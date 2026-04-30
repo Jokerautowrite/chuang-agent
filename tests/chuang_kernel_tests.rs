@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use chuang_agent::chuang_kernel::{ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError};
+use chuang_agent::chuang_kernel::{
+    ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError, DEFAULT_MEMORY_WRITE_MAX_CHARS,
+};
 use chuang_agent::context_engine::ContextBudget;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::subagent_report::ExecutionStatus;
@@ -104,7 +106,22 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
     assert_eq!(snapshot.recall_limit, 2);
     assert_eq!(snapshot.metadata_keys, vec!["scope".to_string()]);
     assert_eq!(snapshot.context_budget_max_tokens, Some(128));
-    assert_eq!(snapshot.memory_write_max_chars, Some(2200));
+    assert_eq!(
+        snapshot.memory_write_max_chars,
+        Some(DEFAULT_MEMORY_WRITE_MAX_CHARS)
+    );
+}
+
+#[test]
+fn chuang_kernel_mvp_default_config_sets_memory_hard_limit() {
+    let config = ChuangKernelConfig::mvp_default("chuang-default");
+
+    assert_eq!(config.agent_id, "chuang-default");
+    assert_eq!(config.recall_limit, 5);
+    assert_eq!(
+        config.memory_write_max_chars,
+        Some(DEFAULT_MEMORY_WRITE_MAX_CHARS)
+    );
 }
 
 #[test]

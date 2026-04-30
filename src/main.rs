@@ -3,7 +3,9 @@ use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-use chuang_agent::chuang_kernel::{ChuangKernel, ChuangKernelConfig};
+use chuang_agent::chuang_kernel::{
+    ChuangKernel, ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS,
+};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
 use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
 use chuang_agent::control_surface::{
@@ -465,7 +467,7 @@ fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
         recall_limit: runtime.recall_limit,
         metadata: runtime.metadata.clone(),
         context_budget: Some(runtime.context_budget.clone()),
-        memory_write_max_chars: Some(2200),
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
     }
 }
 

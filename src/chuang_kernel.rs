@@ -8,6 +8,8 @@ use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
 use serde::Serialize;
 
+pub const DEFAULT_MEMORY_WRITE_MAX_CHARS: usize = 2200;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChuangKernelConfig {
     pub agent_id: String,
@@ -16,6 +18,19 @@ pub struct ChuangKernelConfig {
     pub metadata: BTreeMap<String, String>,
     pub context_budget: Option<ContextBudget>,
     pub memory_write_max_chars: Option<usize>,
+}
+
+impl ChuangKernelConfig {
+    pub fn mvp_default(agent_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            parent_agent_id: None,
+            recall_limit: 5,
+            metadata: BTreeMap::new(),
+            context_budget: None,
+            memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

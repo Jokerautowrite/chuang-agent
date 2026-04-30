@@ -408,6 +408,13 @@
 - 更新测试：
   - `cli_smoke_tests` 扩到 4 条，新增超长输入触发硬上限错误断言。
 - 已运行 `cargo test --test cli_smoke_tests`，当前专项测试通过。
+- 内核记忆写入默认值收口：
+  - 新增 `DEFAULT_MEMORY_WRITE_MAX_CHARS = 2200`。
+  - 新增 `ChuangKernelConfig::mvp_default(agent_id)`，默认启用 2200 字符写入硬上限。
+  - CLI 和测试不再各自硬编码 2200，统一引用内核常量。
+- 更新测试：
+  - `chuang_kernel_tests` 扩到 6 条，新增 MVP 默认配置断言。
+- 已运行 `cargo test --test chuang_kernel_tests --test kernel_status_tests --test cli_smoke_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
