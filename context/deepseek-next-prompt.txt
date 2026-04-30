@@ -1,0 +1,30 @@
+继续干，且默认用专家模式思考后输出。
+
+这次只做一件事：
+补全 `ContextEngineLifecycle` 全真值表实现。
+
+要求：
+- 严格基于 `docs/spec-v3.md` 第3节真值表
+- 输出 Rust `match (command, state)` 完整草案
+- 每个组合明确返回：
+  - `CommandEffect::Accepted { next_state: ... }`
+  - `CommandEffect::Rejected { reason: "reject".to_string() }`
+  - `CommandEffect::Noop`
+  - `CommandEffect::Deferred { command: ..., inserted_at: Timestamp("deferred".to_string()) }`
+- `accept` 时给出合理 next_state：
+  - Start on Uninitialized/Stopped -> Starting
+  - Pause on Running -> Pausing
+  - Resume on Paused -> Running
+  - Checkpoint on Running -> Checkpointing
+  - Drain on Running -> Draining
+  - Stop on Running/Paused/Draining/Failed -> Stopped
+  - Restart on Running/Stopped/Failed -> Restarting
+  - 其他 accept 也补合理 next_state
+- 只给代码草案，不讲解释
+
+输出格式：
+```rust
+match (command, state) {
+  ...
+}
+```
