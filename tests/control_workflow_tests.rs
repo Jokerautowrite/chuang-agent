@@ -1,6 +1,6 @@
-use chuang_agent::control_plane::{ControlAction, ControlRequest, FakeControlPlane};
+use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, FakeControlPlane};
 use chuang_agent::control_workflow::{
-    run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
+    build_unit_views, run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
 };
 use chuang_agent::governance::{RiskDecision, StaticRuleGovernance};
 
@@ -91,4 +91,27 @@ fn control_workflow_reports_unknown_unit_before_governance() {
 
     assert!(matches!(err, ControlWorkflowError::Control(_)));
     assert!(governance.audit_records().is_empty());
+}
+
+#[test]
+fn control_unit_views_render_default_local_units_for_control_surfaces() {
+    let control_plane = FakeControlPlane::default_local_agents();
+
+    let views = build_unit_views(control_plane.list_units());
+
+    let xiaoce = views
+        .iter()
+        .find(|view| view.unit_id == "codex-xiaoce")
+        .expect("xiaoce should exist");
+    let bridge = views
+        .iter()
+        .find(|view| view.unit_id == "codex-feishu-bot.service")
+        .expect("bridge should exist");
+
+    assert_eq!(xiaoce.display_name, "小策");
+    assert_eq!(xiaoce.kind, "agent");
+    assert_eq!(xiaoce.status, "Running");
+    assert_eq!(xiaoce.channel, "feishu");
+    assert_eq!(bridge.kind, "service");
+    assert_eq!(bridge.channel, "systemd");
 }

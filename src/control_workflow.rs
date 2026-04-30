@@ -31,6 +31,16 @@ pub struct ControlWorkflowView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlUnitView {
+    pub unit_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub status: String,
+    pub model_name: Option<String>,
+    pub channel: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlWorkflowError {
     Control(ControlError),
     Governance(GovernanceError),
@@ -93,6 +103,26 @@ where
 
 pub fn build_decision_view(unit: &ManagedUnit, decision: &RiskDecision) -> ControlWorkflowView {
     build_workflow_view(unit, decision, None, false)
+}
+
+pub fn build_unit_views(units: Vec<ManagedUnit>) -> Vec<ControlUnitView> {
+    units.into_iter().map(build_unit_view).collect()
+}
+
+pub fn build_unit_view(unit: ManagedUnit) -> ControlUnitView {
+    ControlUnitView {
+        unit_id: unit.unit_id,
+        display_name: unit.display_name,
+        kind: unit.kind.as_str().to_string(),
+        status: format!("{:?}", unit.status),
+        model_name: unit.model_name,
+        channel: unit
+            .metadata
+            .get("channel")
+            .or_else(|| unit.metadata.get("manager"))
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+    }
 }
 
 fn build_workflow_view(

@@ -297,6 +297,14 @@
   - `cli_control_tests` 继续验证审批、执行、审计输出。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 控制列表也改为结构化视图：
+  - 新增 `ControlUnitView`、`build_unit_view()`、`build_unit_views()`。
+  - `control list` 改为渲染 `ControlUnitView`，字段包含 `unit_id / display_name / kind / status / model_name / channel`。
+  - 列表页和操作页现在都不直接依赖内部 `ManagedUnit` 细节，方便后续桌面 UI / 飞书消息复用。
+- 更新测试：
+  - `control_workflow_tests` 扩到 4 条，新增默认本地 units -> view 断言。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

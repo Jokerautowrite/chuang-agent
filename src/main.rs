@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, ManagedUnit};
 use chuang_agent::control_workflow::{
-    build_decision_view, run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
-    ControlWorkflowView,
+    build_decision_view, build_unit_views, run_control_workflow, ControlUnitView,
+    ControlWorkflowError, ControlWorkflowRequest, ControlWorkflowView,
 };
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
@@ -91,20 +91,8 @@ fn control_list_command(args: &[String]) -> Result<(), String> {
     let slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    for unit in slots.control_plane.list_units() {
-        println!(
-            "unit_id={} name={} kind={} status={:?} model={} channel={}",
-            unit.unit_id,
-            unit.display_name,
-            unit.kind.as_str(),
-            unit.status,
-            unit.model_name.as_deref().unwrap_or("none"),
-            unit.metadata
-                .get("channel")
-                .or_else(|| unit.metadata.get("manager"))
-                .map(String::as_str)
-                .unwrap_or("unknown")
-        );
+    for unit in build_unit_views(slots.control_plane.list_units()) {
+        print_control_unit_view(&unit);
     }
 
     Ok(())
@@ -280,6 +268,18 @@ fn print_control_view(view: &ControlWorkflowView) {
     if view.audit_recorded {
         println!("control_audit: recorded");
     }
+}
+
+fn print_control_unit_view(view: &ControlUnitView) {
+    println!(
+        "unit_id={} name={} kind={} status={} model={} channel={}",
+        view.unit_id,
+        view.display_name,
+        view.kind,
+        view.status,
+        view.model_name.as_deref().unwrap_or("none"),
+        view.channel
+    );
 }
 
 fn build_runtime(db_path: &PathBuf) -> Result<AgentRuntime<SqliteMemoryStore>, String> {
