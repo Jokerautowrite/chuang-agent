@@ -1,5 +1,7 @@
-use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
-use chuang_agent::control_plane::ControlAction;
+use chuang_agent::control_intent::{
+    parse_control_intent, resolve_control_unit_id, ControlIntentError, ControlIntentInput,
+};
+use chuang_agent::control_plane::{ControlAction, ControlPlane, FakeControlPlane};
 
 #[test]
 fn control_intent_parses_cli_style_actions() {
@@ -72,4 +74,35 @@ fn control_intent_requires_model_for_model_switch() {
     .expect_err("missing model should fail");
 
     assert_eq!(err, ControlIntentError::MissingModel);
+}
+
+#[test]
+fn control_intent_resolves_display_name_for_human_surfaces() {
+    let control_plane = FakeControlPlane::default_local_agents();
+    let units = control_plane.list_units();
+
+    let unit_id = resolve_control_unit_id(&units, "小策").expect("display name should resolve");
+
+    assert_eq!(unit_id, "codex-xiaoce");
+}
+
+#[test]
+fn control_intent_resolves_unit_id_without_display_lookup() {
+    let control_plane = FakeControlPlane::default_local_agents();
+    let units = control_plane.list_units();
+
+    let unit_id = resolve_control_unit_id(&units, "codex-feishu-bot.service")
+        .expect("unit id should resolve");
+
+    assert_eq!(unit_id, "codex-feishu-bot.service");
+}
+
+#[test]
+fn control_intent_rejects_unknown_unit_names() {
+    let control_plane = FakeControlPlane::default_local_agents();
+    let units = control_plane.list_units();
+
+    let err = resolve_control_unit_id(&units, "小不存在").expect_err("unknown unit should fail");
+
+    assert_eq!(err, ControlIntentError::UnknownUnit("小不存在".to_string()));
 }

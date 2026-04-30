@@ -1,4 +1,4 @@
-use crate::control_plane::{ControlAction, ControlRequest};
+use crate::control_plane::{ControlAction, ControlRequest, ManagedUnit};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlIntentInput {
@@ -14,7 +14,30 @@ pub enum ControlIntentError {
     MissingAction,
     MissingReason,
     MissingModel,
+    UnknownUnit(String),
+    AmbiguousUnit(String),
     UnsupportedAction(String),
+}
+
+pub fn resolve_control_unit_id(
+    units: &[ManagedUnit],
+    unit_key: &str,
+) -> Result<String, ControlIntentError> {
+    let key = unit_key.trim();
+    if key.is_empty() {
+        return Err(ControlIntentError::MissingUnit);
+    }
+
+    let matches = units
+        .iter()
+        .filter(|unit| unit.unit_id == key || unit.display_name == key)
+        .collect::<Vec<_>>();
+
+    match matches.as_slice() {
+        [unit] => Ok(unit.unit_id.clone()),
+        [] => Err(ControlIntentError::UnknownUnit(key.to_string())),
+        _ => Err(ControlIntentError::AmbiguousUnit(key.to_string())),
+    }
 }
 
 pub fn parse_control_intent(

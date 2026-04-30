@@ -299,6 +299,8 @@ fn control_intent_error_to_cli(error: ControlIntentError) -> String {
         ControlIntentError::MissingAction => "control apply requires --action".to_string(),
         ControlIntentError::MissingReason => "control apply requires --reason".to_string(),
         ControlIntentError::MissingModel => "--model is required for change-model".to_string(),
+        ControlIntentError::UnknownUnit(unit) => format!("unknown control unit: {unit}"),
+        ControlIntentError::AmbiguousUnit(unit) => format!("ambiguous control unit: {unit}"),
         ControlIntentError::UnsupportedAction(action) => {
             format!("unsupported control action: {action}")
         }

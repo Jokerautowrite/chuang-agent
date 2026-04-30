@@ -327,6 +327,13 @@
 - 新增测试：
   - `tests/control_intent_tests.rs` 覆盖英文 action、中文别名、缺字段、缺模型、不支持 action。
 - 已运行 `cargo test --test control_intent_tests --test cli_control_tests`，当前专项测试通过。
+- 控制意图解析继续补人类友好 unit 解析：
+  - `resolve_control_unit_id()` 可把 `unit_id` 或显示名解析成唯一 `unit_id`。
+  - 当前支持从“小策”解析到 `codex-xiaoce`，也保留直接传 `codex-feishu-bot.service` 的路径。
+  - 未知 unit 和歧义 unit 返回结构化错误，不做猜测。
+- 更新测试：
+  - `control_intent_tests` 扩到 8 条，新增显示名解析、unit_id 解析、未知 unit 断言。
+- 已运行 `cargo test --test control_intent_tests --test cli_control_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
