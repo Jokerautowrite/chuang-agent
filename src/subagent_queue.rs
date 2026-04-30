@@ -80,6 +80,33 @@ impl FileSubagentQueue {
         Ok(Some(report))
     }
 
+    pub fn list_dispatches(&self) -> Result<Vec<SubagentDispatch>, FileSubagentQueueError> {
+        let dir = self.config.root.join(&self.config.dispatch_dir);
+        let mut dispatches: Vec<SubagentDispatch> = Vec::new();
+        for path in list_json_files(&dir)? {
+            let payload = fs::read_to_string(&path)
+                .map_err(|_| FileSubagentQueueError::StorageUnavailable { path: path.clone() })?;
+            let dispatch = serde_json::from_str(&payload)
+                .map_err(|e| FileSubagentQueueError::Decode(e.to_string()))?;
+            dispatches.push(dispatch);
+        }
+        dispatches.sort_by(|left, right| left.run_id.0.cmp(&right.run_id.0));
+        Ok(dispatches)
+    }
+
+    pub fn list_report_run_ids(&self) -> Result<Vec<RunId>, FileSubagentQueueError> {
+        let dir = self.config.root.join(&self.config.report_dir);
+        let mut run_ids = Vec::new();
+        for path in list_json_files(&dir)? {
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            run_ids.push(RunId(stem.to_string()));
+        }
+        run_ids.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(run_ids)
+    }
+
     pub fn write_report_for_test(
         &self,
         run_id: &RunId,
@@ -122,6 +149,28 @@ fn ensure_dir(path: &Path) -> Result<(), FileSubagentQueueError> {
     fs::create_dir_all(path).map_err(|_| FileSubagentQueueError::StorageUnavailable {
         path: path.to_path_buf(),
     })
+}
+
+fn list_json_files(path: &Path) -> Result<Vec<PathBuf>, FileSubagentQueueError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    let entries = fs::read_dir(path).map_err(|_| FileSubagentQueueError::StorageUnavailable {
+        path: path.to_path_buf(),
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|_| FileSubagentQueueError::StorageUnavailable {
+            path: path.to_path_buf(),
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 fn atomic_write(path: &Path, content: &str) -> Result<(), FileSubagentQueueError> {

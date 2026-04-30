@@ -88,6 +88,58 @@ fn cli_subagent_dispatch_can_queue_multiple_tasks_in_same_directory() {
 }
 
 #[test]
+fn cli_subagent_list_reports_dispatches_and_report_presence() {
+    let queue_root = temp_queue_root("list");
+    let first = dispatch_task(&queue_root, "task-cli-1", "审计第一段");
+    let second = dispatch_task(&queue_root, "task-cli-2", "审计第二段");
+    let second_run = second["run_id"].as_str().expect("second run id");
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root
+            .join("reports")
+            .join(format!("{second_run}.json")),
+        sample_report_json("second completed"),
+    )
+    .expect("report should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "list",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let first_run = first["run_id"].as_str().expect("first run id");
+
+    assert_eq!(parsed["dispatch_count"], 2);
+    assert_eq!(parsed["report_count"], 1);
+    assert!(parsed["items"]
+        .as_array()
+        .expect("items should be array")
+        .iter()
+        .any(|item| item["run_id"] == first_run && item["has_report"] == false));
+    assert!(parsed["items"]
+        .as_array()
+        .expect("items should be array")
+        .iter()
+        .any(|item| item["run_id"] == second_run && item["has_report"] == true));
+}
+
+#[test]
 fn cli_subagent_dispatch_requires_task() {
     let queue_root = temp_queue_root("missing-task");
     let output = Command::new("cargo")

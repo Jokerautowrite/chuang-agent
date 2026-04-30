@@ -595,6 +595,16 @@
   - `subagent_spawner_tests` 新增显式 ID 派发和重复 run id 拒绝。
   - `cli_subagent_dispatch_tests` 新增同目录连续派发两个任务并保留两个 dispatch 文件。
 - 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_spawner_tests --test subagent_queue_tests`，当前专项测试通过。
+- 子代理文件队列新增只读列表能力：
+  - `FileSubagentQueue::list_dispatches()` 可读取 `dispatch/*.json` 并按 run id 排序。
+  - `FileSubagentQueue::list_report_run_ids()` 可读取 `reports/*.json` 对应 run id。
+  - CLI 新增 `subagent list [--json]`，输出 `dispatch_count / report_count / items[]`。
+  - 每个 item 标出 `run_id / agent_id / task_id / agent_name / tool_policy / has_report`。
+  - 该能力只读扫描目录，不删除、不移动、不 attach 状态。
+- 更新测试：
+  - `subagent_queue_tests` 新增 dispatch/report 列表与忽略非 JSON 文件。
+  - `cli_subagent_dispatch_tests` 新增 list 命令识别两个 dispatch 且正确标记 report presence。
+- 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

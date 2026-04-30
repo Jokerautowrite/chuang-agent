@@ -69,6 +69,48 @@ fn file_subagent_queue_reads_report_json() {
 }
 
 #[test]
+fn file_subagent_queue_lists_dispatches_and_report_run_ids() {
+    let root = temp_root("list");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let mut dispatch = sample_dispatch();
+    queue
+        .write_dispatch(&dispatch)
+        .expect("first dispatch should write");
+    dispatch.run_id = RunId("queued-run-2".to_string());
+    dispatch.task_id = TaskId("task-2".to_string());
+    queue
+        .write_dispatch(&dispatch)
+        .expect("second dispatch should write");
+    queue
+        .write_report_for_test(&RunId("queued-run-2".to_string()), &sample_report())
+        .expect("report should write");
+
+    let dispatches = queue.list_dispatches().expect("dispatches should list");
+    let report_run_ids = queue
+        .list_report_run_ids()
+        .expect("report run ids should list");
+
+    assert_eq!(dispatches.len(), 2);
+    assert_eq!(dispatches[0].run_id.0, "queued-run-1");
+    assert_eq!(dispatches[1].run_id.0, "queued-run-2");
+    assert_eq!(report_run_ids, vec![RunId("queued-run-2".to_string())]);
+}
+
+#[test]
+fn file_subagent_queue_list_ignores_non_json_files() {
+    let root = temp_root("list-ignore");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    std::fs::write(root.join("dispatch").join("note.txt"), "ignore")
+        .expect("non-json file should write");
+
+    let dispatches = queue.list_dispatches().expect("dispatches should list");
+
+    assert!(dispatches.is_empty());
+}
+
+#[test]
 fn file_subagent_queue_flushes_pending_dispatches_from_spawner() {
     let root = temp_root("flush");
     let queue =

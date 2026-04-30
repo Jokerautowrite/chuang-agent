@@ -146,6 +146,7 @@ fn subagent_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dispatch") => subagent_dispatch_command(&args[1..]),
         Some("report") => subagent_report_command(&args[1..]),
+        Some("list") => subagent_list_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -192,6 +193,69 @@ fn subagent_dispatch_command(args: &[String]) -> Result<(), String> {
                 "subagent_dispatch_queued run_id={} agent_id={} task_id={} path={}",
                 output.run_id, output.agent_id, output.task_id, output.dispatch_path
             );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn subagent_list_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_list(args)?;
+    let queue_config = request
+        .options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let queue = FileSubagentQueue::open(queue_config)
+        .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
+    let dispatches = queue
+        .list_dispatches()
+        .map_err(|e| format!("subagent_dispatch_list_failed: {e:?}"))?;
+    let report_run_ids = queue
+        .list_report_run_ids()
+        .map_err(|e| format!("subagent_report_list_failed: {e:?}"))?;
+    let report_lookup = report_run_ids
+        .iter()
+        .map(|run_id| run_id.0.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let items = dispatches
+        .into_iter()
+        .map(|dispatch| SubagentListItem {
+            run_id: dispatch.run_id.0.clone(),
+            agent_id: dispatch.agent_id.0,
+            task_id: dispatch.task_id.0,
+            agent_name: dispatch.agent_name,
+            tool_policy: format!("{:?}", dispatch.tool_policy),
+            has_report: report_lookup.contains(&dispatch.run_id.0),
+        })
+        .collect::<Vec<_>>();
+    let output = SubagentListCliOutput {
+        queue_root: request
+            .options
+            .runtime
+            .subagent_queue
+            .root
+            .display()
+            .to_string(),
+        dispatch_count: items.len(),
+        report_count: report_run_ids.len(),
+        items,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "subagent_queue queue_root={} dispatch_count={} report_count={}",
+                output.queue_root, output.dispatch_count, output.report_count
+            );
+            for item in &output.items {
+                println!(
+                    "run_id={} agent_id={} task_id={} policy={} has_report={}",
+                    item.run_id, item.agent_id, item.task_id, item.tool_policy, item.has_report
+                );
+            }
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -543,6 +607,30 @@ struct SubagentReportCliOutput {
     run_id: String,
     available: bool,
     report: Option<chuang_agent::subagent_report::SubagentReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SubagentListCliRequest {
+    options: CliOptions,
+    output: ControlOutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SubagentListCliOutput {
+    queue_root: String,
+    dispatch_count: usize,
+    report_count: usize,
+    items: Vec<SubagentListItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SubagentListItem {
+    run_id: String,
+    agent_id: String,
+    task_id: String,
+    agent_name: String,
+    tool_policy: String,
+    has_report: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -998,6 +1086,46 @@ fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCliRequest, St
     })
 }
 
+fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--db"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                runtime_args.push(args[index].clone());
+                runtime_args.push(value.clone());
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(SubagentListCliRequest {
+        options: parse_cli_options(&runtime_args)?,
+        output,
+    })
+}
+
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
@@ -1345,5 +1473,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json]".to_string()
 }
