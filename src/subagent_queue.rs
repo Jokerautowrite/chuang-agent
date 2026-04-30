@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::subagent_report::SubagentReport;
-use crate::subagent_spawner::{QueuedSubagentSpawner, RunId, SubagentDispatch};
+use crate::subagent_spawner::{QueuedSubagentSpawner, RunId, SubagentDispatch, SubagentError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSubagentQueueConfig {
@@ -38,6 +38,7 @@ pub enum FileSubagentQueueError {
     StorageUnavailable { path: PathBuf },
     Encode(String),
     Decode(String),
+    Spawner(SubagentError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +101,20 @@ impl FileSubagentQueue {
             .iter()
             .map(|dispatch| self.write_dispatch(dispatch))
             .collect()
+    }
+
+    pub fn attach_report_if_present(
+        &self,
+        spawner: &mut QueuedSubagentSpawner,
+        run_id: &RunId,
+    ) -> Result<bool, FileSubagentQueueError> {
+        let Some(report) = self.read_report(run_id)? else {
+            return Ok(false);
+        };
+        spawner
+            .attach_report(run_id, report)
+            .map_err(FileSubagentQueueError::Spawner)?;
+        Ok(true)
     }
 }
 

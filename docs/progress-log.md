@@ -533,6 +533,13 @@
 - 更新测试：
   - `subagent_queue_tests` 新增从 queued spawner flush 两个 dispatch 文件的断言。
 - 已运行 `cargo test --test subagent_queue_tests --test subagent_spawner_tests --test subagent_report_tests`，当前专项测试通过。
+- 文件型子代理队列补充 report 回填：
+  - `FileSubagentQueue::attach_report_if_present()` 会读取 `reports/<run_id>.json`。
+  - report 存在时调用 `QueuedSubagentSpawner::attach_report()`，缺失时返回 `false` 且保持 run 为 Running。
+  - 这形成了文件队列半闭环：主内核写 dispatch，外部 runner 写 report，主内核再 attach/collect。
+- 更新测试：
+  - `subagent_queue_tests` 新增 report 存在时 attach 成功、report 缺失时返回 false。
+- 已运行 `cargo test --test subagent_queue_tests --test subagent_spawner_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

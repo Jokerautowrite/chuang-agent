@@ -7,7 +7,7 @@ use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentDispatch,
-    SubagentSpawner, SubagentToolPolicy,
+    SubagentSpawner, SubagentState, SubagentToolPolicy,
 };
 
 fn temp_root(name: &str) -> PathBuf {
@@ -88,6 +88,56 @@ fn file_subagent_queue_flushes_pending_dispatches_from_spawner() {
     assert_eq!(paths.len(), 2);
     assert!(root.join("dispatch").join("queued-run-1.json").exists());
     assert!(root.join("dispatch").join("queued-run-2.json").exists());
+}
+
+#[test]
+fn file_subagent_queue_attaches_present_report_to_spawner() {
+    let root = temp_root("attach-report");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(sample_spawn_request("task-1"))
+        .expect("spawn should succeed");
+    queue
+        .write_report_for_test(&receipt.run_id, &sample_report())
+        .expect("report should write");
+
+    let attached = queue
+        .attach_report_if_present(&mut spawner, &receipt.run_id)
+        .expect("report should attach");
+    let report = spawner
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .expect("attached report should be available");
+
+    assert!(attached);
+    assert_eq!(report.summary, "queued worker completed");
+    assert_eq!(
+        spawner.state(&receipt.run_id),
+        Some(&SubagentState::Completed)
+    );
+}
+
+#[test]
+fn file_subagent_queue_attach_returns_false_when_report_missing() {
+    let root = temp_root("attach-missing-report");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(sample_spawn_request("task-1"))
+        .expect("spawn should succeed");
+
+    let attached = queue
+        .attach_report_if_present(&mut spawner, &receipt.run_id)
+        .expect("missing report should not error");
+
+    assert!(!attached);
+    assert_eq!(
+        spawner.state(&receipt.run_id),
+        Some(&SubagentState::Running)
+    );
 }
 
 fn sample_dispatch() -> SubagentDispatch {
