@@ -455,6 +455,15 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("provider_id: {}", status.config.provider_id);
     println!("model: {}", status.config.model_name);
     println!("memory_db: {}", status.config.db_path);
+    println!("identity_memory: {}", status.config.identity_memory_kind);
+    println!(
+        "identity_memory_root: {}",
+        status.config.identity_memory_root
+    );
+    println!(
+        "identity_memory_limits: user={} memory={}",
+        status.config.identity_user_max_chars, status.config.identity_memory_max_chars
+    );
     println!("recall_limit: {}", status.config.recall_limit);
     println!("context_max_tokens: {}", status.config.context_max_tokens);
     println!("governance: {}", status.slots.governance);

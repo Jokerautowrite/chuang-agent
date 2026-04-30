@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use chuang_agent::responder::ProviderTransport;
-use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
+use chuang_agent::runtime_config::{
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
+};
 
 #[test]
 fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
@@ -17,6 +19,9 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.subagent_kind, "fake");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
+    assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+    assert_eq!(summary.identity_user_max_chars, 1375);
+    assert_eq!(summary.identity_memory_max_chars, 2200);
     assert_eq!(summary.api_key_state, None);
 }
 
@@ -107,4 +112,37 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
     assert_eq!(summary.subagent_kind, "fake");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
+    assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+}
+
+#[test]
+fn identity_memory_config_builds_dual_file_config() {
+    let config = IdentityMemoryConfig::HermesDualFile {
+        root: PathBuf::from("./data/identity"),
+        user_max_chars: 111,
+        memory_max_chars: 222,
+    };
+
+    let dual_file = config
+        .build_dual_file_config()
+        .expect("dual file config should build");
+
+    assert_eq!(dual_file.root, PathBuf::from("./data/identity"));
+    assert_eq!(dual_file.user_max_chars, 111);
+    assert_eq!(dual_file.memory_max_chars, 222);
+}
+
+#[test]
+fn identity_memory_config_rejects_zero_limits() {
+    let config = IdentityMemoryConfig::HermesDualFile {
+        root: PathBuf::from("./data/identity"),
+        user_max_chars: 0,
+        memory_max_chars: 2200,
+    };
+
+    let err = config
+        .validate()
+        .expect_err("zero user limit should be rejected");
+
+    assert_eq!(err.field, "identity_memory.user_max_chars");
 }

@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::context_engine::ContextBudget;
+use crate::hermes_memory::{
+    DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
+};
 use crate::responder::{OpenAICompatibleProviderAdapter, ProviderTransport};
 use serde::Serialize;
 
@@ -12,6 +15,7 @@ pub struct RuntimeConfig {
     pub metadata: BTreeMap<String, String>,
     pub context_budget: ContextBudget,
     pub provider: ProviderConfig,
+    pub identity_memory: IdentityMemoryConfig,
     pub governance: GovernanceConfig,
     pub actuator: ActuatorConfig,
     pub subagent: SubagentConfig,
@@ -35,6 +39,15 @@ pub struct OpenAICompatibleConfig {
     pub api_key: String,
     pub model_name: String,
     pub transport: ProviderTransport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityMemoryConfig {
+    HermesDualFile {
+        root: PathBuf,
+        user_max_chars: usize,
+        memory_max_chars: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +85,10 @@ pub struct ConfigSummary {
     pub subagent_kind: String,
     pub evolution_kind: String,
     pub control_plane_kind: String,
+    pub identity_memory_kind: String,
+    pub identity_memory_root: String,
+    pub identity_user_max_chars: usize,
+    pub identity_memory_max_chars: usize,
     pub db_path: String,
     pub recall_limit: usize,
     pub context_max_tokens: u16,
@@ -94,6 +111,11 @@ impl RuntimeConfig {
             provider: ProviderConfig::Fake {
                 provider_id: "fake-runtime".to_string(),
                 model_name: "stub-responder".to_string(),
+            },
+            identity_memory: IdentityMemoryConfig::HermesDualFile {
+                root: PathBuf::from("./data/hermes-memory"),
+                user_max_chars: DEFAULT_USER_MEMORY_MAX_CHARS,
+                memory_max_chars: DEFAULT_HOT_MEMORY_MAX_CHARS,
             },
             governance: GovernanceConfig::StaticRule,
             actuator: ActuatorConfig::Fake,
@@ -119,6 +141,7 @@ impl RuntimeConfig {
         }
 
         self.provider.validate()?;
+        self.identity_memory.validate()?;
         self.governance.validate()?;
         self.actuator.validate()?;
         self.subagent.validate()?;
@@ -128,6 +151,7 @@ impl RuntimeConfig {
 
     pub fn summary(&self) -> ConfigSummary {
         let provider = self.provider.summary_parts();
+        let identity_memory = self.identity_memory.summary_parts();
         ConfigSummary {
             provider_kind: provider.kind,
             provider_id: provider.provider_id,
@@ -137,6 +161,10 @@ impl RuntimeConfig {
             subagent_kind: self.subagent.kind().to_string(),
             evolution_kind: self.evolution.kind().to_string(),
             control_plane_kind: self.control_plane.kind().to_string(),
+            identity_memory_kind: identity_memory.kind,
+            identity_memory_root: identity_memory.root,
+            identity_user_max_chars: identity_memory.user_max_chars,
+            identity_memory_max_chars: identity_memory.memory_max_chars,
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
             context_max_tokens: self.context_budget.max_tokens,
@@ -195,6 +223,59 @@ impl ProviderConfig {
                 provider_id: config.provider_id.clone(),
                 model_name: config.model_name.clone(),
                 api_key_state: Some(mask_key_state(&config.api_key)),
+            },
+        }
+    }
+}
+
+impl IdentityMemoryConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::HermesDualFile { .. } => "hermes_dual_file",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        match self {
+            Self::HermesDualFile {
+                root,
+                user_max_chars,
+                memory_max_chars,
+            } => {
+                require_non_empty("identity_memory.root", &root.display().to_string())?;
+                require_positive_usize("identity_memory.user_max_chars", *user_max_chars)?;
+                require_positive_usize("identity_memory.memory_max_chars", *memory_max_chars)
+            }
+        }
+    }
+
+    pub fn build_dual_file_config(&self) -> Result<DualFileMemoryConfig, ConfigError> {
+        self.validate()?;
+        match self {
+            Self::HermesDualFile {
+                root,
+                user_max_chars,
+                memory_max_chars,
+            } => {
+                let mut config = DualFileMemoryConfig::new(root);
+                config.user_max_chars = *user_max_chars;
+                config.memory_max_chars = *memory_max_chars;
+                Ok(config)
+            }
+        }
+    }
+
+    fn summary_parts(&self) -> IdentityMemorySummaryParts {
+        match self {
+            Self::HermesDualFile {
+                root,
+                user_max_chars,
+                memory_max_chars,
+            } => IdentityMemorySummaryParts {
+                kind: self.kind().to_string(),
+                root: root.display().to_string(),
+                user_max_chars: *user_max_chars,
+                memory_max_chars: *memory_max_chars,
             },
         }
     }
@@ -276,11 +357,29 @@ struct ProviderSummaryParts {
     api_key_state: Option<String>,
 }
 
+struct IdentityMemorySummaryParts {
+    kind: String,
+    root: String,
+    user_max_chars: usize,
+    memory_max_chars: usize,
+}
+
 fn require_non_empty(field: &str, value: &str) -> Result<(), ConfigError> {
     if value.trim().is_empty() {
         return Err(ConfigError {
             field: field.to_string(),
             message: format!("{field} must not be empty"),
+        });
+    }
+
+    Ok(())
+}
+
+fn require_positive_usize(field: &str, value: usize) -> Result<(), ConfigError> {
+    if value == 0 {
+        return Err(ConfigError {
+            field: field.to_string(),
+            message: format!("{field} must be greater than zero"),
         });
     }
 

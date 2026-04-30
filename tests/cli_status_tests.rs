@@ -19,6 +19,8 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("kernel_agent_id: chuang-cli"));
     assert!(stdout.contains("provider: fake"));
     assert!(stdout.contains("model: stub-responder"));
+    assert!(stdout.contains("identity_memory: hermes_dual_file"));
+    assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
     assert!(stdout.contains("governance: static_rule"));
     assert!(stdout.contains("control_plane: fake_local"));
 }
@@ -55,6 +57,7 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["kernel"]["agent_id"], "chuang-cli");
     assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["config"]["provider_id"], "custom-openai");
+    assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
     assert_eq!(parsed["config"]["api_key_state"], "<set>");
     assert!(!stdout.contains("test-secret-key"));
 }

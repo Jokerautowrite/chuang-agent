@@ -442,6 +442,15 @@
 - 新增测试：
   - `tests/hermes_memory_tests.rs` 覆盖文件创建、快照读取、USER 超限不变更、MEMORY 追加超限不变更、重复 ID 拒绝、默认上限。
 - 已运行 `cargo test --test hermes_memory_tests --test memory_admission_tests`，当前专项测试通过。
+- 运行时配置新增 identity memory 插槽：
+  - `RuntimeConfig` 新增 `identity_memory: IdentityMemoryConfig`。
+  - 当前默认实现为 `hermes_dual_file`，root 为 `./data/hermes-memory`，上限沿用 `USER=1375 / MEMORY=2200`。
+  - `IdentityMemoryConfig::build_dual_file_config()` 可生成 `DualFileMemoryConfig`，后续内核接入时不需要硬编码文件路径或上限。
+  - `ConfigSummary` 和 CLI `status` 已暴露 identity memory kind/root/limits。
+- 更新测试：
+  - `runtime_config_tests` 新增 identity memory 配置构建和零上限拒绝。
+  - `cli_status_tests` 验证文本/JSON 状态能看到 `hermes_dual_file` 且不泄露密钥。
+- 已运行 `cargo test --test runtime_config_tests --test kernel_status_tests --test cli_status_tests --test hermes_memory_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
