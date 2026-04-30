@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::control_plane::{
-    ControlAction, ControlError, ControlPlane, ControlRequest, FakeControlPlane, ManagedUnit,
-    ManagedUnitKind, ManagedUnitStatus,
+    proposed_action_for_control, ControlAction, ControlError, ControlPlane, ControlRequest,
+    FakeControlPlane, ManagedUnit, ManagedUnitKind, ManagedUnitStatus,
 };
+use chuang_agent::governance::{Governance, RiskDecision, StaticRuleGovernance};
 
 fn unit(unit_id: &str, kind: ManagedUnitKind) -> ManagedUnit {
     ManagedUnit {
@@ -115,4 +116,24 @@ fn fake_control_plane_rejects_unknown_unit_and_empty_reason() {
 
     assert!(matches!(unknown, ControlError::UnknownUnit(_)));
     assert!(matches!(empty_reason, ControlError::InvalidRequest(_)));
+}
+
+#[test]
+fn control_requests_can_be_classified_by_governance_before_apply() {
+    let unit = unit("agent-1", ManagedUnitKind::Agent);
+    let request = ControlRequest {
+        unit_id: "agent-1".to_string(),
+        action: ControlAction::Restart,
+        reason: "用户点击重启".to_string(),
+    };
+
+    let proposed = proposed_action_for_control(&unit, &request)
+        .expect("control request should become proposed action");
+    let decision = StaticRuleGovernance::new()
+        .classify(&proposed)
+        .expect("governance should classify control action");
+
+    assert_eq!(proposed.target, "agent:agent-1");
+    assert!(proposed.summary.contains("restart"));
+    assert!(matches!(decision, RiskDecision::NeedsApproval { .. }));
 }

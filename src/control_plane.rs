@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::governance::{ActionKind, ProposedAction};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagedUnitKind {
     Service,
@@ -59,6 +61,30 @@ pub enum ControlError {
 pub trait ControlPlane {
     fn list_units(&self) -> Vec<ManagedUnit>;
     fn apply(&mut self, request: ControlRequest) -> Result<ControlReceipt, ControlError>;
+}
+
+pub fn proposed_action_for_control(
+    unit: &ManagedUnit,
+    request: &ControlRequest,
+) -> Result<ProposedAction, ControlError> {
+    validate_request(request)?;
+    if unit.unit_id != request.unit_id {
+        return Err(ControlError::InvalidRequest(
+            "control request unit_id must match unit".to_string(),
+        ));
+    }
+
+    Ok(ProposedAction {
+        action_id: format!("control:{}", request.unit_id),
+        kind: ActionKind::ServiceChange,
+        target: format!("{}:{}", unit.kind.as_str(), unit.unit_id),
+        summary: format!(
+            "{} {} because {}",
+            request.action.as_str(),
+            unit.display_name,
+            request.reason
+        ),
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -174,6 +200,26 @@ impl ControlPlane for FakeControlPlane {
             model_name: unit.model_name.clone(),
             message: "fake control action applied".to_string(),
         })
+    }
+}
+
+impl ManagedUnitKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+impl ControlAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::ChangeModel { .. } => "change_model",
+        }
     }
 }
 

@@ -246,6 +246,14 @@
   - `tests/control_plane_tests.rs`，覆盖默认本地单位、start/stop/restart、agent-only model switch、unknown unit 和空 reason 拒绝。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 控制面板已接入治理前置链路：
+  - `proposed_action_for_control()` 可把 `ControlRequest + ManagedUnit` 转成 `Governance` 可分类的 `ProposedAction`。
+  - 控制类操作统一映射为 `ActionKind::ServiceChange`，当前静态治理会判定为 `NeedsApproval`。
+  - 这保证后续桌面按钮执行 start/stop/restart/change model 前，能先走同一套审批链路。
+- 更新测试：
+  - `control_plane_tests` 扩到 5 条，新增 control request -> governance classify 断言。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
