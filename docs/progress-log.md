@@ -467,6 +467,13 @@
   - 读取失败会返回 `identity_memory_open_failed` 或 `identity_memory_snapshot_failed`，不静默降级。
   - CLI status 文本现在显示 `identity_snapshot_chars`，默认空文件为 `user=0 memory=0`。
 - 已运行 `cargo test --test cli_status_tests --test cli_smoke_tests --test cli_provider_smoke_tests --test cli_repl_default_transport_tests`，当前专项测试通过。
+- CLI 新增 identity memory root 配置：
+  - `run / repl / status` 支持 `--identity-memory-root PATH`。
+  - 该参数会覆盖 `RuntimeConfig.identity_memory` 的 root，仍保留 Hermes 默认上限。
+  - 这让测试、桌面控制台、未来不同 Agent 身份目录可以用不同 USER/MEMORY 文件，不再被默认 `./data/hermes-memory` 绑死。
+- 更新测试：
+  - `cli_status_tests` 新增临时 identity root，预写 `USER.md / MEMORY.md` 后验证 JSON status 暴露 snapshot 字符数。
+- 已运行 `cargo test --test cli_status_tests --test cli_smoke_tests --test runtime_config_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

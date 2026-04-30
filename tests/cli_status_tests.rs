@@ -1,6 +1,17 @@
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+fn temp_identity_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-cli-{name}-{nanos}"))
+}
 
 #[test]
 fn cli_status_prints_mvp_health_summary() {
@@ -61,4 +72,47 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
     assert_eq!(parsed["config"]["api_key_state"], "<set>");
     assert!(!stdout.contains("test-secret-key"));
+}
+
+#[test]
+fn cli_status_can_use_custom_identity_memory_root() {
+    let root = temp_identity_root("identity-root");
+    fs::create_dir_all(&root).expect("root should be created");
+    fs::write(root.join("USER.md"), "老爸偏好简洁中文汇报").expect("user memory should be seeded");
+    fs::write(root.join("MEMORY.md"), "## mem-1\n创项目聚焦核心 MVP")
+        .expect("hot memory should be seeded");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--json",
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(
+        parsed["config"]["identity_memory_root"],
+        root.display().to_string()
+    );
+    assert_eq!(
+        parsed["kernel"]["identity_user_chars"].as_u64(),
+        Some("老爸偏好简洁中文汇报".chars().count() as u64)
+    );
+    assert_eq!(
+        parsed["kernel"]["identity_memory_chars"].as_u64(),
+        Some("## mem-1\n创项目聚焦核心 MVP".chars().count() as u64)
+    );
 }

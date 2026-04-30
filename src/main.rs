@@ -15,12 +15,16 @@ use chuang_agent::control_surface::{
 use chuang_agent::control_workflow::{
     build_decision_view, ControlUnitView, ControlWorkflowError, ControlWorkflowView,
 };
-use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore};
+use chuang_agent::hermes_memory::{
+    DualFileMemoryStore, FileDualFileMemoryStore, DEFAULT_USER_MEMORY_MAX_CHARS,
+};
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
-use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
+use chuang_agent::runtime_config::{
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
+};
 use chuang_agent::slot_registry::build_runtime_slots;
 use serde::Serialize;
 
@@ -321,7 +325,8 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
             | "--provider-api-key"
             | "--provider-model"
             | "--provider-id"
-            | "--provider-transport" => index += 2,
+            | "--provider-transport"
+            | "--identity-memory-root" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -546,6 +551,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut provider_api_key: Option<String> = None;
     let mut provider_model: Option<String> = None;
     let mut provider_transport: Option<String> = None;
+    let mut identity_memory_root: Option<PathBuf> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -583,11 +589,23 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 provider_id = Some(value.clone());
                 index += 2;
             }
+            "--identity-memory-root" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                identity_memory_root = Some(PathBuf::from(value));
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
 
     let mut runtime = RuntimeConfig::new(db_path.unwrap_or_else(default_db_path));
+    if let Some(root) = identity_memory_root {
+        runtime.identity_memory = IdentityMemoryConfig::HermesDualFile {
+            root,
+            user_max_chars: DEFAULT_USER_MEMORY_MAX_CHARS,
+            memory_max_chars: DEFAULT_MEMORY_WRITE_MAX_CHARS,
+        };
+    }
     runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
         (None, None, None) => ProviderConfig::Fake {
             provider_id: "fake-runtime".to_string(),
@@ -731,5 +749,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }
