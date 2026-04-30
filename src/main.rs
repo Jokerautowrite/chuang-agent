@@ -4,10 +4,15 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
+use chuang_agent::control_plane::{
+    proposed_action_for_control, ControlAction, ControlPlane, ControlRequest, ManagedUnit,
+};
+use chuang_agent::governance::{Governance, RiskDecision};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
+use chuang_agent::slot_registry::build_runtime_slots;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliOptions {
@@ -26,6 +31,7 @@ fn run_cli() -> Result<(), String> {
     match args.get(1).map(String::as_str) {
         Some("run") => run_command(&args[2..]),
         Some("repl") => repl_command(&args[2..]),
+        Some("control") => control_command(&args[2..]),
         _ => Err(usage()),
     }
 }
@@ -61,6 +67,90 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             .flush()
             .map_err(|e| format!("stdout_flush_failed: {e}"))?;
     }
+
+    Ok(())
+}
+
+fn control_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("list") => control_list_command(&args[1..]),
+        Some("apply") => control_apply_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn control_list_command(args: &[String]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err(usage());
+    }
+
+    let options = CliOptions {
+        runtime: RuntimeConfig::new(default_db_path()),
+    };
+    let slots = build_runtime_slots(&options.runtime)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+
+    for unit in slots.control_plane.list_units() {
+        println!(
+            "unit_id={} name={} kind={} status={:?} model={} channel={}",
+            unit.unit_id,
+            unit.display_name,
+            unit.kind.as_str(),
+            unit.status,
+            unit.model_name.as_deref().unwrap_or("none"),
+            unit.metadata
+                .get("channel")
+                .or_else(|| unit.metadata.get("manager"))
+                .map(String::as_str)
+                .unwrap_or("unknown")
+        );
+    }
+
+    Ok(())
+}
+
+fn control_apply_command(args: &[String]) -> Result<(), String> {
+    let request = parse_control_apply(args)?;
+    let options = CliOptions {
+        runtime: RuntimeConfig::new(default_db_path()),
+    };
+    let mut slots = build_runtime_slots(&options.runtime)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let units = slots.control_plane.list_units();
+    let unit = units
+        .iter()
+        .find(|unit| unit.unit_id == request.request.unit_id)
+        .ok_or_else(|| format!("unknown control unit: {}", request.request.unit_id))?;
+    let proposed = proposed_action_for_control(unit, &request.request)
+        .map_err(|e| format!("control_invalid: {e:?}"))?;
+    let decision = slots
+        .governance
+        .classify(&proposed)
+        .map_err(|e| format!("governance_failed: {}", e.message))?;
+
+    print_control_decision(unit, &decision);
+    if matches!(decision, RiskDecision::NeedsApproval { .. }) && !request.approve {
+        return Err("control action requires --approve".to_string());
+    }
+    if matches!(
+        decision,
+        RiskDecision::Blocked { .. } | RiskDecision::DraftOnly { .. }
+    ) {
+        return Err("control action was not allowed by governance".to_string());
+    }
+
+    let receipt = slots
+        .control_plane
+        .apply(request.request)
+        .map_err(|e| format!("control_failed: {e:?}"))?;
+    println!(
+        "control_applied unit_id={} action={} previous={:?} next={:?} model={}",
+        receipt.unit_id,
+        receipt.action.as_str(),
+        receipt.previous_status,
+        receipt.next_status,
+        receipt.model_name.as_deref().unwrap_or("none")
+    );
 
     Ok(())
 }
@@ -102,6 +192,85 @@ fn run_with_options(
         }
         Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlApplyCliRequest {
+    request: ControlRequest,
+    approve: bool,
+}
+
+fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String> {
+    let mut unit_id: Option<String> = None;
+    let mut action: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut model_name: Option<String> = None;
+    let mut approve = false;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--unit" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                unit_id = Some(value.clone());
+                index += 2;
+            }
+            "--action" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                action = Some(value.clone());
+                index += 2;
+            }
+            "--reason" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                reason = Some(value.clone());
+                index += 2;
+            }
+            "--model" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                model_name = Some(value.clone());
+                index += 2;
+            }
+            "--approve" => {
+                approve = true;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let action = match action.as_deref() {
+        Some("start") => ControlAction::Start,
+        Some("stop") => ControlAction::Stop,
+        Some("restart") => ControlAction::Restart,
+        Some("change-model") => ControlAction::ChangeModel {
+            model_name: model_name
+                .ok_or_else(|| "--model is required for change-model".to_string())?,
+        },
+        _ => return Err(usage()),
+    };
+
+    Ok(ControlApplyCliRequest {
+        request: ControlRequest {
+            unit_id: unit_id.ok_or_else(usage)?,
+            action,
+            reason: reason.ok_or_else(usage)?,
+        },
+        approve,
+    })
+}
+
+fn print_control_decision(unit: &ManagedUnit, decision: &RiskDecision) {
+    let decision_text = match decision {
+        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
+        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
+        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
+        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
+    };
+
+    println!(
+        "control_decision unit_id={} name={} decision={}",
+        unit.unit_id, unit.display_name, decision_text
+    );
 }
 
 fn build_runtime(db_path: &PathBuf) -> Result<AgentRuntime<SqliteMemoryStore>, String> {
@@ -326,5 +495,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]]".to_string()
+    "usage: cargo run -- <run|repl|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | control list | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve]".to_string()
 }

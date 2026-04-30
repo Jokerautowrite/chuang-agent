@@ -262,6 +262,15 @@
   - `runtime_config_tests` 和 `slot_registry_tests` 已覆盖 `control_plane=fake_local` summary 与装配。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- CLI 已新增控制面板最小入口：
+  - `cargo run -- control list`：列出默认本地 Agent/服务。
+  - `cargo run -- control apply --unit ID --action start|stop|restart|change-model --reason TEXT [--model MODEL] [--approve]`。
+  - `control apply` 会先通过 `proposed_action_for_control()` 转成治理动作，再由 `Governance` 分类。
+  - 对 `NeedsApproval` 的控制动作，必须显式传 `--approve` 才会执行。
+- 新增测试：
+  - `tests/cli_control_tests.rs`，覆盖 list 输出、未审批拦截、显式审批后 change-model 执行。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
