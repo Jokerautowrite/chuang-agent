@@ -120,3 +120,54 @@ transport = "stub"
     assert_eq!(parsed["summary"]["api_key_state"], "<set>");
     assert!(!stdout.contains("test-secret-key"));
 }
+
+#[test]
+fn cli_config_init_writes_default_config_without_overwriting() {
+    let root = temp_root("init");
+    fs::create_dir_all(&root).expect("temp root should be created");
+    let config_path = root.join("config.toml");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "config",
+            "init",
+            "--path",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+    assert_eq!(parsed["written"], true);
+    assert_eq!(parsed["path"], config_path.display().to_string());
+
+    let content = fs::read_to_string(&config_path).expect("config should exist");
+    assert!(content.contains("provider = \"fake\""));
+    assert!(content.contains("api_key_env = \"CHUANG_AGENT_API_KEY\""));
+
+    let second = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "config",
+            "init",
+            "--path",
+            config_path.to_str().expect("config path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("config_init_refused"));
+}

@@ -23,6 +23,7 @@
 - `cargo run -- status`：查看 MVP 核心状态。
 - `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
 - `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
+- `cargo run -- config init`：生成默认 `config.toml`；目标文件已存在时拒绝覆盖。
 - `cargo run -- config check`：只校验配置和内核快照，不执行任务；未传 `--config` 时会自动读取当前目录 `config.toml`（如果存在）。
 - `cargo run -- config show --json`：输出脱敏后的配置摘要，给桌面控制台或插件读取。
 - `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。

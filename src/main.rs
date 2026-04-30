@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -55,6 +56,8 @@ struct RememberedRecords {
     sqlite_record_id: Option<String>,
     identity_record_id: Option<String>,
 }
+
+const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../config.example.toml");
 
 fn main() {
     if let Err(message) = run_cli() {
@@ -141,6 +144,7 @@ fn config_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("check") => config_check_command(&args[1..]),
         Some("show") => config_show_command(&args[1..]),
+        Some("init") => config_init_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -190,6 +194,47 @@ fn config_show_command(args: &[String]) -> Result<(), String> {
     match output {
         ControlOutputFormat::Text => print_config_summary(&result),
         ControlOutputFormat::Json => print_json(&result)?,
+    }
+
+    Ok(())
+}
+
+fn config_init_command(args: &[String]) -> Result<(), String> {
+    let request = parse_config_init(args)?;
+    if request.path.exists() {
+        return Err(format!(
+            "config_init_refused: path already exists: {}",
+            request.path.display()
+        ));
+    }
+    if let Some(parent) = request
+        .path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "config_init_parent_create_failed path={} error={e}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(&request.path, DEFAULT_CONFIG_TEMPLATE).map_err(|e| {
+        format!(
+            "config_init_write_failed path={} error={e}",
+            request.path.display()
+        )
+    })?;
+
+    let output = ConfigInitCliOutput {
+        written: true,
+        path: request.path.display().to_string(),
+    };
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("config_initialized path={}", output.path);
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
     }
 
     Ok(())
@@ -784,6 +829,18 @@ struct ConfigCheckCliOutput {
     summary: ConfigSummary,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigInitCliRequest {
+    output: ControlOutputFormat,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ConfigInitCliOutput {
+    written: bool,
+    path: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControlOutputFormat {
     Text,
@@ -829,6 +886,28 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
         }
     }
     Ok(output)
+}
+
+fn parse_config_init(args: &[String]) -> Result<ConfigInitCliRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut path = PathBuf::from("config.toml");
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--path" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                path = PathBuf::from(value);
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(ConfigInitCliRequest { output, path })
 }
 
 fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String> {
@@ -1815,5 +1894,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|config|control|subagent> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | config check|show [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|config|control|subagent> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | config init [--path PATH] [--json] | config check|show [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
 }
