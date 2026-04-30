@@ -21,7 +21,11 @@ use crate::skill_evolver::{
     EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver, RuntimeEvent, SkillEvolver,
     SkillId, SkillProposal, ValidationReport,
 };
-use crate::subagent_spawner::{FakeSubagentSpawner, QueuedSubagentSpawner, SubagentSlot};
+use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueError};
+use crate::subagent_spawner::{
+    FakeSubagentSpawner, KillReason, QueuedSubagentSpawner, RunId, SpawnReceipt, SpawnRequest,
+    SubagentError, SubagentSpawner,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
@@ -29,7 +33,7 @@ pub struct RuntimeSlots {
     pub provider: ProviderSlot,
     pub governance: GovernanceSlot,
     pub actuator: ActuatorSlot,
-    pub subagent: SubagentSlot,
+    pub subagent: SubagentRuntimeSlot,
     pub evolution: EvolutionSlot,
     pub control_plane: ControlPlaneSlot,
 }
@@ -60,6 +64,15 @@ pub enum ControlPlaneSlot {
     FakeLocal(FakeControlPlane),
 }
 
+#[derive(Debug, Clone)]
+pub enum SubagentRuntimeSlot {
+    Fake(FakeSubagentSpawner),
+    QueuedExternal {
+        spawner: QueuedSubagentSpawner,
+        queue: FileSubagentQueue,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeSlotsSummary {
     pub provider: String,
@@ -77,7 +90,7 @@ pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, Confi
         provider: build_provider_responder(&config.provider)?,
         governance: build_governance(&config.governance)?,
         actuator: build_actuator(&config.actuator)?,
-        subagent: build_subagent(&config.subagent)?,
+        subagent: build_subagent(config)?,
         evolution: build_evolution(&config.evolution)?,
         control_plane: build_control_plane(&config.control_plane)?,
     })
@@ -124,10 +137,20 @@ fn build_actuator(config: &ActuatorConfig) -> Result<ActuatorSlot, ConfigError> 
     }
 }
 
-fn build_subagent(config: &SubagentConfig) -> Result<SubagentSlot, ConfigError> {
+fn build_subagent(config: &RuntimeConfig) -> Result<SubagentRuntimeSlot, ConfigError> {
     match config {
-        SubagentConfig::Fake => Ok(SubagentSlot::Fake(FakeSubagentSpawner::new())),
-        SubagentConfig::QueuedExternal => Ok(SubagentSlot::Queued(QueuedSubagentSpawner::new())),
+        RuntimeConfig {
+            subagent: SubagentConfig::Fake,
+            ..
+        } => Ok(SubagentRuntimeSlot::Fake(FakeSubagentSpawner::new())),
+        RuntimeConfig {
+            subagent: SubagentConfig::QueuedExternal,
+            ..
+        } => Ok(SubagentRuntimeSlot::QueuedExternal {
+            spawner: QueuedSubagentSpawner::new(),
+            queue: FileSubagentQueue::open(config.subagent_queue.build_file_queue_config()?)
+                .map_err(subagent_queue_config_error)?,
+        }),
     }
 }
 
@@ -143,6 +166,17 @@ fn build_control_plane(config: &ControlPlaneConfig) -> Result<ControlPlaneSlot, 
             FakeControlPlane::default_local_agents(),
         )),
     }
+}
+
+fn subagent_queue_config_error(error: FileSubagentQueueError) -> ConfigError {
+    ConfigError {
+        field: "subagent_queue.root".to_string(),
+        message: format!("failed to open subagent queue: {error:?}"),
+    }
+}
+
+fn subagent_queue_runtime_error(error: FileSubagentQueueError) -> SubagentError {
+    SubagentError::InvalidRequest(format!("subagent queue failed: {error:?}"))
 }
 
 impl Governance for GovernanceSlot {
@@ -171,6 +205,60 @@ impl Responder for ProviderSlot {
         match self {
             Self::Fake(responder) => responder.provider(),
             Self::OpenAICompatible(responder) => responder.provider(),
+        }
+    }
+}
+
+impl SubagentSpawner for SubagentRuntimeSlot {
+    fn spawn(&mut self, request: SpawnRequest) -> Result<SpawnReceipt, SubagentError> {
+        match self {
+            Self::Fake(spawner) => spawner.spawn(request),
+            Self::QueuedExternal { spawner, queue } => {
+                let receipt = spawner.spawn(request)?;
+                let dispatch = spawner
+                    .pending_dispatches()
+                    .into_iter()
+                    .find(|dispatch| dispatch.run_id == receipt.run_id)
+                    .ok_or_else(|| {
+                        SubagentError::InvalidRequest(format!(
+                            "queued dispatch missing for run_id={}",
+                            receipt.run_id.0
+                        ))
+                    })?;
+                queue
+                    .write_dispatch(&dispatch)
+                    .map_err(subagent_queue_runtime_error)?;
+                Ok(receipt)
+            }
+        }
+    }
+
+    fn steer(&mut self, run_id: &RunId, message: String) -> Result<(), SubagentError> {
+        match self {
+            Self::Fake(spawner) => spawner.steer(run_id, message),
+            Self::QueuedExternal { spawner, .. } => spawner.steer(run_id, message),
+        }
+    }
+
+    fn kill(&mut self, run_id: &RunId, reason: KillReason) -> Result<(), SubagentError> {
+        match self {
+            Self::Fake(spawner) => spawner.kill(run_id, reason),
+            Self::QueuedExternal { spawner, .. } => spawner.kill(run_id, reason),
+        }
+    }
+
+    fn collect(
+        &mut self,
+        run_id: &RunId,
+    ) -> Result<Option<crate::subagent_report::SubagentReport>, SubagentError> {
+        match self {
+            Self::Fake(spawner) => spawner.collect(run_id),
+            Self::QueuedExternal { spawner, queue } => {
+                queue
+                    .attach_report_if_present(spawner, run_id)
+                    .map_err(subagent_queue_runtime_error)?;
+                spawner.collect(run_id)
+            }
         }
     }
 }

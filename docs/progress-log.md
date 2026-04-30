@@ -24,6 +24,7 @@
 - OpenAI-compatible provider adapter 的实例化已从 `runtime_config` 移到 `slot_registry`；配置层只保留配置描述、校验和脱敏摘要。
 - 新增边界测试，防止 `runtime_config` 重新引入 `OpenAICompatibleProviderAdapter` 构造逻辑。
 - `RuntimeSlotsSummary` 和 CLI `status` 已补 provider slot，控制台视角下所有当前 slot 都能统一展示。
+- `SubagentConfig::QueuedExternal` 在 slot registry 中已接入 `FileSubagentQueue`：spawn 会写入 dispatch 文件，collect 会尝试吸收 report 文件。
 
 ## 2026-04-30
 

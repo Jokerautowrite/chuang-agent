@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
 use chuang_agent::control_plane::ControlPlane;
@@ -6,7 +7,7 @@ use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecis
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::responder::{Responder, ResponderRequest};
 use chuang_agent::runtime_config::{
-    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
 use chuang_agent::slot_registry::{
@@ -16,6 +17,14 @@ use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
 use chuang_agent::{common::AgentId, common::TaskId};
+
+fn temp_queue_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-slot-registry-{name}-{nanos}"))
+}
 
 #[test]
 fn slot_registry_builds_all_current_runtime_slots_from_config() {
@@ -129,6 +138,9 @@ fn slot_registry_builds_provider_responder_from_config() {
 fn slot_registry_can_build_queued_external_subagent_slot() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued"),
+    };
 
     let mut slots = build_runtime_slots(&config).expect("queued slot should build");
     let receipt = slots
@@ -148,6 +160,12 @@ fn slot_registry_can_build_queued_external_subagent_slot() {
         .expect("queued spawn should succeed");
 
     assert_eq!(receipt.run_id.0, "queued-run-1");
+    assert!(config
+        .subagent_queue
+        .root
+        .join("dispatch")
+        .join("queued-run-1.json")
+        .exists());
     assert!(slots
         .subagent
         .collect(&receipt.run_id)
