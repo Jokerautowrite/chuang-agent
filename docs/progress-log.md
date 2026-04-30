@@ -237,6 +237,15 @@
   - `tests/slot_registry_tests.rs`，覆盖四个当前 slot 的构造、FakeSubagentSpawner spawn/collect、summary 与 config kind 一致。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 新增控制面板协议层：
+  - `src/control_plane.rs`：`ControlPlane` trait、`ManagedUnit`、`ControlAction`、`ControlRequest`、`ControlReceipt`、`FakeControlPlane`。
+  - 统一服务/Agent 的 `Start / Stop / Restart / ChangeModel` 操作语义。
+  - 默认 fake units 已显式列出：小创、小承、小云、小策、`codex-feishu-bot.service`，并用 metadata 保留 channel/manager 区分，避免混用通道。
+  - `ChangeModel` 只允许 Agent，不允许 Service。
+- 新增测试：
+  - `tests/control_plane_tests.rs`，覆盖默认本地单位、start/stop/restart、agent-only model switch、unknown unit 和空 reason 拒绝。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

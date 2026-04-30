@@ -3,6 +3,7 @@ pub mod agent_runtime;
 pub mod browser_worker;
 pub mod common;
 pub mod context_engine;
+pub mod control_plane;
 pub mod governance;
 pub mod lifecycle;
 pub mod memory_policy;
