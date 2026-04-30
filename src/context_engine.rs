@@ -3,6 +3,10 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 
+mod deterministic;
+
+pub use deterministic::DeterministicContextEngine;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSegment {
     pub id: String,
@@ -108,27 +112,6 @@ pub struct ContextPacker {
 pub trait ContextEngine {
     fn kind(&self) -> &'static str;
     fn pack(&self, segments: Vec<ContextSegment>) -> Result<PackedContext, ContextPackError>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeterministicContextEngine {
-    budget: ContextBudget,
-}
-
-impl DeterministicContextEngine {
-    pub fn new(budget: ContextBudget) -> Self {
-        Self { budget }
-    }
-}
-
-impl ContextEngine for DeterministicContextEngine {
-    fn kind(&self) -> &'static str {
-        "deterministic_budget"
-    }
-
-    fn pack(&self, segments: Vec<ContextSegment>) -> Result<PackedContext, ContextPackError> {
-        ContextPacker::new(self.budget.clone()).pack(segments)
-    }
 }
 
 impl ContextPacker {

@@ -46,3 +46,4 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `actuator` 主文件保留人类级操作面协议；fake 实现已拆到子模块。真实桌面、浏览器、微信、ADB 控制必须单独作为 adapter。
 - `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现已拆到子模块。真实技能提炼/固化必须单独作为 evolver adapter。
 - `memory_store` 主文件保留记忆记录、查询、命中、trait 和错误类型；in-memory 测试/开发实现已拆到子模块。SQLite、Hermes 双文件、未来向量/远程记忆都必须作为独立实现。
+- `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 策略包装已拆到子模块。未来摘要压缩/优先级/对话树策略必须作为独立 engine。

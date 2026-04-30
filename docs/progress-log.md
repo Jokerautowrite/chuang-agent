@@ -16,6 +16,7 @@
 - `actuator` 已拆出 fake 子模块，主文件只保留桌面/浏览器/人类级操作面的协议定义。
 - `skill_evolver` 已拆出 noop 子模块，主文件只保留进化层协议类型、trait 和共用校验。
 - `memory_store` 已拆出 in-memory 子模块，主文件只保留通用记忆接口和数据结构。
+- `context_engine` 已拆出 deterministic 子模块，主文件保留上下文数据结构、packer 算法、trait 和错误类型。
 
 ## 2026-04-30
 
