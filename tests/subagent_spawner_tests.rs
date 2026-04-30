@@ -200,6 +200,48 @@ fn queued_dispatch_can_roundtrip_as_json() {
 }
 
 #[test]
+fn queued_spawner_can_spawn_with_explicit_ids() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn_with_ids(
+            request(SubagentToolPolicy::Execute),
+            chuang_agent::subagent_spawner::RunId("queued-cli-1".to_string()),
+            AgentId("worker-cli-1".to_string()),
+        )
+        .expect("explicit ids should spawn");
+    let dispatch = spawner
+        .take_next_dispatch()
+        .expect("dispatch should be available");
+
+    assert_eq!(receipt.run_id.0, "queued-cli-1");
+    assert_eq!(receipt.agent_id.0, "worker-cli-1");
+    assert_eq!(dispatch.run_id, receipt.run_id);
+    assert_eq!(dispatch.agent_id, receipt.agent_id);
+}
+
+#[test]
+fn queued_spawner_rejects_duplicate_explicit_run_id() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    spawner
+        .spawn_with_ids(
+            request(SubagentToolPolicy::Execute),
+            chuang_agent::subagent_spawner::RunId("queued-cli-1".to_string()),
+            AgentId("worker-cli-1".to_string()),
+        )
+        .expect("first explicit ids should spawn");
+
+    let err = spawner
+        .spawn_with_ids(
+            request(SubagentToolPolicy::Execute),
+            chuang_agent::subagent_spawner::RunId("queued-cli-1".to_string()),
+            AgentId("worker-cli-2".to_string()),
+        )
+        .expect_err("duplicate run id should fail");
+
+    assert!(matches!(err, SubagentError::InvalidRequest(_)));
+}
+
+#[test]
 fn queued_spawner_rejects_mismatched_attached_report() {
     let mut spawner = QueuedSubagentSpawner::new();
     let receipt = spawner

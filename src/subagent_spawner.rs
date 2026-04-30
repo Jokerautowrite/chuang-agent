@@ -144,6 +144,15 @@ impl QueuedSubagentSpawner {
         Self::default()
     }
 
+    pub fn spawn_with_ids(
+        &mut self,
+        request: SpawnRequest,
+        run_id: RunId,
+        agent_id: AgentId,
+    ) -> Result<SpawnReceipt, SubagentError> {
+        self.spawn_inner(request, run_id, agent_id)
+    }
+
     pub fn pending_dispatches(&self) -> Vec<SubagentDispatch> {
         self.dispatch_queue
             .iter()
@@ -305,45 +314,10 @@ impl SubagentSpawner for FakeSubagentSpawner {
 
 impl SubagentSpawner for QueuedSubagentSpawner {
     fn spawn(&mut self, request: SpawnRequest) -> Result<SpawnReceipt, SubagentError> {
-        validate_spawn_request(&request)?;
         self.next_run += 1;
         let run_id = RunId(format!("queued-run-{}", self.next_run));
         let agent_id = AgentId(format!("{}-{}", request.agent_name, self.next_run));
-        let receipt = SpawnReceipt {
-            run_id: run_id.clone(),
-            agent_id: agent_id.clone(),
-            accepted_tool_policy: request.tool_policy.clone(),
-            context_isolation: request.context_isolation.clone(),
-            recursive_spawn: request.recursive_spawn,
-        };
-        let dispatch = SubagentDispatch {
-            run_id: run_id.clone(),
-            agent_id,
-            task_id: request.task_id.clone(),
-            parent_agent_id: request.parent_agent_id.clone(),
-            agent_name: request.agent_name.clone(),
-            task: request.task.clone(),
-            tool_policy: request.tool_policy.clone(),
-            context_isolation: request.context_isolation.clone(),
-            token_budget: request.token_budget,
-            idle_timeout_ms: request.idle_timeout_ms,
-            recursive_spawn: request.recursive_spawn,
-            metadata: request.metadata.clone(),
-        };
-
-        self.runs.insert(
-            run_id.0.clone(),
-            QueuedRun {
-                request,
-                receipt: receipt.clone(),
-                state: SubagentState::Running,
-                dispatch,
-                report: None,
-            },
-        );
-        self.dispatch_queue.push(run_id);
-
-        Ok(receipt)
+        self.spawn_inner(request, run_id, agent_id)
     }
 
     fn steer(&mut self, run_id: &RunId, message: String) -> Result<(), SubagentError> {
@@ -400,6 +374,68 @@ impl SubagentSpawner for QueuedSubagentSpawner {
                 Some(format!("killed: {reason:?}")),
             ))),
         }
+    }
+}
+
+impl QueuedSubagentSpawner {
+    fn spawn_inner(
+        &mut self,
+        request: SpawnRequest,
+        run_id: RunId,
+        agent_id: AgentId,
+    ) -> Result<SpawnReceipt, SubagentError> {
+        validate_spawn_request(&request)?;
+        if run_id.0.trim().is_empty() {
+            return Err(SubagentError::InvalidRequest(
+                "run_id must not be empty".to_string(),
+            ));
+        }
+        if agent_id.0.trim().is_empty() {
+            return Err(SubagentError::InvalidRequest(
+                "agent_id must not be empty".to_string(),
+            ));
+        }
+        if self.runs.contains_key(&run_id.0) {
+            return Err(SubagentError::InvalidRequest(format!(
+                "run_id already exists: {}",
+                run_id.0
+            )));
+        }
+        let receipt = SpawnReceipt {
+            run_id: run_id.clone(),
+            agent_id: agent_id.clone(),
+            accepted_tool_policy: request.tool_policy.clone(),
+            context_isolation: request.context_isolation.clone(),
+            recursive_spawn: request.recursive_spawn,
+        };
+        let dispatch = SubagentDispatch {
+            run_id: run_id.clone(),
+            agent_id,
+            task_id: request.task_id.clone(),
+            parent_agent_id: request.parent_agent_id.clone(),
+            agent_name: request.agent_name.clone(),
+            task: request.task.clone(),
+            tool_policy: request.tool_policy.clone(),
+            context_isolation: request.context_isolation.clone(),
+            token_budget: request.token_budget,
+            idle_timeout_ms: request.idle_timeout_ms,
+            recursive_spawn: request.recursive_spawn,
+            metadata: request.metadata.clone(),
+        };
+
+        self.runs.insert(
+            run_id.0.clone(),
+            QueuedRun {
+                request,
+                receipt: receipt.clone(),
+                state: SubagentState::Running,
+                dispatch,
+                report: None,
+            },
+        );
+        self.dispatch_queue.push(run_id);
+
+        Ok(receipt)
     }
 }
 

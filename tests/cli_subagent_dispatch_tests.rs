@@ -45,12 +45,16 @@ fn cli_subagent_dispatch_writes_queued_dispatch_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
-    assert_eq!(parsed["run_id"], "queued-run-1");
-    assert_eq!(parsed["agent_id"], "worker-1");
+    let run_id = parsed["run_id"].as_str().expect("run_id should be string");
+    let agent_id = parsed["agent_id"]
+        .as_str()
+        .expect("agent_id should be string");
+    assert!(run_id.starts_with("queued-cli-"));
+    assert!(agent_id.starts_with("worker-"));
     assert_eq!(parsed["task_id"], "task-cli-1");
     assert_eq!(parsed["queue_root"], queue_root.display().to_string());
 
-    let dispatch_path = queue_root.join("dispatch").join("queued-run-1.json");
+    let dispatch_path = queue_root.join("dispatch").join(format!("{run_id}.json"));
     assert_eq!(parsed["dispatch_path"], dispatch_path.display().to_string());
     let dispatch: Value = serde_json::from_str(
         &std::fs::read_to_string(dispatch_path).expect("dispatch file should exist"),
@@ -61,6 +65,26 @@ fn cli_subagent_dispatch_writes_queued_dispatch_json() {
     assert_eq!(dispatch["task"], "审计 runtime 子代理队列");
     assert_eq!(dispatch["tool_policy"], "Execute");
     assert_eq!(dispatch["metadata"]["source"], "cli");
+}
+
+#[test]
+fn cli_subagent_dispatch_can_queue_multiple_tasks_in_same_directory() {
+    let queue_root = temp_queue_root("multi-dispatch");
+    let first = dispatch_task(&queue_root, "task-cli-1", "审计第一段");
+    let second = dispatch_task(&queue_root, "task-cli-2", "审计第二段");
+
+    let first_run = first["run_id"].as_str().expect("first run id");
+    let second_run = second["run_id"].as_str().expect("second run id");
+
+    assert_ne!(first_run, second_run);
+    assert!(queue_root
+        .join("dispatch")
+        .join(format!("{first_run}.json"))
+        .exists());
+    assert!(queue_root
+        .join("dispatch")
+        .join(format!("{second_run}.json"))
+        .exists());
 }
 
 #[test]
@@ -184,4 +208,33 @@ fn sample_report_json(summary: &str) -> String {
   "truncated": false
 }}"#
     )
+}
+
+fn dispatch_task(queue_root: &std::path::Path, task_id: &str, task: &str) -> Value {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "dispatch",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--task",
+            task,
+            "--task-id",
+            task_id,
+            "--agent-name",
+            "worker",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout should be json")
 }

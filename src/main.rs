@@ -31,8 +31,7 @@ use chuang_agent::runtime_config::{
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_spawner::{
-    ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentSpawner,
-    SubagentToolPolicy,
+    ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentToolPolicy,
 };
 use serde::Serialize;
 
@@ -162,8 +161,9 @@ fn subagent_dispatch_command(args: &[String]) -> Result<(), String> {
     let queue = FileSubagentQueue::open(queue_config)
         .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
     let mut spawner = QueuedSubagentSpawner::new();
+    let dispatch_ids = unique_cli_subagent_ids(&request.spawn.agent_name)?;
     let receipt = spawner
-        .spawn(request.spawn)
+        .spawn_with_ids(request.spawn, dispatch_ids.run_id, dispatch_ids.agent_id)
         .map_err(|e| format!("subagent_spawn_failed: {e:?}"))?;
     let paths = queue
         .flush_pending_dispatches(&spawner)
@@ -523,6 +523,12 @@ struct SubagentDispatchCliOutput {
     task_id: String,
     dispatch_path: String,
     queue_root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliSubagentIds {
+    run_id: RunId,
+    agent_id: AgentId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1276,6 +1282,36 @@ fn default_subagent_task_id() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     format!("cli-task-{nanos}")
+}
+
+fn unique_cli_subagent_ids(agent_name: &str) -> Result<CliSubagentIds, String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("clock_error: {e}"))?
+        .as_nanos();
+    let pid = std::process::id();
+    let safe_agent_name = agent_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    let safe_agent_name = if safe_agent_name.is_empty() {
+        "worker".to_string()
+    } else {
+        safe_agent_name
+    };
+
+    Ok(CliSubagentIds {
+        run_id: RunId(format!("queued-cli-{pid}-{nanos}")),
+        agent_id: AgentId(format!("{safe_agent_name}-{pid}-{nanos}")),
+    })
 }
 
 fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), String> {

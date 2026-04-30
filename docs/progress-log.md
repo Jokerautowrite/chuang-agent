@@ -586,6 +586,15 @@
   - `runtime_config_tests` 新增 context engine kind 覆盖。
   - `cli_status_tests` 新增 status 输出 context engine kind 覆盖。
 - 已运行 `cargo test --test context_engine_tests --test agent_runtime_tests --test runtime_config_tests --test cli_status_tests`，当前专项测试通过。
+- 子代理 CLI 多任务派发修复：
+  - `QueuedSubagentSpawner` 新增 `spawn_with_ids()`，允许调用方显式指定 `run_id / agent_id`。
+  - CLI `subagent dispatch` 改为生成 `queued-cli-<pid>-<nanos>` 形式的全局唯一 run id。
+  - 同一个 `--subagent-queue-root` 目录现在可以连续派发多个 dispatch，不会反复覆盖 `queued-run-1.json`。
+  - 内存 spawner 默认 `spawn()` 仍保留顺序 `queued-run-N` 行为，已有测试和协议不变。
+- 更新测试：
+  - `subagent_spawner_tests` 新增显式 ID 派发和重复 run id 拒绝。
+  - `cli_subagent_dispatch_tests` 新增同目录连续派发两个任务并保留两个 dispatch 文件。
+- 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_spawner_tests --test subagent_queue_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
