@@ -15,6 +15,7 @@ use chuang_agent::control_surface::{
 use chuang_agent::control_workflow::{
     build_decision_view, ControlUnitView, ControlWorkflowError, ControlWorkflowView,
 };
+use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore};
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
@@ -87,7 +88,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
 fn status_command(args: &[String]) -> Result<(), String> {
     let output = parse_status_output(args)?;
     let options = parse_cli_options(args)?;
-    let kernel = kernel_config_from_runtime(&options.runtime);
+    let kernel = kernel_config_from_runtime(&options.runtime)?;
     let status = build_chuang_mvp_status(&options.runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
@@ -213,7 +214,7 @@ fn run_with_options(
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
             let mut kernel = ChuangKernel::with_responder(
-                kernel_config_from_runtime(&options.runtime),
+                kernel_config_from_runtime(&options.runtime)?,
                 store,
                 provider,
             );
@@ -226,7 +227,8 @@ fn run_with_options(
             let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
-            let mut kernel = ChuangKernel::new(kernel_config_from_runtime(&options.runtime), store);
+            let mut kernel =
+                ChuangKernel::new(kernel_config_from_runtime(&options.runtime)?, store);
             kernel
                 .run_turn(user_input)
                 .map_err(|e| format!("runtime_failed: {e:?}"))
@@ -486,16 +488,25 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("control_plane: {}", status.slots.control_plane);
 }
 
-fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
-    ChuangKernelConfig {
+fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> Result<ChuangKernelConfig, String> {
+    let dual_file_config = runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let identity_snapshot = FileDualFileMemoryStore::open(dual_file_config)
+        .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?
+        .snapshot()
+        .map_err(|e| format!("identity_memory_snapshot_failed: {e:?}"))?;
+
+    Ok(ChuangKernelConfig {
         agent_id: "chuang-cli".to_string(),
         parent_agent_id: None,
         recall_limit: runtime.recall_limit,
         metadata: runtime.metadata.clone(),
         context_budget: Some(runtime.context_budget.clone()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
-        identity_snapshot: None,
-    }
+        identity_snapshot: Some(identity_snapshot),
+    })
 }
 
 fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String, bool), String> {

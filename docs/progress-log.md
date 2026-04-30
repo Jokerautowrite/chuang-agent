@@ -461,6 +461,12 @@
   - `agent_runtime_tests` 新增 extra identity context packing 断言。
   - `chuang_kernel_tests` 新增 identity snapshot 注入 prompt 和 snapshot 字符数断言。
 - 已运行 `cargo test --test agent_runtime_tests --test chuang_kernel_tests --test kernel_status_tests --test cli_smoke_tests --test runtime_report_tests --test agent_runtime_sqlite_tests`，当前专项测试通过。
+- CLI 启动路径已读取 identity memory 快照：
+  - `kernel_config_from_runtime()` 现在从 `RuntimeConfig.identity_memory` 构造 `DualFileMemoryConfig`。
+  - CLI `run / repl / status` 进入内核前打开 `FileDualFileMemoryStore`，读取一次 `USER.md / MEMORY.md` snapshot。
+  - 读取失败会返回 `identity_memory_open_failed` 或 `identity_memory_snapshot_failed`，不静默降级。
+  - CLI status 文本现在显示 `identity_snapshot_chars`，默认空文件为 `user=0 memory=0`。
+- 已运行 `cargo test --test cli_status_tests --test cli_smoke_tests --test cli_provider_smoke_tests --test cli_repl_default_transport_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

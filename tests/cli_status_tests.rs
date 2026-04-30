@@ -21,6 +21,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("model: stub-responder"));
     assert!(stdout.contains("identity_memory: hermes_dual_file"));
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
+    assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
     assert!(stdout.contains("governance: static_rule"));
     assert!(stdout.contains("control_plane: fake_local"));
 }
