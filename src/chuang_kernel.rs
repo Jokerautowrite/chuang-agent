@@ -2,13 +2,16 @@ use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::context_engine::ContextBudget;
+use crate::memory_admission::{
+    preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
+};
 use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::{FakeResponder, Responder};
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
 use serde::Serialize;
 
-pub const DEFAULT_MEMORY_WRITE_MAX_CHARS: usize = 2200;
+pub use crate::memory_admission::DEFAULT_MEMORY_WRITE_MAX_CHARS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChuangKernelConfig {
@@ -49,13 +52,6 @@ pub struct ChuangKernelSnapshot {
     pub metadata_keys: Vec<String>,
     pub context_budget_max_tokens: Option<u16>,
     pub memory_write_max_chars: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryEntryView {
-    pub id: String,
-    pub content_preview: String,
-    pub chars: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,13 +143,21 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         );
 
         if let Some(limit_chars) = self.config.memory_write_max_chars {
-            let attempted_chars = content.chars().count();
-            if attempted_chars > limit_chars {
-                return Err(ChuangKernelMemoryError::HardLimitExceeded {
+            match TextMemoryAdmission::new(limit_chars)
+                .evaluate(&content, self.existing_turn_summary_entries()?)
+            {
+                TextMemoryAdmissionDecision::Accepted => {}
+                TextMemoryAdmissionDecision::Rejected {
                     limit_chars,
                     attempted_chars,
-                    existing_entries: self.existing_turn_summary_entries()?,
-                });
+                    existing_entries,
+                } => {
+                    return Err(ChuangKernelMemoryError::HardLimitExceeded {
+                        limit_chars,
+                        attempted_chars,
+                        existing_entries,
+                    });
+                }
             }
         }
 
@@ -196,8 +200,4 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             })
             .collect())
     }
-}
-
-fn preview_chars(content: &str, limit: usize) -> String {
-    content.chars().take(limit).collect()
 }

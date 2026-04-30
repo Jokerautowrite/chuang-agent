@@ -424,6 +424,14 @@
   - `chuang_kernel_tests` 验证超限错误包含已有条目的 ID、预览和字符数。
   - `cli_smoke_tests` 验证 CLI 超限错误包含 `existing_entries` 字段。
 - 已运行 `cargo test --test chuang_kernel_tests --test cli_smoke_tests`，当前专项测试通过。
+- 硬上限策略抽成可复用记忆准入模块：
+  - 新增 `src/memory_admission.rs`。
+  - 定义 `TextMemoryAdmission`、`TextMemoryAdmissionDecision`、`MemoryEntryView`、`DEFAULT_MEMORY_WRITE_MAX_CHARS`。
+  - `ChuangKernel::remember_turn()` 改为调用 `TextMemoryAdmission`，不再把字符上限判断写死在内核方法里。
+  - `preview_chars()` 也移入准入模块，后续 USER/MEMORY 双文件可复用。
+- 新增测试：
+  - `tests/memory_admission_tests.rs` 覆盖准入成功、超限拒绝、字符预览截断和默认上限。
+- 已运行 `cargo test --test memory_admission_tests --test chuang_kernel_tests --test cli_smoke_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
