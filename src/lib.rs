@@ -9,6 +9,7 @@ pub mod control_plane;
 pub mod control_surface;
 pub mod control_workflow;
 pub mod governance;
+pub mod hermes_memory;
 pub mod kernel_status;
 pub mod lifecycle;
 pub mod memory_admission;

@@ -432,6 +432,16 @@
 - 新增测试：
   - `tests/memory_admission_tests.rs` 覆盖准入成功、超限拒绝、字符预览截断和默认上限。
 - 已运行 `cargo test --test memory_admission_tests --test chuang_kernel_tests --test cli_smoke_tests`，当前专项测试通过。
+- 新增 Hermes 风格双文件记忆 MVP：
+  - `src/hermes_memory.rs` 定义 `DualFileMemoryStore` trait 和 `FileDualFileMemoryStore` 文件实现。
+  - 默认文件为 `USER.md / MEMORY.md`，默认硬上限为 `1375 / 2200` 字符。
+  - `write_user()` 只在整份 USER 文本未超限时原子写入。
+  - `append_memory()` 以 `## id` 条目追加 MEMORY，重复 ID 拒绝。
+  - 超限时返回 `HardLimitExceeded`，包含 scope、limit、attempted chars 和现有条目预览；不删除、不压缩、不改写现有文件。
+  - `snapshot()` 返回 USER/MEMORY 双文件的会话快照，为后续“会话开始冻结快照”接内核做准备。
+- 新增测试：
+  - `tests/hermes_memory_tests.rs` 覆盖文件创建、快照读取、USER 超限不变更、MEMORY 追加超限不变更、重复 ID 拒绝、默认上限。
+- 已运行 `cargo test --test hermes_memory_tests --test memory_admission_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
