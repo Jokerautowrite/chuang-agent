@@ -7,6 +7,7 @@ use crate::runtime_config::{
 };
 use crate::skill_evolver::NoopEvolver;
 use crate::subagent_spawner::FakeSubagentSpawner;
+use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSlots {
@@ -17,7 +18,7 @@ pub struct RuntimeSlots {
     pub control_plane: FakeControlPlane,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeSlotsSummary {
     pub governance: String,
     pub actuator: String,

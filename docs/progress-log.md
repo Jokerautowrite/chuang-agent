@@ -378,6 +378,16 @@
 - 更新测试：
   - `cli_smoke_tests` 新增端到端写回验证：第一次 `--remember` 写入，同 DB 第二次查询可 recall 到该 turn summary。
 - 已运行 `cargo test --test cli_smoke_tests --test chuang_kernel_tests`，当前专项测试通过。
+- 新增核心 MVP 状态入口：
+  - `src/kernel_status.rs`：`ChuangMvpStatus { config, slots, kernel }`。
+  - 状态视图聚合 `RuntimeConfig::summary()`、`RuntimeSlotsSummary`、`ChuangKernelSnapshot`。
+  - `ConfigSummary / RuntimeSlotsSummary / ChuangKernelSnapshot` 已支持 `Serialize`，方便 CLI/桌面/插件复用。
+  - CLI 新增 `cargo run -- status` 和 `cargo run -- status --json`。
+  - JSON 状态只暴露 `api_key_state=<set>`，不输出密钥明文。
+- 新增测试：
+  - `tests/kernel_status_tests.rs` 覆盖状态聚合与无效配置拒绝。
+  - `tests/cli_status_tests.rs` 覆盖文本状态、JSON 状态和密钥不泄露。
+- 已运行 `cargo test --test kernel_status_tests --test cli_status_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

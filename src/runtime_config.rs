@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::context_engine::ContextBudget;
 use crate::responder::{OpenAICompatibleProviderAdapter, ProviderTransport};
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -61,7 +62,7 @@ pub enum ControlPlaneConfig {
     FakeLocal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigSummary {
     pub provider_kind: String,
     pub provider_id: String,

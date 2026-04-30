@@ -13,6 +13,7 @@ use chuang_agent::control_surface::{
 use chuang_agent::control_workflow::{
     build_decision_view, ControlUnitView, ControlWorkflowError, ControlWorkflowView,
 };
+use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
@@ -37,6 +38,7 @@ fn run_cli() -> Result<(), String> {
     match args.get(1).map(String::as_str) {
         Some("run") => run_command(&args[2..]),
         Some("repl") => repl_command(&args[2..]),
+        Some("status") => status_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
         _ => Err(usage()),
     }
@@ -75,6 +77,21 @@ fn repl_command(args: &[String]) -> Result<(), String> {
         stdout
             .flush()
             .map_err(|e| format!("stdout_flush_failed: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn status_command(args: &[String]) -> Result<(), String> {
+    let output = parse_status_output(args)?;
+    let options = parse_cli_options(args)?;
+    let kernel = kernel_config_from_runtime(&options.runtime);
+    let status = build_chuang_mvp_status(&options.runtime, &kernel)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+
+    match output {
+        ControlOutputFormat::Text => print_status(&status),
+        ControlOutputFormat::Json => print_json(&status)?,
     }
 
     Ok(())
@@ -265,6 +282,27 @@ fn parse_control_output(args: &[String]) -> Result<ControlOutputFormat, String> 
     Ok(output)
 }
 
+fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--db"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport" => index += 2,
+            _ => return Err(usage()),
+        }
+    }
+    Ok(output)
+}
+
 fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String> {
     let mut unit_id: Option<String> = None;
     let mut action: Option<String> = None;
@@ -387,6 +425,22 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
     Ok(())
 }
 
+fn print_status(status: &ChuangMvpStatus) {
+    println!("kernel_agent_id: {}", status.kernel.agent_id);
+    println!("kernel_turn_count: {}", status.kernel.turn_count);
+    println!("provider: {}", status.config.provider_kind);
+    println!("provider_id: {}", status.config.provider_id);
+    println!("model: {}", status.config.model_name);
+    println!("memory_db: {}", status.config.db_path);
+    println!("recall_limit: {}", status.config.recall_limit);
+    println!("context_max_tokens: {}", status.config.context_max_tokens);
+    println!("governance: {}", status.slots.governance);
+    println!("actuator: {}", status.slots.actuator);
+    println!("subagent: {}", status.slots.subagent);
+    println!("evolution: {}", status.slots.evolution);
+    println!("control_plane: {}", status.slots.control_plane);
+}
+
 fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
     ChuangKernelConfig {
         agent_id: "chuang-cli".to_string(),
@@ -443,6 +497,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 db_path = Some(PathBuf::from(value));
                 index += 2;
             }
+            "--json" => index += 1,
             "--input" => index += 2,
             "--remember" => index += 1,
             "--provider-base-url" => {
@@ -618,5 +673,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }

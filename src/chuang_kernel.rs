@@ -6,6 +6,7 @@ use crate::memory_store::{MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::{FakeResponder, Responder};
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChuangKernelConfig {
@@ -24,7 +25,7 @@ pub struct ChuangKernelTurn {
     pub report: SubagentReport,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChuangKernelSnapshot {
     pub agent_id: String,
     pub turn_count: u64,
