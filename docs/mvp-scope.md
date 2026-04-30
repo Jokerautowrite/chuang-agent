@@ -26,6 +26,7 @@
 - `cargo run -- subagent dispatch --task TEXT`：把子代理任务写入文件队列 dispatch JSON，不启动外部 runner。
 - `cargo run -- subagent report --run-id ID`：只读轮询子代理 report JSON。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
+- `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 
 ## 当前明确不做
 
@@ -39,7 +40,7 @@
 ## 下一步优先级
 
 1. 把子代理文件队列接到真实 runner adapter，但默认仍保持 fake/queued，不自动执行危险命令。
-2. 把 context engine 从确定性 budget packing 推进到可插拔 strategy 接口。
+2. 给 context engine 增加第二个非默认策略占位，例如 summary_compression，但默认仍保持 deterministic_budget。
 3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
 4. 最后再接桌面壳、飞书插件和服务控制 UI。
 

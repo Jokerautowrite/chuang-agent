@@ -15,6 +15,7 @@ pub struct RuntimeConfig {
     pub recall_limit: usize,
     pub metadata: BTreeMap<String, String>,
     pub context_budget: ContextBudget,
+    pub context_engine: ContextEngineConfig,
     pub provider: ProviderConfig,
     pub identity_memory: IdentityMemoryConfig,
     pub governance: GovernanceConfig,
@@ -50,6 +51,11 @@ pub enum IdentityMemoryConfig {
         user_max_chars: usize,
         memory_max_chars: usize,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextEngineConfig {
+    DeterministicBudget,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +106,7 @@ pub struct ConfigSummary {
     pub identity_memory_max_chars: usize,
     pub db_path: String,
     pub recall_limit: usize,
+    pub context_engine_kind: String,
     pub context_max_tokens: u16,
     pub context_reserve_system_tokens: u16,
     pub context_min_working_tokens: u16,
@@ -121,6 +128,7 @@ impl RuntimeConfig {
             recall_limit: 5,
             metadata: BTreeMap::new(),
             context_budget: default_context_budget(),
+            context_engine: ContextEngineConfig::DeterministicBudget,
             provider: ProviderConfig::Fake {
                 provider_id: "fake-runtime".to_string(),
                 model_name: "stub-responder".to_string(),
@@ -163,6 +171,7 @@ impl RuntimeConfig {
         }
 
         self.provider.validate()?;
+        self.context_engine.validate()?;
         self.identity_memory.validate()?;
         self.governance.validate()?;
         self.actuator.validate()?;
@@ -191,6 +200,7 @@ impl RuntimeConfig {
             identity_memory_max_chars: identity_memory.memory_max_chars,
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
+            context_engine_kind: self.context_engine.kind().to_string(),
             context_max_tokens: self.context_budget.max_tokens,
             context_reserve_system_tokens: self.context_budget.reserve_system_tokens,
             context_min_working_tokens: self.context_budget.min_working_tokens,
@@ -306,6 +316,18 @@ impl IdentityMemoryConfig {
                 memory_max_chars: *memory_max_chars,
             },
         }
+    }
+}
+
+impl ContextEngineConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::DeterministicBudget => "deterministic_budget",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
     }
 }
 

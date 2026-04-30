@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use chuang_agent::context_engine::{
-    ContextBudget, ContextPackError, ContextPacker, ContextSegment, SegmentSource,
-    WorkingReservationReason,
+    ContextBudget, ContextEngine, ContextPackError, ContextPacker, ContextSegment,
+    DeterministicContextEngine, SegmentSource, WorkingReservationReason,
 };
 
 fn ts(value: &str) -> DateTime<Utc> {
@@ -41,6 +41,38 @@ fn budget(max_tokens: u16, reserve_system_tokens: u16, min_working_tokens: u16) 
         max_tool_results: 5,
         max_memory_segments: 20,
     }
+}
+
+#[test]
+fn deterministic_context_engine_wraps_budget_packer_behavior() {
+    let engine = DeterministicContextEngine::new(budget(30, 10, 0));
+
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system",
+                Some(10),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                "memory",
+                Some(8),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("deterministic context engine should pack");
+
+    assert_eq!(engine.kind(), "deterministic_budget");
+    assert_eq!(packed.total_tokens, 18);
+    assert_eq!(packed.dropped_ids, Vec::<String>::new());
 }
 
 #[test]

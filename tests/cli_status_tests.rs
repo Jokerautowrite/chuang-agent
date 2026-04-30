@@ -34,6 +34,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
     assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
     assert!(stdout.contains("governance: static_rule"));
+    assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
     assert!(stdout.contains(
         "context_budget: max=512 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
@@ -187,6 +188,10 @@ fn cli_status_can_override_context_budget_fields() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["config"]["context_max_tokens"], 256);
+    assert_eq!(
+        parsed["config"]["context_engine_kind"],
+        "deterministic_budget"
+    );
     assert_eq!(parsed["config"]["context_reserve_system_tokens"], 64);
     assert_eq!(parsed["config"]["context_min_working_tokens"], 8);
     assert_eq!(parsed["config"]["context_max_tool_results"], 2);

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
+    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
 
 #[test]
@@ -24,6 +24,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
+    assert_eq!(summary.context_engine_kind, "deterministic_budget");
     assert_eq!(summary.context_max_tokens, 512);
     assert_eq!(summary.context_reserve_system_tokens, 32);
     assert_eq!(summary.context_min_working_tokens, 1);
@@ -55,6 +56,15 @@ fn runtime_config_rejects_context_system_reserve_over_budget() {
         .expect_err("oversized system reserve should fail");
 
     assert_eq!(err.field, "context.reserve_system_tokens");
+}
+
+#[test]
+fn context_engine_config_exposes_deterministic_budget_kind() {
+    let config = ContextEngineConfig::DeterministicBudget;
+
+    config.validate().expect("deterministic config is valid");
+
+    assert_eq!(config.kind(), "deterministic_budget");
 }
 
 #[test]

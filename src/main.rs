@@ -724,6 +724,7 @@ fn print_status(status: &ChuangMvpStatus) {
         status.config.identity_user_max_chars, status.config.identity_memory_max_chars
     );
     println!("recall_limit: {}", status.config.recall_limit);
+    println!("context_engine: {}", status.config.context_engine_kind);
     println!("context_max_tokens: {}", status.config.context_max_tokens);
     println!(
         "context_budget: max={} reserve_system={} min_working={} max_tool_results={} max_memory_segments={}",

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::context_engine::{
-    BudgetExceededReason, ContextBudget, ContextPackError, ContextPacker, ContextSegment,
-    DropReason, PackedContext, SegmentSource,
+    BudgetExceededReason, ContextBudget, ContextEngine, ContextPackError, ContextPacker,
+    ContextSegment, DeterministicContextEngine, DropReason, PackedContext, SegmentSource,
 };
 use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
 use crate::memory_store::MemoryStore;
@@ -136,7 +136,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
-        ContextPacker::new(
+        DeterministicContextEngine::new(
             request
                 .context_budget
                 .clone()

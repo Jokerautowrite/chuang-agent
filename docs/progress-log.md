@@ -575,6 +575,17 @@
   - `runtime_config_tests` 新增 context reserve 越界拒绝。
   - `cli_status_tests` 新增 context budget CLI 覆盖。
 - 已运行 `cargo test --test runtime_config_tests --test cli_status_tests --test cli_smoke_tests --test cli_subagent_dispatch_tests`，当前专项测试通过。
+- Context engine 新增可插拔策略接口：
+  - `src/context_engine.rs` 新增 `ContextEngine` trait。
+  - 新增 `DeterministicContextEngine`，当前包装现有 `ContextPacker`，kind 为 `deterministic_budget`。
+  - `AgentRuntime` 改为通过 `DeterministicContextEngine` 执行 pack，行为保持不变。
+  - `RuntimeConfig` 新增 `ContextEngineConfig::DeterministicBudget`，`ConfigSummary` 和 `status` 暴露 `context_engine_kind`。
+  - 这为后续摘要压缩、自适应策略、对话树策略预留替换点。
+- 更新测试：
+  - `context_engine_tests` 新增 deterministic engine trait 覆盖。
+  - `runtime_config_tests` 新增 context engine kind 覆盖。
+  - `cli_status_tests` 新增 status 输出 context engine kind 覆盖。
+- 已运行 `cargo test --test context_engine_tests --test agent_runtime_tests --test runtime_config_tests --test cli_status_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
