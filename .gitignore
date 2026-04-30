@@ -1,1 +1,21 @@
 /target
+/.idea/
+/.vscode/
+/.DS_Store
+*.swp
+*.swo
+*.tmp
+*.log
+
+# Rust
+**/*.rs.bk
+
+# Build / coverage
+/coverage/
+
+# Local agent scratch / caches
+/.hermes/
+/context/
+
+# OS / editor noise
+Thumbs.db
