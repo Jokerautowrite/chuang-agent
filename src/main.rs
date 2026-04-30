@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS,
@@ -16,7 +17,7 @@ use chuang_agent::control_workflow::{
     build_decision_view, ControlUnitView, ControlWorkflowError, ControlWorkflowView,
 };
 use chuang_agent::hermes_memory::{
-    DualFileMemoryStore, FileDualFileMemoryStore, DEFAULT_USER_MEMORY_MAX_CHARS,
+    DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
@@ -31,6 +32,20 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliOptions {
     runtime: RuntimeConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunCliRequest {
+    options: CliOptions,
+    user_input: String,
+    remember: bool,
+    remember_identity: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct RememberedRecords {
+    sqlite_record_id: Option<String>,
+    identity_record_id: Option<String>,
 }
 
 fn main() {
@@ -52,11 +67,14 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn run_command(args: &[String]) -> Result<(), String> {
-    let (options, user_input, remember) = parse_db_and_input(args)?;
-    let (result, remembered_record_id) = run_with_options(&options, user_input, remember)?;
+    let request = parse_run_request(args)?;
+    let (result, memory_records) = run_with_options(&request)?;
     print_runtime_result(&result);
-    if let Some(record_id) = remembered_record_id {
+    if let Some(record_id) = memory_records.sqlite_record_id {
         println!("memory_recorded: {record_id}");
+    }
+    if let Some(record_id) = memory_records.identity_record_id {
+        println!("identity_memory_recorded: {record_id}");
     }
     Ok(())
 }
@@ -78,7 +96,12 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             continue;
         }
 
-        let (result, _) = run_with_options(&options, input.to_string(), false)?;
+        let (result, _) = run_with_options(&RunCliRequest {
+            options: options.clone(),
+            user_input: input.to_string(),
+            remember: false,
+            remember_identity: false,
+        })?;
         print_runtime_result(&result);
         writeln!(stdout, "---").map_err(|e| format!("stdout_write_failed: {e}"))?;
         stdout
@@ -203,62 +226,153 @@ fn find_control_unit<P: ControlPlane>(
 }
 
 fn run_with_options(
-    options: &CliOptions,
-    user_input: String,
-    remember: bool,
-) -> Result<(chuang_agent::agent_runtime::RuntimeResult, Option<String>), String> {
-    options
+    request: &RunCliRequest,
+) -> Result<
+    (
+        chuang_agent::agent_runtime::RuntimeResult,
+        RememberedRecords,
+    ),
+    String,
+> {
+    request
+        .options
         .runtime
         .validate()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    match options.runtime.provider.build_openai_compatible() {
+    match request.options.runtime.provider.build_openai_compatible() {
         Ok(Some(provider)) => {
-            let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
+            let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
             let mut kernel = ChuangKernel::with_responder(
-                kernel_config_from_runtime(&options.runtime)?,
+                kernel_config_from_runtime(&request.options.runtime)?,
                 store,
                 provider,
             );
             kernel
-                .run_turn(user_input)
+                .run_turn(request.user_input.clone())
                 .map_err(|e| format!("runtime_failed: {e:?}"))
-                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
+                .and_then(|turn| {
+                    remember_turn_if_requested(&request.options, &mut kernel, turn, request)
+                })
         }
         Ok(None) => {
-            let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
+            let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
             let mut kernel =
-                ChuangKernel::new(kernel_config_from_runtime(&options.runtime)?, store);
+                ChuangKernel::new(kernel_config_from_runtime(&request.options.runtime)?, store);
             kernel
-                .run_turn(user_input)
+                .run_turn(request.user_input.clone())
                 .map_err(|e| format!("runtime_failed: {e:?}"))
-                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
+                .and_then(|turn| {
+                    remember_turn_if_requested(&request.options, &mut kernel, turn, request)
+                })
         }
         Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
     }
 }
 
 fn remember_turn_if_requested<S, R>(
+    options: &CliOptions,
     kernel: &mut ChuangKernel<S, R>,
     turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
-    remember: bool,
-) -> Result<(chuang_agent::agent_runtime::RuntimeResult, Option<String>), String>
+    request: &RunCliRequest,
+) -> Result<
+    (
+        chuang_agent::agent_runtime::RuntimeResult,
+        RememberedRecords,
+    ),
+    String,
+>
 where
     S: MemoryStore,
     R: chuang_agent::responder::Responder,
 {
-    if remember {
-        let record_id = kernel
-            .remember_turn(&turn)
-            .map_err(format_kernel_memory_error)?;
-        return Ok((turn.result, Some(record_id)));
+    let mut records = RememberedRecords::default();
+
+    if request.remember {
+        records.sqlite_record_id = Some(
+            kernel
+                .remember_turn(&turn)
+                .map_err(format_kernel_memory_error)?,
+        );
     }
 
-    Ok((turn.result, None))
+    if request.remember_identity {
+        records.identity_record_id = Some(remember_identity_turn(options, &turn)?);
+    }
+
+    Ok((turn.result, records))
+}
+
+fn remember_identity_turn(
+    options: &CliOptions,
+    turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
+) -> Result<String, String> {
+    let dual_file_config = options
+        .runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let mut store = FileDualFileMemoryStore::open(dual_file_config)
+        .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
+    let entry_id = unique_identity_turn_id(&turn.turn_id)?;
+    let content = format!(
+        "user={}\nresponse={}\nsummary={}",
+        turn.user_input, turn.result.response.body, turn.report.summary
+    );
+    store
+        .append_memory(HotMemoryEntry {
+            id: entry_id.clone(),
+            content,
+        })
+        .map_err(format_identity_memory_error)?;
+    Ok(entry_id)
+}
+
+fn unique_identity_turn_id(turn_id: &str) -> Result<String, String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("clock_error: {e}"))?
+        .as_nanos();
+    Ok(format!(
+        "identity-{}-{}-{}",
+        turn_id,
+        std::process::id(),
+        nanos
+    ))
+}
+
+fn format_identity_memory_error(err: chuang_agent::hermes_memory::DualFileMemoryError) -> String {
+    match err {
+        chuang_agent::hermes_memory::DualFileMemoryError::StorageUnavailable { path } => {
+            format!("identity_memory_write_failed path={}", path.display())
+        }
+        chuang_agent::hermes_memory::DualFileMemoryError::DuplicateEntry { id } => {
+            format!("identity_memory_duplicate_entry id={id}")
+        }
+        chuang_agent::hermes_memory::DualFileMemoryError::HardLimitExceeded {
+            scope,
+            limit_chars,
+            attempted_chars,
+            existing_entries,
+        } => format!(
+            "identity_memory_hard_limit_exceeded scope={scope:?} limit_chars={} attempted_chars={} existing_entries={}",
+            limit_chars,
+            attempted_chars,
+            if existing_entries.is_empty() {
+                "none".to_string()
+            } else {
+                existing_entries
+                    .into_iter()
+                    .map(|entry| format!("{}:{}chars", entry.id, entry.chars))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        ),
+    }
 }
 
 fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemoryError) -> String {
@@ -514,15 +628,16 @@ fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> Result<ChuangKernelCon
     })
 }
 
-fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String, bool), String> {
+fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     let options = parse_cli_options(args)?;
     let mut user_input: Option<String> = None;
     let mut remember = false;
+    let mut remember_identity = false;
 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--db" => index += 2,
+            "--db" | "--identity-memory-root" => index += 2,
             "--input" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 user_input = Some(value.clone());
@@ -530,6 +645,10 @@ fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String, bool), Str
             }
             "--remember" => {
                 remember = true;
+                index += 1;
+            }
+            "--remember-identity" => {
+                remember_identity = true;
                 index += 1;
             }
             "--provider-base-url"
@@ -541,7 +660,12 @@ fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String, bool), Str
         }
     }
 
-    Ok((options, user_input.ok_or_else(usage)?, remember))
+    Ok(RunCliRequest {
+        options,
+        user_input: user_input.ok_or_else(usage)?,
+        remember,
+        remember_identity,
+    })
 }
 
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
@@ -564,6 +688,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             "--json" => index += 1,
             "--input" => index += 2,
             "--remember" => index += 1,
+            "--remember-identity" => index += 1,
             "--provider-base-url" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 provider_base_url = Some(value.clone());
@@ -749,5 +874,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }

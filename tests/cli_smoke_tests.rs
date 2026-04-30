@@ -153,6 +153,56 @@ fn cli_run_can_remember_turn_summary_when_requested() {
 }
 
 #[test]
+fn cli_run_can_remember_identity_memory_when_requested() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-identity-remember-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let db_path = temp_dir.join("memory.db");
+    let identity_root = temp_dir.join("identity");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--db",
+            db_path.to_str().expect("db path should be utf-8"),
+            "--identity-memory-root",
+            identity_root
+                .to_str()
+                .expect("identity path should be utf-8"),
+            "--input",
+            "身份热记忆写入测试",
+            "--remember-identity",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("identity_memory_recorded: identity-turn-1-"));
+
+    let memory_file =
+        fs::read_to_string(identity_root.join("MEMORY.md")).expect("memory file should exist");
+    assert!(memory_file.contains("身份热记忆写入测试"));
+    assert!(memory_file.contains("## identity-turn-1-"));
+}
+
+#[test]
 fn cli_run_reports_memory_write_hard_limit_clearly() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;

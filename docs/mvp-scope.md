@@ -18,7 +18,8 @@
 - `ChuangKernel::run_turn()`：主运行入口，统一串起 recall、context packing、responder 和 report。
 - `ChuangKernel::remember_turn()`：显式写回普通 `turn_summary` 记忆。
 - `cargo run -- run --input TEXT`：通过内核运行一轮。
-- `cargo run -- run --input TEXT --remember`：运行后写回本轮摘要。
+- `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
+- `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- status`：查看 MVP 核心状态。
 - `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
 - `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
@@ -46,4 +47,5 @@
 - `cargo run -- status` 能显示核心状态。
 - `cargo run -- run --input TEXT` 能返回结构化响应。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
+- `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - 所有危险操作仍需显式审批或保持 fake。

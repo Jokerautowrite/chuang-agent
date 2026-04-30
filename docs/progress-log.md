@@ -474,6 +474,16 @@
 - 更新测试：
   - `cli_status_tests` 新增临时 identity root，预写 `USER.md / MEMORY.md` 后验证 JSON status 暴露 snapshot 字符数。
 - 已运行 `cargo test --test cli_status_tests --test cli_smoke_tests --test runtime_config_tests`，当前专项测试通过。
+- CLI 新增显式身份热记忆写入：
+  - 新增 `--remember-identity`，运行成功后会把本轮 turn summary 追加到 `MEMORY.md`。
+  - 该能力和 `--remember` 分离：`--remember` 仍只写 SQLite 普通 recall，`--remember-identity` 才写 Hermes 双文件热记忆。
+  - 写入 ID 形如 `identity-turn-1-<pid>-<nanos>`，避免 CLI 每次都是 `turn-1` 时发生重复。
+  - 写入失败会明确返回 `identity_memory_write_failed / identity_memory_duplicate_entry / identity_memory_hard_limit_exceeded`。
+  - 默认不写，仍然不删除、不压缩、不改 `USER.md`。
+- 更新测试：
+  - `cli_smoke_tests` 新增 `--remember-identity + --identity-memory-root` 端到端验证，确认 `MEMORY.md` 被追加。
+  - `docs/mvp-scope.md` 已同步 CLI 能力边界。
+- 已运行 `cargo test --test cli_smoke_tests --test cli_status_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
