@@ -28,6 +28,7 @@ use chuang_agent::runtime_config::{
     IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
     SubagentQueueConfig,
 };
+use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
@@ -744,6 +745,7 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
                 index += 1;
             }
             "--db"
+            | "--config"
             | "--provider-base-url"
             | "--provider-api-key"
             | "--provider-model"
@@ -963,9 +965,11 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--db" | "--identity-memory-root" | "--subagent" | "--subagent-queue-root" => {
-                index += 2
-            }
+            "--db"
+            | "--config"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root" => index += 2,
             "--input" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 user_input = Some(value.clone());
@@ -1020,6 +1024,7 @@ fn parse_subagent_dispatch(args: &[String]) -> Result<SubagentDispatchCliRequest
                 index += 1;
             }
             "--db"
+            | "--config"
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"
@@ -1131,6 +1136,7 @@ fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCliRequest, St
                 index += 1;
             }
             "--db"
+            | "--config"
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"
@@ -1182,6 +1188,7 @@ fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String
                 index += 1;
             }
             "--db"
+            | "--config"
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"
@@ -1230,6 +1237,7 @@ fn parse_subagent_run_once(args: &[String]) -> Result<SubagentRunOnceCliRequest,
                 index += 2;
             }
             "--db"
+            | "--config"
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"
@@ -1267,6 +1275,7 @@ fn parse_subagent_run_once(args: &[String]) -> Result<SubagentRunOnceCliRequest,
 }
 
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
+    let config_path = find_config_path(args)?;
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
     let mut provider_base_url: Option<String> = None;
@@ -1285,6 +1294,9 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "--config" => {
+                index += 2;
+            }
             "--db" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 db_path = Some(PathBuf::from(value));
@@ -1367,7 +1379,14 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
         }
     }
 
-    let mut runtime = RuntimeConfig::new(db_path.unwrap_or_else(default_db_path));
+    let mut runtime = if let Some(path) = config_path {
+        load_runtime_config_file(&path).map_err(format_runtime_config_file_error)?
+    } else {
+        RuntimeConfig::new(default_db_path())
+    };
+    if let Some(path) = db_path {
+        runtime.db_path = path;
+    }
     if let Some(root) = identity_memory_root {
         runtime.identity_memory = IdentityMemoryConfig::HermesDualFile {
             root,
@@ -1397,10 +1416,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
         runtime.context_budget.max_memory_segments = value;
     }
     runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
-        (None, None, None) => ProviderConfig::Fake {
-            provider_id: "fake-runtime".to_string(),
-            model_name: "stub-responder".to_string(),
-        },
+        (None, None, None) => runtime.provider,
         (Some(base_url), Some(api_key), Some(model_name)) => {
             ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
                 provider_id: provider_id.unwrap_or_else(|| "openai-compatible-cli".to_string()),
@@ -1419,6 +1435,39 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     };
 
     Ok(CliOptions { runtime })
+}
+
+fn find_config_path(args: &[String]) -> Result<Option<PathBuf>, String> {
+    let mut index = 0;
+    let mut config_path = None;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--config" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                config_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            _ => index += 1,
+        }
+    }
+    Ok(config_path)
+}
+
+fn format_runtime_config_file_error(err: RuntimeConfigFileError) -> String {
+    match err {
+        RuntimeConfigFileError::ReadFailed { path } => {
+            format!("config_read_failed path={}", path.display())
+        }
+        RuntimeConfigFileError::InvalidLine { line, content } => {
+            format!("config_invalid_line line={line} content={content}")
+        }
+        RuntimeConfigFileError::InvalidValue { key, value } => {
+            format!("config_invalid_value key={key} value={value}")
+        }
+        RuntimeConfigFileError::MissingEnv { name } => {
+            format!("config_missing_env name={name}")
+        }
+    }
 }
 
 fn print_runtime_result(result: &chuang_agent::agent_runtime::RuntimeResult) {
@@ -1658,5 +1707,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
 }

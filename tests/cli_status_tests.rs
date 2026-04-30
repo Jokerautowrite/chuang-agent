@@ -198,3 +198,74 @@ fn cli_status_can_override_context_budget_fields() {
     assert_eq!(parsed["config"]["context_max_memory_segments"], 3);
     assert_eq!(parsed["kernel"]["context_budget_max_tokens"], 256);
 }
+
+#[test]
+fn cli_status_can_load_simple_config_file_and_accept_cli_overrides() {
+    let root = temp_identity_root("config");
+    let identity_root = root.join("identity");
+    let queue_root = root.join("queue");
+    let config_path = root.join("config.toml");
+    fs::create_dir_all(&identity_root).expect("identity root should be created");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+db_path = "{db}"
+recall_limit = 9
+identity_memory_root = "{identity}"
+subagent = "queued_external"
+subagent_queue_root = "{queue}"
+
+[provider]
+kind = "fake"
+id = "config-fake"
+model = "config-stub"
+
+[context]
+max_tokens = 384
+reserve_system_tokens = 48
+min_working_tokens = 3
+max_tool_results = 4
+max_memory_segments = 6
+"#,
+            db = root.join("chuang.db").display(),
+            identity = identity_root.display(),
+            queue = queue_root.display()
+        ),
+    )
+    .expect("config should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--json",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--context-max-tokens",
+            "256",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["config"]["provider_id"], "config-fake");
+    assert_eq!(parsed["config"]["model_name"], "config-stub");
+    assert_eq!(parsed["config"]["recall_limit"], 9);
+    assert_eq!(
+        parsed["config"]["subagent_queue_root"],
+        queue_root.display().to_string()
+    );
+    assert_eq!(parsed["config"]["subagent_kind"], "queued_external");
+    assert_eq!(parsed["config"]["context_max_tokens"], 256);
+    assert_eq!(parsed["config"]["context_reserve_system_tokens"], 48);
+}

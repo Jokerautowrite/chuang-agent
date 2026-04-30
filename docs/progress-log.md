@@ -614,6 +614,17 @@
 - 更新测试：
   - `cli_subagent_dispatch_tests` 新增 run-once 写 report 和 idle 两条覆盖。
 - 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
+- 新增简单配置文件支持：
+  - 新增 `src/runtime_config_file.rs`，实现轻量 `config.toml` 解析，不引入复杂配置层。
+  - CLI 新增 `--config PATH`，会先加载配置文件，再用 CLI 参数覆盖。
+  - 配置文件支持顶层 `db_path / recall_limit / identity_memory_root / subagent / subagent_queue_root`。
+  - 支持 `[provider]`：`kind=fake` 或 `kind=openai_compatible`；真实 key 使用 `api_key_env`，不要求明文写入配置。
+  - 支持 `[context]`：`max_tokens / reserve_system_tokens / min_working_tokens / max_tool_results / max_memory_segments`。
+  - 新增 `config.example.toml` 作为可维护模板。
+- 更新测试：
+  - `runtime_config_file_tests` 覆盖 fake 配置、OpenAI-compatible env key、缺失 env、非法行。
+  - `cli_status_tests` 覆盖 `--config` 加载和 CLI 覆盖配置文件字段。
+- 已运行 `cargo test --test runtime_config_file_tests --test cli_status_tests --test runtime_config_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

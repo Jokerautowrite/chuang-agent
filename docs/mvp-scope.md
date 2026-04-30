@@ -22,6 +22,7 @@
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- status`：查看 MVP 核心状态。
 - `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
+- `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
 - `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
 - `cargo run -- subagent dispatch --task TEXT`：把子代理任务写入文件队列 dispatch JSON，不启动外部 runner。
 - `cargo run -- subagent report --run-id ID`：只读轮询子代理 report JSON。
@@ -38,6 +39,7 @@
 - 不直接控制 Hermes / OpenClaw 进程。
 - 不把飞书作为核心依赖，飞书只作为未来插件入口。
 - 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
+- 不把 API key 明文写进配置文件；真实 provider 使用 `api_key_env` 引用环境变量。
 
 ## 下一步优先级
 
@@ -51,6 +53,7 @@
 - `cargo test` 全仓通过。
 - `cargo run -- status` 能显示核心状态。
 - `cargo run -- run --input TEXT` 能返回结构化响应。
+- `cargo run -- status --config PATH` 能加载简单配置文件，且 CLI 参数可覆盖配置。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
