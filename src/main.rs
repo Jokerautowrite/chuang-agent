@@ -246,11 +246,33 @@ where
     if remember {
         let record_id = kernel
             .remember_turn(&turn)
-            .map_err(|err| format!("memory_write_failed: {err:?}"))?;
+            .map_err(format_kernel_memory_error)?;
         return Ok((turn.result, Some(record_id)));
     }
 
     Ok((turn.result, None))
+}
+
+fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemoryError) -> String {
+    match err {
+        chuang_agent::chuang_kernel::ChuangKernelMemoryError::Store(store_err) => {
+            format!("memory_write_failed: {store_err:?}")
+        }
+        chuang_agent::chuang_kernel::ChuangKernelMemoryError::HardLimitExceeded {
+            limit_chars,
+            attempted_chars,
+            existing_record_ids,
+        } => format!(
+            "memory_write_hard_limit_exceeded limit_chars={} attempted_chars={} existing_record_ids={}",
+            limit_chars,
+            attempted_chars,
+            if existing_record_ids.is_empty() {
+                "none".to_string()
+            } else {
+                existing_record_ids.join(",")
+            }
+        ),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

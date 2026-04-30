@@ -151,3 +151,42 @@ fn cli_run_can_remember_turn_summary_when_requested() {
     assert!(second_stdout.contains("recall_hits: 1"));
     assert!(second_stdout.contains("MVP记忆写入测试"));
 }
+
+#[test]
+fn cli_run_reports_memory_write_hard_limit_clearly() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-memory-limit-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let db_path = temp_dir.join("memory.db");
+    let oversized_input = "超限".repeat(1200);
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--db",
+            db_path.to_str().expect("db path should be utf-8"),
+            "--input",
+            &oversized_input,
+            "--remember",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("memory_write_hard_limit_exceeded"));
+    assert!(stderr.contains("limit_chars=2200"));
+    assert!(stderr.contains("attempted_chars="));
+}

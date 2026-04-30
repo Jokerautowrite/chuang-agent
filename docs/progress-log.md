@@ -401,6 +401,13 @@
   - `chuang_kernel_tests` 扩到 5 条，新增硬上限拒绝写入，并确认下一轮 recall 不会命中失败写入。
   - `cli_smoke_tests / kernel_status_tests` 已同步适配内核配置。
 - 已运行 `cargo test --test chuang_kernel_tests --test cli_smoke_tests --test kernel_status_tests`，当前专项测试通过。
+- CLI 记忆写入超限错误已明确化：
+  - `--remember` 触发硬上限时输出 `memory_write_hard_limit_exceeded`。
+  - 错误信息包含 `limit_chars / attempted_chars / existing_record_ids`。
+  - 普通 store 错误仍输出 `memory_write_failed`。
+- 更新测试：
+  - `cli_smoke_tests` 扩到 4 条，新增超长输入触发硬上限错误断言。
+- 已运行 `cargo test --test cli_smoke_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
