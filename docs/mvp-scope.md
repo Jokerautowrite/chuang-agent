@@ -25,6 +25,7 @@
 - `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
 - `cargo run -- subagent dispatch --task TEXT`：把子代理任务写入文件队列 dispatch JSON，不启动外部 runner。
 - `cargo run -- subagent report --run-id ID`：只读轮询子代理 report JSON。
+- `cargo run -- subagent list`：只读查看 dispatch 队列和 report presence；同一队列目录可连续派发多个任务。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 
@@ -52,5 +53,7 @@
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
+- 同一个 `--subagent-queue-root PATH` 下连续 dispatch 多个任务不会覆盖。
+- `cargo run -- subagent list --subagent-queue-root PATH` 能列出 dispatch 数量和 report presence。
 - `cargo run -- subagent report --run-id ID --subagent-queue-root PATH` 能读取或轮询 report JSON。
 - 所有危险操作仍需显式审批或保持 fake。
