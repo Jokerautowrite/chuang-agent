@@ -25,13 +25,12 @@ use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::provider_openai_compatible::ProviderTransport;
-use chuang_agent::responder::FakeResponder;
 use chuang_agent::runtime_config::{
     ConfigSummary, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
     SubagentConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
-use chuang_agent::slot_registry::build_runtime_slots;
+use chuang_agent::slot_registry::{build_provider_responder, build_runtime_slots};
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
@@ -578,41 +577,20 @@ fn run_with_options(
         .validate()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    match request.options.runtime.provider.build_openai_compatible() {
-        Ok(Some(provider)) => {
-            let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
-                .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
-            seed_default_memory_if_empty(&mut store)?;
-            let mut kernel = ChuangKernel::with_responder(
-                kernel_config_from_runtime(&request.options.runtime)?,
-                store,
-                provider,
-            );
-            kernel
-                .run_turn(request.user_input.clone())
-                .map_err(|e| format!("runtime_failed: {e:?}"))
-                .and_then(|turn| {
-                    remember_turn_if_requested(&request.options, &mut kernel, turn, request)
-                })
-        }
-        Ok(None) => {
-            let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
-                .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
-            seed_default_memory_if_empty(&mut store)?;
-            let mut kernel = ChuangKernel::with_responder(
-                kernel_config_from_runtime(&request.options.runtime)?,
-                store,
-                FakeResponder::new("stub-responder"),
-            );
-            kernel
-                .run_turn(request.user_input.clone())
-                .map_err(|e| format!("runtime_failed: {e:?}"))
-                .and_then(|turn| {
-                    remember_turn_if_requested(&request.options, &mut kernel, turn, request)
-                })
-        }
-        Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
-    }
+    let provider = build_provider_responder(&request.options.runtime.provider)
+        .map_err(|err| format!("config_invalid: {}: {}", err.field, err.message))?;
+    let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
+        .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
+    seed_default_memory_if_empty(&mut store)?;
+    let mut kernel = ChuangKernel::with_responder(
+        kernel_config_from_runtime(&request.options.runtime)?,
+        store,
+        provider,
+    );
+    kernel
+        .run_turn(request.user_input.clone())
+        .map_err(|e| format!("runtime_failed: {e:?}"))
+        .and_then(|turn| remember_turn_if_requested(&request.options, &mut kernel, turn, request))
 }
 
 fn remember_turn_if_requested<S, R>(

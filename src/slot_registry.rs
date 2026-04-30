@@ -9,9 +9,13 @@ use crate::control_plane::{
 use crate::governance::{
     Governance, GovernanceError, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
+use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
+use crate::responder::{
+    FakeResponder, Responder, ResponderOutput, ResponderProvider, ResponderRequest,
+};
 use crate::runtime_config::{
     ActuatorConfig, ConfigError, ControlPlaneConfig, EvolutionConfig, GovernanceConfig,
-    RuntimeConfig, SubagentConfig,
+    ProviderConfig, RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::{
     EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver, RuntimeEvent, SkillEvolver,
@@ -22,11 +26,18 @@ use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSlots {
+    pub provider: ProviderSlot,
     pub governance: GovernanceSlot,
     pub actuator: ActuatorSlot,
     pub subagent: SubagentSlot,
     pub evolution: EvolutionSlot,
     pub control_plane: ControlPlaneSlot,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProviderSlot {
+    Fake(FakeResponder),
+    OpenAICompatible(OpenAICompatibleProviderAdapter),
 }
 
 #[derive(Debug, Clone)]
@@ -62,12 +73,31 @@ pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, Confi
     config.validate()?;
 
     Ok(RuntimeSlots {
+        provider: build_provider_responder(&config.provider)?,
         governance: build_governance(&config.governance)?,
         actuator: build_actuator(&config.actuator)?,
         subagent: build_subagent(&config.subagent)?,
         evolution: build_evolution(&config.evolution)?,
         control_plane: build_control_plane(&config.control_plane)?,
     })
+}
+
+pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot, ConfigError> {
+    config.validate()?;
+    match config {
+        ProviderConfig::Fake { model_name, .. } => {
+            Ok(ProviderSlot::Fake(FakeResponder::new(model_name.clone())))
+        }
+        ProviderConfig::OpenAICompatible(config) => Ok(ProviderSlot::OpenAICompatible(
+            OpenAICompatibleProviderAdapter::new(
+                config.provider_id.clone(),
+                config.base_url.clone(),
+                config.api_key.clone(),
+                config.model_name.clone(),
+            )
+            .with_transport(config.transport.clone()),
+        )),
+    }
 }
 
 pub fn summarize_runtime_slots(config: &RuntimeConfig) -> RuntimeSlotsSummary {
@@ -123,6 +153,22 @@ impl Governance for GovernanceSlot {
     fn audit(&mut self, record: AuditRecord) -> Result<(), GovernanceError> {
         match self {
             Self::StaticRule(governance) => governance.audit(record),
+        }
+    }
+}
+
+impl Responder for ProviderSlot {
+    fn generate(&self, request: &ResponderRequest) -> ResponderOutput {
+        match self {
+            Self::Fake(responder) => responder.generate(request),
+            Self::OpenAICompatible(responder) => responder.generate(request),
+        }
+    }
+
+    fn provider(&self) -> ResponderProvider {
+        match self {
+            Self::Fake(responder) => responder.provider(),
+            Self::OpenAICompatible(responder) => responder.provider(),
         }
     }
 }

@@ -35,7 +35,7 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 
 - core 不直接构造 `FakeResponder` 或 OpenAI-compatible adapter；由 CLI、测试或后续 plugin loader 注入。
 - `runtime_config` 和 `main` 属于组合层，可以认识具体 adapter，但不要把具体实现传回 core。
-- `slot_registry` 属于组合层，负责把配置映射为 slot；上层只依赖 slot wrapper 和 trait，不直接绑定具体实现类型。
+- `slot_registry` 属于组合层，负责把配置映射为 slot；上层只依赖 slot wrapper 和 trait，不直接绑定具体实现类型。provider adapter 也在这里实例化，`runtime_config` 只描述配置。
 - 新能力默认先落在 adapter/plugin，只有身份、记忆、上下文、治理、报告这类稳定语义才允许进入 core。
 
 ## 当前迁移状态
@@ -50,4 +50,4 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `hermes_memory` 主文件保留 Hermes 双文件记忆配置、快照、条目、错误和 trait；真实文件读写实现已拆到子模块。
 - `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 策略包装已拆到子模块。未来摘要压缩/优先级/对话树策略必须作为独立 engine。
 - `governance` 主文件保留动作、风险决策、错误类型和 trait；static-rule 实现已拆到子模块。未来策略引擎/审批通道/组织规则必须作为独立治理实现。
-- `slot_registry` 已引入 `GovernanceSlot / ActuatorSlot / EvolutionSlot / ControlPlaneSlot`，避免 `RuntimeSlots` 字段直接绑定具体实现类型。
+- `slot_registry` 已引入 `ProviderSlot / GovernanceSlot / ActuatorSlot / EvolutionSlot / ControlPlaneSlot`，避免 `RuntimeSlots` 字段直接绑定具体实现类型。

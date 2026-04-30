@@ -5,7 +5,7 @@ use crate::context_engine::ContextBudget;
 use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
-use crate::provider_openai_compatible::{OpenAICompatibleProviderAdapter, ProviderTransport};
+use crate::provider_openai_compatible::ProviderTransport;
 use crate::subagent_queue::FileSubagentQueueConfig;
 use serde::Serialize;
 
@@ -222,26 +222,6 @@ impl ProviderConfig {
                 require_non_empty("provider.model_name", model_name)
             }
             Self::OpenAICompatible(config) => config.validate(),
-        }
-    }
-
-    pub fn build_openai_compatible(
-        &self,
-    ) -> Result<Option<OpenAICompatibleProviderAdapter>, ConfigError> {
-        match self {
-            Self::Fake { .. } => Ok(None),
-            Self::OpenAICompatible(config) => {
-                config.validate()?;
-                Ok(Some(
-                    OpenAICompatibleProviderAdapter::new(
-                        config.provider_id.clone(),
-                        config.base_url.clone(),
-                        config.api_key.clone(),
-                        config.model_name.clone(),
-                    )
-                    .with_transport(config.transport.clone()),
-                ))
-            }
         }
     }
 

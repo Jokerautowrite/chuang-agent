@@ -3,9 +3,15 @@ use std::path::PathBuf;
 use chuang_agent::actuator::{Actuator, ObserveTarget};
 use chuang_agent::control_plane::ControlPlane;
 use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecision};
-use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
+use chuang_agent::provider_openai_compatible::ProviderTransport;
+use chuang_agent::responder::{Responder, ResponderRequest};
+use chuang_agent::runtime_config::{
+    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+};
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
-use chuang_agent::slot_registry::{build_runtime_slots, summarize_runtime_slots};
+use chuang_agent::slot_registry::{
+    build_provider_responder, build_runtime_slots, summarize_runtime_slots,
+};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
@@ -87,6 +93,35 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
     assert_eq!(summary.subagent, "fake");
     assert_eq!(summary.evolution, "noop");
     assert_eq!(summary.control_plane, "fake_local");
+}
+
+#[test]
+fn slot_registry_builds_provider_responder_from_config() {
+    let fake = build_provider_responder(&ProviderConfig::Fake {
+        provider_id: "fake-runtime".to_string(),
+        model_name: "stub-responder".to_string(),
+    })
+    .expect("fake provider should build");
+    let fake_output = fake.generate(&ResponderRequest {
+        prompt: "prompt".to_string(),
+        user_input: "hello".to_string(),
+        recall_hit_count: 0,
+    });
+    assert_eq!(fake_output.model_name, "stub-responder");
+    assert_eq!(fake_output.meta.provider.as_deref(), Some("fake-responder"));
+
+    let openai =
+        build_provider_responder(&ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "custom-openai".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model_name: "gpt-4.1-mini".to_string(),
+            transport: ProviderTransport::Stub,
+        }))
+        .expect("openai-compatible provider should build");
+    let provider = openai.provider();
+    assert_eq!(provider.provider_id, "custom-openai");
+    assert_eq!(provider.model_name, "gpt-4.1-mini");
 }
 
 #[test]

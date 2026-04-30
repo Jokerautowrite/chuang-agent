@@ -89,31 +89,6 @@ fn openai_provider_config_redacts_api_key_in_summary() {
 }
 
 #[test]
-fn openai_provider_config_builds_adapter_only_for_openai_kind() {
-    let fake = ProviderConfig::Fake {
-        provider_id: "fake-runtime".to_string(),
-        model_name: "stub-responder".to_string(),
-    };
-    assert!(fake
-        .build_openai_compatible()
-        .expect("fake config is valid")
-        .is_none());
-
-    let openai = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
-        provider_id: "custom-openai".to_string(),
-        base_url: "https://api.example.com/v1".to_string(),
-        api_key: "test-key".to_string(),
-        model_name: "gpt-4.1-mini".to_string(),
-        transport: ProviderTransport::Stub,
-    });
-
-    assert!(openai
-        .build_openai_compatible()
-        .expect("openai config should build")
-        .is_some());
-}
-
-#[test]
 fn openai_provider_config_rejects_missing_required_fields() {
     let config = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
         provider_id: "custom-openai".to_string(),
