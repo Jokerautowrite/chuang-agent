@@ -191,6 +191,17 @@
   - `tests/actuator_tests.rs`：覆盖 Fake 执行序列、证据引用、secret 输入不记录明文。
 - 已运行 `cargo fmt`。
 - 已运行 `cargo test`，当前全仓测试通过。
+- 已提交并推送到 GitHub：
+  - `1c34fdd feat: add pluggable agent runtime foundations`
+- 新增运行时配置主线：
+  - `src/runtime_config.rs`：`RuntimeConfig / ProviderConfig / OpenAICompatibleConfig / ConfigSummary / ConfigError`
+  - 默认 provider 明确为 fake，不静默联网。
+  - OpenAI-compatible provider 配置可构建 adapter，但 summary 只显示 `api_key=<set>` 语义，不泄露明文。
+  - CLI 已从直接拼 provider 参数改为先收口到 `RuntimeConfig`，再进入 runtime。
+- 新增测试：
+  - `tests/runtime_config_tests.rs`，覆盖默认 fake provider、zero recall 拒绝、OpenAI-compatible 配置校验、adapter 构建、API key 脱敏 summary。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -6,21 +6,12 @@ use std::path::PathBuf;
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::responder::{OpenAICompatibleProviderAdapter, ProviderTransport};
+use chuang_agent::responder::ProviderTransport;
+use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliOptions {
-    db_path: PathBuf,
-    provider: Option<ProviderCliConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProviderCliConfig {
-    provider_id: String,
-    base_url: String,
-    api_key: String,
-    model_name: String,
-    transport: ProviderTransport,
+    runtime: RuntimeConfig,
 }
 
 fn main() {
@@ -78,41 +69,38 @@ fn run_with_options(
     options: &CliOptions,
     user_input: String,
 ) -> Result<chuang_agent::agent_runtime::RuntimeResult, String> {
-    match &options.provider {
-        Some(provider) => {
-            let mut store = SqliteMemoryStore::open(&options.db_path)
+    options
+        .runtime
+        .validate()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+
+    match options.runtime.provider.build_openai_compatible() {
+        Ok(Some(provider)) => {
+            let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
-            let runtime = AgentRuntime::with_responder(
-                store,
-                OpenAICompatibleProviderAdapter::new(
-                    provider.provider_id.clone(),
-                    provider.base_url.clone(),
-                    provider.api_key.clone(),
-                    provider.model_name.clone(),
-                )
-                .with_transport(provider.transport.clone()),
-            );
+            let runtime = AgentRuntime::with_responder(store, provider);
             runtime
                 .run(&RuntimeRequest {
                     user_input,
-                    recall_limit: 5,
-                    metadata: BTreeMap::new(),
-                    context_budget: None,
+                    recall_limit: options.runtime.recall_limit,
+                    metadata: options.runtime.metadata.clone(),
+                    context_budget: Some(options.runtime.context_budget.clone()),
                 })
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
-        None => {
-            let runtime = build_runtime(&options.db_path)?;
+        Ok(None) => {
+            let runtime = build_runtime(&options.runtime.db_path)?;
             runtime
                 .run(&RuntimeRequest {
                     user_input,
-                    recall_limit: 5,
-                    metadata: BTreeMap::new(),
-                    context_budget: None,
+                    recall_limit: options.runtime.recall_limit,
+                    metadata: options.runtime.metadata.clone(),
+                    context_budget: Some(options.runtime.context_budget.clone()),
                 })
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
+        Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
     }
 }
 
@@ -194,15 +182,21 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
         }
     }
 
-    let provider = match (provider_base_url, provider_api_key, provider_model) {
-        (None, None, None) => None,
-        (Some(base_url), Some(api_key), Some(model_name)) => Some(ProviderCliConfig {
-            provider_id: provider_id.unwrap_or_else(|| "openai-compatible-cli".to_string()),
-            base_url,
-            api_key,
-            model_name,
-            transport: parse_provider_transport(provider_transport.as_deref())?,
-        }),
+    let mut runtime = RuntimeConfig::new(db_path.unwrap_or_else(default_db_path));
+    runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
+        (None, None, None) => ProviderConfig::Fake {
+            provider_id: "fake-runtime".to_string(),
+            model_name: "stub-responder".to_string(),
+        },
+        (Some(base_url), Some(api_key), Some(model_name)) => {
+            ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+                provider_id: provider_id.unwrap_or_else(|| "openai-compatible-cli".to_string()),
+                base_url,
+                api_key,
+                model_name,
+                transport: parse_provider_transport(provider_transport.as_deref())?,
+            })
+        }
         _ => {
             return Err(
                 "provider config requires base_url + api_key + model (optional: provider_id)"
@@ -211,10 +205,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
         }
     };
 
-    Ok(CliOptions {
-        db_path: db_path.unwrap_or_else(default_db_path),
-        provider,
-    })
+    Ok(CliOptions { runtime })
 }
 
 fn print_runtime_result(result: &chuang_agent::agent_runtime::RuntimeResult) {
