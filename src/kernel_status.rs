@@ -29,6 +29,14 @@ pub fn build_chuang_mvp_status(
                 .as_ref()
                 .map(|budget| budget.max_tokens),
             memory_write_max_chars: kernel.memory_write_max_chars,
+            identity_user_chars: kernel
+                .identity_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.user.chars().count()),
+            identity_memory_chars: kernel
+                .identity_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.memory.chars().count()),
         },
     })
 }

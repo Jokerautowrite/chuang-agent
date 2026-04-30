@@ -17,6 +17,7 @@ pub struct ContextSegment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SegmentSource {
+    Identity,
     Memory,
     Working,
     ToolResult,

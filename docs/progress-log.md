@@ -451,6 +451,16 @@
   - `runtime_config_tests` 新增 identity memory 配置构建和零上限拒绝。
   - `cli_status_tests` 验证文本/JSON 状态能看到 `hermes_dual_file` 且不泄露密钥。
 - 已运行 `cargo test --test runtime_config_tests --test kernel_status_tests --test cli_status_tests --test hermes_memory_tests`，当前专项测试通过。
+- 内核已接入 identity snapshot 上下文接缝：
+  - `RuntimeRequest` 新增 `extra_context_segments`，用于接收非 recall 来源的上下文。
+  - `SegmentSource` 新增 `Identity`，避免身份记忆和普通检索记忆混淆。
+  - `ChuangKernelConfig` 新增 `identity_snapshot: Option<DualFileMemorySnapshot>`。
+  - `ChuangKernel::run_turn()` 会把 USER/MEMORY 快照转为 `identity-user / identity-memory` segments 注入 runtime prompt。
+  - `ChuangKernelSnapshot` 暴露 `identity_user_chars / identity_memory_chars`，用于确认本轮内核是否带着冻结记忆启动。
+- 新增/更新测试：
+  - `agent_runtime_tests` 新增 extra identity context packing 断言。
+  - `chuang_kernel_tests` 新增 identity snapshot 注入 prompt 和 snapshot 字符数断言。
+- 已运行 `cargo test --test agent_runtime_tests --test chuang_kernel_tests --test kernel_status_tests --test cli_smoke_tests --test runtime_report_tests --test agent_runtime_sqlite_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

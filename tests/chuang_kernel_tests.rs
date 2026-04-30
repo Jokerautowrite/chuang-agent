@@ -4,6 +4,7 @@ use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::ContextBudget;
+use chuang_agent::hermes_memory::DualFileMemorySnapshot;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::subagent_report::ExecutionStatus;
 
@@ -28,6 +29,7 @@ fn kernel_config() -> ChuangKernelConfig {
         metadata: BTreeMap::new(),
         context_budget: None,
         memory_write_max_chars: Some(2200),
+        identity_snapshot: None,
     }
 }
 
@@ -96,6 +98,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
             max_memory_segments: 5,
         }),
         memory_write_max_chars: Some(2200),
+        identity_snapshot: None,
     };
     let kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
 
@@ -109,6 +112,35 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
     assert_eq!(
         snapshot.memory_write_max_chars,
         Some(DEFAULT_MEMORY_WRITE_MAX_CHARS)
+    );
+}
+
+#[test]
+fn chuang_kernel_injects_identity_snapshot_into_runtime_context() {
+    let config = ChuangKernelConfig {
+        identity_snapshot: Some(DualFileMemorySnapshot {
+            user: "老爸偏好简洁中文状态汇报".to_string(),
+            memory: "## mem-1\n创项目 MVP 当前聚焦核心记忆层".to_string(),
+        }),
+        ..kernel_config()
+    };
+    let mut kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
+
+    let turn = kernel
+        .run_turn("现在读取身份快照")
+        .expect("kernel turn should run");
+    let snapshot = kernel.snapshot();
+
+    assert!(turn.result.prompt.contains("identity-user"));
+    assert!(turn.result.prompt.contains("老爸偏好简洁中文状态汇报"));
+    assert!(turn.result.prompt.contains("identity-memory"));
+    assert_eq!(
+        snapshot.identity_user_chars,
+        Some("老爸偏好简洁中文状态汇报".chars().count())
+    );
+    assert_eq!(
+        snapshot.identity_memory_chars,
+        Some("## mem-1\n创项目 MVP 当前聚焦核心记忆层".chars().count())
     );
 }
 

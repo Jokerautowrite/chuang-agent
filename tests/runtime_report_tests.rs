@@ -59,6 +59,7 @@ fn runtime_report_builder_carries_runtime_debug_fields() {
                 max_tool_results: 5,
                 max_memory_segments: 20,
             }),
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -179,6 +180,7 @@ fn runtime_report_metadata_exposes_core_fields() {
             recall_limit: 3,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 

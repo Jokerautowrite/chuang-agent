@@ -105,6 +105,7 @@ fn runtime_accepts_provider_adapter_responder_without_shape_change() {
             recall_limit: 3,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 

@@ -50,6 +50,7 @@ fn agent_runtime_uses_fake_responder_output() {
             recall_limit: 3,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -81,6 +82,7 @@ fn agent_runtime_preserves_prompt_and_trace_with_fake_responder() {
             recall_limit: 2,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 

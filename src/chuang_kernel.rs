@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
-use crate::context_engine::ContextBudget;
+use crate::context_engine::{ContextBudget, ContextSegment, SegmentSource};
+use crate::hermes_memory::DualFileMemorySnapshot;
 use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
 };
@@ -21,6 +22,7 @@ pub struct ChuangKernelConfig {
     pub metadata: BTreeMap<String, String>,
     pub context_budget: Option<ContextBudget>,
     pub memory_write_max_chars: Option<usize>,
+    pub identity_snapshot: Option<DualFileMemorySnapshot>,
 }
 
 impl ChuangKernelConfig {
@@ -32,6 +34,7 @@ impl ChuangKernelConfig {
             metadata: BTreeMap::new(),
             context_budget: None,
             memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+            identity_snapshot: None,
         }
     }
 }
@@ -52,6 +55,8 @@ pub struct ChuangKernelSnapshot {
     pub metadata_keys: Vec<String>,
     pub context_budget_max_tokens: Option<u16>,
     pub memory_write_max_chars: Option<usize>,
+    pub identity_user_chars: Option<usize>,
+    pub identity_memory_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +102,16 @@ impl<S, R> ChuangKernel<S, R> {
                 .as_ref()
                 .map(|budget| budget.max_tokens),
             memory_write_max_chars: self.config.memory_write_max_chars,
+            identity_user_chars: self
+                .config
+                .identity_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.user.chars().count()),
+            identity_memory_chars: self
+                .config
+                .identity_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.memory.chars().count()),
         }
     }
 }
@@ -114,6 +129,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             recall_limit: self.config.recall_limit,
             metadata: self.config.metadata.clone(),
             context_budget: self.config.context_budget.clone(),
+            extra_context_segments: self.identity_context_segments(),
         })?;
         let report = build_runtime_report(
             &result,
@@ -200,4 +216,50 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             })
             .collect())
     }
+
+    fn identity_context_segments(&self) -> Vec<ContextSegment> {
+        let Some(snapshot) = &self.config.identity_snapshot else {
+            return Vec::new();
+        };
+
+        let mut segments = Vec::new();
+        if !snapshot.user.trim().is_empty() {
+            segments.push(identity_segment(
+                "identity-user",
+                "USER.md",
+                &snapshot.user,
+                245,
+            ));
+        }
+        if !snapshot.memory.trim().is_empty() {
+            segments.push(identity_segment(
+                "identity-memory",
+                "MEMORY.md",
+                &snapshot.memory,
+                210,
+            ));
+        }
+        segments
+    }
+}
+
+fn identity_segment(id: &str, source_file: &str, content: &str, priority: u8) -> ContextSegment {
+    ContextSegment {
+        id: id.to_string(),
+        source: SegmentSource::Identity,
+        content: content.to_string(),
+        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
+        priority,
+        created_at: default_identity_timestamp(),
+        last_accessed: default_identity_timestamp(),
+        metadata: [("source_file".to_string(), source_file.to_string())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn default_identity_timestamp() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
+        .expect("static identity timestamp should parse")
+        .with_timezone(&chrono::Utc)
 }

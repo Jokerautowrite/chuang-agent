@@ -56,6 +56,7 @@ fn agent_runtime_uses_scripted_responder_output() {
             recall_limit: 3,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -90,6 +91,7 @@ fn scripted_responder_keeps_runtime_trace_intact() {
             recall_limit: 2,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 

@@ -16,6 +16,7 @@ pub struct RuntimeRequest {
     pub recall_limit: usize,
     pub metadata: BTreeMap<String, String>,
     pub context_budget: Option<ContextBudget>,
+    pub extra_context_segments: Vec<ContextSegment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +133,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             build_system_segment(),
             build_working_segment(&request.user_input),
         ];
+        segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
         ContextPacker::new(

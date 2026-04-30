@@ -14,6 +14,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -38,6 +39,7 @@ fn kernel_status_rejects_invalid_runtime_config() {
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
     };
 
     let err = build_chuang_mvp_status(&config, &kernel).expect_err("invalid config should fail");

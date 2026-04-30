@@ -57,6 +57,7 @@ fn agent_runtime_runs_with_sqlite_memory_store() {
             recall_limit: 5,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -92,6 +93,7 @@ fn agent_runtime_returns_structured_trace_fields() {
             recall_limit: 3,
             metadata,
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -128,6 +130,7 @@ fn agent_runtime_exposes_structured_context_debug_fields() {
                 max_tool_results: 5,
                 max_memory_segments: 20,
             }),
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 

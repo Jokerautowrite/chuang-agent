@@ -466,6 +466,19 @@ fn print_status(status: &ChuangMvpStatus) {
     );
     println!("recall_limit: {}", status.config.recall_limit);
     println!("context_max_tokens: {}", status.config.context_max_tokens);
+    println!(
+        "identity_snapshot_chars: user={} memory={}",
+        status
+            .kernel
+            .identity_user_chars
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        status
+            .kernel
+            .identity_memory_chars
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
     println!("governance: {}", status.slots.governance);
     println!("actuator: {}", status.slots.actuator);
     println!("subagent: {}", status.slots.subagent);
@@ -481,6 +494,7 @@ fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
         metadata: runtime.metadata.clone(),
         context_budget: Some(runtime.context_budget.clone()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
     }
 }
 

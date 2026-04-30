@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chuang_agent::agent_runtime::{
     debug_pack_for_test, AgentRuntime, AgentRuntimeError, RuntimeRequest,
 };
-use chuang_agent::context_engine::ContextBudget;
+use chuang_agent::context_engine::{ContextBudget, ContextSegment, SegmentSource};
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {
@@ -38,6 +38,7 @@ fn agent_runtime_runs_minimal_loop_with_packed_context() {
             recall_limit: 3,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -60,12 +61,45 @@ fn agent_runtime_handles_empty_recall_hits() {
             recall_limit: 2,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
     assert_eq!(result.recall_hit_count, 0);
     assert_eq!(result.response.model_name, "stub-responder");
     assert_eq!(result.response.meta.recall_hit_count, Some(0));
+}
+
+#[test]
+fn agent_runtime_packs_extra_identity_context_segments() {
+    let store = InMemoryMemoryStore::new();
+    let runtime = AgentRuntime::new(store);
+
+    let result = runtime
+        .run(&RuntimeRequest {
+            user_input: "读取身份记忆".to_string(),
+            recall_limit: 1,
+            metadata: BTreeMap::new(),
+            context_budget: None,
+            extra_context_segments: vec![ContextSegment {
+                id: "identity-user".to_string(),
+                source: SegmentSource::Identity,
+                content: "老爸偏好简洁中文状态汇报".to_string(),
+                tokens: Some(14),
+                priority: 245,
+                created_at: chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
+                    .expect("timestamp parses")
+                    .with_timezone(&chrono::Utc),
+                last_accessed: chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
+                    .expect("timestamp parses")
+                    .with_timezone(&chrono::Utc),
+                metadata: Default::default(),
+            }],
+        })
+        .expect("runtime should succeed");
+
+    assert!(result.packed_context_preview.contains("identity-user"));
+    assert!(result.prompt.contains("老爸偏好简洁中文状态汇报"));
 }
 
 #[test]
@@ -79,6 +113,7 @@ fn agent_runtime_rejects_zero_recall_limit() {
             recall_limit: 0,
             metadata: BTreeMap::new(),
             context_budget: None,
+            extra_context_segments: Vec::new(),
         })
         .expect_err("zero recall limit should fail");
 
@@ -142,6 +177,7 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
                 max_tool_results: 5,
                 max_memory_segments: 20,
             }),
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -175,6 +211,7 @@ fn agent_runtime_exposes_budget_exceeded_reason_in_preview() {
                 max_tool_results: 5,
                 max_memory_segments: 20,
             }),
+            extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
 
@@ -243,6 +280,7 @@ fn agent_runtime_surfaces_context_pack_errors() {
                 max_tool_results: 5,
                 max_memory_segments: 20,
             }),
+            extra_context_segments: Vec::new(),
         })
         .expect_err("context pack should fail");
 
