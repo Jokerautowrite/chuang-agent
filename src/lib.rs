@@ -22,5 +22,6 @@ pub mod runtime_config;
 pub mod runtime_report;
 pub mod skill_evolver;
 pub mod slot_registry;
+pub mod subagent_queue;
 pub mod subagent_report;
 pub mod subagent_spawner;

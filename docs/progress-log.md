@@ -519,6 +519,20 @@
   - `subagent_spawner_tests` 新增 dispatch JSON roundtrip。
   - `subagent_report_tests` 新增 report JSON roundtrip。
 - 已运行 `cargo test --test subagent_spawner_tests --test subagent_report_tests --test slot_registry_tests`，当前专项测试通过。
+- 新增文件型子代理队列 adapter：
+  - `src/subagent_queue.rs` 新增 `FileSubagentQueueConfig / FileSubagentQueue`。
+  - `write_dispatch()` 会把 `SubagentDispatch` 原子写入 `dispatch/<run_id>.json`。
+  - `read_report()` 从 `reports/<run_id>.json` 读取 `SubagentReport`，不存在时返回 `None`。
+  - 当前 adapter 只负责文件协议，不启动外部进程、不执行任务。
+- 新增测试：
+  - `tests/subagent_queue_tests.rs` 覆盖 dispatch JSON 写入、缺失 report 返回 None、report JSON 读取。
+- 已运行 `cargo test --test subagent_queue_tests --test subagent_spawner_tests`，当前专项测试通过。
+- 文件型子代理队列补充 spawner 整合点：
+  - `FileSubagentQueue::flush_pending_dispatches()` 可把 `QueuedSubagentSpawner::pending_dispatches()` 批量写入 `dispatch/<run_id>.json`。
+  - 这一步仍不启动 runner，只建立主内核到外部 runner 的文件边界。
+- 更新测试：
+  - `subagent_queue_tests` 新增从 queued spawner flush 两个 dispatch 文件的断言。
+- 已运行 `cargo test --test subagent_queue_tests --test subagent_spawner_tests --test subagent_report_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
