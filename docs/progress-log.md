@@ -288,6 +288,15 @@
   - `tests/control_workflow_tests.rs`，覆盖未审批拒绝、审批后执行并审计、未知 unit 在治理前失败。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 控制工作流新增结构化视图：
+  - `ControlWorkflowView` 暴露 `unit_id / display_name / decision / action / previous_status / next_status / model_name / audit_recorded`。
+  - `run_control_workflow()` 成功时返回 `view`，审批拒绝路径可用 `build_decision_view()` 渲染。
+  - CLI 已改为渲染 `ControlWorkflowView`，避免 CLI/飞书/桌面 UI 各自拼控制状态字符串。
+- 更新测试：
+  - `control_workflow_tests` 已覆盖 view 字段。
+  - `cli_control_tests` 继续验证审批、执行、审计输出。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

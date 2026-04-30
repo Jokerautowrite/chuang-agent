@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, ManagedUnit};
 use chuang_agent::control_workflow::{
-    run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
+    build_decision_view, run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
+    ControlWorkflowView,
 };
-use chuang_agent::governance::RiskDecision;
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
@@ -128,11 +128,11 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     ) {
         Ok(result) => result,
         Err(ControlWorkflowError::ApprovalRequired(decision)) => {
-            print_control_decision(&unit, &decision);
+            print_control_view(&build_decision_view(&unit, &decision));
             return Err("control action requires --approve".to_string());
         }
         Err(ControlWorkflowError::NotAllowed(decision)) => {
-            print_control_decision(&unit, &decision);
+            print_control_view(&build_decision_view(&unit, &decision));
             return Err("control action was not allowed by governance".to_string());
         }
         Err(ControlWorkflowError::Control(err)) => return Err(format!("control_failed: {err:?}")),
@@ -141,7 +141,7 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         }
     };
 
-    print_control_decision(&unit, &result.decision);
+    print_control_view(&result.view);
     let receipt = result
         .receipt
         .ok_or_else(|| "control workflow returned no receipt".to_string())?;
@@ -153,7 +153,6 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         receipt.next_status,
         receipt.model_name.as_deref().unwrap_or("none")
     );
-    println!("control_audit: recorded");
 
     Ok(())
 }
@@ -273,18 +272,14 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
     })
 }
 
-fn print_control_decision(unit: &ManagedUnit, decision: &RiskDecision) {
-    let decision_text = match decision {
-        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
-        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
-        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
-        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
-    };
-
+fn print_control_view(view: &ControlWorkflowView) {
     println!(
         "control_decision unit_id={} name={} decision={}",
-        unit.unit_id, unit.display_name, decision_text
+        view.unit_id, view.display_name, view.decision
     );
+    if view.audit_recorded {
+        println!("control_audit: recorded");
+    }
 }
 
 fn build_runtime(db_path: &PathBuf) -> Result<AgentRuntime<SqliteMemoryStore>, String> {

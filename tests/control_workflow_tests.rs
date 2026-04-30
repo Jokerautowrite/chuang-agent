@@ -56,6 +56,13 @@ fn control_workflow_applies_and_audits_after_approval() {
         RiskDecision::NeedsApproval { .. }
     ));
     assert!(result.audit_recorded);
+    assert_eq!(result.view.unit_id, "codex-xiaoce");
+    assert_eq!(result.view.display_name, "小策");
+    assert!(result.view.decision.starts_with("needs_approval:"));
+    assert_eq!(result.view.action, "change_model");
+    assert_eq!(result.view.next_status, Some("Running".to_string()));
+    assert_eq!(result.view.model_name, Some("gpt-5.5".to_string()));
+    assert!(result.view.audit_recorded);
     assert_eq!(governance.audit_records().len(), 1);
     assert_eq!(
         result.receipt.expect("receipt should exist").model_name,
