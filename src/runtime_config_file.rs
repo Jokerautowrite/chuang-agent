@@ -54,25 +54,40 @@ pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, Runtime
             root: PathBuf::from(value),
         };
     }
-    if let Some(value) = values.get("context.max_tokens") {
+    if let Some(value) = get_any(&values, &["context.max_tokens", "context_max_tokens"]) {
         config.context_budget.max_tokens = parse_u16("context.max_tokens", value)?;
     }
-    if let Some(value) = values.get("context.reserve_system_tokens") {
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "context.reserve_system_tokens",
+            "context_reserve_system_tokens",
+        ],
+    ) {
         config.context_budget.reserve_system_tokens =
             parse_u16("context.reserve_system_tokens", value)?;
     }
-    if let Some(value) = values.get("context.min_working_tokens") {
+    if let Some(value) = get_any(
+        &values,
+        &["context.min_working_tokens", "context_min_working_tokens"],
+    ) {
         config.context_budget.min_working_tokens = parse_u16("context.min_working_tokens", value)?;
     }
-    if let Some(value) = values.get("context.max_tool_results") {
+    if let Some(value) = get_any(
+        &values,
+        &["context.max_tool_results", "context_max_tool_results"],
+    ) {
         config.context_budget.max_tool_results = parse_usize("context.max_tool_results", value)?;
     }
-    if let Some(value) = values.get("context.max_memory_segments") {
+    if let Some(value) = get_any(
+        &values,
+        &["context.max_memory_segments", "context_max_memory_segments"],
+    ) {
         config.context_budget.max_memory_segments =
             parse_usize("context.max_memory_segments", value)?;
     }
 
-    if values.contains_key("provider.kind") {
+    if values.contains_key("provider.kind") || values.contains_key("provider") {
         config.provider = parse_provider(&values)?;
     }
 
@@ -139,41 +154,35 @@ fn parse_value(raw: &str) -> String {
 fn parse_provider(
     values: &BTreeMap<String, String>,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
-    let kind = values
-        .get("provider.kind")
+    let kind = get_any(values, &["provider.kind", "provider"])
         .map(String::as_str)
         .unwrap_or("fake");
     match kind {
         "fake" => Ok(ProviderConfig::Fake {
-            provider_id: values
-                .get("provider.id")
+            provider_id: get_any(values, &["provider.id", "provider_id"])
                 .cloned()
                 .unwrap_or_else(|| "fake-runtime".to_string()),
-            model_name: values
-                .get("provider.model")
+            model_name: get_any(values, &["provider.model", "model"])
                 .cloned()
                 .unwrap_or_else(|| "stub-responder".to_string()),
         }),
         "openai_compatible" => {
-            let api_key_env = required(values, "provider.api_key_env")?;
+            let api_key_env = required_any(values, &["provider.api_key_env", "api_key_env"])?;
             let api_key = std::env::var(&api_key_env)
                 .map_err(|_| RuntimeConfigFileError::MissingEnv { name: api_key_env })?;
             Ok(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
-                provider_id: values
-                    .get("provider.id")
+                provider_id: get_any(values, &["provider.id", "provider_id"])
                     .cloned()
                     .unwrap_or_else(|| "openai-compatible-config".to_string()),
-                base_url: required(values, "provider.base_url")?,
+                base_url: required_any(values, &["provider.base_url", "base_url"])?,
                 api_key,
-                model_name: required(values, "provider.model")?,
-                transport: values
-                    .get("provider.transport")
+                model_name: required_any(values, &["provider.model", "model"])?,
+                transport: get_any(values, &["provider.transport", "transport"])
                     .map(|value| value.parse::<ProviderTransport>())
                     .transpose()
                     .map_err(|_| RuntimeConfigFileError::InvalidValue {
                         key: "provider.transport".to_string(),
-                        value: values
-                            .get("provider.transport")
+                        value: get_any(values, &["provider.transport", "transport"])
                             .cloned()
                             .unwrap_or_default(),
                     })?
@@ -187,16 +196,19 @@ fn parse_provider(
     }
 }
 
-fn required(
+fn get_any<'a>(values: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a String> {
+    keys.iter().find_map(|key| values.get(*key))
+}
+
+fn required_any(
     values: &BTreeMap<String, String>,
-    key: &str,
+    keys: &[&str],
 ) -> Result<String, RuntimeConfigFileError> {
-    values
-        .get(key)
+    get_any(values, keys)
         .filter(|value| !value.trim().is_empty())
         .cloned()
         .ok_or_else(|| RuntimeConfigFileError::InvalidValue {
-            key: key.to_string(),
+            key: keys.first().copied().unwrap_or("unknown").to_string(),
             value: String::new(),
         })
 }

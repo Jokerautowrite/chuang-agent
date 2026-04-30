@@ -52,6 +52,42 @@ max_memory_segments = 3
 }
 
 #[test]
+fn config_file_parses_flat_maintenance_friendly_shape() {
+    let config = parse_runtime_config_file(
+        r#"
+db_path = "./tmp/chuang.db"
+recall_limit = 8
+identity_memory_root = "./tmp/identity"
+provider = "fake"
+provider_id = "flat-fake"
+model = "flat-stub"
+subagent = "fake"
+subagent_queue_root = "./tmp/subagents"
+context_max_tokens = 300
+context_reserve_system_tokens = 30
+context_min_working_tokens = 2
+context_max_tool_results = 3
+context_max_memory_segments = 4
+"#,
+    )
+    .expect("flat config should parse");
+
+    assert_eq!(config.recall_limit, 8);
+    assert_eq!(config.context_budget.max_tokens, 300);
+    assert_eq!(config.context_budget.reserve_system_tokens, 30);
+    assert_eq!(config.context_budget.min_working_tokens, 2);
+    assert_eq!(config.context_budget.max_tool_results, 3);
+    assert_eq!(config.context_budget.max_memory_segments, 4);
+    assert!(matches!(
+        config.provider,
+        ProviderConfig::Fake {
+            provider_id,
+            model_name
+        } if provider_id == "flat-fake" && model_name == "flat-stub"
+    ));
+}
+
+#[test]
 fn config_file_uses_env_name_for_openai_compatible_key() {
     std::env::set_var("CHUANG_AGENT_TEST_API_KEY", "test-key");
     let config = parse_runtime_config_file(

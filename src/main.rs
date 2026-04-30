@@ -25,8 +25,8 @@ use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    ConfigSummary, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
+    SubagentConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
 use chuang_agent::slot_registry::build_runtime_slots;
@@ -69,6 +69,7 @@ fn run_cli() -> Result<(), String> {
         Some("run") => run_command(&args[2..]),
         Some("repl") => repl_command(&args[2..]),
         Some("status") => status_command(&args[2..]),
+        Some("config") => config_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
         Some("subagent") => subagent_command(&args[2..]),
         _ => Err(usage()),
@@ -131,6 +132,64 @@ fn status_command(args: &[String]) -> Result<(), String> {
     match output {
         ControlOutputFormat::Text => print_status(&status),
         ControlOutputFormat::Json => print_json(&status)?,
+    }
+
+    Ok(())
+}
+
+fn config_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("check") => config_check_command(&args[1..]),
+        Some("show") => config_show_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn config_check_command(args: &[String]) -> Result<(), String> {
+    let output = parse_status_output(args)?;
+    let options = parse_cli_options(args)?;
+    let kernel = kernel_config_from_runtime(&options.runtime)?;
+    build_chuang_mvp_status(&options.runtime, &kernel)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let result = ConfigCheckCliOutput {
+        ok: true,
+        source: effective_config_source(args)?.unwrap_or_else(|| "defaults".to_string()),
+        summary: options.runtime.summary(),
+    };
+
+    match output {
+        ControlOutputFormat::Text => {
+            println!(
+                "config_ok source={} provider={} model={} subagent={} queue_root={}",
+                result.source,
+                result.summary.provider_kind,
+                result.summary.model_name,
+                result.summary.subagent_kind,
+                result.summary.subagent_queue_root
+            );
+        }
+        ControlOutputFormat::Json => print_json(&result)?,
+    }
+
+    Ok(())
+}
+
+fn config_show_command(args: &[String]) -> Result<(), String> {
+    let output = parse_status_output(args)?;
+    let options = parse_cli_options(args)?;
+    options
+        .runtime
+        .validate()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let result = ConfigCheckCliOutput {
+        ok: true,
+        source: effective_config_source(args)?.unwrap_or_else(|| "defaults".to_string()),
+        summary: options.runtime.summary(),
+    };
+
+    match output {
+        ControlOutputFormat::Text => print_config_summary(&result),
+        ControlOutputFormat::Json => print_json(&result)?,
     }
 
     Ok(())
@@ -718,6 +777,13 @@ struct SubagentRunOnceCliOutput {
     summary: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ConfigCheckCliOutput {
+    ok: bool,
+    source: String,
+    summary: ConfigSummary,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControlOutputFormat {
     Text,
@@ -933,6 +999,35 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("subagent_queue_root: {}", status.config.subagent_queue_root);
     println!("evolution: {}", status.slots.evolution);
     println!("control_plane: {}", status.slots.control_plane);
+}
+
+fn print_config_summary(result: &ConfigCheckCliOutput) {
+    println!("config_ok: {}", result.ok);
+    println!("config_source: {}", result.source);
+    println!("provider: {}", result.summary.provider_kind);
+    println!("provider_id: {}", result.summary.provider_id);
+    println!("model: {}", result.summary.model_name);
+    println!("memory_db: {}", result.summary.db_path);
+    println!(
+        "identity_memory_root: {}",
+        result.summary.identity_memory_root
+    );
+    println!("subagent: {}", result.summary.subagent_kind);
+    println!(
+        "subagent_queue_root: {}",
+        result.summary.subagent_queue_root
+    );
+    println!(
+        "context_budget: max={} reserve_system={} min_working={} max_tool_results={} max_memory_segments={}",
+        result.summary.context_max_tokens,
+        result.summary.context_reserve_system_tokens,
+        result.summary.context_min_working_tokens,
+        result.summary.context_max_tool_results,
+        result.summary.context_max_memory_segments
+    );
+    if let Some(api_key_state) = &result.summary.api_key_state {
+        println!("api_key: {api_key_state}");
+    }
 }
 
 fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> Result<ChuangKernelConfig, String> {
@@ -1381,6 +1476,8 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
 
     let mut runtime = if let Some(path) = config_path {
         load_runtime_config_file(&path).map_err(format_runtime_config_file_error)?
+    } else if let Some(path) = default_config_path() {
+        load_runtime_config_file(&path).map_err(format_runtime_config_file_error)?
     } else {
         RuntimeConfig::new(default_db_path())
     };
@@ -1451,6 +1548,17 @@ fn find_config_path(args: &[String]) -> Result<Option<PathBuf>, String> {
         }
     }
     Ok(config_path)
+}
+
+fn default_config_path() -> Option<PathBuf> {
+    let path = PathBuf::from("config.toml");
+    path.is_file().then_some(path)
+}
+
+fn effective_config_source(args: &[String]) -> Result<Option<String>, String> {
+    Ok(find_config_path(args)?
+        .or_else(default_config_path)
+        .map(|path| path.display().to_string()))
 }
 
 fn format_runtime_config_file_error(err: RuntimeConfigFileError) -> String {
@@ -1707,5 +1815,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|config|control|subagent> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | config check|show [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
 }

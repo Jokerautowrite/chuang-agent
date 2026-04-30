@@ -1,5 +1,13 @@
 # 协作进度日志
 
+## 2026-05-01
+
+### 最新进展
+- 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
+- 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
+- CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
+- 未显式传 `--config` 时，CLI 会自动读取当前目录 `config.toml`；不存在则继续使用内置默认值。
+
 ## 2026-04-30
 
 ### 已完成

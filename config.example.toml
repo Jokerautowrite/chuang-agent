@@ -1,28 +1,27 @@
 # Simple Chuang Agent config.
-# Keep secrets out of this file. Use provider.api_key_env for real providers.
+# Keep secrets out of this file. Use api_key_env for real providers.
 
 db_path = "./data/chuang-agent.db"
 recall_limit = 5
 identity_memory_root = "./data/hermes-memory"
+
+provider = "fake"
+provider_id = "fake-runtime"
+model = "stub-responder"
+
 subagent = "fake"
 subagent_queue_root = "./data/subagent-queue"
 
-[provider]
-kind = "fake"
-id = "fake-runtime"
-model = "stub-responder"
+context_max_tokens = 512
+context_reserve_system_tokens = 32
+context_min_working_tokens = 1
+context_max_tool_results = 5
+context_max_memory_segments = 5
 
 # For a real OpenAI-compatible provider:
-# kind = "openai_compatible"
-# id = "local-openai-compatible"
+# provider = "openai_compatible"
+# provider_id = "local-openai-compatible"
 # base_url = "http://127.0.0.1:8000/v1"
 # model = "gpt-5.5"
 # api_key_env = "CHUANG_AGENT_API_KEY"
 # transport = "stub"
-
-[context]
-max_tokens = 512
-reserve_system_tokens = 32
-min_working_tokens = 1
-max_tool_results = 5
-max_memory_segments = 5
