@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
+use chuang_agent::common::{AgentId, TaskId};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
 use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
 use chuang_agent::control_surface::{
@@ -28,6 +29,10 @@ use chuang_agent::runtime_config::{
     SubagentQueueConfig,
 };
 use chuang_agent::slot_registry::build_runtime_slots;
+use chuang_agent::subagent_queue::FileSubagentQueue;
+use chuang_agent::subagent_spawner::{
+    ContextIsolation, QueuedSubagentSpawner, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +68,7 @@ fn run_cli() -> Result<(), String> {
         Some("repl") => repl_command(&args[2..]),
         Some("status") => status_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
+        Some("subagent") => subagent_command(&args[2..]),
         _ => Err(usage()),
     }
 }
@@ -134,6 +140,61 @@ fn control_command(args: &[String]) -> Result<(), String> {
         Some("apply") => control_apply_command(&args[1..]),
         _ => Err(usage()),
     }
+}
+
+fn subagent_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("dispatch") => subagent_dispatch_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn subagent_dispatch_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_dispatch(args)?;
+    let queue_config = request
+        .options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let queue = FileSubagentQueue::open(queue_config)
+        .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request.spawn)
+        .map_err(|e| format!("subagent_spawn_failed: {e:?}"))?;
+    let paths = queue
+        .flush_pending_dispatches(&spawner)
+        .map_err(|e| format!("subagent_dispatch_write_failed: {e:?}"))?;
+    let dispatch_path = paths
+        .first()
+        .ok_or_else(|| "subagent_dispatch_write_failed: no dispatch was produced".to_string())?
+        .clone();
+    let output = SubagentDispatchCliOutput {
+        run_id: receipt.run_id.0,
+        agent_id: receipt.agent_id.0,
+        task_id: request.task_id.0,
+        dispatch_path: dispatch_path.display().to_string(),
+        queue_root: request
+            .options
+            .runtime
+            .subagent_queue
+            .root
+            .display()
+            .to_string(),
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "subagent_dispatch_queued run_id={} agent_id={} task_id={} path={}",
+                output.run_id, output.agent_id, output.task_id, output.dispatch_path
+            );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
 }
 
 fn control_list_command(args: &[String]) -> Result<(), String> {
@@ -409,6 +470,23 @@ struct ControlApplyCliRequest {
     output: ControlOutputFormat,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SubagentDispatchCliRequest {
+    options: CliOptions,
+    output: ControlOutputFormat,
+    task_id: TaskId,
+    spawn: SpawnRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SubagentDispatchCliOutput {
+    run_id: String,
+    agent_id: String,
+    task_id: String,
+    dispatch_path: String,
+    queue_root: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControlOutputFormat {
     Text,
@@ -674,6 +752,118 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     })
 }
 
+fn parse_subagent_dispatch(args: &[String]) -> Result<SubagentDispatchCliRequest, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut task: Option<String> = None;
+    let mut task_id: Option<String> = None;
+    let mut agent_name: Option<String> = None;
+    let mut policy: Option<String> = None;
+    let mut token_budget: Option<u16> = None;
+    let mut idle_timeout_ms: Option<u64> = None;
+    let mut fork_parent_tokens: Option<u16> = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--db"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                runtime_args.push(args[index].clone());
+                runtime_args.push(value.clone());
+                index += 2;
+            }
+            "--task" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "subagent dispatch requires value after --task".to_string())?;
+                task = Some(value.clone());
+                index += 2;
+            }
+            "--task-id" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --task-id".to_string()
+                })?;
+                task_id = Some(value.clone());
+                index += 2;
+            }
+            "--agent-name" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --agent-name".to_string()
+                })?;
+                agent_name = Some(value.clone());
+                index += 2;
+            }
+            "--policy" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "subagent dispatch requires value after --policy".to_string())?;
+                policy = Some(value.clone());
+                index += 2;
+            }
+            "--token-budget" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --token-budget".to_string()
+                })?;
+                token_budget = Some(parse_u16_flag("--token-budget", value)?);
+                index += 2;
+            }
+            "--idle-timeout-ms" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --idle-timeout-ms".to_string()
+                })?;
+                idle_timeout_ms = Some(parse_u64_flag("--idle-timeout-ms", value)?);
+                index += 2;
+            }
+            "--fork-parent-tokens" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --fork-parent-tokens".to_string()
+                })?;
+                fork_parent_tokens = Some(parse_u16_flag("--fork-parent-tokens", value)?);
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let task = task.ok_or_else(|| "subagent dispatch requires --task".to_string())?;
+    let options = parse_cli_options(&runtime_args)?;
+    let task_id = TaskId(task_id.unwrap_or_else(default_subagent_task_id));
+    let context_isolation = fork_parent_tokens
+        .map(|max_parent_tokens| ContextIsolation::Forked { max_parent_tokens })
+        .unwrap_or(ContextIsolation::Isolated);
+    let spawn = SpawnRequest {
+        task_id: task_id.clone(),
+        parent_agent_id: AgentId("chuang-cli".to_string()),
+        agent_name: agent_name.unwrap_or_else(|| "worker".to_string()),
+        task,
+        tool_policy: parse_subagent_tool_policy(policy.as_deref())?,
+        context_isolation,
+        token_budget: token_budget.unwrap_or(1024),
+        idle_timeout_ms: idle_timeout_ms.unwrap_or(30_000),
+        recursive_spawn: false,
+        metadata: BTreeMap::from([("source".to_string(), "cli".to_string())]),
+    };
+
+    Ok(SubagentDispatchCliRequest {
+        options,
+        output,
+        task_id,
+        spawn,
+    })
+}
+
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
@@ -877,6 +1067,35 @@ fn parse_subagent_config(raw: &str) -> Result<SubagentConfig, String> {
     }
 }
 
+fn parse_subagent_tool_policy(raw: Option<&str>) -> Result<SubagentToolPolicy, String> {
+    match raw.unwrap_or("analyze") {
+        "analyze" => Ok(SubagentToolPolicy::Analyze),
+        "execute" => Ok(SubagentToolPolicy::Execute),
+        "orchestrate" => Ok(SubagentToolPolicy::Orchestrate),
+        other => Err(format!(
+            "unsupported subagent policy: {other} (supported: analyze, execute, orchestrate)"
+        )),
+    }
+}
+
+fn parse_u16_flag(flag: &str, raw: &str) -> Result<u16, String> {
+    raw.parse::<u16>()
+        .map_err(|_| format!("{flag} must be a positive integer"))
+}
+
+fn parse_u64_flag(flag: &str, raw: &str) -> Result<u64, String> {
+    raw.parse::<u64>()
+        .map_err(|_| format!("{flag} must be a positive integer"))
+}
+
+fn default_subagent_task_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("cli-task-{nanos}")
+}
+
 fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), String> {
     let existing = store
         .search(&chuang_agent::memory_store::MemoryQuery {
@@ -908,5 +1127,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json]".to_string()
 }

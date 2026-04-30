@@ -549,6 +549,14 @@
   - `runtime_config_tests` 覆盖默认队列目录、queued external 自定义目录、文件队列配置构造、空 root 拒绝。
   - `cli_status_tests` 覆盖文本 status 默认队列目录和 JSON status 自定义队列目录。
 - 已运行 `cargo test --test runtime_config_tests --test cli_status_tests`，当前专项测试通过。
+- CLI 新增子代理 dispatch 入口：
+  - 新增 `subagent dispatch --task TEXT`，可把任务打包成 queued external dispatch JSON。
+  - 支持 `--subagent-queue-root PATH / --task-id ID / --agent-name NAME / --policy analyze|execute|orchestrate / --token-budget N / --idle-timeout-ms MS / --fork-parent-tokens N / --json`。
+  - 输出 `run_id / agent_id / task_id / dispatch_path / queue_root`，外部 runner 可扫描 `dispatch/<run_id>.json`。
+  - 该命令只排队，不启动外部进程，不执行真实子代理。
+- 新增测试：
+  - `cli_subagent_dispatch_tests` 覆盖 JSON 输出、dispatch 文件内容、缺失 `--task` 拒绝。
+- 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests --test runtime_config_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
