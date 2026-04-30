@@ -62,6 +62,7 @@ pub enum ControlPlaneSlot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeSlotsSummary {
+    pub provider: String,
     pub governance: String,
     pub actuator: String,
     pub subagent: String,
@@ -102,6 +103,7 @@ pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot,
 
 pub fn summarize_runtime_slots(config: &RuntimeConfig) -> RuntimeSlotsSummary {
     RuntimeSlotsSummary {
+        provider: config.provider.kind().to_string(),
         governance: config.governance.kind().to_string(),
         actuator: config.actuator.kind().to_string(),
         subagent: config.subagent.kind().to_string(),

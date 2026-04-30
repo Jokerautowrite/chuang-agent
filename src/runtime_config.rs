@@ -212,6 +212,13 @@ impl RuntimeConfig {
 }
 
 impl ProviderConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Fake { .. } => "fake",
+            Self::OpenAICompatible(_) => "openai_compatible",
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         match self {
             Self::Fake {
@@ -231,13 +238,13 @@ impl ProviderConfig {
                 provider_id,
                 model_name,
             } => ProviderSummaryParts {
-                kind: "fake".to_string(),
+                kind: self.kind().to_string(),
                 provider_id: provider_id.clone(),
                 model_name: model_name.clone(),
                 api_key_state: None,
             },
             Self::OpenAICompatible(config) => ProviderSummaryParts {
-                kind: "openai_compatible".to_string(),
+                kind: self.kind().to_string(),
                 provider_id: config.provider_id.clone(),
                 model_name: config.model_name.clone(),
                 api_key_state: Some(mask_key_state(&config.api_key)),

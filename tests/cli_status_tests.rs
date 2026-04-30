@@ -29,6 +29,7 @@ fn cli_status_prints_mvp_health_summary() {
 
     assert!(stdout.contains("kernel_agent_id: chuang-cli"));
     assert!(stdout.contains("provider: fake"));
+    assert!(stdout.contains("provider_slot: fake"));
     assert!(stdout.contains("model: stub-responder"));
     assert!(stdout.contains("identity_memory: hermes_dual_file"));
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));

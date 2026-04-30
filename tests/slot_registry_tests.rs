@@ -88,6 +88,7 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
 
     let summary = summarize_runtime_slots(&config);
 
+    assert_eq!(summary.provider, "fake");
     assert_eq!(summary.governance, "static_rule");
     assert_eq!(summary.actuator, "fake");
     assert_eq!(summary.subagent, "fake");

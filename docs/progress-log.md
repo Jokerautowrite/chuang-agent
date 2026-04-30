@@ -23,6 +23,7 @@
 - `slot_registry` 已引入 provider、治理、操作面、进化、控制面的 slot wrapper；`RuntimeSlots` 不再把字段类型直接绑定到当前 fake/noop/static/openai-compatible 实现。
 - OpenAI-compatible provider adapter 的实例化已从 `runtime_config` 移到 `slot_registry`；配置层只保留配置描述、校验和脱敏摘要。
 - 新增边界测试，防止 `runtime_config` 重新引入 `OpenAICompatibleProviderAdapter` 构造逻辑。
+- `RuntimeSlotsSummary` 和 CLI `status` 已补 provider slot，控制台视角下所有当前 slot 都能统一展示。
 
 ## 2026-04-30
 

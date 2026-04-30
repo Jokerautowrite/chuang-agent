@@ -1018,6 +1018,7 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("kernel_agent_id: {}", status.kernel.agent_id);
     println!("kernel_turn_count: {}", status.kernel.turn_count);
     println!("provider: {}", status.config.provider_kind);
+    println!("provider_slot: {}", status.slots.provider);
     println!("provider_id: {}", status.config.provider_id);
     println!("model: {}", status.config.model_name);
     println!("memory_db: {}", status.config.db_path);

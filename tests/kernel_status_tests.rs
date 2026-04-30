@@ -23,6 +23,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.kernel.turn_count, 0);
     assert_eq!(status.config.provider_kind, "fake");
     assert_eq!(status.config.model_name, "stub-responder");
+    assert_eq!(status.slots.provider, "fake");
     assert_eq!(status.slots.governance, "static_rule");
     assert_eq!(status.slots.subagent, "fake");
     assert_eq!(status.slots.control_plane, "fake_local");
