@@ -16,6 +16,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.actuator_kind, "fake");
     assert_eq!(summary.subagent_kind, "fake");
     assert_eq!(summary.evolution_kind, "noop");
+    assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.api_key_state, None);
 }
 
@@ -105,4 +106,5 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
     assert_eq!(summary.actuator_kind, "fake");
     assert_eq!(summary.subagent_kind, "fake");
     assert_eq!(summary.evolution_kind, "noop");
+    assert_eq!(summary.control_plane_kind, "fake_local");
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
+use chuang_agent::control_plane::ControlPlane;
 use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecision};
 use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
@@ -37,10 +38,12 @@ fn slot_registry_builds_all_current_runtime_slots_from_config() {
             max_proposals: 1,
         })
         .expect("noop evolver should accept valid scope");
+    let units = slots.control_plane.list_units();
 
     assert!(matches!(decision, RiskDecision::Allowed { .. }));
     assert_eq!(observation.summary, "fake observation");
     assert!(proposals.is_empty());
+    assert!(units.iter().any(|unit| unit.display_name == "小策"));
 }
 
 #[test]
@@ -83,4 +86,5 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
     assert_eq!(summary.actuator, "fake");
     assert_eq!(summary.subagent, "fake");
     assert_eq!(summary.evolution, "noop");
+    assert_eq!(summary.control_plane, "fake_local");
 }

@@ -1,7 +1,9 @@
 use crate::actuator::FakeActuator;
+use crate::control_plane::FakeControlPlane;
 use crate::governance::StaticRuleGovernance;
 use crate::runtime_config::{
-    ActuatorConfig, ConfigError, EvolutionConfig, GovernanceConfig, RuntimeConfig, SubagentConfig,
+    ActuatorConfig, ConfigError, ControlPlaneConfig, EvolutionConfig, GovernanceConfig,
+    RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::NoopEvolver;
 use crate::subagent_spawner::FakeSubagentSpawner;
@@ -12,6 +14,7 @@ pub struct RuntimeSlots {
     pub actuator: FakeActuator,
     pub subagent: FakeSubagentSpawner,
     pub evolution: NoopEvolver,
+    pub control_plane: FakeControlPlane,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +23,7 @@ pub struct RuntimeSlotsSummary {
     pub actuator: String,
     pub subagent: String,
     pub evolution: String,
+    pub control_plane: String,
 }
 
 pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, ConfigError> {
@@ -30,6 +34,7 @@ pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, Confi
         actuator: build_actuator(&config.actuator)?,
         subagent: build_subagent(&config.subagent)?,
         evolution: build_evolution(&config.evolution)?,
+        control_plane: build_control_plane(&config.control_plane)?,
     })
 }
 
@@ -39,6 +44,7 @@ pub fn summarize_runtime_slots(config: &RuntimeConfig) -> RuntimeSlotsSummary {
         actuator: config.actuator.kind().to_string(),
         subagent: config.subagent.kind().to_string(),
         evolution: config.evolution.kind().to_string(),
+        control_plane: config.control_plane.kind().to_string(),
     }
 }
 
@@ -63,5 +69,11 @@ fn build_subagent(config: &SubagentConfig) -> Result<FakeSubagentSpawner, Config
 fn build_evolution(config: &EvolutionConfig) -> Result<NoopEvolver, ConfigError> {
     match config {
         EvolutionConfig::Noop => Ok(NoopEvolver::new()),
+    }
+}
+
+fn build_control_plane(config: &ControlPlaneConfig) -> Result<FakeControlPlane, ConfigError> {
+    match config {
+        ControlPlaneConfig::FakeLocal => Ok(FakeControlPlane::default_local_agents()),
     }
 }

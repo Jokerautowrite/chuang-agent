@@ -254,6 +254,14 @@
   - `control_plane_tests` 扩到 5 条，新增 control request -> governance classify 断言。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 控制面板已纳入 runtime 配置和 slot registry：
+  - `RuntimeConfig` 新增 `control_plane: ControlPlaneConfig`，默认 `fake_local`。
+  - `ConfigSummary` 和 `RuntimeSlotsSummary` 都新增 `control_plane` kind。
+  - `RuntimeSlots` 现在包含 `FakeControlPlane`，后续桌面控制台可直接从 slots 获取默认本地服务/Agent 列表。
+- 更新测试：
+  - `runtime_config_tests` 和 `slot_registry_tests` 已覆盖 `control_plane=fake_local` summary 与装配。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

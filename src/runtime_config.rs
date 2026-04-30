@@ -15,6 +15,7 @@ pub struct RuntimeConfig {
     pub actuator: ActuatorConfig,
     pub subagent: SubagentConfig,
     pub evolution: EvolutionConfig,
+    pub control_plane: ControlPlaneConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +57,11 @@ pub enum EvolutionConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlPlaneConfig {
+    FakeLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigSummary {
     pub provider_kind: String,
     pub provider_id: String,
@@ -64,6 +70,7 @@ pub struct ConfigSummary {
     pub actuator_kind: String,
     pub subagent_kind: String,
     pub evolution_kind: String,
+    pub control_plane_kind: String,
     pub db_path: String,
     pub recall_limit: usize,
     pub context_max_tokens: u16,
@@ -91,6 +98,7 @@ impl RuntimeConfig {
             actuator: ActuatorConfig::Fake,
             subagent: SubagentConfig::Fake,
             evolution: EvolutionConfig::Noop,
+            control_plane: ControlPlaneConfig::FakeLocal,
         }
     }
 
@@ -113,7 +121,8 @@ impl RuntimeConfig {
         self.governance.validate()?;
         self.actuator.validate()?;
         self.subagent.validate()?;
-        self.evolution.validate()
+        self.evolution.validate()?;
+        self.control_plane.validate()
     }
 
     pub fn summary(&self) -> ConfigSummary {
@@ -126,6 +135,7 @@ impl RuntimeConfig {
             actuator_kind: self.actuator.kind().to_string(),
             subagent_kind: self.subagent.kind().to_string(),
             evolution_kind: self.evolution.kind().to_string(),
+            control_plane_kind: self.control_plane.kind().to_string(),
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
             context_max_tokens: self.context_budget.max_tokens,
@@ -229,6 +239,18 @@ impl EvolutionConfig {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Noop => "noop",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
+    }
+}
+
+impl ControlPlaneConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::FakeLocal => "fake_local",
         }
     }
 
