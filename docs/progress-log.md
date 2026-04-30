@@ -220,6 +220,15 @@
   - `tests/subagent_spawner_tests.rs`，覆盖 isolated spawn、fork context budget、Analyze 递归拒绝、steer 记录、collect report、kill 后禁止 steer。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 运行时配置已扩成多插槽 summary：
+  - `RuntimeConfig` 新增 `governance / actuator / subagent / evolution` 配置字段。
+  - 当前可用 kind：`static_rule / fake / fake / noop`，不声明未实现 adapter，避免 silent fallback。
+  - `ConfigSummary` 现在能暴露 provider/governance/actuator/subagent/evolution 全部 slot kind，供后续桌面控制台或飞书控制面板读取。
+  - Governance 当前没有 disabled 变体，保持“治理不可拔掉”的硬约束。
+- 新增/更新测试：
+  - `runtime_config_tests` 扩到 6 条，新增 all-slot summary 断言。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -12,6 +12,10 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
 
     assert_eq!(summary.provider_kind, "fake");
     assert_eq!(summary.model_name, "stub-responder");
+    assert_eq!(summary.governance_kind, "static_rule");
+    assert_eq!(summary.actuator_kind, "fake");
+    assert_eq!(summary.subagent_kind, "fake");
+    assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.api_key_state, None);
 }
 
@@ -88,4 +92,17 @@ fn openai_provider_config_rejects_missing_required_fields() {
         .expect_err("missing api key should be rejected");
 
     assert_eq!(err.field, "provider.api_key");
+}
+
+#[test]
+fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+
+    let summary = config.summary();
+
+    assert_eq!(summary.provider_kind, "fake");
+    assert_eq!(summary.governance_kind, "static_rule");
+    assert_eq!(summary.actuator_kind, "fake");
+    assert_eq!(summary.subagent_kind, "fake");
+    assert_eq!(summary.evolution_kind, "noop");
 }

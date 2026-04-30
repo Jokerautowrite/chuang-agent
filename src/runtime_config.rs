@@ -11,6 +11,10 @@ pub struct RuntimeConfig {
     pub metadata: BTreeMap<String, String>,
     pub context_budget: ContextBudget,
     pub provider: ProviderConfig,
+    pub governance: GovernanceConfig,
+    pub actuator: ActuatorConfig,
+    pub subagent: SubagentConfig,
+    pub evolution: EvolutionConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,10 +36,34 @@ pub struct OpenAICompatibleConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GovernanceConfig {
+    StaticRule,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActuatorConfig {
+    Fake,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubagentConfig {
+    Fake,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvolutionConfig {
+    Noop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigSummary {
     pub provider_kind: String,
     pub provider_id: String,
     pub model_name: String,
+    pub governance_kind: String,
+    pub actuator_kind: String,
+    pub subagent_kind: String,
+    pub evolution_kind: String,
     pub db_path: String,
     pub recall_limit: usize,
     pub context_max_tokens: u16,
@@ -59,6 +87,10 @@ impl RuntimeConfig {
                 provider_id: "fake-runtime".to_string(),
                 model_name: "stub-responder".to_string(),
             },
+            governance: GovernanceConfig::StaticRule,
+            actuator: ActuatorConfig::Fake,
+            subagent: SubagentConfig::Fake,
+            evolution: EvolutionConfig::Noop,
         }
     }
 
@@ -77,7 +109,11 @@ impl RuntimeConfig {
             });
         }
 
-        self.provider.validate()
+        self.provider.validate()?;
+        self.governance.validate()?;
+        self.actuator.validate()?;
+        self.subagent.validate()?;
+        self.evolution.validate()
     }
 
     pub fn summary(&self) -> ConfigSummary {
@@ -86,6 +122,10 @@ impl RuntimeConfig {
             provider_kind: provider.kind,
             provider_id: provider.provider_id,
             model_name: provider.model_name,
+            governance_kind: self.governance.kind().to_string(),
+            actuator_kind: self.actuator.kind().to_string(),
+            subagent_kind: self.subagent.kind().to_string(),
+            evolution_kind: self.evolution.kind().to_string(),
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
             context_max_tokens: self.context_budget.max_tokens,
@@ -146,6 +186,54 @@ impl ProviderConfig {
                 api_key_state: Some(mask_key_state(&config.api_key)),
             },
         }
+    }
+}
+
+impl GovernanceConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::StaticRule => "static_rule",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
+    }
+}
+
+impl ActuatorConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Fake => "fake",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
+    }
+}
+
+impl SubagentConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Fake => "fake",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
+    }
+}
+
+impl EvolutionConfig {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Noop => "noop",
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
     }
 }
 
