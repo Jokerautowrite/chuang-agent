@@ -4,11 +4,11 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
-use chuang_agent::control_plane::{
-    audit_record_for_control, proposed_action_for_control, ControlAction, ControlPlane,
-    ControlRequest, ManagedUnit,
+use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, ManagedUnit};
+use chuang_agent::control_workflow::{
+    run_control_workflow, ControlWorkflowError, ControlWorkflowRequest,
 };
-use chuang_agent::governance::{Governance, RiskDecision};
+use chuang_agent::governance::RiskDecision;
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
@@ -117,40 +117,34 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     };
     let mut slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
-    let units = slots.control_plane.list_units();
-    let unit = units
-        .iter()
-        .find(|unit| unit.unit_id == request.request.unit_id)
-        .ok_or_else(|| format!("unknown control unit: {}", request.request.unit_id))?;
-    let proposed = proposed_action_for_control(unit, &request.request)
-        .map_err(|e| format!("control_invalid: {e:?}"))?;
-    let decision = slots
-        .governance
-        .classify(&proposed)
-        .map_err(|e| format!("governance_failed: {}", e.message))?;
-
-    print_control_decision(unit, &decision);
-    if matches!(decision, RiskDecision::NeedsApproval { .. }) && !request.approve {
-        return Err("control action requires --approve".to_string());
-    }
-    if matches!(
-        decision,
-        RiskDecision::Blocked { .. } | RiskDecision::DraftOnly { .. }
+    let unit = find_control_unit(&slots.control_plane, &request.request.unit_id)?;
+    let result = match run_control_workflow(
+        &mut slots.control_plane,
+        &mut slots.governance,
+        ControlWorkflowRequest {
+            control: request.request,
+            approved: request.approve,
+        },
     ) {
-        return Err("control action was not allowed by governance".to_string());
-    }
+        Ok(result) => result,
+        Err(ControlWorkflowError::ApprovalRequired(decision)) => {
+            print_control_decision(&unit, &decision);
+            return Err("control action requires --approve".to_string());
+        }
+        Err(ControlWorkflowError::NotAllowed(decision)) => {
+            print_control_decision(&unit, &decision);
+            return Err("control action was not allowed by governance".to_string());
+        }
+        Err(ControlWorkflowError::Control(err)) => return Err(format!("control_failed: {err:?}")),
+        Err(ControlWorkflowError::Governance(err)) => {
+            return Err(format!("governance_failed: {}", err.message))
+        }
+    };
 
-    let audit_record = audit_record_for_control(unit, &request.request, request.approve)
-        .map_err(|e| format!("control_audit_invalid: {e:?}"))?;
-    slots
-        .governance
-        .audit(audit_record)
-        .map_err(|e| format!("control_audit_failed: {}", e.message))?;
-
-    let receipt = slots
-        .control_plane
-        .apply(request.request)
-        .map_err(|e| format!("control_failed: {e:?}"))?;
+    print_control_decision(&unit, &result.decision);
+    let receipt = result
+        .receipt
+        .ok_or_else(|| "control workflow returned no receipt".to_string())?;
     println!(
         "control_applied unit_id={} action={} previous={:?} next={:?} model={}",
         receipt.unit_id,
@@ -162,6 +156,17 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     println!("control_audit: recorded");
 
     Ok(())
+}
+
+fn find_control_unit<P: ControlPlane>(
+    control_plane: &P,
+    unit_id: &str,
+) -> Result<ManagedUnit, String> {
+    control_plane
+        .list_units()
+        .into_iter()
+        .find(|unit| unit.unit_id == unit_id)
+        .ok_or_else(|| format!("unknown control unit: {unit_id}"))
 }
 
 fn run_with_options(

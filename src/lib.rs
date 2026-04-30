@@ -4,6 +4,7 @@ pub mod browser_worker;
 pub mod common;
 pub mod context_engine;
 pub mod control_plane;
+pub mod control_workflow;
 pub mod governance;
 pub mod lifecycle;
 pub mod memory_policy;

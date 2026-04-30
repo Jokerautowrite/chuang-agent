@@ -280,6 +280,14 @@
   - `cli_control_tests` 已验证审批执行后输出审计记录提示。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 新增控制工作流抽象：
+  - `src/control_workflow.rs`：`run_control_workflow()`、`ControlWorkflowRequest`、`ControlWorkflowResult`、`ControlWorkflowError`。
+  - 统一封装：查 unit -> 构造 ProposedAction -> Governance classify -> approval gate -> audit -> ControlPlane apply。
+  - CLI `control apply` 已改成调用 `run_control_workflow()`，飞书和桌面控制台后续可复用同一条链路。
+- 新增测试：
+  - `tests/control_workflow_tests.rs`，覆盖未审批拒绝、审批后执行并审计、未知 unit 在治理前失败。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
