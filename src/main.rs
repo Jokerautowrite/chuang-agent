@@ -3,7 +3,7 @@ use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
+use chuang_agent::chuang_kernel::{ChuangKernel, ChuangKernelConfig};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
 use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
 use chuang_agent::control_surface::{
@@ -189,25 +189,24 @@ fn run_with_options(
             let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
-            let runtime = AgentRuntime::with_responder(store, provider);
-            runtime
-                .run(&RuntimeRequest {
-                    user_input,
-                    recall_limit: options.runtime.recall_limit,
-                    metadata: options.runtime.metadata.clone(),
-                    context_budget: Some(options.runtime.context_budget.clone()),
-                })
+            let mut kernel = ChuangKernel::with_responder(
+                kernel_config_from_runtime(&options.runtime),
+                store,
+                provider,
+            );
+            kernel
+                .run_turn(user_input)
+                .map(|turn| turn.result)
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
         Ok(None) => {
-            let runtime = build_runtime(&options.runtime.db_path)?;
-            runtime
-                .run(&RuntimeRequest {
-                    user_input,
-                    recall_limit: options.runtime.recall_limit,
-                    metadata: options.runtime.metadata.clone(),
-                    context_budget: Some(options.runtime.context_budget.clone()),
-                })
+            let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
+                .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
+            seed_default_memory_if_empty(&mut store)?;
+            let mut kernel = ChuangKernel::new(kernel_config_from_runtime(&options.runtime), store);
+            kernel
+                .run_turn(user_input)
+                .map(|turn| turn.result)
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
         Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
@@ -360,11 +359,14 @@ fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
     Ok(())
 }
 
-fn build_runtime(db_path: &PathBuf) -> Result<AgentRuntime<SqliteMemoryStore>, String> {
-    let mut store =
-        SqliteMemoryStore::open(db_path).map_err(|e| format!("failed_to_open_db: {e:?}"))?;
-    seed_default_memory_if_empty(&mut store)?;
-    Ok(AgentRuntime::new(store))
+fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
+    ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: runtime.recall_limit,
+        metadata: runtime.metadata.clone(),
+        context_budget: Some(runtime.context_budget.clone()),
+    }
 }
 
 fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String), String> {

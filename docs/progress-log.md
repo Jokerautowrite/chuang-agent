@@ -358,6 +358,11 @@
 - 新增测试：
   - `tests/chuang_kernel_tests.rs` 覆盖最小可审计 turn、健康快照、失败不计轮次。
 - 已运行 `cargo test --test chuang_kernel_tests`，当前专项测试通过。
+- CLI 主运行入口已接入 `ChuangKernel`：
+  - `cargo run -- run ...` 现在通过 `ChuangKernel::run_turn()` 执行，再复用原有 `RuntimeResult` 输出。
+  - OpenAI-compatible provider 路径也通过 `ChuangKernel::with_responder()`，不再绕过 MVP 内核。
+  - 文本输出保持兼容，已有 CLI 冒烟测试无需改断言。
+- 已运行 `cargo test --test cli_smoke_tests --test cli_provider_smoke_tests --test chuang_kernel_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
