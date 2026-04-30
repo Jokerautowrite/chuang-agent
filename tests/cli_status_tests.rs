@@ -116,3 +116,30 @@ fn cli_status_can_use_custom_identity_memory_root() {
         Some("## mem-1\n创项目聚焦核心 MVP".chars().count() as u64)
     );
 }
+
+#[test]
+fn cli_status_can_select_queued_external_subagent_slot() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--json",
+            "--subagent",
+            "queued_external",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["config"]["subagent_kind"], "queued_external");
+    assert_eq!(parsed["slots"]["subagent"], "queued_external");
+}

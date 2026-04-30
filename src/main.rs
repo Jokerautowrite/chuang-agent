@@ -24,7 +24,7 @@ use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
 };
 use chuang_agent::slot_registry::build_runtime_slots;
 use serde::Serialize;
@@ -440,7 +440,8 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
             | "--provider-model"
             | "--provider-id"
             | "--provider-transport"
-            | "--identity-memory-root" => index += 2,
+            | "--identity-memory-root"
+            | "--subagent" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -637,7 +638,7 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--db" | "--identity-memory-root" => index += 2,
+            "--db" | "--identity-memory-root" | "--subagent" => index += 2,
             "--input" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 user_input = Some(value.clone());
@@ -676,6 +677,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut provider_model: Option<String> = None;
     let mut provider_transport: Option<String> = None;
     let mut identity_memory_root: Option<PathBuf> = None;
+    let mut subagent_kind: Option<String> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -719,6 +721,11 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 identity_memory_root = Some(PathBuf::from(value));
                 index += 2;
             }
+            "--subagent" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                subagent_kind = Some(value.clone());
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
@@ -730,6 +737,9 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             user_max_chars: DEFAULT_USER_MEMORY_MAX_CHARS,
             memory_max_chars: DEFAULT_MEMORY_WRITE_MAX_CHARS,
         };
+    }
+    if let Some(kind) = subagent_kind {
+        runtime.subagent = parse_subagent_config(&kind)?;
     }
     runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
         (None, None, None) => ProviderConfig::Fake {
@@ -843,6 +853,16 @@ fn parse_provider_transport(raw: Option<&str>) -> Result<ProviderTransport, Stri
     raw.unwrap_or("stub").parse()
 }
 
+fn parse_subagent_config(raw: &str) -> Result<SubagentConfig, String> {
+    match raw {
+        "fake" => Ok(SubagentConfig::Fake),
+        "queued_external" => Ok(SubagentConfig::QueuedExternal),
+        other => Err(format!(
+            "unsupported subagent kind: {other} (supported: fake, queued_external)"
+        )),
+    }
+}
+
 fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), String> {
     let existing = store
         .search(&chuang_agent::memory_store::MemoryQuery {
@@ -874,5 +894,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }

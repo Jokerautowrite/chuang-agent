@@ -503,6 +503,13 @@
   - `slot_registry_tests` 新增 queued external slot 构建和 collect 返回 None。
   - `runtime_config_tests` 新增 queued subagent kind summary。
 - 已运行 `cargo test --test subagent_spawner_tests --test slot_registry_tests --test runtime_config_tests`，当前专项测试通过。
+- CLI 新增子代理槽位选择：
+  - `run / repl / status` 支持 `--subagent fake|queued_external`。
+  - `status --json --subagent queued_external` 会在 config 和 slots summary 中显示 `queued_external`。
+  - 默认仍为 `fake`。
+- 更新测试：
+  - `cli_status_tests` 新增 CLI 选择 queued external 子代理槽位断言。
+- 已运行 `cargo test --test cli_status_tests --test runtime_config_tests --test slot_registry_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
