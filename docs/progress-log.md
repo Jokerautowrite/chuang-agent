@@ -343,6 +343,13 @@
   - `tests/control_surface_tests.rs` 覆盖 UI-ready list、显示名重启需审批、已审批换模型、未知显示名治理前失败。
   - `cli_control_tests` 扩到 8 条，新增 `--unit 小策 --action 重启` 的人类入口回归。
 - 已运行 `cargo test --test control_surface_tests --test cli_control_tests`，当前专项测试通过。
+- 控制台 MVP 入口补飞书友好结果信封：
+  - 新增 `ControlSurfaceOutcome { status, view }`，状态当前为 `applied / needs_approval / rejected`。
+  - 新增 `run_control_surface_outcome()`，审批缺失不再必须作为错误给 UI 处理，而是返回 `needs_approval + ControlWorkflowView`。
+  - 真错误仍然保留结构化 `ControlSurfaceError`，未知对象、无效 intent、底层 workflow 失败不会静默吞掉。
+- 更新测试：
+  - `control_surface_tests` 扩到 6 条，新增 `needs_approval` outcome 和已审批 `applied` outcome。
+- 已运行 `cargo test --test control_surface_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
