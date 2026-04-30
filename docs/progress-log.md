@@ -371,6 +371,13 @@
 - 更新测试：
   - `chuang_kernel_tests` 扩到 4 条，验证写入后的 turn 摘要可在下一轮 recall 命中。
 - 已运行 `cargo test --test chuang_kernel_tests`，当前专项测试通过。
+- CLI 新增最小记忆写回开关：
+  - `cargo run -- run ... --remember` 会在本轮执行成功后调用 `ChuangKernel::remember_turn()`。
+  - 成功写入时输出 `memory_recorded: <record_id>`。
+  - 默认不写回，避免普通调试污染记忆库。
+- 更新测试：
+  - `cli_smoke_tests` 新增端到端写回验证：第一次 `--remember` 写入，同 DB 第二次查询可 recall 到该 turn summary。
+- 已运行 `cargo test --test cli_smoke_tests --test chuang_kernel_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

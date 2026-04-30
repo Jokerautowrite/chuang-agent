@@ -43,9 +43,12 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn run_command(args: &[String]) -> Result<(), String> {
-    let (options, user_input) = parse_db_and_input(args)?;
-    let result = run_with_options(&options, user_input)?;
+    let (options, user_input, remember) = parse_db_and_input(args)?;
+    let (result, remembered_record_id) = run_with_options(&options, user_input, remember)?;
     print_runtime_result(&result);
+    if let Some(record_id) = remembered_record_id {
+        println!("memory_recorded: {record_id}");
+    }
     Ok(())
 }
 
@@ -66,7 +69,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             continue;
         }
 
-        let result = run_with_options(&options, input.to_string())?;
+        let (result, _) = run_with_options(&options, input.to_string(), false)?;
         print_runtime_result(&result);
         writeln!(stdout, "---").map_err(|e| format!("stdout_write_failed: {e}"))?;
         stdout
@@ -178,7 +181,8 @@ fn find_control_unit<P: ControlPlane>(
 fn run_with_options(
     options: &CliOptions,
     user_input: String,
-) -> Result<chuang_agent::agent_runtime::RuntimeResult, String> {
+    remember: bool,
+) -> Result<(chuang_agent::agent_runtime::RuntimeResult, Option<String>), String> {
     options
         .runtime
         .validate()
@@ -196,7 +200,7 @@ fn run_with_options(
             );
             kernel
                 .run_turn(user_input)
-                .map(|turn| turn.result)
+                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
         Ok(None) => {
@@ -206,11 +210,35 @@ fn run_with_options(
             let mut kernel = ChuangKernel::new(kernel_config_from_runtime(&options.runtime), store);
             kernel
                 .run_turn(user_input)
-                .map(|turn| turn.result)
+                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
                 .map_err(|e| format!("runtime_failed: {e:?}"))
         }
         Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
     }
+}
+
+fn remember_turn_if_requested<S, R>(
+    kernel: &mut ChuangKernel<S, R>,
+    turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
+    remember: bool,
+) -> Result<
+    (chuang_agent::agent_runtime::RuntimeResult, Option<String>),
+    chuang_agent::agent_runtime::AgentRuntimeError,
+>
+where
+    S: MemoryStore,
+    R: chuang_agent::responder::Responder,
+{
+    if remember {
+        let record_id = kernel.remember_turn(&turn).map_err(|err| {
+            chuang_agent::agent_runtime::AgentRuntimeError::Recall(
+                chuang_agent::memory_recall::MemoryRecallError::Store(err),
+            )
+        })?;
+        return Ok((turn.result, Some(record_id)));
+    }
+
+    Ok((turn.result, None))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,9 +397,10 @@ fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
     }
 }
 
-fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String), String> {
+fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String, bool), String> {
     let options = parse_cli_options(args)?;
     let mut user_input: Option<String> = None;
+    let mut remember = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -382,6 +411,10 @@ fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String), String> {
                 user_input = Some(value.clone());
                 index += 2;
             }
+            "--remember" => {
+                remember = true;
+                index += 1;
+            }
             "--provider-base-url"
             | "--provider-api-key"
             | "--provider-model"
@@ -391,7 +424,7 @@ fn parse_db_and_input(args: &[String]) -> Result<(CliOptions, String), String> {
         }
     }
 
-    Ok((options, user_input.ok_or_else(usage)?))
+    Ok((options, user_input.ok_or_else(usage)?, remember))
 }
 
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
@@ -411,6 +444,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 index += 2;
             }
             "--input" => index += 2,
+            "--remember" => index += 1,
             "--provider-base-url" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 provider_base_url = Some(value.clone());
