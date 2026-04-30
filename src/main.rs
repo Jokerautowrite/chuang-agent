@@ -25,6 +25,7 @@ use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
     IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    SubagentQueueConfig,
 };
 use chuang_agent::slot_registry::build_runtime_slots;
 use serde::Serialize;
@@ -441,7 +442,8 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
             | "--provider-id"
             | "--provider-transport"
             | "--identity-memory-root"
-            | "--subagent" => index += 2,
+            | "--subagent"
+            | "--subagent-queue-root" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -604,6 +606,7 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("governance: {}", status.slots.governance);
     println!("actuator: {}", status.slots.actuator);
     println!("subagent: {}", status.slots.subagent);
+    println!("subagent_queue_root: {}", status.config.subagent_queue_root);
     println!("evolution: {}", status.slots.evolution);
     println!("control_plane: {}", status.slots.control_plane);
 }
@@ -638,7 +641,9 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--db" | "--identity-memory-root" | "--subagent" => index += 2,
+            "--db" | "--identity-memory-root" | "--subagent" | "--subagent-queue-root" => {
+                index += 2
+            }
             "--input" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 user_input = Some(value.clone());
@@ -678,6 +683,7 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut provider_transport: Option<String> = None;
     let mut identity_memory_root: Option<PathBuf> = None;
     let mut subagent_kind: Option<String> = None;
+    let mut subagent_queue_root: Option<PathBuf> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -726,6 +732,11 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 subagent_kind = Some(value.clone());
                 index += 2;
             }
+            "--subagent-queue-root" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                subagent_queue_root = Some(PathBuf::from(value));
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
@@ -740,6 +751,9 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     }
     if let Some(kind) = subagent_kind {
         runtime.subagent = parse_subagent_config(&kind)?;
+    }
+    if let Some(root) = subagent_queue_root {
+        runtime.subagent_queue = SubagentQueueConfig { root };
     }
     runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
         (None, None, None) => ProviderConfig::Fake {
@@ -894,5 +908,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }

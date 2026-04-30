@@ -6,6 +6,7 @@ use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
 use crate::responder::{OpenAICompatibleProviderAdapter, ProviderTransport};
+use crate::subagent_queue::FileSubagentQueueConfig;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +20,7 @@ pub struct RuntimeConfig {
     pub governance: GovernanceConfig,
     pub actuator: ActuatorConfig,
     pub subagent: SubagentConfig,
+    pub subagent_queue: SubagentQueueConfig,
     pub evolution: EvolutionConfig,
     pub control_plane: ControlPlaneConfig,
 }
@@ -67,6 +69,11 @@ pub enum SubagentConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentQueueConfig {
+    pub root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolutionConfig {
     Noop,
 }
@@ -84,6 +91,7 @@ pub struct ConfigSummary {
     pub governance_kind: String,
     pub actuator_kind: String,
     pub subagent_kind: String,
+    pub subagent_queue_root: String,
     pub evolution_kind: String,
     pub control_plane_kind: String,
     pub identity_memory_kind: String,
@@ -121,6 +129,9 @@ impl RuntimeConfig {
             governance: GovernanceConfig::StaticRule,
             actuator: ActuatorConfig::Fake,
             subagent: SubagentConfig::Fake,
+            subagent_queue: SubagentQueueConfig {
+                root: PathBuf::from("./data/subagent-queue"),
+            },
             evolution: EvolutionConfig::Noop,
             control_plane: ControlPlaneConfig::FakeLocal,
         }
@@ -146,6 +157,7 @@ impl RuntimeConfig {
         self.governance.validate()?;
         self.actuator.validate()?;
         self.subagent.validate()?;
+        self.subagent_queue.validate()?;
         self.evolution.validate()?;
         self.control_plane.validate()
     }
@@ -160,6 +172,7 @@ impl RuntimeConfig {
             governance_kind: self.governance.kind().to_string(),
             actuator_kind: self.actuator.kind().to_string(),
             subagent_kind: self.subagent.kind().to_string(),
+            subagent_queue_root: self.subagent_queue.root.display().to_string(),
             evolution_kind: self.evolution.kind().to_string(),
             control_plane_kind: self.control_plane.kind().to_string(),
             identity_memory_kind: identity_memory.kind,
@@ -316,6 +329,17 @@ impl SubagentConfig {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
+    }
+}
+
+impl SubagentQueueConfig {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        require_non_empty("subagent_queue.root", &self.root.display().to_string())
+    }
+
+    pub fn build_file_queue_config(&self) -> Result<FileSubagentQueueConfig, ConfigError> {
+        self.validate()?;
+        Ok(FileSubagentQueueConfig::new(&self.root))
     }
 }
 

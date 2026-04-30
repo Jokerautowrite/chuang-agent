@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
     IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    SubagentQueueConfig,
 };
 
 #[test]
@@ -17,6 +18,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.governance_kind, "static_rule");
     assert_eq!(summary.actuator_kind, "fake");
     assert_eq!(summary.subagent_kind, "fake");
+    assert_eq!(summary.subagent_queue_root, "./data/subagent-queue");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
@@ -119,11 +121,43 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
 fn runtime_config_summary_can_expose_queued_subagent_kind() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: PathBuf::from("./tmp/subagent-queue"),
+    };
 
     config.validate().expect("queued subagent config is valid");
     let summary = config.summary();
 
     assert_eq!(summary.subagent_kind, "queued_external");
+    assert_eq!(summary.subagent_queue_root, "./tmp/subagent-queue");
+}
+
+#[test]
+fn subagent_queue_config_builds_file_queue_config() {
+    let config = SubagentQueueConfig {
+        root: PathBuf::from("./data/subagent-queue"),
+    };
+
+    let queue = config
+        .build_file_queue_config()
+        .expect("queue config should build");
+
+    assert_eq!(queue.root, PathBuf::from("./data/subagent-queue"));
+    assert_eq!(queue.dispatch_dir, "dispatch");
+    assert_eq!(queue.report_dir, "reports");
+}
+
+#[test]
+fn subagent_queue_config_rejects_empty_root() {
+    let config = SubagentQueueConfig {
+        root: PathBuf::from(""),
+    };
+
+    let err = config
+        .validate()
+        .expect_err("empty queue root should be rejected");
+
+    assert_eq!(err.field, "subagent_queue.root");
 }
 
 #[test]

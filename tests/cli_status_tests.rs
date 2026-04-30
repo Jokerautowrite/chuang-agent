@@ -34,6 +34,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
     assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
     assert!(stdout.contains("governance: static_rule"));
+    assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
     assert!(stdout.contains("control_plane: fake_local"));
 }
 
@@ -119,6 +120,7 @@ fn cli_status_can_use_custom_identity_memory_root() {
 
 #[test]
 fn cli_status_can_select_queued_external_subagent_slot() {
+    let queue_root = temp_identity_root("subagent-queue");
     let output = Command::new("cargo")
         .args([
             "run",
@@ -128,6 +130,8 @@ fn cli_status_can_select_queued_external_subagent_slot() {
             "--json",
             "--subagent",
             "queued_external",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
         ])
         .output()
         .expect("cargo run should execute");
@@ -141,5 +145,9 @@ fn cli_status_can_select_queued_external_subagent_slot() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["config"]["subagent_kind"], "queued_external");
+    assert_eq!(
+        parsed["config"]["subagent_queue_root"],
+        queue_root.display().to_string()
+    );
     assert_eq!(parsed["slots"]["subagent"], "queued_external");
 }

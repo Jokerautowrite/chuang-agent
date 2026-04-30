@@ -540,6 +540,15 @@
 - 更新测试：
   - `subagent_queue_tests` 新增 report 存在时 attach 成功、report 缺失时返回 false。
 - 已运行 `cargo test --test subagent_queue_tests --test subagent_spawner_tests`，当前专项测试通过。
+- RuntimeConfig 新增子代理文件队列配置：
+  - 新增 `SubagentQueueConfig { root }`，默认 `./data/subagent-queue`。
+  - `ConfigSummary` 和 `status` 文本/JSON 现在会暴露 `subagent_queue_root`，让外部 runner 明确知道扫描 `dispatch/` 与写回 `reports/` 的根目录。
+  - CLI 新增 `--subagent-queue-root PATH`，可在 `run / repl / status` 中覆盖队列目录。
+  - 该配置只暴露文件队列边界，不启动外部进程、不执行真实子代理。
+- 更新测试：
+  - `runtime_config_tests` 覆盖默认队列目录、queued external 自定义目录、文件队列配置构造、空 root 拒绝。
+  - `cli_status_tests` 覆盖文本 status 默认队列目录和 JSON status 自定义队列目录。
+- 已运行 `cargo test --test runtime_config_tests --test cli_status_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
