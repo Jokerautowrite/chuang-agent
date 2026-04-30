@@ -63,6 +63,7 @@ pub enum ActuatorConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubagentConfig {
     Fake,
+    QueuedExternal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,6 +310,7 @@ impl SubagentConfig {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Fake => "fake",
+            Self::QueuedExternal => "queued_external",
         }
     }
 

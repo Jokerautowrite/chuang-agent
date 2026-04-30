@@ -491,6 +491,18 @@
 - 更新测试：
   - `hermes_memory_tests` 新增自由文本 preamble 超限拒绝断言。
 - 已运行 `cargo test --test hermes_memory_tests --test cli_smoke_tests`，当前专项测试通过。
+- 子代理调度层新增 queued external 协议：
+  - `src/subagent_spawner.rs` 新增 `SubagentDispatch`，用于把 spawn 请求打包成外部 runner 可消费的派发信封。
+  - 新增 `QueuedSubagentSpawner`：`spawn()` 只入队 dispatch，`collect()` 在 report 回填前返回 `None`，不伪装已完成。
+  - 新增 `take_next_dispatch()` / `pending_dispatches()` / `attach_report()`，让未来真实 Codex/OpenClaw 子代理或外部进程可以按协议接任务、回传 report。
+  - 新增 `SubagentSlot` 包装 `Fake / Queued`，slot registry 可以在不改上层调用方式的情况下替换子代理实现。
+  - `RuntimeConfig::SubagentConfig` 新增 `QueuedExternal`，summary kind 为 `queued_external`。
+  - 默认仍然是 `fake`，不执行真实命令、不打开危险能力。
+- 更新测试：
+  - `subagent_spawner_tests` 新增 queued dispatch、report 回填、身份不匹配拒绝、kill 移除 pending dispatch。
+  - `slot_registry_tests` 新增 queued external slot 构建和 collect 返回 None。
+  - `runtime_config_tests` 新增 queued subagent kind summary。
+- 已运行 `cargo test --test subagent_spawner_tests --test slot_registry_tests --test runtime_config_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

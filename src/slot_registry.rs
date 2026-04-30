@@ -6,14 +6,14 @@ use crate::runtime_config::{
     RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::NoopEvolver;
-use crate::subagent_spawner::FakeSubagentSpawner;
+use crate::subagent_spawner::{FakeSubagentSpawner, QueuedSubagentSpawner, SubagentSlot};
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSlots {
     pub governance: StaticRuleGovernance,
     pub actuator: FakeActuator,
-    pub subagent: FakeSubagentSpawner,
+    pub subagent: SubagentSlot,
     pub evolution: NoopEvolver,
     pub control_plane: FakeControlPlane,
 }
@@ -61,9 +61,10 @@ fn build_actuator(config: &ActuatorConfig) -> Result<FakeActuator, ConfigError> 
     }
 }
 
-fn build_subagent(config: &SubagentConfig) -> Result<FakeSubagentSpawner, ConfigError> {
+fn build_subagent(config: &SubagentConfig) -> Result<SubagentSlot, ConfigError> {
     match config {
-        SubagentConfig::Fake => Ok(FakeSubagentSpawner::new()),
+        SubagentConfig::Fake => Ok(SubagentSlot::Fake(FakeSubagentSpawner::new())),
+        SubagentConfig::QueuedExternal => Ok(SubagentSlot::Queued(QueuedSubagentSpawner::new())),
     }
 }
 

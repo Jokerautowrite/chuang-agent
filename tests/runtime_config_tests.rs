@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
 };
 
 #[test]
@@ -113,6 +113,17 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+}
+
+#[test]
+fn runtime_config_summary_can_expose_queued_subagent_kind() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+
+    config.validate().expect("queued subagent config is valid");
+    let summary = config.summary();
+
+    assert_eq!(summary.subagent_kind, "queued_external");
 }
 
 #[test]

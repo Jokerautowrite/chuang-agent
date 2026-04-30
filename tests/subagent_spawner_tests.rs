@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use chuang_agent::common::{AgentId, TaskId};
-use chuang_agent::subagent_report::ExecutionStatus;
+use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
+use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
-    ContextIsolation, FakeSubagentSpawner, KillReason, SpawnRequest, SubagentError,
-    SubagentSpawner, SubagentState, SubagentToolPolicy,
+    ContextIsolation, FakeSubagentSpawner, KillReason, QueuedSubagentSpawner, SpawnRequest,
+    SubagentError, SubagentSpawner, SubagentState, SubagentToolPolicy,
 };
 
 fn request(policy: SubagentToolPolicy) -> SpawnRequest {
@@ -134,4 +134,103 @@ fn fake_spawner_kill_changes_report_status_and_blocks_steering() {
     );
     assert_eq!(report.status, ExecutionStatus::Cancelled);
     assert!(report.stderr_preview.unwrap().contains("Timeout"));
+}
+
+#[test]
+fn queued_spawner_emits_dispatch_and_waits_for_attached_report() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("spawn should succeed");
+
+    let pending = spawner.pending_dispatches();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].run_id, receipt.run_id);
+    assert_eq!(pending[0].agent_id, receipt.agent_id);
+    assert_eq!(pending[0].task, "审计 runtime 配置接缝");
+    assert!(spawner
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .is_none());
+
+    let dispatch = spawner
+        .take_next_dispatch()
+        .expect("dispatch should be available");
+    assert_eq!(dispatch.run_id, receipt.run_id);
+    assert!(spawner.pending_dispatches().is_empty());
+
+    spawner
+        .attach_report(&receipt.run_id, queued_report(&receipt.agent_id))
+        .expect("attach report should succeed");
+    let report = spawner
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .expect("attached report should be available");
+
+    assert_eq!(report.status, ExecutionStatus::Success);
+    assert_eq!(
+        spawner.state(&receipt.run_id),
+        Some(&SubagentState::Completed)
+    );
+}
+
+#[test]
+fn queued_spawner_rejects_mismatched_attached_report() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Analyze))
+        .expect("spawn should succeed");
+
+    let mut report = queued_report(&AgentId("wrong-agent".to_string()));
+    report.task_id = TaskId("task-1".to_string());
+    let err = spawner
+        .attach_report(&receipt.run_id, report)
+        .expect_err("mismatched report should be rejected");
+
+    assert!(matches!(err, SubagentError::InvalidRequest(_)));
+    assert_eq!(
+        spawner.state(&receipt.run_id),
+        Some(&SubagentState::Running)
+    );
+}
+
+#[test]
+fn queued_spawner_kill_removes_pending_dispatch() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Orchestrate))
+        .expect("spawn should succeed");
+
+    spawner
+        .kill(&receipt.run_id, KillReason::UserRequested)
+        .expect("kill should succeed");
+
+    assert!(spawner.pending_dispatches().is_empty());
+    let report = spawner
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .expect("killed queued run should report cancellation");
+    assert_eq!(report.status, ExecutionStatus::Cancelled);
+}
+
+fn queued_report(agent_id: &AgentId) -> SubagentReport {
+    SubagentReport {
+        schema_version: "1.0".to_string(),
+        report_id: ReportId("report-queued-run-1".to_string()),
+        task_id: TaskId("task-1".to_string()),
+        agent_id: agent_id.clone(),
+        parent_agent_id: Some(AgentId("xiaoce".to_string())),
+        status: ExecutionStatus::Success,
+        started_at: Timestamp("2026-05-01T00:00:00Z".to_string()),
+        finished_at: Timestamp("2026-05-01T00:00:01Z".to_string()),
+        summary: "queued worker completed".to_string(),
+        exit_code: Some(0),
+        stdout_preview: Some("ok".to_string()),
+        stderr_preview: None,
+        resource_usage: ResourceUsage::default(),
+        artifacts: Vec::new(),
+        replay_ref: Some("queued-subagent://queued-run-1".to_string()),
+        context_debug: None,
+        truncated: false,
+    }
 }

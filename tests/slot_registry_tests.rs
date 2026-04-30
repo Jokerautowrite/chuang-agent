@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chuang_agent::actuator::{Actuator, ObserveTarget};
 use chuang_agent::control_plane::ControlPlane;
 use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecision};
-use chuang_agent::runtime_config::RuntimeConfig;
+use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
 use chuang_agent::slot_registry::{build_runtime_slots, summarize_runtime_slots};
 use chuang_agent::subagent_spawner::{
@@ -87,4 +87,35 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
     assert_eq!(summary.subagent, "fake");
     assert_eq!(summary.evolution, "noop");
     assert_eq!(summary.control_plane, "fake_local");
+}
+
+#[test]
+fn slot_registry_can_build_queued_external_subagent_slot() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "生成外部派发任务".to_string(),
+            tool_policy: SubagentToolPolicy::Analyze,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 512,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("queued spawn should succeed");
+
+    assert_eq!(receipt.run_id.0, "queued-run-1");
+    assert!(slots
+        .subagent
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .is_none());
+    assert_eq!(summarize_runtime_slots(&config).subagent, "queued_external");
 }
