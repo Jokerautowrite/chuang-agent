@@ -229,6 +229,14 @@
   - `runtime_config_tests` 扩到 6 条，新增 all-slot summary 断言。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 新增 slot registry 装配层：
+  - `src/slot_registry.rs`：`build_runtime_slots()` 和 `summarize_runtime_slots()`。
+  - 当前可从 `RuntimeConfig` 构造 `StaticRuleGovernance / FakeActuator / FakeSubagentSpawner / NoopEvolver`。
+  - 这一步把“配置声明了插槽”推进到“配置能装配当前实现”，后续新增 adapter 时只扩 registry，不污染 runtime 主链路。
+- 新增测试：
+  - `tests/slot_registry_tests.rs`，覆盖四个当前 slot 的构造、FakeSubagentSpawner spawn/collect、summary 与 config kind 一致。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
