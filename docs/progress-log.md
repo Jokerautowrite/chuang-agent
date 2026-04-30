@@ -388,6 +388,9 @@
   - `tests/kernel_status_tests.rs` 覆盖状态聚合与无效配置拒绝。
   - `tests/cli_status_tests.rs` 覆盖文本状态、JSON 状态和密钥不泄露。
 - 已运行 `cargo test --test kernel_status_tests --test cli_status_tests`，当前专项测试通过。
+- 新增 MVP 边界文档：
+  - `docs/mvp-scope.md` 明确当前最小闭环、已具备能力、当前不做事项、下一步优先级和 MVP 可用判定标准。
+  - 重点约束：飞书只作为未来插件入口，不再作为核心主线；真实服务/Agent 控制仍保持 adapter 化和审批化。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -1,0 +1,49 @@
+# 创项目 MVP 边界
+
+## 当前 MVP 目标
+
+先证明创项目内核能独立跑通一轮，而不是先追求完整桌面壳、飞书壳或真实服务控制。
+
+当前 MVP 的核心闭环：
+
+1. 读取长期记忆
+2. 打包上下文
+3. 调用 responder
+4. 生成可审计报告
+5. 可选写回本轮 turn summary
+6. 暴露核心状态
+
+## 已具备能力
+
+- `ChuangKernel::run_turn()`：主运行入口，统一串起 recall、context packing、responder 和 report。
+- `ChuangKernel::remember_turn()`：显式写回普通 `turn_summary` 记忆。
+- `cargo run -- run --input TEXT`：通过内核运行一轮。
+- `cargo run -- run --input TEXT --remember`：运行后写回本轮摘要。
+- `cargo run -- status`：查看 MVP 核心状态。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
+- `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
+
+## 当前明确不做
+
+- 不自动删除任何记忆。
+- 不自动压缩身份记忆。
+- 不直接操作真实 systemd 服务。
+- 不直接控制 Hermes / OpenClaw 进程。
+- 不把飞书作为核心依赖，飞书只作为未来插件入口。
+- 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
+
+## 下一步优先级
+
+1. 把记忆层从普通 SQLite turn summary，推进到 Hermes 风格硬上限记忆策略。
+2. 把 fake subagent spawner 推进到最小真实子代理调度协议。
+3. 把 context engine 的状态和压缩策略接入 `ChuangKernel` 配置。
+4. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
+5. 最后再接桌面壳、飞书插件和服务控制 UI。
+
+## 判定 MVP 可用的最低标准
+
+- `cargo test` 全仓通过。
+- `cargo run -- status` 能显示核心状态。
+- `cargo run -- run --input TEXT` 能返回结构化响应。
+- `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
+- 所有危险操作仍需显式审批或保持 fake。
