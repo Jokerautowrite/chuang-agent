@@ -565,6 +565,16 @@
 - 更新测试：
   - `cli_subagent_dispatch_tests` 新增 report 可读与缺失 report 两条 CLI 覆盖。
 - 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
+- RuntimeConfig / CLI 新增 context budget 可配置面：
+  - `ConfigSummary` 现在暴露 `context_reserve_system_tokens / context_min_working_tokens / context_max_tool_results / context_max_memory_segments`。
+  - CLI 新增 `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`，可用于 `run / repl / status / subagent` 的 runtime 配置解析。
+  - `RuntimeConfig::validate()` 新增保护：`reserve_system_tokens` 不能超过 `max_tokens`。
+  - `status` 文本新增完整 `context_budget` 行，JSON status 暴露全部字段。
+  - `docs/mvp-scope.md` 已同步当前已具备能力和下一步优先级。
+- 更新测试：
+  - `runtime_config_tests` 新增 context reserve 越界拒绝。
+  - `cli_status_tests` 新增 context budget CLI 覆盖。
+- 已运行 `cargo test --test runtime_config_tests --test cli_status_tests --test cli_smoke_tests --test cli_subagent_dispatch_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

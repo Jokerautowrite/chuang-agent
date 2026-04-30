@@ -24,6 +24,11 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
+    assert_eq!(summary.context_max_tokens, 512);
+    assert_eq!(summary.context_reserve_system_tokens, 32);
+    assert_eq!(summary.context_min_working_tokens, 1);
+    assert_eq!(summary.context_max_tool_results, 5);
+    assert_eq!(summary.context_max_memory_segments, 5);
     assert_eq!(summary.api_key_state, None);
 }
 
@@ -37,6 +42,19 @@ fn runtime_config_rejects_zero_recall_limit() {
         .expect_err("zero recall limit should fail");
 
     assert_eq!(err.field, "recall_limit");
+}
+
+#[test]
+fn runtime_config_rejects_context_system_reserve_over_budget() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.context_budget.max_tokens = 32;
+    config.context_budget.reserve_system_tokens = 64;
+
+    let err = config
+        .validate()
+        .expect_err("oversized system reserve should fail");
+
+    assert_eq!(err.field, "context.reserve_system_tokens");
 }
 
 #[test]

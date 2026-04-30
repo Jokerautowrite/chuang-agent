@@ -101,6 +101,10 @@ pub struct ConfigSummary {
     pub db_path: String,
     pub recall_limit: usize,
     pub context_max_tokens: u16,
+    pub context_reserve_system_tokens: u16,
+    pub context_min_working_tokens: u16,
+    pub context_max_tool_results: usize,
+    pub context_max_memory_segments: usize,
     pub api_key_state: Option<String>,
 }
 
@@ -151,6 +155,12 @@ impl RuntimeConfig {
                 message: "context max_tokens must be greater than zero".to_string(),
             });
         }
+        if self.context_budget.reserve_system_tokens > self.context_budget.max_tokens {
+            return Err(ConfigError {
+                field: "context.reserve_system_tokens".to_string(),
+                message: "context reserve_system_tokens must not exceed max_tokens".to_string(),
+            });
+        }
 
         self.provider.validate()?;
         self.identity_memory.validate()?;
@@ -182,6 +192,10 @@ impl RuntimeConfig {
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
             context_max_tokens: self.context_budget.max_tokens,
+            context_reserve_system_tokens: self.context_budget.reserve_system_tokens,
+            context_min_working_tokens: self.context_budget.min_working_tokens,
+            context_max_tool_results: self.context_budget.max_tool_results,
+            context_max_memory_segments: self.context_budget.max_memory_segments,
             api_key_state: provider.api_key_state,
         }
     }

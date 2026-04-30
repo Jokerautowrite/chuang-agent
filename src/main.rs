@@ -573,7 +573,12 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
             | "--provider-transport"
             | "--identity-memory-root"
             | "--subagent"
-            | "--subagent-queue-root" => index += 2,
+            | "--subagent-queue-root"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -721,6 +726,14 @@ fn print_status(status: &ChuangMvpStatus) {
     println!("recall_limit: {}", status.config.recall_limit);
     println!("context_max_tokens: {}", status.config.context_max_tokens);
     println!(
+        "context_budget: max={} reserve_system={} min_working={} max_tool_results={} max_memory_segments={}",
+        status.config.context_max_tokens,
+        status.config.context_reserve_system_tokens,
+        status.config.context_min_working_tokens,
+        status.config.context_max_tool_results,
+        status.config.context_max_memory_segments
+    );
+    println!(
         "identity_snapshot_chars: user={} memory={}",
         status
             .kernel
@@ -791,7 +804,12 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
             | "--provider-api-key"
             | "--provider-model"
             | "--provider-id"
-            | "--provider-transport" => index += 2,
+            | "--provider-transport"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -830,7 +848,12 @@ fn parse_subagent_dispatch(args: &[String]) -> Result<SubagentDispatchCliRequest
             | "--provider-api-key"
             | "--provider-model"
             | "--provider-id"
-            | "--provider-transport" => {
+            | "--provider-transport"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 runtime_args.push(args[index].clone());
                 runtime_args.push(value.clone());
@@ -936,7 +959,12 @@ fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCliRequest, St
             | "--provider-api-key"
             | "--provider-model"
             | "--provider-id"
-            | "--provider-transport" => {
+            | "--provider-transport"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 runtime_args.push(args[index].clone());
                 runtime_args.push(value.clone());
@@ -973,6 +1001,11 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut identity_memory_root: Option<PathBuf> = None;
     let mut subagent_kind: Option<String> = None;
     let mut subagent_queue_root: Option<PathBuf> = None;
+    let mut context_max_tokens: Option<u16> = None;
+    let mut context_reserve_system_tokens: Option<u16> = None;
+    let mut context_min_working_tokens: Option<u16> = None;
+    let mut context_max_tool_results: Option<usize> = None;
+    let mut context_max_memory_segments: Option<usize> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -1026,6 +1059,35 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 subagent_queue_root = Some(PathBuf::from(value));
                 index += 2;
             }
+            "--context-max-tokens" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                context_max_tokens = Some(parse_u16_flag("--context-max-tokens", value)?);
+                index += 2;
+            }
+            "--context-reserve-system-tokens" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                context_reserve_system_tokens =
+                    Some(parse_u16_flag("--context-reserve-system-tokens", value)?);
+                index += 2;
+            }
+            "--context-min-working-tokens" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                context_min_working_tokens =
+                    Some(parse_u16_flag("--context-min-working-tokens", value)?);
+                index += 2;
+            }
+            "--context-max-tool-results" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                context_max_tool_results =
+                    Some(parse_usize_flag("--context-max-tool-results", value)?);
+                index += 2;
+            }
+            "--context-max-memory-segments" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                context_max_memory_segments =
+                    Some(parse_usize_flag("--context-max-memory-segments", value)?);
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
@@ -1043,6 +1105,21 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     }
     if let Some(root) = subagent_queue_root {
         runtime.subagent_queue = SubagentQueueConfig { root };
+    }
+    if let Some(value) = context_max_tokens {
+        runtime.context_budget.max_tokens = value;
+    }
+    if let Some(value) = context_reserve_system_tokens {
+        runtime.context_budget.reserve_system_tokens = value;
+    }
+    if let Some(value) = context_min_working_tokens {
+        runtime.context_budget.min_working_tokens = value;
+    }
+    if let Some(value) = context_max_tool_results {
+        runtime.context_budget.max_tool_results = value;
+    }
+    if let Some(value) = context_max_memory_segments {
+        runtime.context_budget.max_memory_segments = value;
     }
     runtime.provider = match (provider_base_url, provider_api_key, provider_model) {
         (None, None, None) => ProviderConfig::Fake {
@@ -1187,6 +1264,11 @@ fn parse_u64_flag(flag: &str, raw: &str) -> Result<u64, String> {
         .map_err(|_| format!("{flag} must be a positive integer"))
 }
 
+fn parse_usize_flag(flag: &str, raw: &str) -> Result<usize, String> {
+    raw.parse::<usize>()
+        .map_err(|_| format!("{flag} must be a positive integer"))
+}
+
 fn default_subagent_task_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1226,5 +1308,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json]".to_string()
 }

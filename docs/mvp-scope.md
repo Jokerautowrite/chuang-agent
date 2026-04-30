@@ -23,6 +23,9 @@
 - `cargo run -- status`：查看 MVP 核心状态。
 - `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
 - `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
+- `cargo run -- subagent dispatch --task TEXT`：把子代理任务写入文件队列 dispatch JSON，不启动外部 runner。
+- `cargo run -- subagent report --run-id ID`：只读轮询子代理 report JSON。
+- `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 
 ## 当前明确不做
 
@@ -35,11 +38,10 @@
 
 ## 下一步优先级
 
-1. 把记忆层从普通 SQLite turn summary，推进到 Hermes 风格硬上限记忆策略。
-2. 把 fake subagent spawner 推进到最小真实子代理调度协议。
-3. 把 context engine 的状态和压缩策略接入 `ChuangKernel` 配置。
-4. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
-5. 最后再接桌面壳、飞书插件和服务控制 UI。
+1. 把子代理文件队列接到真实 runner adapter，但默认仍保持 fake/queued，不自动执行危险命令。
+2. 把 context engine 从确定性 budget packing 推进到可插拔 strategy 接口。
+3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
+4. 最后再接桌面壳、飞书插件和服务控制 UI。
 
 ## 判定 MVP 可用的最低标准
 
@@ -48,4 +50,6 @@
 - `cargo run -- run --input TEXT` 能返回结构化响应。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
+- `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
+- `cargo run -- subagent report --run-id ID --subagent-queue-root PATH` 能读取或轮询 report JSON。
 - 所有危险操作仍需显式审批或保持 fake。
