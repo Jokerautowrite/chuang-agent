@@ -363,6 +363,14 @@
   - OpenAI-compatible provider 路径也通过 `ChuangKernel::with_responder()`，不再绕过 MVP 内核。
   - 文本输出保持兼容，已有 CLI 冒烟测试无需改断言。
 - 已运行 `cargo test --test cli_smoke_tests --test cli_provider_smoke_tests --test chuang_kernel_tests`，当前专项测试通过。
+- 内核新增最小记忆写入闭环：
+  - `AgentRuntime::memory_store_mut()` 和 `MemoryRecallPipeline::store_mut()` 暴露受控写入口。
+  - `ChuangKernelTurn` 新增 `user_input`，用于生成可读 turn 摘要。
+  - `ChuangKernel::remember_turn()` 将执行后的 turn 写成普通 `turn_summary` 记忆，metadata 包含 `kind / agent_id / turn_id`。
+  - 该能力只追加普通记忆，不删除、不压缩、不改身份记忆。
+- 更新测试：
+  - `chuang_kernel_tests` 扩到 4 条，验证写入后的 turn 摘要可在下一轮 recall 命中。
+- 已运行 `cargo test --test chuang_kernel_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

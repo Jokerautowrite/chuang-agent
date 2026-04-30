@@ -41,6 +41,10 @@ impl<S> MemoryRecallPipeline<S> {
     pub fn new(store: S) -> Self {
         Self { store }
     }
+
+    pub fn store_mut(&mut self) -> &mut S {
+        &mut self.store
+    }
 }
 
 impl<S: MemoryStore> MemoryRecallPipeline<S> {

@@ -73,6 +73,10 @@ impl<S, R> AgentRuntime<S, R> {
             responder,
         }
     }
+
+    pub fn memory_store_mut(&mut self) -> &mut S {
+        self.recall.store_mut()
+    }
 }
 
 impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {

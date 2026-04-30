@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::context_engine::ContextBudget;
-use crate::memory_store::MemoryStore;
+use crate::memory_store::{MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::{FakeResponder, Responder};
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
@@ -19,6 +19,7 @@ pub struct ChuangKernelConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChuangKernelTurn {
     pub turn_id: String,
+    pub user_input: String,
     pub result: RuntimeResult,
     pub report: SubagentReport,
 }
@@ -75,8 +76,9 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
     ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
         let next_turn = self.turn_count + 1;
         let turn_id = format!("turn-{next_turn}");
+        let user_input = user_input.into();
         let result = self.runtime.run(&RuntimeRequest {
-            user_input: user_input.into(),
+            user_input: user_input.clone(),
             recall_limit: self.config.recall_limit,
             metadata: self.config.metadata.clone(),
             context_budget: self.config.context_budget.clone(),
@@ -92,8 +94,28 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
 
         Ok(ChuangKernelTurn {
             turn_id,
+            user_input,
             result,
             report,
         })
+    }
+
+    pub fn remember_turn(&mut self, turn: &ChuangKernelTurn) -> Result<String, MemoryStoreError> {
+        let record_id = format!("turn-memory-{}", turn.turn_id);
+        self.runtime.memory_store_mut().put(MemoryRecord {
+            id: record_id.clone(),
+            content: format!(
+                "user={}\nresponse={}\nsummary={}",
+                turn.user_input, turn.result.response.body, turn.report.summary
+            ),
+            metadata: BTreeMap::from([
+                ("kind".to_string(), "turn_summary".to_string()),
+                ("agent_id".to_string(), self.config.agent_id.clone()),
+                ("turn_id".to_string(), turn.turn_id.clone()),
+            ]),
+            created_at: "2026-05-01T00:00:00Z".to_string(),
+            expires_at: None,
+        })?;
+        Ok(record_id)
     }
 }

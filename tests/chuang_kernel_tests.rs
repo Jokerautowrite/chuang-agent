@@ -46,6 +46,7 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
         .expect("kernel turn should run");
 
     assert_eq!(turn.turn_id, "turn-1");
+    assert_eq!(turn.user_input, "创项目 MVP 先跑通");
     assert_eq!(turn.report.task_id.0, "turn-1");
     assert_eq!(turn.report.report_id.0, "report-turn-1");
     assert_eq!(turn.report.agent_id.0, "chuang-mvp");
@@ -54,6 +55,27 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
     assert!(turn.result.packed_context_preview.contains("system-core"));
     assert!(turn.report.summary.contains("model=stub-responder"));
     assert_eq!(kernel.snapshot().turn_count, 1);
+}
+
+#[test]
+fn chuang_kernel_can_write_turn_summary_memory_after_execution() {
+    let mut kernel = ChuangKernel::new(kernel_config(), InMemoryMemoryStore::new());
+
+    let turn = kernel
+        .run_turn("记住这次 MVP 闭环")
+        .expect("kernel turn should run");
+    let record_id = kernel
+        .remember_turn(&turn)
+        .expect("turn memory should be written");
+
+    assert_eq!(record_id, "turn-memory-turn-1");
+
+    let second = kernel
+        .run_turn("MVP")
+        .expect("second turn should recall stored memory");
+
+    assert!(second.result.recall_summary.contains("记住这次 MVP 闭环"));
+    assert_eq!(second.result.recall_hit_count, 1);
 }
 
 #[test]
