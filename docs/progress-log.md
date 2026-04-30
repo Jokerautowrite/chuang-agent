@@ -350,6 +350,14 @@
 - 更新测试：
   - `control_surface_tests` 扩到 6 条，新增 `needs_approval` outcome 和已审批 `applied` outcome。
 - 已运行 `cargo test --test control_surface_tests`，当前专项测试通过。
+- 从飞书适配转回创项目核心 MVP：
+  - 新增 `src/chuang_kernel.rs`，定义 `ChuangKernel`、`ChuangKernelConfig`、`ChuangKernelTurn`、`ChuangKernelSnapshot`。
+  - `ChuangKernel::run_turn()` 现在把 `AgentRuntime` 的记忆检索、上下文打包、responder 调用和 `SubagentReport` 审计报告连成一条最小主链路。
+  - `snapshot()` 暴露 agent_id、turn_count、recall_limit、metadata keys、context budget，用于未来桌面/插件查看核心状态。
+  - 失败请求不会推进 turn_count，避免错误轮次污染最小运行状态。
+- 新增测试：
+  - `tests/chuang_kernel_tests.rs` 覆盖最小可审计 turn、健康快照、失败不计轮次。
+- 已运行 `cargo test --test chuang_kernel_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -1,6 +1,7 @@
 pub mod actuator;
 pub mod agent_runtime;
 pub mod browser_worker;
+pub mod chuang_kernel;
 pub mod common;
 pub mod context_engine;
 pub mod control_intent;
