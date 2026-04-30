@@ -189,4 +189,5 @@ fn cli_run_reports_memory_write_hard_limit_clearly() {
     assert!(stderr.contains("memory_write_hard_limit_exceeded"));
     assert!(stderr.contains("limit_chars=2200"));
     assert!(stderr.contains("attempted_chars="));
+    assert!(stderr.contains("existing_entries="));
 }

@@ -415,6 +415,15 @@
 - 更新测试：
   - `chuang_kernel_tests` 扩到 6 条，新增 MVP 默认配置断言。
 - 已运行 `cargo test --test chuang_kernel_tests --test kernel_status_tests --test cli_smoke_tests`，当前专项测试通过。
+- 硬上限错误扩展现有记忆条目视图：
+  - 新增 `MemoryEntryView { id, content_preview, chars }`。
+  - `ChuangKernelMemoryError::HardLimitExceeded` 从 `existing_record_ids` 升级为 `existing_entries`。
+  - 超限时返回已有 turn summary 的轻量预览，后续可交给模型或人工决定如何压缩，而不是自动删除。
+  - CLI 超限错误同步输出 `existing_entries=id:chars` 概要。
+- 更新测试：
+  - `chuang_kernel_tests` 验证超限错误包含已有条目的 ID、预览和字符数。
+  - `cli_smoke_tests` 验证 CLI 超限错误包含 `existing_entries` 字段。
+- 已运行 `cargo test --test chuang_kernel_tests --test cli_smoke_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -52,12 +52,19 @@ pub struct ChuangKernelSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryEntryView {
+    pub id: String,
+    pub content_preview: String,
+    pub chars: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChuangKernelMemoryError {
     Store(MemoryStoreError),
     HardLimitExceeded {
         limit_chars: usize,
         attempted_chars: usize,
-        existing_record_ids: Vec<String>,
+        existing_entries: Vec<MemoryEntryView>,
     },
 }
 
@@ -145,7 +152,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 return Err(ChuangKernelMemoryError::HardLimitExceeded {
                     limit_chars,
                     attempted_chars,
-                    existing_record_ids: self.existing_turn_summary_ids()?,
+                    existing_entries: self.existing_turn_summary_entries()?,
                 });
             }
         }
@@ -167,7 +174,9 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         Ok(record_id)
     }
 
-    fn existing_turn_summary_ids(&mut self) -> Result<Vec<String>, ChuangKernelMemoryError> {
+    fn existing_turn_summary_entries(
+        &mut self,
+    ) -> Result<Vec<MemoryEntryView>, ChuangKernelMemoryError> {
         let hits = self
             .runtime
             .memory_store_mut()
@@ -178,6 +187,17 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             })
             .map_err(ChuangKernelMemoryError::Store)?;
 
-        Ok(hits.into_iter().map(|hit| hit.record.id).collect())
+        Ok(hits
+            .into_iter()
+            .map(|hit| MemoryEntryView {
+                id: hit.record.id,
+                chars: hit.record.content.chars().count(),
+                content_preview: preview_chars(&hit.record.content, 80),
+            })
+            .collect())
     }
+}
+
+fn preview_chars(content: &str, limit: usize) -> String {
+    content.chars().take(limit).collect()
 }

@@ -263,15 +263,19 @@ fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemo
         chuang_agent::chuang_kernel::ChuangKernelMemoryError::HardLimitExceeded {
             limit_chars,
             attempted_chars,
-            existing_record_ids,
+            existing_entries,
         } => format!(
-            "memory_write_hard_limit_exceeded limit_chars={} attempted_chars={} existing_record_ids={}",
+            "memory_write_hard_limit_exceeded limit_chars={} attempted_chars={} existing_entries={}",
             limit_chars,
             attempted_chars,
-            if existing_record_ids.is_empty() {
+            if existing_entries.is_empty() {
                 "none".to_string()
             } else {
-                existing_record_ids.join(",")
+                existing_entries
+                    .into_iter()
+                    .map(|entry| format!("{}:{}chars", entry.id, entry.chars))
+                    .collect::<Vec<_>>()
+                    .join(",")
             }
         ),
     }

@@ -152,11 +152,17 @@ fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
         ChuangKernelMemoryError::HardLimitExceeded {
             limit_chars,
             attempted_chars,
-            existing_record_ids,
+            existing_entries,
         } => {
             assert_eq!(limit_chars, 12);
             assert!(attempted_chars > 12);
-            assert_eq!(existing_record_ids, vec!["existing-turn".to_string()]);
+            assert_eq!(existing_entries.len(), 1);
+            assert_eq!(existing_entries[0].id, "existing-turn");
+            assert_eq!(existing_entries[0].content_preview, "旧的 turn summary");
+            assert_eq!(
+                existing_entries[0].chars,
+                "旧的 turn summary".chars().count()
+            );
         }
         other => panic!("unexpected error: {other:?}"),
     }
