@@ -44,3 +44,4 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `subagent_spawner` 主文件保留协议类型、trait、slot 转发和共用校验；fake / queued 实现已拆到子模块。
 - `control_plane` 主文件保留控制面协议、治理/审计辅助函数和共用校验；fake 实现已拆到子模块。真实 systemd/桌面控制必须单独作为 adapter。
 - `actuator` 主文件保留人类级操作面协议；fake 实现已拆到子模块。真实桌面、浏览器、微信、ADB 控制必须单独作为 adapter。
+- `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现已拆到子模块。真实技能提炼/固化必须单独作为 evolver adapter。
