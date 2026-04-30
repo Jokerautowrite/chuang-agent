@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
+use chuang_agent::responder::FakeResponder;
 
 fn temp_db_path(name: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
@@ -29,6 +30,10 @@ fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) 
     }
 }
 
+fn runtime<S>(store: S) -> AgentRuntime<S, FakeResponder> {
+    AgentRuntime::with_responder(store, FakeResponder::new("stub-responder"))
+}
+
 #[test]
 fn agent_runtime_runs_with_sqlite_memory_store() {
     let path = temp_db_path("sqlite-loop");
@@ -50,7 +55,7 @@ fn agent_runtime_runs_with_sqlite_memory_store() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "现在先把创项目跑起来".to_string(),
@@ -86,7 +91,7 @@ fn agent_runtime_returns_structured_trace_fields() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "创项目先跑起来".to_string(),
@@ -116,7 +121,7 @@ fn agent_runtime_exposes_structured_context_debug_fields() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "这是一段很长很长的用户输入，用来制造 working segment 无法装入预算的情况"

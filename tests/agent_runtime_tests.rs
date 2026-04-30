@@ -5,6 +5,7 @@ use chuang_agent::agent_runtime::{
 };
 use chuang_agent::context_engine::{ContextBudget, ContextSegment, SegmentSource};
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
+use chuang_agent::responder::FakeResponder;
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {
     MemoryRecord {
@@ -19,6 +20,10 @@ fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) 
     }
 }
 
+fn runtime<S>(store: S) -> AgentRuntime<S, FakeResponder> {
+    AgentRuntime::with_responder(store, FakeResponder::new("stub-responder"))
+}
+
 #[test]
 fn agent_runtime_runs_minimal_loop_with_packed_context() {
     let mut store = InMemoryMemoryStore::new();
@@ -31,7 +36,7 @@ fn agent_runtime_runs_minimal_loop_with_packed_context() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "现在先把创项目跑起来".to_string(),
@@ -53,7 +58,7 @@ fn agent_runtime_runs_minimal_loop_with_packed_context() {
 #[test]
 fn agent_runtime_handles_empty_recall_hits() {
     let store = InMemoryMemoryStore::new();
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
 
     let result = runtime
         .run(&RuntimeRequest {
@@ -73,7 +78,7 @@ fn agent_runtime_handles_empty_recall_hits() {
 #[test]
 fn agent_runtime_packs_extra_identity_context_segments() {
     let store = InMemoryMemoryStore::new();
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
 
     let result = runtime
         .run(&RuntimeRequest {
@@ -105,7 +110,7 @@ fn agent_runtime_packs_extra_identity_context_segments() {
 #[test]
 fn agent_runtime_rejects_zero_recall_limit() {
     let store = InMemoryMemoryStore::new();
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
 
     let error = runtime
         .run(&RuntimeRequest {
@@ -164,7 +169,7 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "把创项目主线继续推进".to_string(),
@@ -196,7 +201,7 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
 
 #[test]
 fn agent_runtime_exposes_budget_exceeded_reason_in_preview() {
-    let runtime = AgentRuntime::new(InMemoryMemoryStore::new());
+    let runtime = runtime(InMemoryMemoryStore::new());
 
     let result = runtime
         .run(&RuntimeRequest {
@@ -266,7 +271,7 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
 #[test]
 fn agent_runtime_surfaces_context_pack_errors() {
     let store = InMemoryMemoryStore::new();
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
 
     let error = runtime
         .run(&RuntimeRequest {

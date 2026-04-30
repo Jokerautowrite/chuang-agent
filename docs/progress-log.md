@@ -8,6 +8,8 @@
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
 - CLI 新增 `config init`：显式生成默认 `config.toml`，目标存在时拒绝覆盖。
 - 未显式传 `--config` 时，CLI 会自动读取当前目录 `config.toml`；不存在则继续使用内置默认值。
+- 核心边界第一轮瘦身已开始：`AgentRuntime` / `ChuangKernel` 不再默认构造 `FakeResponder`，由 CLI 或测试显式注入。
+- 新增 `docs/core-boundary.md` 与 core 边界测试，防止核心文件继续引入具体 provider / browser / control plane / subagent adapter。
 
 ## 2026-04-30
 

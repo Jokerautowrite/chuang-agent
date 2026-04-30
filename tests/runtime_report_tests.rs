@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::responder::ResponderMeta;
+use chuang_agent::responder::{FakeResponder, ResponderMeta};
 use chuang_agent::runtime_report::{build_runtime_report, report_metadata};
 use chuang_agent::subagent_report::ExecutionStatus;
 
@@ -32,6 +32,10 @@ fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) 
     }
 }
 
+fn runtime<S>(store: S) -> AgentRuntime<S, FakeResponder> {
+    AgentRuntime::with_responder(store, FakeResponder::new("stub-responder"))
+}
+
 #[test]
 fn runtime_report_builder_carries_runtime_debug_fields() {
     let mut store =
@@ -45,7 +49,7 @@ fn runtime_report_builder_carries_runtime_debug_fields() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "这是一段很长很长的用户输入，用来制造 working segment 无法装入预算的情况"
@@ -173,7 +177,7 @@ fn runtime_report_metadata_exposes_core_fields() {
         ))
         .expect("put should succeed");
 
-    let runtime = AgentRuntime::new(store);
+    let runtime = runtime(store);
     let result = runtime
         .run(&RuntimeRequest {
             user_input: "创项目先跑起来".to_string(),

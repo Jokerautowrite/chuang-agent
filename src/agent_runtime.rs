@@ -6,9 +6,7 @@ use crate::context_engine::{
 };
 use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
 use crate::memory_store::MemoryStore;
-use crate::responder::{
-    FakeResponder, Responder, ResponderMeta, ResponderOutput, ResponderRequest,
-};
+use crate::responder::{Responder, ResponderMeta, ResponderOutput, ResponderRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequest {
@@ -53,18 +51,9 @@ pub enum AgentRuntimeError {
     ContextPack(ContextPackError),
 }
 
-pub struct AgentRuntime<S, R = FakeResponder> {
+pub struct AgentRuntime<S, R> {
     recall: MemoryRecallPipeline<S>,
     responder: R,
-}
-
-impl<S> AgentRuntime<S, FakeResponder> {
-    pub fn new(store: S) -> Self {
-        Self {
-            recall: MemoryRecallPipeline::new(store),
-            responder: FakeResponder::new("stub-responder"),
-        }
-    }
 }
 
 impl<S, R> AgentRuntime<S, R> {

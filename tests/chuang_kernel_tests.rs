@@ -6,6 +6,7 @@ use chuang_agent::chuang_kernel::{
 use chuang_agent::context_engine::ContextBudget;
 use chuang_agent::hermes_memory::DualFileMemorySnapshot;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
+use chuang_agent::responder::FakeResponder;
 use chuang_agent::subagent_report::ExecutionStatus;
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {
@@ -33,6 +34,10 @@ fn kernel_config() -> ChuangKernelConfig {
     }
 }
 
+fn kernel<S>(config: ChuangKernelConfig, store: S) -> ChuangKernel<S, FakeResponder> {
+    ChuangKernel::with_responder(config, store, FakeResponder::new("stub-responder"))
+}
+
 #[test]
 fn chuang_kernel_runs_minimal_auditable_turn() {
     let mut store = InMemoryMemoryStore::new();
@@ -44,7 +49,7 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
             "2026-05-01T10:00:00Z",
         ))
         .expect("memory seed should succeed");
-    let mut kernel = ChuangKernel::new(kernel_config(), store);
+    let mut kernel = kernel(kernel_config(), store);
 
     let turn = kernel
         .run_turn("创项目 MVP 先跑通")
@@ -64,7 +69,7 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
 
 #[test]
 fn chuang_kernel_can_write_turn_summary_memory_after_execution() {
-    let mut kernel = ChuangKernel::new(kernel_config(), InMemoryMemoryStore::new());
+    let mut kernel = kernel(kernel_config(), InMemoryMemoryStore::new());
 
     let turn = kernel
         .run_turn("记住这次 MVP 闭环")
@@ -100,7 +105,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
     };
-    let kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
+    let kernel = kernel(config, InMemoryMemoryStore::new());
 
     let snapshot = kernel.snapshot();
 
@@ -124,7 +129,7 @@ fn chuang_kernel_injects_identity_snapshot_into_runtime_context() {
         }),
         ..kernel_config()
     };
-    let mut kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
     let turn = kernel
         .run_turn("现在读取身份快照")
@@ -171,7 +176,7 @@ fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
         memory_write_max_chars: Some(12),
         ..kernel_config()
     };
-    let mut kernel = ChuangKernel::new(config, store);
+    let mut kernel = kernel(config, store);
 
     let turn = kernel
         .run_turn("这次写入应该超过硬上限")
@@ -211,7 +216,7 @@ fn chuang_kernel_rejects_invalid_runtime_request_without_incrementing_turn() {
         recall_limit: 0,
         ..kernel_config()
     };
-    let mut kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
     let error = kernel
         .run_turn("这个请求应该失败")

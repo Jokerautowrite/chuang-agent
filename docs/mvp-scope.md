@@ -8,10 +8,13 @@
 
 1. 读取长期记忆
 2. 打包上下文
-3. 调用 responder
-4. 生成可审计报告
-5. 可选写回本轮 turn summary
-6. 暴露核心状态
+3. 经过治理层形成执行请求
+4. 通过注入的 execution/provider port 执行
+5. 生成可审计报告
+6. 可选写回本轮 turn summary
+7. 暴露核心状态
+
+核心边界见 `docs/core-boundary.md`。provider、子代理、桌面/浏览器、控制面和外部通道都属于 adapter/plugin，不进入核心主干。
 
 ## 已具备能力
 

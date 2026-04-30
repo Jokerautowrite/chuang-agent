@@ -24,7 +24,7 @@ use chuang_agent::hermes_memory::{
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::responder::ProviderTransport;
+use chuang_agent::responder::{FakeResponder, ProviderTransport};
 use chuang_agent::runtime_config::{
     ConfigSummary, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
     SubagentConfig, SubagentQueueConfig,
@@ -598,8 +598,11 @@ fn run_with_options(
             let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
                 .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
             seed_default_memory_if_empty(&mut store)?;
-            let mut kernel =
-                ChuangKernel::new(kernel_config_from_runtime(&request.options.runtime)?, store);
+            let mut kernel = ChuangKernel::with_responder(
+                kernel_config_from_runtime(&request.options.runtime)?,
+                store,
+                FakeResponder::new("stub-responder"),
+            );
             kernel
                 .run_turn(request.user_input.clone())
                 .map_err(|e| format!("runtime_failed: {e:?}"))

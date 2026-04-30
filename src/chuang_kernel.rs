@@ -7,7 +7,7 @@ use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
 };
 use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
-use crate::responder::{FakeResponder, Responder};
+use crate::responder::Responder;
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
 use serde::Serialize;
@@ -69,16 +69,10 @@ pub enum ChuangKernelMemoryError {
     },
 }
 
-pub struct ChuangKernel<S, R = FakeResponder> {
+pub struct ChuangKernel<S, R> {
     config: ChuangKernelConfig,
     runtime: AgentRuntime<S, R>,
     turn_count: u64,
-}
-
-impl<S> ChuangKernel<S, FakeResponder> {
-    pub fn new(config: ChuangKernelConfig, store: S) -> Self {
-        Self::with_responder(config, store, FakeResponder::new("stub-responder"))
-    }
 }
 
 impl<S, R> ChuangKernel<S, R> {
