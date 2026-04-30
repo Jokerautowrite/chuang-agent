@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chuang_agent::responder::ProviderTransport;
+use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
     ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
     RuntimeConfig, SubagentConfig, SubagentQueueConfig,

@@ -2,9 +2,10 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use chuang_agent::responder::{
-    OpenAICompatibleProviderAdapter, ProviderAdapterResponder, ProviderTransport, ResponderRequest,
+use chuang_agent::provider_openai_compatible::{
+    OpenAICompatibleProviderAdapter, ProviderTransport,
 };
+use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
 
 #[test]
 fn openai_compatible_http_transport_executes_real_post_against_local_server() {

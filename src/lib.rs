@@ -17,6 +17,7 @@ pub mod memory_policy;
 pub mod memory_recall;
 pub mod memory_store;
 pub mod memory_store_sqlite;
+pub mod provider_openai_compatible;
 pub mod responder;
 pub mod runtime_config;
 pub mod runtime_config_file;

@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
+use chuang_agent::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use chuang_agent::responder::{
-    OpenAICompatibleProviderAdapter, ProviderAdapterResponder, ProviderAdapterResponse,
-    ProviderIdentity, Responder, ResponderRequest,
+    ProviderAdapterResponder, ProviderAdapterResponse, ProviderIdentity, Responder,
+    ResponderRequest,
 };
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {

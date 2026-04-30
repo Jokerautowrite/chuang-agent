@@ -10,6 +10,7 @@
 - 未显式传 `--config` 时，CLI 会自动读取当前目录 `config.toml`；不存在则继续使用内置默认值。
 - 核心边界第一轮瘦身已开始：`AgentRuntime` / `ChuangKernel` 不再默认构造 `FakeResponder`，由 CLI 或测试显式注入。
 - 新增 `docs/core-boundary.md` 与 core 边界测试，防止核心文件继续引入具体 provider / browser / control plane / subagent adapter。
+- `responder.rs` 已拆出 OpenAI-compatible 具体实现到 `provider_openai_compatible.rs`；`responder` 现在主要保留抽象 trait 和 fake/scripted 测试 responder。
 
 ## 2026-04-30
 

@@ -24,7 +24,8 @@ use chuang_agent::hermes_memory::{
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::responder::{FakeResponder, ProviderTransport};
+use chuang_agent::provider_openai_compatible::ProviderTransport;
+use chuang_agent::responder::FakeResponder;
 use chuang_agent::runtime_config::{
     ConfigSummary, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
     SubagentConfig, SubagentQueueConfig,

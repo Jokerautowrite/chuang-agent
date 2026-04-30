@@ -37,8 +37,9 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `runtime_config` 和 `main` 属于组合层，可以认识具体 adapter，但不要把具体实现传回 core。
 - 新能力默认先落在 adapter/plugin，只有身份、记忆、上下文、治理、报告这类稳定语义才允许进入 core。
 
-## 允许的短期债务
+## 当前迁移状态
 
-- `responder` 当前同时包含 responder trait、fake responder、OpenAI-compatible adapter。下一阶段应拆成 `responder` trait + `provider_*` adapter 模块。
+- `responder` 保留 responder trait、provider adapter trait、fake/scripted 测试实现。
+- `provider_openai_compatible` 承载 OpenAI-compatible 具体 adapter；调用点直接引用 provider 模块。
 - `subagent_spawner` 当前同时包含 trait、fake spawner、queued spawner。下一阶段应拆 trait 和实现。
 - `control_plane` 当前 fake 实现仍在同一文件。真实 systemd/桌面控制必须单独作为 adapter。

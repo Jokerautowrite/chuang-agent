@@ -1,6 +1,7 @@
-use chuang_agent::responder::{
-    OpenAICompatibleProviderAdapter, ProviderAdapterResponder, ProviderTransport, ResponderRequest,
+use chuang_agent::provider_openai_compatible::{
+    OpenAICompatibleProviderAdapter, ProviderTransport,
 };
+use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
 
 #[test]
 fn openai_compatible_http_transport_reports_config_error_for_https_until_tls_client_exists() {

@@ -1,4 +1,5 @@
-use chuang_agent::responder::{OpenAICompatibleProviderAdapter, Responder, ResponderRequest};
+use chuang_agent::provider_openai_compatible::OpenAICompatibleProviderAdapter;
+use chuang_agent::responder::{Responder, ResponderRequest};
 
 #[test]
 fn openai_compatible_adapter_rejects_missing_base_url() {

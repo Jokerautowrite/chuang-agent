@@ -1,6 +1,7 @@
-use chuang_agent::responder::{
-    OpenAICompatibleProviderAdapter, ProviderAdapterResponder, ProviderTransport, ResponderRequest,
+use chuang_agent::provider_openai_compatible::{
+    OpenAICompatibleProviderAdapter, ProviderTransport,
 };
+use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
 
 #[test]
 fn openai_compatible_adapter_respond_exposes_transport_mode_stub() {

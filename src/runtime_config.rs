@@ -5,7 +5,7 @@ use crate::context_engine::ContextBudget;
 use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
-use crate::responder::{OpenAICompatibleProviderAdapter, ProviderTransport};
+use crate::provider_openai_compatible::{OpenAICompatibleProviderAdapter, ProviderTransport};
 use crate::subagent_queue::FileSubagentQueueConfig;
 use serde::Serialize;
 

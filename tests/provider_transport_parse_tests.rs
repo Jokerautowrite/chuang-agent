@@ -1,4 +1,4 @@
-use chuang_agent::responder::ProviderTransport;
+use chuang_agent::provider_openai_compatible::ProviderTransport;
 
 #[test]
 fn provider_transport_parses_http_variant() {

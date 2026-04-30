@@ -1,6 +1,5 @@
-use chuang_agent::responder::{
-    OpenAICompatibleProviderAdapter, ProviderAdapterResponder, ResponderRequest,
-};
+use chuang_agent::provider_openai_compatible::OpenAICompatibleProviderAdapter;
+use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
 
 #[test]
 fn openai_compatible_adapter_builds_http_request_preview() {
