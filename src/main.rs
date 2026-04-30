@@ -14,6 +14,7 @@ use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::ProviderTransport;
 use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
 use chuang_agent::slot_registry::build_runtime_slots;
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliOptions {
@@ -81,9 +82,7 @@ fn control_command(args: &[String]) -> Result<(), String> {
 }
 
 fn control_list_command(args: &[String]) -> Result<(), String> {
-    if !args.is_empty() {
-        return Err(usage());
-    }
+    let output = parse_control_output(args)?;
 
     let options = CliOptions {
         runtime: RuntimeConfig::new(default_db_path()),
@@ -91,8 +90,14 @@ fn control_list_command(args: &[String]) -> Result<(), String> {
     let slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    for unit in build_unit_views(slots.control_plane.list_units()) {
-        print_control_unit_view(&unit);
+    let views = build_unit_views(slots.control_plane.list_units());
+    match output {
+        ControlOutputFormat::Text => {
+            for unit in views {
+                print_control_unit_view(&unit);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&views)?,
     }
 
     Ok(())
@@ -116,11 +121,11 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     ) {
         Ok(result) => result,
         Err(ControlWorkflowError::ApprovalRequired(decision)) => {
-            print_control_view(&build_decision_view(&unit, &decision));
+            print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action requires --approve".to_string());
         }
         Err(ControlWorkflowError::NotAllowed(decision)) => {
-            print_control_view(&build_decision_view(&unit, &decision));
+            print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action was not allowed by governance".to_string());
         }
         Err(ControlWorkflowError::Control(err)) => return Err(format!("control_failed: {err:?}")),
@@ -129,18 +134,20 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         }
     };
 
-    print_control_view(&result.view);
+    print_control_view_with_format(&result.view, request.output)?;
     let receipt = result
         .receipt
         .ok_or_else(|| "control workflow returned no receipt".to_string())?;
-    println!(
-        "control_applied unit_id={} action={} previous={:?} next={:?} model={}",
-        receipt.unit_id,
-        receipt.action.as_str(),
-        receipt.previous_status,
-        receipt.next_status,
-        receipt.model_name.as_deref().unwrap_or("none")
-    );
+    if request.output == ControlOutputFormat::Text {
+        println!(
+            "control_applied unit_id={} action={} previous={:?} next={:?} model={}",
+            receipt.unit_id,
+            receipt.action.as_str(),
+            receipt.previous_status,
+            receipt.next_status,
+            receipt.model_name.as_deref().unwrap_or("none")
+        );
+    }
 
     Ok(())
 }
@@ -199,6 +206,24 @@ fn run_with_options(
 struct ControlApplyCliRequest {
     request: ControlRequest,
     approve: bool,
+    output: ControlOutputFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlOutputFormat {
+    Text,
+    Json,
+}
+
+fn parse_control_output(args: &[String]) -> Result<ControlOutputFormat, String> {
+    let mut output = ControlOutputFormat::Text;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => output = ControlOutputFormat::Json,
+            _ => return Err(usage()),
+        }
+    }
+    Ok(output)
 }
 
 fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String> {
@@ -207,6 +232,7 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
     let mut reason: Option<String> = None;
     let mut model_name: Option<String> = None;
     let mut approve = false;
+    let mut output = ControlOutputFormat::Text;
 
     let mut index = 0;
     while index < args.len() {
@@ -243,6 +269,10 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
                 approve = true;
                 index += 1;
             }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
             _ => return Err(usage()),
         }
     }
@@ -266,6 +296,7 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
             reason: reason.ok_or_else(|| "control apply requires --reason".to_string())?,
         },
         approve,
+        output,
     })
 }
 
@@ -279,6 +310,19 @@ fn print_control_view(view: &ControlWorkflowView) {
     }
 }
 
+fn print_control_view_with_format(
+    view: &ControlWorkflowView,
+    output: ControlOutputFormat,
+) -> Result<(), String> {
+    match output {
+        ControlOutputFormat::Text => {
+            print_control_view(view);
+            Ok(())
+        }
+        ControlOutputFormat::Json => print_json(view),
+    }
+}
+
 fn print_control_unit_view(view: &ControlUnitView) {
     println!(
         "unit_id={} name={} kind={} status={} model={} channel={}",
@@ -289,6 +333,13 @@ fn print_control_unit_view(view: &ControlUnitView) {
         view.model_name.as_deref().unwrap_or("none"),
         view.channel
     );
+}
+
+fn print_json<T: Serialize>(value: &T) -> Result<(), String> {
+    let rendered =
+        serde_json::to_string_pretty(value).map_err(|e| format!("json_render_failed: {e}"))?;
+    println!("{rendered}");
+    Ok(())
 }
 
 fn build_runtime(db_path: &PathBuf) -> Result<AgentRuntime<SqliteMemoryStore>, String> {
@@ -513,5 +564,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | control list | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve]".to_string()
+    "usage: cargo run -- <run|repl|control> [--db PATH] [--input TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json]".to_string()
 }

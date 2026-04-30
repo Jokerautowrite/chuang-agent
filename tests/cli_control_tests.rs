@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use serde_json::Value;
+
 #[test]
 fn cli_control_list_shows_default_local_agents() {
     let output = Command::new("cargo")
@@ -129,4 +131,67 @@ fn cli_control_apply_reports_unsupported_action_concisely() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(stderr.contains("unsupported control action: reload"));
+}
+
+#[test]
+fn cli_control_list_can_render_json_for_control_surfaces() {
+    let output = Command::new("cargo")
+        .args(["run", "--quiet", "--", "control", "list", "--json"])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+    let units = parsed.as_array().expect("control list should return array");
+
+    let xiaoce = units
+        .iter()
+        .find(|unit| unit["unit_id"] == "codex-xiaoce")
+        .expect("xiaoce should exist");
+    assert_eq!(xiaoce["display_name"], "小策");
+    assert_eq!(xiaoce["kind"], "agent");
+    assert_eq!(xiaoce["channel"], "feishu");
+}
+
+#[test]
+fn cli_control_apply_can_render_json_view() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "control",
+            "apply",
+            "--unit",
+            "codex-xiaoce",
+            "--action",
+            "change-model",
+            "--model",
+            "gpt-5.5",
+            "--reason",
+            "test json model switch",
+            "--approve",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["unit_id"], "codex-xiaoce");
+    assert_eq!(parsed["display_name"], "小策");
+    assert_eq!(parsed["action"], "change_model");
+    assert_eq!(parsed["model_name"], "gpt-5.5");
+    assert_eq!(parsed["audit_recorded"], true);
 }

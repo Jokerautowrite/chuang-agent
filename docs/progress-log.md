@@ -312,6 +312,13 @@
 - 更新测试：
   - `cli_control_tests` 新增缺少 action 和不支持 action 的错误提示断言。
 - 已运行 `cargo test --test cli_control_tests`，当前专项测试通过。
+- 控制 CLI 新增 JSON 输出模式：
+  - `cargo run -- control list --json` 输出 `ControlUnitView[]`。
+  - `cargo run -- control apply ... --json` 输出 `ControlWorkflowView`。
+  - 文本输出保持兼容，JSON 输出复用同一份 view，避免飞书/桌面 UI 另起一套拼接逻辑。
+- 更新测试：
+  - `cli_control_tests` 新增 list JSON 和 apply JSON 断言。
+- 已运行 `cargo test --test cli_control_tests`，当前 7 条专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

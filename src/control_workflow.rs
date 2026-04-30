@@ -3,6 +3,7 @@ use crate::control_plane::{
     ControlReceipt, ControlRequest, ManagedUnit,
 };
 use crate::governance::{Governance, GovernanceError, RiskDecision};
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlWorkflowRequest {
@@ -18,7 +19,7 @@ pub struct ControlWorkflowResult {
     pub view: ControlWorkflowView,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ControlWorkflowView {
     pub unit_id: String,
     pub display_name: String,
@@ -30,7 +31,7 @@ pub struct ControlWorkflowView {
     pub audit_recorded: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ControlUnitView {
     pub unit_id: String,
     pub display_name: String,
