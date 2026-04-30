@@ -116,6 +116,19 @@ fn validator_accepts_valid_report_bytes() {
 }
 
 #[test]
+fn subagent_report_can_roundtrip_as_json() {
+    let report = sample_report();
+
+    let encoded = serde_json::to_string(&report).expect("report should serialize");
+    let decoded: SubagentReport =
+        serde_json::from_str(&encoded).expect("report should deserialize");
+
+    assert_eq!(decoded, report);
+    assert!(encoded.contains("\"status\":\"Success\""));
+    assert!(encoded.contains("\"report_id\":\"report-1\""));
+}
+
+#[test]
 fn validator_rejects_unsupported_schema_major() {
     let validator = SubagentReportValidator::default();
     let raw = br#"{

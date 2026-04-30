@@ -1,6 +1,7 @@
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionStatus {
     Success,
     Failed,
@@ -20,7 +21,7 @@ impl ExecutionStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArtifactKind {
     File,
     Directory,
@@ -29,20 +30,20 @@ pub enum ArtifactKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactRef {
     pub kind: ArtifactKind,
     pub locator: String,
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextDropReasonSummary {
     pub segment_id: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextDebugSummary {
     pub dropped_segment_ids: Vec<String>,
     pub drop_reasons: Vec<ContextDropReasonSummary>,
@@ -51,7 +52,7 @@ pub struct ContextDebugSummary {
     pub working_reservation: Option<WorkingReservationDebug>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkingReservationDebug {
     pub reserved_segment_id: String,
     pub reserved_tokens: u16,
@@ -59,7 +60,7 @@ pub struct WorkingReservationDebug {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ResourceUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
@@ -68,7 +69,7 @@ pub struct ResourceUsage {
     pub peak_memory_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentReport {
     pub schema_version: String,
     pub report_id: ReportId,

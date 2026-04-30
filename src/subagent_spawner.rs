@@ -2,24 +2,26 @@ use std::collections::BTreeMap;
 
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
 use crate::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RunId(pub String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SubagentToolPolicy {
     Analyze,
     Execute,
     Orchestrate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContextIsolation {
     Isolated,
     Forked { max_parent_tokens: u16 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnRequest {
     pub task_id: TaskId,
     pub parent_agent_id: AgentId,
@@ -33,7 +35,7 @@ pub struct SpawnRequest {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnReceipt {
     pub run_id: RunId,
     pub agent_id: AgentId,
@@ -42,7 +44,7 @@ pub struct SpawnReceipt {
     pub recursive_spawn: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentDispatch {
     pub run_id: RunId,
     pub agent_id: AgentId,
@@ -58,7 +60,7 @@ pub struct SubagentDispatch {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KillReason {
     UserRequested,
     Timeout,
@@ -66,7 +68,7 @@ pub enum KillReason {
     Superseded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SubagentState {
     Running,
     Completed,

@@ -175,6 +175,31 @@ fn queued_spawner_emits_dispatch_and_waits_for_attached_report() {
 }
 
 #[test]
+fn queued_dispatch_can_roundtrip_as_json() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let mut spawn = request(SubagentToolPolicy::Execute);
+    spawn.context_isolation = ContextIsolation::Forked {
+        max_parent_tokens: 128,
+    };
+    spawn
+        .metadata
+        .insert("scope".to_string(), "mvp".to_string());
+    let receipt = spawner.spawn(spawn).expect("spawn should succeed");
+    let dispatch = spawner
+        .take_next_dispatch()
+        .expect("dispatch should be available");
+
+    let encoded = serde_json::to_string(&dispatch).expect("dispatch should serialize");
+    let decoded: chuang_agent::subagent_spawner::SubagentDispatch =
+        serde_json::from_str(&encoded).expect("dispatch should deserialize");
+
+    assert_eq!(decoded.run_id, receipt.run_id);
+    assert_eq!(decoded.agent_id, receipt.agent_id);
+    assert_eq!(decoded.metadata.get("scope"), Some(&"mvp".to_string()));
+    assert!(encoded.contains("\"tool_policy\":\"Execute\""));
+}
+
+#[test]
 fn queued_spawner_rejects_mismatched_attached_report() {
     let mut spawner = QueuedSubagentSpawner::new();
     let receipt = spawner

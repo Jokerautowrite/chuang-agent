@@ -510,6 +510,15 @@
 - 更新测试：
   - `cli_status_tests` 新增 CLI 选择 queued external 子代理槽位断言。
 - 已运行 `cargo test --test cli_status_tests --test runtime_config_tests --test slot_registry_tests`，当前专项测试通过。
+- 子代理跨进程边界补序列化：
+  - `TaskId / AgentId / ReportId / Timestamp / RunId` 新增 serde 透明序列化。
+  - `SubagentDispatch / SpawnRequest / SpawnReceipt / SubagentToolPolicy / ContextIsolation / KillReason / SubagentState` 新增 `Serialize / Deserialize`。
+  - `SubagentReport` 及其嵌套结构新增 `Serialize / Deserialize`。
+  - 这让 queued external 后续可以落成 JSON 文件队列、IPC 消息或外部 runner 协议，而不是只能在内存里流转。
+- 更新测试：
+  - `subagent_spawner_tests` 新增 dispatch JSON roundtrip。
+  - `subagent_report_tests` 新增 report JSON roundtrip。
+- 已运行 `cargo test --test subagent_spawner_tests --test subagent_report_tests --test slot_registry_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
