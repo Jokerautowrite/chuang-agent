@@ -31,7 +31,8 @@ use chuang_agent::runtime_config::{
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_spawner::{
-    ContextIsolation, QueuedSubagentSpawner, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
+    ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentSpawner,
+    SubagentToolPolicy,
 };
 use serde::Serialize;
 
@@ -145,6 +146,7 @@ fn control_command(args: &[String]) -> Result<(), String> {
 fn subagent_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dispatch") => subagent_dispatch_command(&args[1..]),
+        Some("report") => subagent_report_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -190,6 +192,42 @@ fn subagent_dispatch_command(args: &[String]) -> Result<(), String> {
                 "subagent_dispatch_queued run_id={} agent_id={} task_id={} path={}",
                 output.run_id, output.agent_id, output.task_id, output.dispatch_path
             );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn subagent_report_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_report(args)?;
+    let queue_config = request
+        .options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let queue = FileSubagentQueue::open(queue_config)
+        .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
+    let report = queue
+        .read_report(&request.run_id)
+        .map_err(|e| format!("subagent_report_read_failed: {e:?}"))?;
+    let output = SubagentReportCliOutput {
+        run_id: request.run_id.0.clone(),
+        available: report.is_some(),
+        report,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            if let Some(report) = &output.report {
+                println!(
+                    "subagent_report_available run_id={} status={:?} summary={}",
+                    output.run_id, report.status, report.summary
+                );
+            } else {
+                println!("subagent_report_missing run_id={}", output.run_id);
+            }
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -485,6 +523,20 @@ struct SubagentDispatchCliOutput {
     task_id: String,
     dispatch_path: String,
     queue_root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SubagentReportCliRequest {
+    options: CliOptions,
+    output: ControlOutputFormat,
+    run_id: RunId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SubagentReportCliOutput {
+    run_id: String,
+    available: bool,
+    report: Option<chuang_agent::subagent_report::SubagentReport>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -864,6 +916,53 @@ fn parse_subagent_dispatch(args: &[String]) -> Result<SubagentDispatchCliRequest
     })
 }
 
+fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCliRequest, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut run_id: Option<String> = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--db"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                runtime_args.push(args[index].clone());
+                runtime_args.push(value.clone());
+                index += 2;
+            }
+            "--run-id" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "subagent report requires value after --run-id".to_string())?;
+                run_id = Some(value.clone());
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let options = parse_cli_options(&runtime_args)?;
+    let run_id = RunId(run_id.ok_or_else(|| "subagent report requires --run-id".to_string())?);
+
+    Ok(SubagentReportCliRequest {
+        options,
+        output,
+        run_id,
+    })
+}
+
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
@@ -1127,5 +1226,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json]".to_string()
 }

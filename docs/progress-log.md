@@ -557,6 +557,14 @@
 - 新增测试：
   - `cli_subagent_dispatch_tests` 覆盖 JSON 输出、dispatch 文件内容、缺失 `--task` 拒绝。
 - 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests --test runtime_config_tests`，当前专项测试通过。
+- CLI 新增子代理 report 读取入口：
+  - 新增 `subagent report --run-id ID`，会读取 `reports/<run_id>.json`。
+  - JSON 输出包含 `run_id / available / report`；缺失 report 时返回 `available=false`，用于轮询，不把“还没回来”当错误。
+  - 文本输出会显示 `subagent_report_available` 或 `subagent_report_missing`。
+  - 该命令只读 report 文件，不删除、不移动、不 attach 到持久状态。
+- 更新测试：
+  - `cli_subagent_dispatch_tests` 新增 report 可读与缺失 report 两条 CLI 覆盖。
+- 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
