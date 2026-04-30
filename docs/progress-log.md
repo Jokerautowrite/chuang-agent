@@ -319,6 +319,14 @@
 - 更新测试：
   - `cli_control_tests` 新增 list JSON 和 apply JSON 断言。
 - 已运行 `cargo test --test cli_control_tests`，当前 7 条专项测试通过。
+- 新增控制意图解析模块：
+  - `src/control_intent.rs`：`ControlIntentInput -> ControlRequest`。
+  - 支持 CLI 风格 action，也支持飞书/按钮更适合的中文别名：启动、关闭、停止、重启、换模型、切模型。
+  - 仍然保持无静默 fallback：缺字段、缺模型、不支持 action 都返回结构化错误。
+  - CLI `control apply` 已改为复用该模块，后续飞书和桌面控制台可绕开命令行字符串，直接构造 intent。
+- 新增测试：
+  - `tests/control_intent_tests.rs` 覆盖英文 action、中文别名、缺字段、缺模型、不支持 action。
+- 已运行 `cargo test --test control_intent_tests --test cli_control_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

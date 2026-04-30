@@ -4,7 +4,8 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
-use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, ManagedUnit};
+use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
+use chuang_agent::control_plane::{ControlPlane, ControlRequest, ManagedUnit};
 use chuang_agent::control_workflow::{
     build_decision_view, build_unit_views, run_control_workflow, ControlUnitView,
     ControlWorkflowError, ControlWorkflowRequest, ControlWorkflowView,
@@ -277,27 +278,31 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
         }
     }
 
-    let action = match action.as_deref() {
-        Some("start") => ControlAction::Start,
-        Some("stop") => ControlAction::Stop,
-        Some("restart") => ControlAction::Restart,
-        Some("change-model") => ControlAction::ChangeModel {
-            model_name: model_name
-                .ok_or_else(|| "--model is required for change-model".to_string())?,
-        },
-        Some(other) => return Err(format!("unsupported control action: {other}")),
-        None => return Err("control apply requires --action".to_string()),
-    };
+    let request = parse_control_intent(ControlIntentInput {
+        unit_id,
+        action,
+        reason,
+        model_name,
+    })
+    .map_err(control_intent_error_to_cli)?;
 
     Ok(ControlApplyCliRequest {
-        request: ControlRequest {
-            unit_id: unit_id.ok_or_else(|| "control apply requires --unit".to_string())?,
-            action,
-            reason: reason.ok_or_else(|| "control apply requires --reason".to_string())?,
-        },
+        request,
         approve,
         output,
     })
+}
+
+fn control_intent_error_to_cli(error: ControlIntentError) -> String {
+    match error {
+        ControlIntentError::MissingUnit => "control apply requires --unit".to_string(),
+        ControlIntentError::MissingAction => "control apply requires --action".to_string(),
+        ControlIntentError::MissingReason => "control apply requires --reason".to_string(),
+        ControlIntentError::MissingModel => "--model is required for change-model".to_string(),
+        ControlIntentError::UnsupportedAction(action) => {
+            format!("unsupported control action: {action}")
+        }
+    }
 }
 
 fn print_control_view(view: &ControlWorkflowView) {
