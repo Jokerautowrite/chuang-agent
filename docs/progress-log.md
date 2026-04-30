@@ -16,6 +16,7 @@
 - `actuator` 已拆出 fake 子模块，主文件只保留桌面/浏览器/人类级操作面的协议定义。
 - `skill_evolver` 已拆出 noop 子模块，主文件只保留进化层协议类型、trait 和共用校验。
 - `memory_store` 已拆出 in-memory 子模块，主文件只保留通用记忆接口和数据结构。
+- `hermes_memory` 已拆出 file 子模块，主文件只保留 Hermes 双文件记忆的配置、快照、条目、错误和 trait。
 - `context_engine` 已拆出 deterministic 子模块，主文件保留上下文数据结构、packer 算法、trait 和错误类型。
 - `governance` 已拆出 static-rule 子模块，主文件只保留动作、风险决策、错误类型和治理 trait。
 - `AgentRuntime` 已改为直接使用核心 `ContextPacker`，不再在主链路里构造 deterministic engine 包装实现。
