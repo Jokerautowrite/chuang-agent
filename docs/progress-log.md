@@ -12,6 +12,7 @@
 - 新增 `docs/core-boundary.md` 与 core 边界测试，防止核心文件继续引入具体 provider / browser / control plane / subagent adapter。
 - `responder.rs` 已拆出 OpenAI-compatible 具体实现到 `provider_openai_compatible.rs`；`responder` 现在主要保留抽象 trait 和 fake/scripted 测试 responder。
 - `subagent_spawner` 已拆出 `fake` / `queued` 子模块，主文件只保留子代理协议类型、trait、slot 转发和共用校验。
+- `control_plane` 已拆出 fake 子模块，主文件只保留控制面协议、治理/审计辅助函数和共用校验。
 
 ## 2026-04-30
 
