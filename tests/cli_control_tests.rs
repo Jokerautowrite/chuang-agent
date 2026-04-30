@@ -195,3 +195,32 @@ fn cli_control_apply_can_render_json_view() {
     assert_eq!(parsed["model_name"], "gpt-5.5");
     assert_eq!(parsed["audit_recorded"], true);
 }
+
+#[test]
+fn cli_control_apply_accepts_display_name_for_mvp_surfaces() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "control",
+            "apply",
+            "--unit",
+            "小策",
+            "--action",
+            "重启",
+            "--reason",
+            "test display name restart",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stdout.contains("unit_id=codex-xiaoce"));
+    assert!(stdout.contains("name=小策"));
+    assert!(stdout.contains("decision=needs_approval"));
+    assert!(stderr.contains("control action requires --approve"));
+}

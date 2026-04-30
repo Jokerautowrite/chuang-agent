@@ -5,10 +5,13 @@ use std::path::PathBuf;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
-use chuang_agent::control_plane::{ControlPlane, ControlRequest, ManagedUnit};
+use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
+use chuang_agent::control_surface::{
+    list_control_surface_units, run_control_surface_intent, ControlSurfaceError,
+    ControlSurfaceRequest,
+};
 use chuang_agent::control_workflow::{
-    build_decision_view, build_unit_views, run_control_workflow, ControlUnitView,
-    ControlWorkflowError, ControlWorkflowRequest, ControlWorkflowView,
+    build_decision_view, ControlUnitView, ControlWorkflowError, ControlWorkflowView,
 };
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
@@ -91,7 +94,7 @@ fn control_list_command(args: &[String]) -> Result<(), String> {
     let slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    let views = build_unit_views(slots.control_plane.list_units());
+    let views = list_control_surface_units(&slots.control_plane);
     match output {
         ControlOutputFormat::Text => {
             for unit in views {
@@ -111,28 +114,36 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     };
     let mut slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
-    let unit = find_control_unit(&slots.control_plane, &request.request.unit_id)?;
-    let result = match run_control_workflow(
+    let unit_key = request
+        .intent
+        .unit_id
+        .as_deref()
+        .ok_or_else(|| "control apply requires --unit".to_string())?;
+    let unit = find_control_unit(&slots.control_plane, unit_key)?;
+    let result = match run_control_surface_intent(
         &mut slots.control_plane,
         &mut slots.governance,
-        ControlWorkflowRequest {
-            control: request.request,
+        ControlSurfaceRequest {
+            intent: request.intent,
             approved: request.approve,
         },
     ) {
         Ok(result) => result,
-        Err(ControlWorkflowError::ApprovalRequired(decision)) => {
+        Err(ControlSurfaceError::Workflow(ControlWorkflowError::ApprovalRequired(decision))) => {
             print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action requires --approve".to_string());
         }
-        Err(ControlWorkflowError::NotAllowed(decision)) => {
+        Err(ControlSurfaceError::Workflow(ControlWorkflowError::NotAllowed(decision))) => {
             print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action was not allowed by governance".to_string());
         }
-        Err(ControlWorkflowError::Control(err)) => return Err(format!("control_failed: {err:?}")),
-        Err(ControlWorkflowError::Governance(err)) => {
+        Err(ControlSurfaceError::Workflow(ControlWorkflowError::Control(err))) => {
+            return Err(format!("control_failed: {err:?}"))
+        }
+        Err(ControlSurfaceError::Workflow(ControlWorkflowError::Governance(err))) => {
             return Err(format!("governance_failed: {}", err.message))
         }
+        Err(ControlSurfaceError::Intent(err)) => return Err(control_intent_error_to_cli(err)),
     };
 
     print_control_view_with_format(&result.view, request.output)?;
@@ -160,7 +171,7 @@ fn find_control_unit<P: ControlPlane>(
     control_plane
         .list_units()
         .into_iter()
-        .find(|unit| unit.unit_id == unit_id)
+        .find(|unit| unit.unit_id == unit_id || unit.display_name == unit_id)
         .ok_or_else(|| format!("unknown control unit: {unit_id}"))
 }
 
@@ -205,7 +216,7 @@ fn run_with_options(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ControlApplyCliRequest {
-    request: ControlRequest,
+    intent: ControlIntentInput,
     approve: bool,
     output: ControlOutputFormat,
 }
@@ -278,16 +289,16 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
         }
     }
 
-    let request = parse_control_intent(ControlIntentInput {
+    let intent = ControlIntentInput {
         unit_id,
         action,
         reason,
         model_name,
-    })
-    .map_err(control_intent_error_to_cli)?;
+    };
+    parse_control_intent(intent.clone()).map_err(control_intent_error_to_cli)?;
 
     Ok(ControlApplyCliRequest {
-        request,
+        intent,
         approve,
         output,
     })

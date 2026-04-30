@@ -334,6 +334,15 @@
 - 更新测试：
   - `control_intent_tests` 扩到 8 条，新增显示名解析、unit_id 解析、未知 unit 断言。
 - 已运行 `cargo test --test control_intent_tests --test cli_control_tests`，当前专项测试通过。
+- 新增最小 MVP 控制台入口层：
+  - `src/control_surface.rs`：`list_control_surface_units()` 和 `run_control_surface_intent()`。
+  - 该层把飞书/桌面/CLI 的人类输入统一成 `ControlIntentInput`，支持显示名解析，再进入既有 `ControlWorkflow`。
+  - 仍然不做真实 systemd/Agent 变更，当前只走 fake control plane，保证 MVP 协议先稳定。
+  - CLI `control list/apply` 已切到 `control_surface`，终端、飞书、桌面后续可共用同一条路径。
+- 新增/更新测试：
+  - `tests/control_surface_tests.rs` 覆盖 UI-ready list、显示名重启需审批、已审批换模型、未知显示名治理前失败。
+  - `cli_control_tests` 扩到 8 条，新增 `--unit 小策 --action 重启` 的人类入口回归。
+- 已运行 `cargo test --test control_surface_tests --test cli_control_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

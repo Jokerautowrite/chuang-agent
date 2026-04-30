@@ -5,6 +5,7 @@ pub mod common;
 pub mod context_engine;
 pub mod control_intent;
 pub mod control_plane;
+pub mod control_surface;
 pub mod control_workflow;
 pub mod governance;
 pub mod lifecycle;
