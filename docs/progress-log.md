@@ -211,6 +211,15 @@
   - `tests/skill_evolver_tests.rs`，覆盖事件记录、空 proposal、非法 scope、proposal shape 校验、拒绝固化、非法事件拒绝。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 新增子代理调度层最小插槽：
+  - `src/subagent_spawner.rs`：`SubagentSpawner` trait、`SpawnRequest`、`SpawnReceipt`、`RunId`、`SubagentToolPolicy`、`ContextIsolation`、`FakeSubagentSpawner`。
+  - Fake spawner 当前支持 `spawn / steer / kill / collect`，并通过 `SubagentReport` 返回结构化报告。
+  - 已明确 Analyze 策略不能开启递归 spawn，保留老爸要求的安全闸门。
+  - 已保留 isolated/forked 两种上下文隔离形状，但不把 parent context payload 塞进 Fake 运行态，避免上下文边界混淆。
+- 新增测试：
+  - `tests/subagent_spawner_tests.rs`，覆盖 isolated spawn、fork context budget、Analyze 递归拒绝、steer 记录、collect report、kill 后禁止 steer。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
