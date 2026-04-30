@@ -202,6 +202,15 @@
   - `tests/runtime_config_tests.rs`，覆盖默认 fake provider、zero recall 拒绝、OpenAI-compatible 配置校验、adapter 构建、API key 脱敏 summary。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 已提交并推送到 GitHub：
+  - `1168d53 feat: add runtime config slot selection`
+- 新增进化层最小插槽：
+  - `src/skill_evolver.rs`：`SkillEvolver` trait、`RuntimeEvent`、`EvolutionScope`、`SkillProposal`、`ValidationReport`、`NoopEvolver`。
+  - `NoopEvolver` 当前只记录观察事件，不生成、不验证通过、不固化技能，避免早期自动写入技能造成失控。
+- 新增测试：
+  - `tests/skill_evolver_tests.rs`，覆盖事件记录、空 proposal、非法 scope、proposal shape 校验、拒绝固化、非法事件拒绝。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

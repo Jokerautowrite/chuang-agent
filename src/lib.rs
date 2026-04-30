@@ -12,4 +12,5 @@ pub mod memory_store_sqlite;
 pub mod responder;
 pub mod runtime_config;
 pub mod runtime_report;
+pub mod skill_evolver;
 pub mod subagent_report;
