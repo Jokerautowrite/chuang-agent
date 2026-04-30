@@ -140,6 +140,79 @@ fn cli_subagent_list_reports_dispatches_and_report_presence() {
 }
 
 #[test]
+fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() {
+    let queue_root = temp_queue_root("run-once");
+    let first = dispatch_task(&queue_root, "task-cli-1", "审计第一段");
+    let second = dispatch_task(&queue_root, "task-cli-2", "审计第二段");
+    let first_run = first["run_id"].as_str().expect("first run id");
+    let second_run = second["run_id"].as_str().expect("second run id");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["runner"], "fake");
+    assert_eq!(parsed["ran"], true);
+    assert_eq!(parsed["run_id"], first_run);
+    assert!(queue_root
+        .join("reports")
+        .join(format!("{first_run}.json"))
+        .exists());
+    assert!(!queue_root
+        .join("reports")
+        .join(format!("{second_run}.json"))
+        .exists());
+}
+
+#[test]
+fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
+    let queue_root = temp_queue_root("run-once-idle");
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["runner"], "fake");
+    assert_eq!(parsed["ran"], false);
+    assert_eq!(parsed["summary"], "no pending dispatch");
+}
+
+#[test]
 fn cli_subagent_dispatch_requires_task() {
     let queue_root = temp_queue_root("missing-task");
     let output = Command::new("cargo")

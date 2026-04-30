@@ -112,6 +112,14 @@ impl FileSubagentQueue {
         run_id: &RunId,
         report: &SubagentReport,
     ) -> Result<PathBuf, FileSubagentQueueError> {
+        self.write_report(run_id, report)
+    }
+
+    pub fn write_report(
+        &self,
+        run_id: &RunId,
+        report: &SubagentReport,
+    ) -> Result<PathBuf, FileSubagentQueueError> {
         let path = self.config.report_path(run_id);
         let payload = serde_json::to_string_pretty(report)
             .map_err(|e| FileSubagentQueueError::Encode(e.to_string()))?;

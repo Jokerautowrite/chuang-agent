@@ -605,6 +605,15 @@
   - `subagent_queue_tests` 新增 dispatch/report 列表与忽略非 JSON 文件。
   - `cli_subagent_dispatch_tests` 新增 list 命令识别两个 dispatch 且正确标记 report presence。
 - 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
+- 子代理文件队列新增 fake runner MVP：
+  - `FileSubagentQueue` 新增通用 `write_report()`，`write_report_for_test()` 保留兼容测试。
+  - CLI 新增 `subagent run-once [--runner fake] [--json]`。
+  - fake runner 会只读找到第一个尚无 report 的 dispatch，并写入一个模拟成功 `SubagentReport`。
+  - 没有 pending dispatch 时返回 idle，不报错。
+  - 当前 runner 不执行 shell、不启动真实 agent，只用于端到端证明文件队列协议。
+- 更新测试：
+  - `cli_subagent_dispatch_tests` 新增 run-once 写 report 和 idle 两条覆盖。
+- 已运行 `cargo test --test cli_subagent_dispatch_tests --test subagent_queue_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

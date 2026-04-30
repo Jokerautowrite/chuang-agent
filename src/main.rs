@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
-use chuang_agent::common::{AgentId, TaskId};
+use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
 use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
 use chuang_agent::control_surface::{
@@ -30,6 +30,7 @@ use chuang_agent::runtime_config::{
 };
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueue;
+use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentToolPolicy,
 };
@@ -147,6 +148,7 @@ fn subagent_command(args: &[String]) -> Result<(), String> {
         Some("dispatch") => subagent_dispatch_command(&args[1..]),
         Some("report") => subagent_report_command(&args[1..]),
         Some("list") => subagent_list_command(&args[1..]),
+        Some("run-once") => subagent_run_once_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -256,6 +258,72 @@ fn subagent_list_command(args: &[String]) -> Result<(), String> {
                     item.run_id, item.agent_id, item.task_id, item.tool_policy, item.has_report
                 );
             }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn subagent_run_once_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_run_once(args)?;
+    let queue_config = request
+        .options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let queue = FileSubagentQueue::open(queue_config)
+        .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
+    let dispatches = queue
+        .list_dispatches()
+        .map_err(|e| format!("subagent_dispatch_list_failed: {e:?}"))?;
+    let report_run_ids = queue
+        .list_report_run_ids()
+        .map_err(|e| format!("subagent_report_list_failed: {e:?}"))?
+        .into_iter()
+        .map(|run_id| run_id.0)
+        .collect::<std::collections::BTreeSet<_>>();
+    let Some(dispatch) = dispatches
+        .into_iter()
+        .find(|dispatch| !report_run_ids.contains(&dispatch.run_id.0))
+    else {
+        let output = SubagentRunOnceCliOutput {
+            runner: request.runner,
+            ran: false,
+            run_id: None,
+            report_path: None,
+            summary: "no pending dispatch".to_string(),
+        };
+        return match request.output {
+            ControlOutputFormat::Text => {
+                println!("subagent_run_once idle runner={}", output.runner);
+                Ok(())
+            }
+            ControlOutputFormat::Json => print_json(&output),
+        };
+    };
+
+    let report = build_fake_runner_report(&dispatch)?;
+    let report_path = queue
+        .write_report(&dispatch.run_id, &report)
+        .map_err(|e| format!("subagent_report_write_failed: {e:?}"))?;
+    let output = SubagentRunOnceCliOutput {
+        runner: request.runner,
+        ran: true,
+        run_id: Some(dispatch.run_id.0),
+        report_path: Some(report_path.display().to_string()),
+        summary: report.summary,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "subagent_run_once runner={} run_id={} report_path={}",
+                output.runner,
+                output.run_id.as_deref().unwrap_or("none"),
+                output.report_path.as_deref().unwrap_or("none")
+            );
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -631,6 +699,22 @@ struct SubagentListItem {
     agent_name: String,
     tool_policy: String,
     has_report: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SubagentRunOnceCliRequest {
+    options: CliOptions,
+    output: ControlOutputFormat,
+    runner: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SubagentRunOnceCliOutput {
+    runner: String,
+    ran: bool,
+    run_id: Option<String>,
+    report_path: Option<String>,
+    summary: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1126,6 +1210,62 @@ fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String
     })
 }
 
+fn parse_subagent_run_once(args: &[String]) -> Result<SubagentRunOnceCliRequest, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut runner: Option<String> = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--runner" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "subagent run-once requires value after --runner".to_string())?;
+                runner = Some(value.clone());
+                index += 2;
+            }
+            "--db"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                runtime_args.push(args[index].clone());
+                runtime_args.push(value.clone());
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let runner = runner.unwrap_or_else(|| "fake".to_string());
+    if runner != "fake" {
+        return Err(format!(
+            "unsupported subagent runner: {runner} (supported: fake)"
+        ));
+    }
+
+    Ok(SubagentRunOnceCliRequest {
+        options: parse_cli_options(&runtime_args)?,
+        output,
+        runner,
+    })
+}
+
 fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
@@ -1442,6 +1582,51 @@ fn unique_cli_subagent_ids(agent_name: &str) -> Result<CliSubagentIds, String> {
     })
 }
 
+fn build_fake_runner_report(
+    dispatch: &chuang_agent::subagent_spawner::SubagentDispatch,
+) -> Result<SubagentReport, String> {
+    let timestamp = current_rfc3339_timestamp()?;
+    Ok(SubagentReport {
+        schema_version: "1.0".to_string(),
+        report_id: ReportId(format!("report-{}", dispatch.run_id.0)),
+        task_id: dispatch.task_id.clone(),
+        agent_id: dispatch.agent_id.clone(),
+        parent_agent_id: Some(dispatch.parent_agent_id.clone()),
+        status: ExecutionStatus::Success,
+        started_at: Timestamp(timestamp.clone()),
+        finished_at: Timestamp(timestamp),
+        summary: format!(
+            "fake runner completed {} with {:?} policy",
+            dispatch.task_id.0, dispatch.tool_policy
+        ),
+        exit_code: Some(0),
+        stdout_preview: Some(format!("task={}", dispatch.task)),
+        stderr_preview: None,
+        resource_usage: ResourceUsage::default(),
+        artifacts: Vec::new(),
+        replay_ref: Some(format!("queued-subagent://{}", dispatch.run_id.0)),
+        context_debug: None,
+        truncated: false,
+    })
+}
+
+fn current_rfc3339_timestamp() -> Result<String, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("clock_error: {e}"))?
+        .as_secs();
+    Ok(format_unix_rfc3339(now))
+}
+
+fn format_unix_rfc3339(seconds: u64) -> String {
+    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(seconds as i64, 0)
+        .unwrap_or_else(|| {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0)
+                .expect("unix epoch timestamp should be valid")
+        });
+    datetime.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
 fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), String> {
     let existing = store
         .search(&chuang_agent::memory_store::MemoryQuery {
@@ -1473,5 +1658,5 @@ fn default_db_path() -> PathBuf {
 }
 
 fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|control|subagent> [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--remember-identity] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID]] | status [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--json] | subagent report --run-id ID [--json] | subagent list [--json] | subagent run-once [--runner fake] [--json]".to_string()
 }
