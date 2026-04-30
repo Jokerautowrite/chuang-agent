@@ -36,6 +36,29 @@ pub struct ArtifactRef {
     pub description: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextDropReasonSummary {
+    pub segment_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextDebugSummary {
+    pub dropped_segment_ids: Vec<String>,
+    pub drop_reasons: Vec<ContextDropReasonSummary>,
+    pub budget_exceeded: bool,
+    pub budget_exceeded_reasons: Vec<String>,
+    pub working_reservation: Option<WorkingReservationDebug>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkingReservationDebug {
+    pub reserved_segment_id: String,
+    pub reserved_tokens: u16,
+    pub dropped_segment_ids: Vec<String>,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResourceUsage {
     pub prompt_tokens: u64,
@@ -62,5 +85,6 @@ pub struct SubagentReport {
     pub resource_usage: ResourceUsage,
     pub artifacts: Vec<ArtifactRef>,
     pub replay_ref: Option<String>,
+    pub context_debug: Option<ContextDebugSummary>,
     pub truncated: bool,
 }

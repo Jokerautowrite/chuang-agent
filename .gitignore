@@ -16,6 +16,8 @@
 # Local agent scratch / caches
 /.hermes/
 /context/
+/data/
+/tmp/
 
 # OS / editor noise
 Thumbs.db

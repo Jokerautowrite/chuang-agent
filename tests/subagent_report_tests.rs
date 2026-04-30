@@ -25,8 +25,47 @@ fn sample_report() -> SubagentReport {
             description: None,
         }],
         replay_ref: None,
+        context_debug: Some(chuang_agent::subagent_report::ContextDebugSummary {
+            dropped_segment_ids: vec!["working-user-input".to_string()],
+            drop_reasons: vec![chuang_agent::subagent_report::ContextDropReasonSummary {
+                segment_id: "working-user-input".to_string(),
+                reason: "budget_limit".to_string(),
+            }],
+            budget_exceeded: true,
+            budget_exceeded_reasons: vec!["min_working_tokens_unmet".to_string()],
+            working_reservation: Some(chuang_agent::subagent_report::WorkingReservationDebug {
+                reserved_segment_id: "working-user-input".to_string(),
+                reserved_tokens: 20,
+                dropped_segment_ids: vec!["mem-1".to_string()],
+                reason: "minimum_working_tokens".to_string(),
+            }),
+        }),
         truncated: false,
     }
+}
+
+#[test]
+fn report_can_carry_context_debug_summary() {
+    let report = sample_report();
+    let debug = report.context_debug.expect("context debug should exist");
+
+    assert_eq!(
+        debug.dropped_segment_ids,
+        vec!["working-user-input".to_string()]
+    );
+    assert_eq!(debug.drop_reasons.len(), 1);
+    assert_eq!(debug.drop_reasons[0].segment_id, "working-user-input");
+    assert_eq!(debug.drop_reasons[0].reason, "budget_limit");
+    assert!(debug.budget_exceeded);
+    assert_eq!(
+        debug.budget_exceeded_reasons,
+        vec!["min_working_tokens_unmet".to_string()]
+    );
+    let reservation = debug
+        .working_reservation
+        .expect("working reservation should exist");
+    assert_eq!(reservation.reserved_segment_id, "working-user-input");
+    assert_eq!(reservation.reason, "minimum_working_tokens");
 }
 
 #[test]
@@ -62,6 +101,12 @@ fn validator_accepts_valid_report_bytes() {
         "summary":"ok",
         "resource_usage":{},
         "artifacts":[],
+        "context_debug":{
+            "dropped_segment_ids":["working-user-input"],
+            "drop_reasons":[{"segment_id":"working-user-input","reason":"budget_limit"}],
+            "budget_exceeded":true,
+            "budget_exceeded_reasons":["min_working_tokens_unmet"]
+        },
         "truncated":false
     }"#;
 
@@ -188,4 +233,47 @@ fn builder_truncates_previews_and_marks_report() {
     assert_eq!(built.stdout_preview, Some("stdo".to_string()));
     assert_eq!(built.stderr_preview, None);
     assert!(built.truncated);
+}
+
+#[test]
+fn builder_can_build_report_from_runtime_input() {
+    let built =
+        SubagentReportBuilder::from_runtime(chuang_agent::subagent_report::RuntimeReportInput {
+            report_id: "report-runtime-1".to_string(),
+            task_id: "task-runtime-1".to_string(),
+            agent_id: "agent-runtime-1".to_string(),
+            parent_agent_id: Some("agent-parent-1".to_string()),
+            summary: "runtime summary ok".to_string(),
+            response_body: "runtime body".to_string(),
+            response_trace: "runtime trace".to_string(),
+            dropped_segment_ids: vec!["working-user-input".to_string()],
+            drop_reasons: vec![("working-user-input".to_string(), "budget_limit".to_string())],
+            budget_exceeded: true,
+            budget_exceeded_reasons: vec!["min_working_tokens_unmet".to_string()],
+            working_reservation: Some(chuang_agent::subagent_report::WorkingReservationDebug {
+                reserved_segment_id: "working-user-input".to_string(),
+                reserved_tokens: 20,
+                dropped_segment_ids: vec!["mem-1".to_string()],
+                reason: "minimum_working_tokens".to_string(),
+            }),
+        })
+        .build();
+
+    assert_eq!(built.report_id.0, "report-runtime-1");
+    assert_eq!(built.task_id.0, "task-runtime-1");
+    assert_eq!(built.agent_id.0, "agent-runtime-1");
+    assert_eq!(built.parent_agent_id.expect("parent").0, "agent-parent-1");
+    assert_eq!(built.summary, "runtime summary ok");
+    assert_eq!(built.stdout_preview, Some("runtime body".to_string()));
+    let debug = built.context_debug.expect("context debug should exist");
+    assert_eq!(
+        debug.dropped_segment_ids,
+        vec!["working-user-input".to_string()]
+    );
+    assert!(debug.budget_exceeded);
+    let reservation = debug
+        .working_reservation
+        .expect("working reservation should exist");
+    assert_eq!(reservation.reserved_segment_id, "working-user-input");
+    assert_eq!(reservation.reason, "minimum_working_tokens");
 }

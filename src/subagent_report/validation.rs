@@ -1,4 +1,6 @@
-use super::schema::{ExecutionStatus, SubagentReport};
+use super::schema::{
+    ContextDebugSummary, ContextDropReasonSummary, ExecutionStatus, SubagentReport,
+};
 use super::size_limit::DEFAULT_REPORT_SIZE_LIMIT_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,22 @@ pub trait ReportValidator {
 pub trait ReportBuilder {
     fn build(self) -> SubagentReport;
     fn truncate_previews(self, max_total_bytes: usize) -> Self;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeReportInput {
+    pub report_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub parent_agent_id: Option<String>,
+    pub summary: String,
+    pub response_body: String,
+    pub response_trace: String,
+    pub dropped_segment_ids: Vec<String>,
+    pub drop_reasons: Vec<(String, String)>,
+    pub budget_exceeded: bool,
+    pub budget_exceeded_reasons: Vec<String>,
+    pub working_reservation: Option<super::schema::WorkingReservationDebug>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +200,40 @@ pub struct SubagentReportBuilder {
 impl SubagentReportBuilder {
     pub fn new(report: SubagentReport) -> Self {
         Self { report }
+    }
+
+    pub fn from_runtime(input: RuntimeReportInput) -> Self {
+        Self {
+            report: SubagentReport {
+                schema_version: "1.0.0".to_string(),
+                report_id: crate::common::ReportId(input.report_id),
+                task_id: crate::common::TaskId(input.task_id),
+                agent_id: crate::common::AgentId(input.agent_id),
+                parent_agent_id: input.parent_agent_id.map(crate::common::AgentId),
+                status: ExecutionStatus::Success,
+                started_at: crate::common::Timestamp("2026-04-30T00:00:00.000Z".to_string()),
+                finished_at: crate::common::Timestamp("2026-04-30T00:00:01.000Z".to_string()),
+                summary: input.summary,
+                exit_code: Some(0),
+                stdout_preview: Some(input.response_body),
+                stderr_preview: Some(String::new()),
+                resource_usage: Default::default(),
+                artifacts: vec![],
+                replay_ref: None,
+                context_debug: Some(ContextDebugSummary {
+                    dropped_segment_ids: input.dropped_segment_ids,
+                    drop_reasons: input
+                        .drop_reasons
+                        .into_iter()
+                        .map(|(segment_id, reason)| ContextDropReasonSummary { segment_id, reason })
+                        .collect(),
+                    budget_exceeded: input.budget_exceeded,
+                    budget_exceeded_reasons: input.budget_exceeded_reasons,
+                    working_reservation: input.working_reservation,
+                }),
+                truncated: false,
+            },
+        }
     }
 }
 

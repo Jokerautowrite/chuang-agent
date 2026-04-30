@@ -17,12 +17,13 @@
 
 ### 当前分工
 - 小创：主线收口、验证、落盘进度
-- 小承（DeepSeek）：并行补 BrowserWorker 能力线最小闭环（session / transcript / coordinator / adapter / error / hash）
+- 小承（DeepSeek）：并行补上下文引擎 DS-3 规格草案，供主线 context engine 收口参考
 
 ### 待做
-1. 收小承后续产出并继续合并到本地文档/代码
-2. 继续把 BrowserWorker 作为并行能力线推进，不抢三大核心主线
-3. BrowserWorker 下一轮可补：adapter trait 真正对接 browser provider、`apply_task`/`apply_receipt` 也进一步统一到完整状态机、placeholder 时间戳/快照引用换成真实来源
+1. 把 DS-3 规格草案收口进本地 context engine 设计与测试计划
+2. 优先推进 context engine 主线：结构化 segment + budget packing + runtime 接缝
+3. BrowserWorker 继续作为并行能力线推进，不抢三大核心主线
+4. DeepSeek 并行任务拆分文档保留，但 context engine 已上升为当前第一优先级
 
 ### 最新进展
 - lifecycle 真值表已扩到 14 条测试并全通过
@@ -36,6 +37,88 @@
 - memory_policy 的 `expire_reservations_at()` 已落地：可按时间批量释放过期 reservation
 - SubagentReport validator/builder 最小闭环已落地
 - `subagent_report_tests.rs` 已扩到 8 条并全部通过
+- 长期记忆主线已新增 SQLite 持久化测试文件：`tests/memory_store_sqlite_tests.rs`
+- `SqliteMemoryStore` 当前已实测跑通 5 条：`put/get`、`persist_across_reopen`、`search/delete`、`expire_removes_expired_records_only`、`search_excludes_expired_records_after_expire`
+- 长期记忆主线新增最小检索编排层：`src/memory_recall.rs`
+- 新增测试：`tests/memory_recall_tests.rs`，当前已实测跑通 5 条：`returns_ranked_hits_for_query`、`respects_metadata_filter_and_limit`、`rejects_zero_limit_request`、`builds_agent_input_block_from_hits`、`builds_memory_segments_from_hits`
+- `MemoryRecallPipeline` 最小闭环已跑通：`RecallRequest -> store.search -> ranked hits -> summary -> agent_input`
+- **新增最小运行时主线：`src/agent_runtime.rs`**
+- **新增 responder 抽象：`src/responder.rs`，当前已落下 `Responder trait + FakeResponder + ScriptedResponder`**
+- **新增测试：`tests/agent_runtime_tests.rs`，当前已实测跑通 6 条，覆盖 packed context debug artifacts / empty recall / zero limit / packed context loop / dropped recall / context pack errors**
+- **新增 SQLite 运行时集成测试：`tests/agent_runtime_sqlite_tests.rs`，当前已实测跑通 2 条：`runs_with_sqlite_memory_store`、`returns_structured_trace_fields`**
+- **新增 responder 集成测试：`tests/agent_runtime_responder_tests.rs`，当前已实测跑通 2 条：`uses_fake_responder_output`、`preserves_prompt_and_trace_with_fake_responder`**
+- **新增 responder 结构化 payload：`ResponderOutput { model_name, body, trace, meta }`，并补 `ResponderMeta { provider, recall_hit_count, finish_reason }`**
+- **`ScriptedResponder` 已从纯 string 返回推进到结构化对象，可稳定模拟模型名 / 正文 / trace / meta**
+- **`RuntimeResult` 已收口为结构化响应：`prompt / response{ model_name, body, trace, meta } / recall_summary / recall_hit_count`**
+- **新增/更新测试覆盖结构化返回链路：`scripted_responder_tests`、`agent_runtime_tests`、`agent_runtime_sqlite_tests`、`agent_runtime_responder_tests` 已实测通过**
+- **新增可执行入口：`src/main.rs`，当前支持最小命令：`cargo run -- run --input "..."`，可选 `--db PATH`**
+- **新增 CLI 冒烟测试：`tests/cli_smoke_tests.rs`，已实测通过；本机已实际跑通 `cargo run --quiet -- run --input "创项目现在启动试试"`**
+- **CLI 已继续推进到最小 REPL：支持 `cargo run -- repl`，已实测单轮输入 + `exit` 正常收口**
+- **新增 DeepSeek 并行任务拆分文档：`docs/deepseek-parallel-task-split-20260430.md`，已把适合网页外包的剩余模块重新拆成 3 份明确任务**
+- **新增 responder provider seam：`Responder::provider() -> ResponderProvider { provider_id, model_name }`，Fake / Scripted responder 已统一暴露 provider 身份**
+- **新增测试：`tests/provider_seam_tests.rs`，已实测通过；runtime 已能稳定保留 responder provider identity，给后续接真模型 provider 预留了接缝**
+- **新增 provider adapter entry 验证：`tests/provider_adapter_entry_tests.rs`，已证明 runtime 可无结构改动地接收一个“类真实 provider responder”实现**
+- **新增 context engine 主线最小闭环：`src/context_engine.rs` 已落地，包含 `ContextSegment / ContextBudget / ContextPacker / PackedContext`**
+- **新增测试：`tests/context_engine_tests.rs`，8 条测试已全绿，覆盖 system reservation / missing-token normalize / tool trim / rank / recent-memory trimming / working restore / dropped ids / budget exceeded**
+- **`ContextPacker` 已补 segment normalize：缺失 `tokens` 时会按内容长度估算，避免预算合并前出现空 token 段**
+- **`ContextPacker` 已补 memory trimming 最近访问保留策略：超过 `max_memory_segments` 时，优先保留最近访问的 memory segment**
+- **`ContextPacker` 已补 working budget 失败信号：当 `min_working_tokens` 约束无法满足时，会显式打出 `budget_exceeded=true`**
+- **`ContextPacker` 现在会结构化保留 drop/debug 信息：新增 `drop_reasons` 与 `budget_exceeded_reasons`，便于上层解释为什么丢、为什么超预算**
+- **`MemoryRecallPipeline` 已升级为双输出：保留 `summary/agent_input` 的同时新增 `segments: Vec<ContextSegment>`**
+- **`AgentRuntime` 已接入 context seam：`RuntimeRequest` 新增 `context_budget`，`RuntimeResult` 新增 `packed_context_preview / packed_token_count / dropped_segment_ids`**
+- **`AgentRuntime` 的 packed preview 已升级为 explain/debug 视图：会输出 `drop_reasons / budget_exceeded / budget_exceeded_reasons`**
+- **`RuntimeResult` 已新增结构化 `context_debug` 字段，直接暴露 `drop_reasons / budget_exceeded / budget_exceeded_reasons`，不再只靠 preview 字符串**
+- **CLI 已把 context debug 结构化字段打印出来：`context_drop_reasons / context_budget_exceeded / context_budget_exceeded_reasons`**
+- **新增测试：`tests/agent_runtime_tests.rs`、`tests/agent_runtime_sqlite_tests.rs`、`tests/cli_smoke_tests.rs` 已补 explain/debug 断言，当前全绿**
+- **CLI / sqlite runtime / responder / provider / context 相关测试已补齐兼容更新，当前全仓 `cargo test` 再次全绿**
+- **新增 responder 半层抽象：`ProviderAdapterResponder + ProviderIdentity + ProviderAdapterResponse` 已落地，`Responder` 退成上层统一壳，下一步可以自然接本地 provider / OpenAI-compatible / 其它 backend**
+- **新增最小 provider 配置校验与请求封装：`ProviderConfigError / OpenAICompatibleRequestEnvelope / OpenAICompatibleMessage` 已落地**
+- **`OpenAICompatibleProviderAdapter` 已补 `validate_config()` 与 `build_request_envelope()`，现在能先校验 `base_url/model_name`，再构造结构化 messages 请求体**
+- **新增测试：`tests/openai_compatible_adapter_request_tests.rs`，4 条已全绿，覆盖空配置拒绝 / request envelope 构造 / trace 暴露 message_count**
+- **CLI 已新增 provider 参数直通：`--provider-base-url / --provider-api-key / --provider-model / --provider-id`，可直接把最小 openai-compatible 配置接进 runtime**
+- **新增测试：`tests/cli_provider_smoke_tests.rs`，2 条已全绿，覆盖 provider 参数跑通 + 残缺配置拒绝**
+- **已实际跑通命令：`cargo run --quiet -- run --input "创项目继续推进 provider" --provider-base-url "https://api.example.com/v1" --provider-api-key "test-key" --provider-model "gpt-4.1-mini" --provider-id "custom-openai"`**
+- **当前 CLI 实测输出已稳定带出：`model_name/provider/transport/message_count`，真 provider 调用前的接线骨架已通**
+- **新增 HTTP 请求预览骨架：`HttpRequestPreview { method, url, headers, body_json }` 已落地，adapter 现在能先收口到“可发送”的 HTTP 形状**
+- **`OpenAICompatibleProviderAdapter::build_http_request_preview()` 已落地：会把 `/chat/completions` URL、Bearer Header、JSON body 统一组出来**
+- **新增测试：`tests/openai_compatible_http_preview_tests.rs`，2 条已全绿，覆盖 HTTP preview 构造 + respond 透出 request_url/request_method/request_message_count**
+- **当前 trace/meta 已能稳定暴露 request 级骨架字段，为下一步真 POST 调用留好了接口面**
+- **新增扩展元数据通道：`ResponderMeta.extra: BTreeMap<String, String>` 已落地，adapter 可带 transport / backend 等非核心字段，不污染 runtime 主结构**
+- **新增最小 OpenAI-compatible adapter：`OpenAICompatibleProviderAdapter { provider_id, base_url, api_key, model_name }` 已落地，先按 Hermes 现有思路收成最小配置面，只保留 key/url/model 三要素**
+- **新增红转绿测试：`openai_compatible_adapter_exposes_minimal_config_shape` 已实测通过，验证 provider identity + base_url/transport 元数据透传 + 统一 responder 壳接入正常**
+- **新增 stub POST 骨架：`StubHttpCallResult { status_code, url, request_body_json, response_body_json }` 已落地**
+- **`OpenAICompatibleProviderAdapter::execute_stub_post_call()` 已落地：当前会在本地生成 chat.completion 风格 stub 响应，先打通“request preview -> post result -> assistant content extract”闭环**
+- **新增测试：`tests/openai_compatible_stub_post_tests.rs`，2 条已全绿，覆盖 stub post 返回 request/response body + respond 透出 stub_status_code/stub_response_kind**
+- **CLI 现在会打印 `response.meta.extra` 全部扩展字段；新增测试：`tests/cli_provider_stub_metadata_tests.rs` 已实测通过，确认 stdout 能看到 `stub_status_code: 200` 与 `stub_response_kind: chat.completion`**
+- **provider transport 开关已落地：`ProviderTransport::{Stub,Http}` + `OpenAICompatibleProviderAdapter::with_transport()` 已接上，CLI 新增 `--provider-transport stub|http`**
+- **当前 `http` 还没真发请求，但接缝已前推：`ProviderTransport` 现已实现 `FromStr/as_str/Display`，CLI 能识别 `http`，并稳定返回 `transport` 配置错误而不是参数层直接拦死**
+- **`http` 占位态现在也会保留 request 预览证据：即使 transport 还没实现，`respond()` 在报 `invalid-config` 时也会把 `request_url/request_method/request_message_count/transport_mode` 带出来，方便下一步直接替换成真 HTTP 调用**
+- **新增测试：`tests/cli_provider_transport_flag_tests.rs`、`tests/cli_provider_transport_reject_tests.rs`、`tests/cli_repl_provider_transport_tests.rs`、`tests/openai_compatible_transport_mode_tests.rs`、`tests/cli_provider_default_transport_tests.rs`、`tests/cli_repl_default_transport_tests.rs`、`tests/provider_transport_parse_tests.rs`、`tests/cli_provider_http_not_implemented_tests.rs`、`tests/openai_compatible_http_transport_preview_tests.rs` 已全绿，确认 run/repl/adapter 三层 transport seam 都通了，默认回落到 `stub`，`http` 进入实现前占位态**
+- **新增 runtime->subagent_report 桥接层：`src/runtime_report.rs` 已落地，可把 `RuntimeResult` 收口成结构化 `SubagentReport`**
+- **新增测试：`tests/runtime_report_tests.rs`，2 条已全绿，覆盖 runtime context debug -> report 映射、report metadata 收口**
+- **`SubagentReportBuilder::from_runtime()` 已接上最小运行时输入结构 `RuntimeReportInput`，为后续子代理执行结果统一出 report 铺平**
+- **新增 provider http 执行层：`OpenAICompatibleProviderAdapter::execute_http_post_call()` 现在已能对 `http://` 目标发真实 POST，并解析返回的 status/body**
+- **`ProviderTransport::Http` 当前能力边界已明确：`http://` 本地/明文链路可真实打通；`https://` 先返回结构化配置错误 `unsupported_http_scheme`，同时保留 request preview 证据，不再假装成功**
+- **新增测试：`tests/openai_compatible_http_live_transport_tests.rs`、`tests/openai_compatible_http_live_transport_local_tests.rs`，并同步更新 `cli_provider_transport_reject_tests.rs`、`cli_provider_http_not_implemented_tests.rs`、`openai_compatible_http_transport_preview_tests.rs`、`openai_compatible_http_preview_tests.rs`，当前全绿**
+- **HTTP 边界现在补齐了失败闭环：本地端口不可达时会稳定返回 `config_error_field=http_connect`，并保留 `request_url/request_method/request_message_count/transport_mode` 供上层解释**
+- **HTTP 输入形状错误也已补验证：非法端口（如 `http://127.0.0.1:notaport/v1`）会稳定返回 `config_error_field=base_url` + `invalid_port:...`，CLI/adapter 两层都已实测收口**
+- **HTTP 响应解析失败闭环已补：远端回 malformed response 时，`missing_header_separator` / `missing_status_code` 会收口成 `config_error_field=http_response`，不再静默吞掉**
+- **HTTP 非 200 返回的证据链也补上了：429 等状态现在会稳定保留 `status_code / response_kind / response_finish_reason`，即使没有 assistant content 也会给出 `provider_response_missing_content` 占位并带 trace 证据**
+- **新增回归测试：`openai_compatible_http_transport_preserves_non_200_status_with_structured_metadata` 与 `cli_run_http_transport_reports_invalid_port_shape`，已红转绿并纳入全量 `cargo test`**
+- **新增 context engine 保底预留能力：当 `min_working_tokens` 配置生效时，`ContextPacker` 现在会优先为 working segment 预留预算，再决定是否挤掉较低优先级 segment**
+- **新增红转绿测试：`pack_reserves_minimum_working_tokens_before_lower_priority_segments`，验证 working 保底预算会先于 lower-priority memory 生效**
+- **顺手修掉一个隐藏重复上报问题：`budget_exceeded_reasons` 不再把 `min_working_tokens_unmet` 重复写两次，`runtime_report_tests` 已重新全绿**
+- **CLI explain 已补一层显式输出：新增 `context_working_reservation:` 字段，当前只要 pack 过程中出现 `budget_limit` 型挤出，就会显示 `working_budget_reserved`**
+- **新增验证：`agent_runtime_tests.rs` 补了 `agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped`，`cli_smoke_tests.rs` 补了 `context_working_reservation:` 断言**
+- 小创刚重新实测：当前仓库 `cargo test` **再次全绿**
+- **working reservation 已从“启发式提示”升级为正式结构化原因：`WorkingReservationReason::MinimumWorkingTokens` 已落地到 `context_engine`，并贯通到 runtime / CLI / runtime_report / subagent_report**
+- **新增验证：`context_engine_tests.rs`、`agent_runtime_tests.rs`、`runtime_report_tests.rs`、`subagent_report_tests.rs` 已补 reason 断言，当前全绿**
+- **注意：这版 `context_working_reservation` 还是启发式输出——它根据 drop reason 推断“发生过为 working 腾预算”，不是单独的结构化 reason enum；先够用，但下一版最好把这个原因从 packer 里显式产出**
+- **下一步最值当：把 `working reservation` 从 CLI 字符串提示，升级成 runtime/context_debug 的正式字段或 reason 枚举，避免外层靠推断**
+- 已通过 opencli + 可见 Chrome 向 DeepSeek 派发 DS-3（上下文引擎规格草案）并收回结果
+- 新增外脑原文收档：`docs/deepseek-ds3-context-engine-spec.md`
+- 新增小创收口版设计：`docs/context-engine-design-v1.md`
+- 结论已收口：**当前主线优先级切到 context engine，不再继续扩 BrowserWorker 抢主线**
 - BrowserWorker MVP 模块骨架已落下：`types / session / transcript / coordinator / adapters::deepseek_web`
 - BrowserWorker session 最小闭环已落地：`new / apply_task / apply_receipt / apply_output`
 - BrowserWorker transcript 最小闭环已落地：`BrowserTranscript::new / start_record / complete_record`
@@ -44,12 +127,70 @@
 - BrowserWorker 错误返回最小闭环已落地：`BrowserWorkerError` + coordinator/session 关键路径 `Result` 化
 - BrowserWorker 真实稳定 hash 已落地：`src/browser_worker/hash.rs`，当前使用 FNV-1a 64-bit 十六进制输出
 - BrowserWorker adapter 已新增最小 dispatch/read 抽象：`submit_task / read_output`
-- `DeepSeekWebAdapter` 已接上 dispatch/read 占位实现，并能真实驱动 session 状态从 `Ready -> Dispatching -> WaitingResponse -> Completed`
-- BrowserWorker 新增/更新测试：
+- 已引入 provider-facing 抽象：`BrowserProviderDriver`
+- `DeepSeekWebAdapter` 已改为通过 provider driver 获取 `DispatchReceipt / WorkerOutput`
+- 当前默认底层 driver：`FakeBrowserProviderDriver`，用于可测试的 simulated workflow
+- 新增最小可执行 demo/service：`src/browser_worker/service.rs`
+- 已能跑通一条 simulated DeepSeek web workflow：expert mode -> ready -> enqueue -> submit -> read -> transcript -> completed
+- **新增 real-browser bridge 最小闭环：`ProviderBackedRealBrowserDriver<D: RealBrowserDriver>` 现在会按 `EnsureMode -> OpenPage -> FocusComposer -> TypePrompt -> SubmitPrompt -> WaitForAssistantTurn -> CaptureOutput` 顺序执行真实浏览器命令序列，可作为 BrowserWorker 接 opencli/Chrome 的最小骨架**
+- **新增测试：`tests/browser_worker_opencli_real_driver_tests.rs`，验证 BrowserWorker service 可通过 real browser driver 跑通一条 opencli 风格 workflow，并保留 `opencli://...` snapshot anchor**
+- **新增 real-browser 证据保留闭环：`BrowserTranscriptRecord` 现在显式带 `raw_snapshot_ref`，opencli/真实浏览器抓到的 snapshot anchor 不会在 transcript 层丢失**
+- **新增红转绿验证：`tests/browser_worker_opencli_real_driver_tests.rs` 先卡住 `run.record.raw_snapshot_ref`，随后补齐 transcript 层实现并带动 `deepseek_web_workflow_integration_tests.rs` 同步更新**
+- BrowserWorker real-driver 现在会校验每一步 observation 形状：`EnsureMode/OpenPage/FocusComposer/TypePrompt/SubmitPrompt/WaitForAssistantTurn/CaptureOutput` 任一步返回错形状都会立刻失败，不再默默吞掉
+- 新增错误类型：`BrowserWorkerError::UnexpectedBrowserObservation { command, observation }`
+- 新增测试：`provider_backed_real_driver_rejects_unexpected_browser_observation`，已实测通过
+- 已实际验证本机 opencli bridge 可用：`opencli doctor` 显示 Extension connected；`opencli browser state` 当前可读 `about:blank`
+- 刚实测：`cargo test --test browser_worker_opencli_real_driver_tests -- --nocapture` 通过（2/2）
+- **新增真实 opencli driver 最小实现：`src/browser_worker/opencli_driver.rs`**
+- **新增 `OpenCliRunner / SystemOpenCliRunner / OpenCliRealBrowserDriver`，已能把 `RealBrowserCommand` 映射到真实 `opencli browser ...` 命令**
+- **新增测试：`tests/opencli_real_browser_driver_tests.rs`，已实测通过 3 条：state evidence、open page、command failure**
+- **真实 opencli driver当前已保留 browser state 原始 stdout 作为 output content，并生成 `opencli://state/<prompt_hash>` snapshot anchor**
+- BrowserWorker service 已收口为“以 driver 输出为准”，不再在 service 层二次覆盖 output；这让 fake / injected driver / future opencli driver 的行为边界更清晰
+- 新增/更新测试：
   - `browser_worker_adapter_trait_tests.rs` 扩到 5 条
   - `browser_worker_coordinator_tests.rs` 扩到 8 条
-  - session 单测扩到 7 条
+  - `browser_worker_service_demo_tests.rs` 保持 2 条并已按 driver-first 语义更新
+  - `deepseek_web_workflow_integration_tests.rs` 保持 2 条
+  - `browser_worker_runtime_integration_tests.rs` 保持 3 条
+  - `browser_worker_opencli_real_driver_tests.rs` 新增 1 条
+  - session 单测维持 7 条
 - 小创刚重新实测：当前仓库 `cargo test` **全绿**
+
+## 2026-05-01
+
+### 小策接手审计
+- 老爸明确创项目来源路线：Codex CLI 取 Core Loop / SQ-EQ，Hermes 取 MemoryStore，OpenClaw 取子代理执行层，GenericAgent 取技能进化机制。
+- 已做只读来源项目初审：
+  - Codex CLI：本机 `codex-cli 0.125.0`，npm 包为单二进制；结合本机 app-server JSON-RPC bridge 与官方协议文档抽取 Submission/Event 思路。
+  - Hermes Agent：确认 `MemoryStore` 硬上限、双文件、冻结快照、文件锁、原子写入、风险扫描机制。
+  - OpenClaw：从 npm `dist` 中确认 subagent spawn / registry / announce / depth / isolated-or-fork context 等机制。
+  - GenericAgent：确认极简 agent loop、L1-L4 记忆、No Execution No Memory、自进化 SOP 与 subagent SOP。
+- 新增审计文档：`docs/source-project-audit-v1.md`
+- 当前结论：创项目不是拼接四套系统，而是抽象成统一身份、记忆、执行、风险、进化五个协议。
+- 老爸补充目标：GenericAgent 不只提供进化思想，还提供人类级桌面操作工具；创项目目标应包含 `Actuation Layer`，让 Agent 能打开软件、读屏、输入、发消息、操作真实登录态，同时通过治理层约束验证码、发送、支付、删除、密钥等高风险动作。
+- 新增总蓝图：`docs/blueprint-v1.md`
+  - 定义创项目为“本地智能体操作系统”，不是聊天机器人。
+  - 固定本体论：记忆才是本体，Agent 只是壳。
+  - 收敛八层架构：Identity / Memory / Core Loop / Context / Execution / Governance / Evolution / Interface。
+  - 收敛七类协议：身份、记忆、执行、子代理、桌面操作、风险、进化。
+  - 收敛 V0.1-V0.5 路线：工程闭环 -> 记忆本体 -> 子代理执行 -> 桌面操作 -> 外脑和进化。
+- 老爸强调可插拔设计极其重要，要求最大程度解耦。
+- 新增可插拔架构文档：`docs/pluggable-architecture-v1.md`
+  - 固定原则：接口优先，内核只认协议，不认具体实现。
+  - 定义核心插槽：Provider / MemoryStore / ContextEngine / SubagentSpawner / Actuator / Governance / SkillEvolver。
+  - 要求每个插槽有 Fake 实现、contract tests、错误测试、序列化测试、配置选择测试。
+- `docs/blueprint-v1.md` 已同步“接口优先、最大解耦”原则。
+- 新增项目级规则：`AGENTS.md`
+  - 固化创项目本体论、来源项目定位、可插拔工程规则、风险规则、记忆规则和进度规则。
+- 新增可插拔插槽最小代码：
+  - `src/governance.rs`：`Governance` trait、`StaticRuleGovernance`、`RiskDecision`、`ProposedAction`。
+  - `src/actuator.rs`：`Actuator` trait、桌面操作相关 request/target/evidence 类型、`FakeActuator`。
+  - `src/lib.rs` 已导出 `governance` 和 `actuator` 模块。
+- 新增 contract tests：
+  - `tests/governance_tests.rs`：覆盖低风险允许、高风险需确认、空 target 阻断、审计记录。
+  - `tests/actuator_tests.rs`：覆盖 Fake 执行序列、证据引用、secret 输入不记录明文。
+- 已运行 `cargo fmt`。
+- 已运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

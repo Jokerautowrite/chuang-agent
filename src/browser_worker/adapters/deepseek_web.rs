@@ -1,17 +1,28 @@
 use crate::browser_worker::{
-    BrowserMode, BrowserWorkerError, BrowserWorkerSession, DispatchReceipt, DispatchStatus,
-    ProviderKind, WorkerFinishReason, WorkerOutput, WorkerState, WorkerTask,
+    BrowserMode, BrowserWorkerError, BrowserWorkerSession, DispatchReceipt, ProviderKind,
+    WorkerOutput, WorkerState, WorkerTask,
 };
 
-use super::BrowserWorkerAdapter;
+use super::{BrowserProviderDriver, BrowserWorkerAdapter, FakeBrowserProviderDriver};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeepSeekWebAdapter {
+pub struct DeepSeekWebAdapter<D = FakeBrowserProviderDriver> {
     pub session: BrowserWorkerSession,
+    driver: D,
 }
 
-impl DeepSeekWebAdapter {
+impl DeepSeekWebAdapter<FakeBrowserProviderDriver> {
     pub fn new(worker_id: impl Into<String>, page_url: impl Into<String>) -> Self {
+        Self::with_driver(worker_id, page_url, FakeBrowserProviderDriver)
+    }
+}
+
+impl<D> DeepSeekWebAdapter<D> {
+    pub fn with_driver(
+        worker_id: impl Into<String>,
+        page_url: impl Into<String>,
+        driver: D,
+    ) -> Self {
         Self {
             session: BrowserWorkerSession {
                 worker_id: worker_id.into(),
@@ -26,6 +37,7 @@ impl DeepSeekWebAdapter {
                 last_read_at: None,
                 state: WorkerState::Uninitialized,
             },
+            driver,
         }
     }
 
@@ -38,23 +50,16 @@ impl DeepSeekWebAdapter {
         self.session.logged_in = true;
         self.session.state = WorkerState::Ready;
     }
+}
 
+impl<D: BrowserProviderDriver> DeepSeekWebAdapter<D> {
     pub fn submit_task(
         &mut self,
         task: &WorkerTask,
     ) -> Result<DispatchReceipt, BrowserWorkerError> {
         self.session.apply_task(task);
 
-        let receipt = DispatchReceipt {
-            task_id: task.task_id.clone(),
-            worker_id: self.session.worker_id.clone(),
-            provider: self.session.provider.clone(),
-            submitted_at: "placeholder-submitted-at".to_string(),
-            prompt_hash: self.session.last_prompt_hash.clone().unwrap_or_default(),
-            mode: self.session.mode.clone(),
-            status: DispatchStatus::Submitted,
-        };
-
+        let receipt = self.driver.submit_task(&self.session, task)?;
         self.session.apply_receipt(&receipt)?;
         Ok(receipt)
     }
@@ -63,25 +68,13 @@ impl DeepSeekWebAdapter {
         &mut self,
         receipt: &DispatchReceipt,
     ) -> Result<WorkerOutput, BrowserWorkerError> {
-        let output = WorkerOutput {
-            worker_id: self.session.worker_id.clone(),
-            provider: self.session.provider.clone(),
-            task_id: receipt.task_id.clone(),
-            content: format!(
-                "placeholder output for worker {} task {}",
-                self.session.worker_id, receipt.task_id
-            ),
-            raw_snapshot_ref: Some("placeholder-snapshot".to_string()),
-            completed_at: "placeholder-completed-at".to_string(),
-            finish_reason: WorkerFinishReason::Completed,
-        };
-
+        let output = self.driver.read_output(&self.session, receipt)?;
         self.session.apply_output(&output)?;
         Ok(output)
     }
 }
 
-impl BrowserWorkerAdapter for DeepSeekWebAdapter {
+impl<D: BrowserProviderDriver> BrowserWorkerAdapter for DeepSeekWebAdapter<D> {
     fn session(&self) -> &BrowserWorkerSession {
         &self.session
     }

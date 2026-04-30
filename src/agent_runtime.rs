@@ -1,0 +1,249 @@
+use std::collections::BTreeMap;
+
+use crate::context_engine::{
+    BudgetExceededReason, ContextBudget, ContextPackError, ContextPacker, ContextSegment,
+    DropReason, PackedContext, SegmentSource,
+};
+use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
+use crate::memory_store::MemoryStore;
+use crate::responder::{
+    FakeResponder, Responder, ResponderMeta, ResponderOutput, ResponderRequest,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRequest {
+    pub user_input: String,
+    pub recall_limit: usize,
+    pub metadata: BTreeMap<String, String>,
+    pub context_budget: Option<ContextBudget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeResponse {
+    pub model_name: String,
+    pub body: String,
+    pub trace: String,
+    pub meta: ResponderMeta,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeResult {
+    pub prompt: String,
+    pub response: RuntimeResponse,
+    pub recall_summary: String,
+    pub recall_hit_count: usize,
+    pub packed_context_preview: String,
+    pub packed_token_count: u16,
+    pub dropped_segment_ids: Vec<String>,
+    pub context_debug: ContextDebugInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextDebugInfo {
+    pub drop_reasons: Vec<DropReason>,
+    pub budget_exceeded: bool,
+    pub budget_exceeded_reasons: Vec<BudgetExceededReason>,
+    pub working_reservation: Option<crate::context_engine::WorkingReservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentRuntimeError {
+    Recall(MemoryRecallError),
+    ContextPack(ContextPackError),
+}
+
+pub struct AgentRuntime<S, R = FakeResponder> {
+    recall: MemoryRecallPipeline<S>,
+    responder: R,
+}
+
+impl<S> AgentRuntime<S, FakeResponder> {
+    pub fn new(store: S) -> Self {
+        Self {
+            recall: MemoryRecallPipeline::new(store),
+            responder: FakeResponder::new("stub-responder"),
+        }
+    }
+}
+
+impl<S, R> AgentRuntime<S, R> {
+    pub fn with_responder(store: S, responder: R) -> Self {
+        Self {
+            recall: MemoryRecallPipeline::new(store),
+            responder,
+        }
+    }
+}
+
+impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
+    pub fn run(&self, request: &RuntimeRequest) -> Result<RuntimeResult, AgentRuntimeError> {
+        let recall_result = self
+            .recall
+            .recall(&RecallRequest {
+                query_text: request.user_input.clone(),
+                metadata: request.metadata.clone(),
+                limit: request.recall_limit,
+            })
+            .map_err(AgentRuntimeError::Recall)?;
+
+        let packed_context = self
+            .pack_context(request, &recall_result.segments)
+            .map_err(AgentRuntimeError::ContextPack)?;
+
+        let packed_context_preview = render_prompt_context(&packed_context);
+        let prompt = format!(
+            "[chuang-agent-runtime]\nuser_input={}\n{}",
+            request.user_input, packed_context_preview
+        );
+
+        let responder_output = self.responder.generate(&ResponderRequest {
+            prompt: prompt.clone(),
+            user_input: request.user_input.clone(),
+            recall_hit_count: recall_result.hits.len(),
+        });
+
+        Ok(RuntimeResult {
+            prompt,
+            response: map_runtime_response(responder_output),
+            recall_summary: recall_result.summary,
+            recall_hit_count: recall_result.hits.len(),
+            packed_context_preview,
+            packed_token_count: packed_context.total_tokens,
+            dropped_segment_ids: packed_context.dropped_ids.clone(),
+            context_debug: ContextDebugInfo {
+                drop_reasons: packed_context.drop_reasons.clone(),
+                budget_exceeded: packed_context.budget_exceeded,
+                budget_exceeded_reasons: packed_context.budget_exceeded_reasons.clone(),
+                working_reservation: packed_context.working_reservation.clone(),
+            },
+        })
+    }
+
+    fn pack_context(
+        &self,
+        request: &RuntimeRequest,
+        recall_segments: &[ContextSegment],
+    ) -> Result<PackedContext, ContextPackError> {
+        let mut segments = vec![
+            build_system_segment(),
+            build_working_segment(&request.user_input),
+        ];
+        segments.extend(recall_segments.iter().cloned());
+
+        ContextPacker::new(
+            request
+                .context_budget
+                .clone()
+                .unwrap_or_else(default_context_budget),
+        )
+        .pack(segments)
+    }
+}
+
+fn map_runtime_response(output: ResponderOutput) -> RuntimeResponse {
+    RuntimeResponse {
+        model_name: output.model_name,
+        body: output.body,
+        trace: output.trace,
+        meta: output.meta,
+    }
+}
+
+fn render_prompt_context(packed: &PackedContext) -> String {
+    let drop_reasons = render_drop_reasons(&packed.drop_reasons);
+    let budget_exceeded_reasons = render_budget_exceeded_reasons(&packed.budget_exceeded_reasons);
+    let mut lines = vec![
+        "[packed-context]".to_string(),
+        format!("segments={}", packed.segments.len()),
+        format!("total_tokens={}", packed.total_tokens),
+        format!("dropped={}", packed.dropped_ids.join(",")),
+        format!("drop_reasons={}", drop_reasons),
+        format!("budget_exceeded={}", packed.budget_exceeded),
+        format!("budget_exceeded_reasons={}", budget_exceeded_reasons),
+    ];
+
+    for segment in &packed.segments {
+        lines.push(format!(
+            "- {:?}/p{} [{}] {}",
+            segment.source, segment.priority, segment.id, segment.content
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn render_drop_reasons(reasons: &[DropReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(|reason| format!("{}:{}", reason.segment_id, reason.reason.as_str()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn render_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(BudgetExceededReason::as_str)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+pub fn debug_pack_for_test(
+    user_input: &str,
+    recall_segments: &[ContextSegment],
+    context_budget: ContextBudget,
+) -> Result<PackedContext, ContextPackError> {
+    let mut segments = vec![build_system_segment(), build_working_segment(user_input)];
+    segments.extend(recall_segments.iter().cloned());
+    ContextPacker::new(context_budget).pack(segments)
+}
+
+fn build_system_segment() -> ContextSegment {
+    ContextSegment {
+        id: "system-core".to_string(),
+        source: SegmentSource::System,
+        content: "你是创项目本地 Agent 内核，先闭环，再优化。".to_string(),
+        tokens: Some(10),
+        priority: 255,
+        created_at: default_timestamp(),
+        last_accessed: default_timestamp(),
+        metadata: std::collections::HashMap::new(),
+    }
+}
+
+fn build_working_segment(user_input: &str) -> ContextSegment {
+    ContextSegment {
+        id: "working-user-input".to_string(),
+        source: SegmentSource::Working,
+        content: format!("当前用户输入：{}", user_input),
+        tokens: Some(user_input.chars().count().min(u16::MAX as usize) as u16),
+        priority: 220,
+        created_at: default_timestamp(),
+        last_accessed: default_timestamp(),
+        metadata: std::collections::HashMap::new(),
+    }
+}
+
+fn default_context_budget() -> ContextBudget {
+    ContextBudget {
+        max_tokens: 512,
+        reserve_system_tokens: 32,
+        min_working_tokens: 1,
+        max_tool_results: 5,
+        max_memory_segments: 20,
+    }
+}
+
+fn default_timestamp() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-04-30T00:00:00Z")
+        .expect("static runtime timestamp should parse")
+        .with_timezone(&chrono::Utc)
+}

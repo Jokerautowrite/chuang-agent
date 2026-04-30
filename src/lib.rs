@@ -1,5 +1,14 @@
+pub mod actuator;
+pub mod agent_runtime;
 pub mod browser_worker;
 pub mod common;
+pub mod context_engine;
+pub mod governance;
 pub mod lifecycle;
 pub mod memory_policy;
+pub mod memory_recall;
+pub mod memory_store;
+pub mod memory_store_sqlite;
+pub mod responder;
+pub mod runtime_report;
 pub mod subagent_report;

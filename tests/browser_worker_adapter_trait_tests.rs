@@ -33,7 +33,7 @@ fn deepseek_web_adapter_trait_mutations_update_underlying_session() {
 }
 
 #[test]
-fn deepseek_web_adapter_submit_task_returns_placeholder_receipt() {
+fn deepseek_web_adapter_submit_task_uses_default_fake_driver() {
     let mut adapter = DeepSeekWebAdapter::new("worker-1", "https://chat.deepseek.com");
     adapter.ensure_expert_mode();
     adapter.mark_ready();
@@ -45,7 +45,7 @@ fn deepseek_web_adapter_submit_task_returns_placeholder_receipt() {
     };
 
     let receipt = chuang_agent::browser_worker::adapter_submit_task(&mut adapter, &task)
-        .expect("placeholder submit should succeed");
+        .expect("default fake driver submit should succeed");
 
     let session = chuang_agent::browser_worker::adapter_session(&adapter);
     assert_eq!(receipt.task_id, task.task_id);
@@ -53,6 +53,7 @@ fn deepseek_web_adapter_submit_task_returns_placeholder_receipt() {
     assert_eq!(receipt.provider, ProviderKind::DeepSeekWeb);
     assert_eq!(receipt.status, DispatchStatus::Submitted);
     assert_eq!(receipt.mode, BrowserMode::Expert);
+    assert_eq!(receipt.submitted_at, "fake-submitted-at");
     assert_eq!(
         receipt.prompt_hash,
         session.last_prompt_hash.clone().unwrap()
@@ -62,7 +63,7 @@ fn deepseek_web_adapter_submit_task_returns_placeholder_receipt() {
 }
 
 #[test]
-fn deepseek_web_adapter_read_output_returns_placeholder_output() {
+fn deepseek_web_adapter_read_output_uses_default_fake_driver() {
     let mut adapter = DeepSeekWebAdapter::new("worker-1", "https://chat.deepseek.com");
     adapter.ensure_expert_mode();
     adapter.mark_ready();
@@ -74,16 +75,24 @@ fn deepseek_web_adapter_read_output_returns_placeholder_output() {
     };
 
     let receipt = chuang_agent::browser_worker::adapter_submit_task(&mut adapter, &task)
-        .expect("placeholder submit should succeed");
+        .expect("default fake driver submit should succeed");
     let output = chuang_agent::browser_worker::adapter_read_output(&mut adapter, &receipt)
-        .expect("placeholder read should succeed");
+        .expect("default fake driver read should succeed");
 
     let session = chuang_agent::browser_worker::adapter_session(&adapter);
     assert_eq!(output.worker_id, "worker-1");
     assert_eq!(output.provider, ProviderKind::DeepSeekWeb);
     assert_eq!(output.task_id, task.task_id);
     assert_eq!(output.finish_reason, WorkerFinishReason::Completed);
-    assert!(output.content.contains("placeholder"));
+    assert_eq!(
+        output.content,
+        "fake provider output for worker worker-1 task task-1"
+    );
+    assert_eq!(
+        output.raw_snapshot_ref.as_deref(),
+        Some("fake-provider-snapshot")
+    );
+    assert_eq!(output.completed_at, "fake-completed-at");
     assert_eq!(session.state, WorkerState::Completed);
     assert_eq!(
         session.last_output_hash,

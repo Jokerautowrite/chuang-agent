@@ -45,6 +45,14 @@ pub enum WorkerFinishReason {
 pub enum BrowserWorkerError {
     MissingPromptContext,
     MissingDispatchReceipt,
+    UnexpectedBrowserObservation {
+        command: &'static str,
+        observation: &'static str,
+    },
+    OpenCliCommandFailed {
+        command: String,
+        detail: String,
+    },
     InvalidStateTransition {
         from: WorkerState,
         action: &'static str,

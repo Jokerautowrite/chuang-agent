@@ -14,6 +14,7 @@ pub struct BrowserTranscriptRecord {
     pub provider: ProviderKind,
     pub prompt: String,
     pub output: Option<String>,
+    pub raw_snapshot_ref: Option<String>,
     pub entries: Vec<BrowserTranscriptEntry>,
 }
 
@@ -36,6 +37,7 @@ impl BrowserTranscript {
             provider: receipt.provider.clone(),
             prompt: task.prompt.clone(),
             output: None,
+            raw_snapshot_ref: None,
             entries: vec![BrowserTranscriptEntry {
                 role: "user".to_string(),
                 content: task.prompt.clone(),
@@ -50,6 +52,7 @@ impl BrowserTranscript {
         output: &WorkerOutput,
     ) -> BrowserTranscriptRecord {
         record.output = Some(output.content.clone());
+        record.raw_snapshot_ref = output.raw_snapshot_ref.clone();
         record.entries.push(BrowserTranscriptEntry {
             role: "assistant".to_string(),
             content: output.content.clone(),
@@ -92,6 +95,7 @@ mod tests {
         assert_eq!(record.provider, ProviderKind::DeepSeekWeb);
         assert_eq!(record.prompt, "Summarize this page");
         assert_eq!(record.output, None);
+        assert_eq!(record.raw_snapshot_ref, None);
         assert_eq!(
             record.entries,
             vec![BrowserTranscriptEntry {
@@ -124,7 +128,7 @@ mod tests {
             provider: ProviderKind::DeepSeekWeb,
             task_id: "task-1".into(),
             content: "Done".into(),
-            raw_snapshot_ref: None,
+            raw_snapshot_ref: Some("opencli://deepseek/task-1".into()),
             completed_at: "2026-04-30T15:15:00Z".into(),
             finish_reason: WorkerFinishReason::Completed,
         };
@@ -132,6 +136,10 @@ mod tests {
         let record = transcript.complete_record(transcript.start_record(&task, &receipt), &output);
 
         assert_eq!(record.output, Some("Done".into()));
+        assert_eq!(
+            record.raw_snapshot_ref,
+            Some("opencli://deepseek/task-1".into())
+        );
         assert_eq!(record.entries.len(), 2);
         assert_eq!(
             record.entries[1],
