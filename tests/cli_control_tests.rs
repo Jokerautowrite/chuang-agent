@@ -82,3 +82,51 @@ fn cli_control_apply_runs_after_explicit_approval() {
     assert!(stdout.contains("model=gpt-5.5"));
     assert!(stdout.contains("control_audit: recorded"));
 }
+
+#[test]
+fn cli_control_apply_reports_missing_action_concisely() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "control",
+            "apply",
+            "--unit",
+            "codex-xiaoce",
+            "--reason",
+            "test missing action",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("control apply requires --action"));
+}
+
+#[test]
+fn cli_control_apply_reports_unsupported_action_concisely() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "control",
+            "apply",
+            "--unit",
+            "codex-xiaoce",
+            "--action",
+            "reload",
+            "--reason",
+            "test unsupported action",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("unsupported control action: reload"));
+}

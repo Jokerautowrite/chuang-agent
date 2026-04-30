@@ -212,22 +212,30 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
     while index < args.len() {
         match args[index].as_str() {
             "--unit" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "control apply requires value after --unit".to_string())?;
                 unit_id = Some(value.clone());
                 index += 2;
             }
             "--action" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "control apply requires value after --action".to_string())?;
                 action = Some(value.clone());
                 index += 2;
             }
             "--reason" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "control apply requires value after --reason".to_string())?;
                 reason = Some(value.clone());
                 index += 2;
             }
             "--model" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "control apply requires value after --model".to_string())?;
                 model_name = Some(value.clone());
                 index += 2;
             }
@@ -247,14 +255,15 @@ fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String
             model_name: model_name
                 .ok_or_else(|| "--model is required for change-model".to_string())?,
         },
-        _ => return Err(usage()),
+        Some(other) => return Err(format!("unsupported control action: {other}")),
+        None => return Err("control apply requires --action".to_string()),
     };
 
     Ok(ControlApplyCliRequest {
         request: ControlRequest {
-            unit_id: unit_id.ok_or_else(usage)?,
+            unit_id: unit_id.ok_or_else(|| "control apply requires --unit".to_string())?,
             action,
-            reason: reason.ok_or_else(usage)?,
+            reason: reason.ok_or_else(|| "control apply requires --reason".to_string())?,
         },
         approve,
     })

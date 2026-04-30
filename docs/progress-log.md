@@ -305,6 +305,13 @@
   - `control_workflow_tests` 扩到 4 条，新增默认本地 units -> view 断言。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- CLI 控制命令错误信息已收窄：
+  - 缺少 `--unit / --action / --reason` 时返回明确字段错误，不再只吐通用 usage。
+  - `--unit / --action / --reason / --model` 后缺值时返回明确缺值错误。
+  - 不支持的 action 会返回 `unsupported control action: <action>`。
+- 更新测试：
+  - `cli_control_tests` 新增缺少 action 和不支持 action 的错误提示断言。
+- 已运行 `cargo test --test cli_control_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
