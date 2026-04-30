@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::context_engine::ContextBudget;
-use crate::memory_store::{MemoryRecord, MemoryStore, MemoryStoreError};
+use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::{FakeResponder, Responder};
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::SubagentReport;
@@ -15,6 +15,7 @@ pub struct ChuangKernelConfig {
     pub recall_limit: usize,
     pub metadata: BTreeMap<String, String>,
     pub context_budget: Option<ContextBudget>,
+    pub memory_write_max_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,17 @@ pub struct ChuangKernelSnapshot {
     pub recall_limit: usize,
     pub metadata_keys: Vec<String>,
     pub context_budget_max_tokens: Option<u16>,
+    pub memory_write_max_chars: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChuangKernelMemoryError {
+    Store(MemoryStoreError),
+    HardLimitExceeded {
+        limit_chars: usize,
+        attempted_chars: usize,
+        existing_record_ids: Vec<String>,
+    },
 }
 
 pub struct ChuangKernel<S, R = FakeResponder> {
@@ -66,6 +78,7 @@ impl<S, R> ChuangKernel<S, R> {
                 .context_budget
                 .as_ref()
                 .map(|budget| budget.max_tokens),
+            memory_write_max_chars: self.config.memory_write_max_chars,
         }
     }
 }
@@ -101,22 +114,55 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         })
     }
 
-    pub fn remember_turn(&mut self, turn: &ChuangKernelTurn) -> Result<String, MemoryStoreError> {
+    pub fn remember_turn(
+        &mut self,
+        turn: &ChuangKernelTurn,
+    ) -> Result<String, ChuangKernelMemoryError> {
         let record_id = format!("turn-memory-{}", turn.turn_id);
-        self.runtime.memory_store_mut().put(MemoryRecord {
-            id: record_id.clone(),
-            content: format!(
-                "user={}\nresponse={}\nsummary={}",
-                turn.user_input, turn.result.response.body, turn.report.summary
-            ),
-            metadata: BTreeMap::from([
-                ("kind".to_string(), "turn_summary".to_string()),
-                ("agent_id".to_string(), self.config.agent_id.clone()),
-                ("turn_id".to_string(), turn.turn_id.clone()),
-            ]),
-            created_at: "2026-05-01T00:00:00Z".to_string(),
-            expires_at: None,
-        })?;
+        let content = format!(
+            "user={}\nresponse={}\nsummary={}",
+            turn.user_input, turn.result.response.body, turn.report.summary
+        );
+
+        if let Some(limit_chars) = self.config.memory_write_max_chars {
+            let attempted_chars = content.chars().count();
+            if attempted_chars > limit_chars {
+                return Err(ChuangKernelMemoryError::HardLimitExceeded {
+                    limit_chars,
+                    attempted_chars,
+                    existing_record_ids: self.existing_turn_summary_ids()?,
+                });
+            }
+        }
+
+        self.runtime
+            .memory_store_mut()
+            .put(MemoryRecord {
+                id: record_id.clone(),
+                content,
+                metadata: BTreeMap::from([
+                    ("kind".to_string(), "turn_summary".to_string()),
+                    ("agent_id".to_string(), self.config.agent_id.clone()),
+                    ("turn_id".to_string(), turn.turn_id.clone()),
+                ]),
+                created_at: "2026-05-01T00:00:00Z".to_string(),
+                expires_at: None,
+            })
+            .map_err(ChuangKernelMemoryError::Store)?;
         Ok(record_id)
+    }
+
+    fn existing_turn_summary_ids(&mut self) -> Result<Vec<String>, ChuangKernelMemoryError> {
+        let hits = self
+            .runtime
+            .memory_store_mut()
+            .search(&MemoryQuery {
+                text: None,
+                metadata: BTreeMap::from([("kind".to_string(), "turn_summary".to_string())]),
+                limit: 1000,
+            })
+            .map_err(ChuangKernelMemoryError::Store)?;
+
+        Ok(hits.into_iter().map(|hit| hit.record.id).collect())
     }
 }

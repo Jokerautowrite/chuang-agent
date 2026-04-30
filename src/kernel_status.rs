@@ -28,6 +28,7 @@ pub fn build_chuang_mvp_status(
                 .context_budget
                 .as_ref()
                 .map(|budget| budget.max_tokens),
+            memory_write_max_chars: kernel.memory_write_max_chars,
         },
     })
 }

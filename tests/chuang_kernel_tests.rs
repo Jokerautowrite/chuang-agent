@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chuang_agent::chuang_kernel::{ChuangKernel, ChuangKernelConfig};
+use chuang_agent::chuang_kernel::{ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError};
 use chuang_agent::context_engine::ContextBudget;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::subagent_report::ExecutionStatus;
@@ -25,6 +25,7 @@ fn kernel_config() -> ChuangKernelConfig {
         recall_limit: 3,
         metadata: BTreeMap::new(),
         context_budget: None,
+        memory_write_max_chars: Some(2200),
     }
 }
 
@@ -92,6 +93,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
             max_tool_results: 3,
             max_memory_segments: 5,
         }),
+        memory_write_max_chars: Some(2200),
     };
     let kernel = ChuangKernel::new(config, InMemoryMemoryStore::new());
 
@@ -102,6 +104,50 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
     assert_eq!(snapshot.recall_limit, 2);
     assert_eq!(snapshot.metadata_keys, vec!["scope".to_string()]);
     assert_eq!(snapshot.context_budget_max_tokens, Some(128));
+    assert_eq!(snapshot.memory_write_max_chars, Some(2200));
+}
+
+#[test]
+fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
+    let mut store = InMemoryMemoryStore::new();
+    store
+        .put(record(
+            "existing-turn",
+            "旧的 turn summary",
+            &[("kind", "turn_summary")],
+            "2026-05-01T10:00:00Z",
+        ))
+        .expect("seed should succeed");
+    let config = ChuangKernelConfig {
+        memory_write_max_chars: Some(12),
+        ..kernel_config()
+    };
+    let mut kernel = ChuangKernel::new(config, store);
+
+    let turn = kernel
+        .run_turn("这次写入应该超过硬上限")
+        .expect("kernel turn should run");
+    let err = kernel
+        .remember_turn(&turn)
+        .expect_err("oversized memory write should fail");
+
+    match err {
+        ChuangKernelMemoryError::HardLimitExceeded {
+            limit_chars,
+            attempted_chars,
+            existing_record_ids,
+        } => {
+            assert_eq!(limit_chars, 12);
+            assert!(attempted_chars > 12);
+            assert_eq!(existing_record_ids, vec!["existing-turn".to_string()]);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let next = kernel
+        .run_turn("硬上限")
+        .expect("next turn should still run");
+    assert_eq!(next.result.recall_hit_count, 0);
 }
 
 #[test]

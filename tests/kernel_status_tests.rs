@@ -13,6 +13,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         recall_limit: config.recall_limit,
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
+        memory_write_max_chars: Some(2200),
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -36,6 +37,7 @@ fn kernel_status_rejects_invalid_runtime_config() {
         recall_limit: config.recall_limit,
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
+        memory_write_max_chars: Some(2200),
     };
 
     let err = build_chuang_mvp_status(&config, &kernel).expect_err("invalid config should fail");

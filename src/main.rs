@@ -217,8 +217,8 @@ fn run_with_options(
             );
             kernel
                 .run_turn(user_input)
-                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
                 .map_err(|e| format!("runtime_failed: {e:?}"))
+                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
         }
         Ok(None) => {
             let mut store = SqliteMemoryStore::open(&options.runtime.db_path)
@@ -227,8 +227,8 @@ fn run_with_options(
             let mut kernel = ChuangKernel::new(kernel_config_from_runtime(&options.runtime), store);
             kernel
                 .run_turn(user_input)
-                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
                 .map_err(|e| format!("runtime_failed: {e:?}"))
+                .and_then(|turn| remember_turn_if_requested(&mut kernel, turn, remember))
         }
         Err(err) => Err(format!("config_invalid: {}: {}", err.field, err.message)),
     }
@@ -238,20 +238,15 @@ fn remember_turn_if_requested<S, R>(
     kernel: &mut ChuangKernel<S, R>,
     turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
     remember: bool,
-) -> Result<
-    (chuang_agent::agent_runtime::RuntimeResult, Option<String>),
-    chuang_agent::agent_runtime::AgentRuntimeError,
->
+) -> Result<(chuang_agent::agent_runtime::RuntimeResult, Option<String>), String>
 where
     S: MemoryStore,
     R: chuang_agent::responder::Responder,
 {
     if remember {
-        let record_id = kernel.remember_turn(&turn).map_err(|err| {
-            chuang_agent::agent_runtime::AgentRuntimeError::Recall(
-                chuang_agent::memory_recall::MemoryRecallError::Store(err),
-            )
-        })?;
+        let record_id = kernel
+            .remember_turn(&turn)
+            .map_err(|err| format!("memory_write_failed: {err:?}"))?;
         return Ok((turn.result, Some(record_id)));
     }
 
@@ -448,6 +443,7 @@ fn kernel_config_from_runtime(runtime: &RuntimeConfig) -> ChuangKernelConfig {
         recall_limit: runtime.recall_limit,
         metadata: runtime.metadata.clone(),
         context_budget: Some(runtime.context_budget.clone()),
+        memory_write_max_chars: Some(2200),
     }
 }
 

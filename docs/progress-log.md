@@ -391,6 +391,16 @@
 - 新增 MVP 边界文档：
   - `docs/mvp-scope.md` 明确当前最小闭环、已具备能力、当前不做事项、下一步优先级和 MVP 可用判定标准。
   - 重点约束：飞书只作为未来插件入口，不再作为核心主线；真实服务/Agent 控制仍保持 adapter 化和审批化。
+- 内核记忆写入新增最小硬上限策略：
+  - `ChuangKernelConfig` 新增 `memory_write_max_chars`。
+  - `ChuangKernelSnapshot` 暴露当前写入上限。
+  - `ChuangKernel::remember_turn()` 写入前检查 turn summary 字符数，超限返回 `ChuangKernelMemoryError::HardLimitExceeded`。
+  - 超限错误包含 `limit_chars / attempted_chars / existing_record_ids`，给后续模型自主压缩或人工处理留接口。
+  - 仍然不自动删除、不自动压缩、不改身份记忆。
+- 更新测试：
+  - `chuang_kernel_tests` 扩到 5 条，新增硬上限拒绝写入，并确认下一轮 recall 不会命中失败写入。
+  - `cli_smoke_tests / kernel_status_tests` 已同步适配内核配置。
+- 已运行 `cargo test --test chuang_kernel_tests --test cli_smoke_tests --test kernel_status_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
