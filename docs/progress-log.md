@@ -484,6 +484,13 @@
   - `cli_smoke_tests` 新增 `--remember-identity + --identity-memory-root` 端到端验证，确认 `MEMORY.md` 被追加。
   - `docs/mvp-scope.md` 已同步 CLI 能力边界。
 - 已运行 `cargo test --test cli_smoke_tests --test cli_status_tests`，当前专项测试通过。
+- 双文件热记忆条目解析补强：
+  - `MEMORY.md` 中位于第一个 `## id` 前的自由文本现在会作为 `MEMORY.md:preamble` 返回。
+  - 这样手写热记忆或旧格式内容在追加超限时也会出现在 `existing_entries` 中，便于后续模型/人工决定如何压缩。
+  - 仍然不自动删除、不自动压缩、不改写原文件。
+- 更新测试：
+  - `hermes_memory_tests` 新增自由文本 preamble 超限拒绝断言。
+- 已运行 `cargo test --test hermes_memory_tests --test cli_smoke_tests`，当前专项测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

@@ -123,6 +123,40 @@ fn dual_file_memory_rejects_memory_append_over_hard_limit_with_existing_entries(
 }
 
 #[test]
+fn dual_file_memory_reports_freeform_preamble_when_append_exceeds_limit() {
+    let root = temp_root("memory-preamble-limit");
+    let mut config = DualFileMemoryConfig::new(&root);
+    config.memory_max_chars = 20;
+    let mut store = FileDualFileMemoryStore::open(config).expect("open succeeds");
+    fs::write(root.join("MEMORY.md"), "手写热记忆").expect("preamble should be seeded");
+
+    let err = store
+        .append_memory(HotMemoryEntry {
+            id: "mem-1".to_string(),
+            content: "01234567890123456789".to_string(),
+        })
+        .expect_err("over-limit append should fail");
+
+    match err {
+        DualFileMemoryError::HardLimitExceeded {
+            scope,
+            existing_entries,
+            ..
+        } => {
+            assert_eq!(scope, DualFileMemoryScope::Memory);
+            assert_eq!(existing_entries.len(), 1);
+            assert_eq!(existing_entries[0].id, "MEMORY.md:preamble");
+            assert_eq!(existing_entries[0].content_preview, "手写热记忆");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(
+        fs::read_to_string(root.join("MEMORY.md")).expect("memory file readable"),
+        "手写热记忆"
+    );
+}
+
+#[test]
 fn dual_file_memory_rejects_duplicate_memory_entry_id() {
     let root = temp_root("duplicate");
     let mut store =

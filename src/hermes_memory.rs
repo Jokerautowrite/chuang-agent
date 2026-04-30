@@ -219,7 +219,17 @@ fn parse_memory_entry_views(content: &str) -> Vec<MemoryEntryView> {
 
     for line in content.lines() {
         if let Some(id) = line.strip_prefix("## ") {
-            push_entry(&mut entries, current_id.take(), &current_body);
+            push_entry(
+                &mut entries,
+                current_id.take().or_else(|| {
+                    if current_body.trim().is_empty() {
+                        None
+                    } else {
+                        Some("MEMORY.md:preamble".to_string())
+                    }
+                }),
+                &current_body,
+            );
             current_id = Some(id.trim().to_string());
             current_body.clear();
         } else {
@@ -229,7 +239,17 @@ fn parse_memory_entry_views(content: &str) -> Vec<MemoryEntryView> {
             current_body.push_str(line);
         }
     }
-    push_entry(&mut entries, current_id, &current_body);
+    push_entry(
+        &mut entries,
+        current_id.or_else(|| {
+            if current_body.trim().is_empty() {
+                None
+            } else {
+                Some("MEMORY.md:preamble".to_string())
+            }
+        }),
+        &current_body,
+    );
     entries
 }
 
