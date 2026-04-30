@@ -49,3 +49,15 @@ fn core_files_do_not_import_or_construct_specific_adapters() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn runtime_config_describes_provider_but_does_not_construct_adapters() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let content = fs::read_to_string(repo_root.join("src/runtime_config.rs"))
+        .expect("runtime_config should be readable");
+
+    assert!(
+        !content.contains("OpenAICompatibleProviderAdapter"),
+        "runtime_config must not construct provider adapters; use slot_registry composition instead"
+    );
+}
