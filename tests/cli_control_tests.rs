@@ -80,4 +80,5 @@ fn cli_control_apply_runs_after_explicit_approval() {
     assert!(stdout.contains("control_applied unit_id=codex-xiaoce"));
     assert!(stdout.contains("action=change_model"));
     assert!(stdout.contains("model=gpt-5.5"));
+    assert!(stdout.contains("control_audit: recorded"));
 }

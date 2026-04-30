@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::control_plane::{
-    proposed_action_for_control, ControlAction, ControlError, ControlPlane, ControlRequest,
-    FakeControlPlane, ManagedUnit, ManagedUnitKind, ManagedUnitStatus,
+    audit_record_for_control, proposed_action_for_control, ControlAction, ControlError,
+    ControlPlane, ControlRequest, FakeControlPlane, ManagedUnit, ManagedUnitKind,
+    ManagedUnitStatus,
 };
 use chuang_agent::governance::{Governance, RiskDecision, StaticRuleGovernance};
 
@@ -136,4 +137,25 @@ fn control_requests_can_be_classified_by_governance_before_apply() {
     assert_eq!(proposed.target, "agent:agent-1");
     assert!(proposed.summary.contains("restart"));
     assert!(matches!(decision, RiskDecision::NeedsApproval { .. }));
+}
+
+#[test]
+fn control_requests_can_build_audit_record_after_approval() {
+    let unit = unit("agent-1", ManagedUnitKind::Agent);
+    let request = ControlRequest {
+        unit_id: "agent-1".to_string(),
+        action: ControlAction::ChangeModel {
+            model_name: "gpt-5.5".to_string(),
+        },
+        reason: "用户确认换模型".to_string(),
+    };
+
+    let audit = audit_record_for_control(&unit, &request, true)
+        .expect("control request should produce audit record");
+
+    assert_eq!(audit.operation, "control.change_model");
+    assert_eq!(audit.agent_id.0, "control-plane");
+    assert_eq!(audit.task_id.0, "control:agent-1");
+    assert!(audit.reason.contains("approved=true"));
+    assert!(audit.reason.contains("target=agent:agent-1"));
 }

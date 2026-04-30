@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::control_plane::{
-    proposed_action_for_control, ControlAction, ControlPlane, ControlRequest, ManagedUnit,
+    audit_record_for_control, proposed_action_for_control, ControlAction, ControlPlane,
+    ControlRequest, ManagedUnit,
 };
 use chuang_agent::governance::{Governance, RiskDecision};
 use chuang_agent::memory_store::MemoryStore;
@@ -139,6 +140,13 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         return Err("control action was not allowed by governance".to_string());
     }
 
+    let audit_record = audit_record_for_control(unit, &request.request, request.approve)
+        .map_err(|e| format!("control_audit_invalid: {e:?}"))?;
+    slots
+        .governance
+        .audit(audit_record)
+        .map_err(|e| format!("control_audit_failed: {}", e.message))?;
+
     let receipt = slots
         .control_plane
         .apply(request.request)
@@ -151,6 +159,7 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         receipt.next_status,
         receipt.model_name.as_deref().unwrap_or("none")
     );
+    println!("control_audit: recorded");
 
     Ok(())
 }

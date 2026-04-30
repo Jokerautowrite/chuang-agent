@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{ActionKind, ProposedAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,34 @@ pub fn proposed_action_for_control(
             unit.display_name,
             request.reason
         ),
+    })
+}
+
+pub fn audit_record_for_control(
+    unit: &ManagedUnit,
+    request: &ControlRequest,
+    approved: bool,
+) -> Result<AuditRecord, ControlError> {
+    validate_request(request)?;
+    if unit.unit_id != request.unit_id {
+        return Err(ControlError::InvalidRequest(
+            "control request unit_id must match unit".to_string(),
+        ));
+    }
+
+    Ok(AuditRecord {
+        operation: format!("control.{}", request.action.as_str()),
+        agent_id: AgentId("control-plane".to_string()),
+        task_id: TaskId(format!("control:{}", unit.unit_id)),
+        delta_bytes: 0,
+        reason: format!(
+            "{}; approved={}; target={}:{}",
+            request.reason,
+            approved,
+            unit.kind.as_str(),
+            unit.unit_id
+        ),
+        timestamp: Timestamp("2026-05-01T00:00:00Z".to_string()),
     })
 }
 

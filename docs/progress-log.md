@@ -271,6 +271,15 @@
   - `tests/cli_control_tests.rs`，覆盖 list 输出、未审批拦截、显式审批后 change-model 执行。
 - 已再次运行 `cargo fmt`。
 - 已再次运行 `cargo test`，当前全仓测试通过。
+- 控制操作已补审计记录链路：
+  - `audit_record_for_control()` 可把 `ManagedUnit + ControlRequest + approved` 转成统一 `AuditRecord`。
+  - CLI `control apply` 在治理允许/显式审批后，会调用 `Governance::audit()` 记录控制操作。
+  - CLI 成功执行后输出 `control_audit: recorded`。
+- 更新测试：
+  - `control_plane_tests` 扩到 6 条，新增 control audit record 断言。
+  - `cli_control_tests` 已验证审批执行后输出审计记录提示。
+- 已再次运行 `cargo fmt`。
+- 已再次运行 `cargo test`，当前全仓测试通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文
