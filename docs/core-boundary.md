@@ -39,7 +39,7 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 
 ## 当前迁移状态
 
-- `responder` 保留 responder trait、provider adapter trait、fake/scripted 测试实现。
+- `responder` 主文件保留 responder trait、provider adapter trait 和统一壳；fake/scripted 测试实现已拆到子模块。
 - `provider_openai_compatible` 承载 OpenAI-compatible 具体 adapter；调用点直接引用 provider 模块。
 - `subagent_spawner` 主文件保留协议类型、trait、slot 转发和共用校验；fake / queued 实现已拆到子模块。
 - `control_plane` 主文件保留控制面协议、治理/审计辅助函数和共用校验；fake 实现已拆到子模块。真实 systemd/桌面控制必须单独作为 adapter。
