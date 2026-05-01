@@ -12,6 +12,7 @@ pub mod control_intent;
 pub mod control_plane;
 pub mod control_surface;
 pub mod control_workflow;
+pub mod genesis_actuator;
 pub mod governance;
 pub mod hermes_memory;
 pub mod kernel_status;

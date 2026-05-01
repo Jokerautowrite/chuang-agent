@@ -25,7 +25,8 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - provider：OpenAI-compatible、本地模型、未来任意模型后端。
 - subagent：Codex/OpenClaw/Hermes/GenericAgent runner。
 - actuator：桌面、浏览器、键鼠、剪贴板、ADB、微信/飞书等真实操作面。
-- browser worker：浏览器外脑、网页专家、opencli/Chrome 驱动等外部工作流。
+- genesis actuator：网页版 AI 查询插件，核心只依赖统一 ask/search port；AutoCLI、DeepSeek、userDataDir、CDP 真人浏览器都属于具体 adapter。
+- browser worker：旧浏览器外脑实验线，当前冻结，不继续作为 MVP 推进方向。
 - control plane：systemd、桌面服务、Agent 进程管理。
 - external channel：飞书、微信、HTTP、CLI、桌面 UI。
 - evolver：技能提炼、SOP 固化、外脑同步。
@@ -52,4 +53,5 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 与 summary_compression 策略包装已拆到子模块。未来真实摘要压缩/优先级/对话树策略必须作为独立 engine。
 - `governance` 主文件保留动作、风险决策、错误类型和 trait；static-rule 实现已拆到子模块。未来策略引擎/审批通道/组织规则必须作为独立治理实现。
 - `slot_registry` 已引入 `ProviderSlot / GovernanceSlot / ActuatorSlot / EvolutionSlot / ControlPlaneSlot`，避免 `RuntimeSlots` 字段直接绑定具体实现类型。
-- `browser_worker` 明确属于 adapter/plugin 能力线。它可以保留在仓库中继续试验 opencli/网页外脑能力，但 MVP 主入口、runtime、kernel、slot registry 不应直接依赖它。
+- `browser_worker` 明确属于 adapter/plugin 能力线。旧实现当前先冻结，不作为 MVP 推进方向；MVP 主入口、runtime、kernel、slot registry 不应直接依赖它。
+- `Genesis Actuator` 是后续网页 AI 查询能力的新插件线：对核心只暴露 `ask/search` 语义，主通道 userDataDir、备用 CDP、登录态检测和修复策略都必须留在 adapter 内，并接受治理和审计约束。

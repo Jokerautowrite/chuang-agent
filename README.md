@@ -21,6 +21,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `cargo run -- subagent dispatch --task TEXT`：写入子代理 dispatch 文件队列。
 - `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch。
 - `cargo run -- subagent run-once --runner command --runner-command PATH --approve-exec`：显式执行外部 runner，并把输出收成 report。
+- `GenesisActuator`：新版网页 AI 查询插件线，旧 `BrowserWorker` 暂停推进。
 - `cargo test`：全量回归。
 
 当前 MVP 边界见 `docs/mvp-scope.md`，核心边界见 `docs/core-boundary.md`，长期进度见 `docs/progress-log.md`。

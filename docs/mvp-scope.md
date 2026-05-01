@@ -41,6 +41,7 @@
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 - `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
+- `GenesisActuator` trait + `AutoCliGenesisActuator` 最小实现：主通道 userDataDir，备用 CDP，登录态失效时 fallback，并返回需审批的修复计划，不自动删除 profile。
 
 ## 当前明确不做
 
@@ -48,6 +49,7 @@
 - 不自动压缩身份记忆。
 - 不直接操作真实 systemd 服务。
 - 不直接控制 Hermes / OpenClaw 进程。
+- 不继续扩展旧 `BrowserWorker` 实验线；网页版 AI 查询能力后续改走 `Genesis Actuator` 插件线。
 - 不把飞书作为核心依赖，飞书只作为未来插件入口。
 - 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
 - 不把 API key 明文写进配置文件；真实 provider 使用 `api_key_env` 引用环境变量。
@@ -57,7 +59,8 @@
 1. 继续完善真实子代理 runner adapter 的协议约束；当前已有显式审批的 `command` runner 接缝，默认仍保持 fake/queued，不自动执行危险命令。
 2. 继续增强 `summary_compression` 的压缩质量，但默认仍保持 `deterministic_budget`。
 3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
-4. 最后再接桌面壳、飞书插件和服务控制 UI。
+4. 新开 `Genesis Actuator` 插件线，先做可审计的 AutoCLI 查询 port；旧 `BrowserWorker` 先冻结。
+5. 最后再接桌面壳、飞书插件和服务控制 UI。
 
 ## 判定 MVP 可用的最低标准
 
