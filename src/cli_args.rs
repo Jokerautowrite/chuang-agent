@@ -67,6 +67,91 @@ pub(crate) fn parse_config_init(args: &[String]) -> Result<ConfigInitCliRequest,
     Ok(ConfigInitCliRequest { output, path })
 }
 
+pub(crate) fn parse_genesis_ask(args: &[String]) -> Result<GenesisAskCliRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut prompt: Option<String> = None;
+    let mut program = "autocli".to_string();
+    let mut profile_dir = PathBuf::from("./deepseek_profile");
+    let mut cdp_port = 9222u16;
+    let mut timeout_ms = 30_000u64;
+    let mut approve_exec = false;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--prompt" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "genesis ask requires value after --prompt".to_string())?;
+                prompt = Some(value.clone());
+                index += 2;
+            }
+            "--program" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "genesis ask requires value after --program".to_string())?;
+                program = value.clone();
+                index += 2;
+            }
+            "--profile-dir" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "genesis ask requires value after --profile-dir".to_string())?;
+                profile_dir = PathBuf::from(value);
+                index += 2;
+            }
+            "--cdp-port" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "genesis ask requires value after --cdp-port".to_string())?;
+                cdp_port = value
+                    .parse::<u16>()
+                    .map_err(|_| format!("invalid --cdp-port: {value}"))?;
+                index += 2;
+            }
+            "--timeout-ms" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "genesis ask requires value after --timeout-ms".to_string())?;
+                timeout_ms = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid --timeout-ms: {value}"))?;
+                index += 2;
+            }
+            "--approve-exec" => {
+                approve_exec = true;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let prompt = prompt.ok_or_else(|| "genesis ask requires --prompt".to_string())?;
+    if prompt.trim().is_empty() {
+        return Err("genesis ask requires non-empty --prompt".to_string());
+    }
+    if program.trim().is_empty() {
+        return Err("genesis ask requires non-empty --program".to_string());
+    }
+    if !approve_exec {
+        return Err("genesis_ask_requires_approve_exec: pass --approve-exec".to_string());
+    }
+
+    Ok(GenesisAskCliRequest {
+        output,
+        prompt,
+        program,
+        profile_dir,
+        cdp_port,
+        timeout_ms,
+        approve_exec,
+    })
+}
+
 pub(crate) fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequest, String> {
     let mut unit_id: Option<String> = None;
     let mut action: Option<String> = None;

@@ -143,6 +143,17 @@ pub(crate) struct ConfigInitCliRequest {
     pub(crate) path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenesisAskCliRequest {
+    pub(crate) output: ControlOutputFormat,
+    pub(crate) prompt: String,
+    pub(crate) program: String,
+    pub(crate) profile_dir: PathBuf,
+    pub(crate) cdp_port: u16,
+    pub(crate) timeout_ms: u64,
+    pub(crate) approve_exec: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ConfigInitCliOutput {
     pub(crate) written: bool,

@@ -9,6 +9,8 @@
 - 新增 `src/genesis_actuator.rs` 插件线：包含 `GenesisActuator` trait、`FakeGenesisActuator`、`AutoCliGenesisActuator`、`GenesisConfig`、双通道错误类型和修复计划结构。
 - `AutoCliGenesisActuator` 已实现主通道 userDataDir + 备用 CDP 的最小容灾：主通道命中“请登录 / 验证码 / 登录后查看”等登录态失效 marker 时切备用通道，备用成功后只返回需审批的修复建议，不改写或删除 profile。
 - 新增 `tests/genesis_actuator_tests.rs`，覆盖 fake 查询、AutoCLI 命令形状、主通道成功、CDP fallback、双通道失败。
+- CLI 新增 `genesis ask --prompt TEXT --approve-exec`：可手动验证 Genesis 查询入口；缺少 `--approve-exec` 时拒绝执行外部程序。
+- 新增 `tests/cli_genesis_tests.rs`，覆盖 Genesis CLI 审批拒绝和已审批执行路径。
 - MVP 主链路补上 kernel 级治理入口：`ChuangKernel::run_governed_turn()` 会先通过 `Governance` trait 分类，非允许决策会在 runtime 前阻断，允许后再执行并写 audit。
 - `ChuangKernelTurn` 现在可携带 `governance_decision`，普通 `run_turn` 保持兼容并留空；CLI `run/repl` 默认通过 slot registry 的治理 slot 走 governed turn。
 - CLI `run` 输出新增 `governance_decision: allowed:...`，让 `input -> context -> runtime -> governance -> report` 的 MVP 链路有可见证据。

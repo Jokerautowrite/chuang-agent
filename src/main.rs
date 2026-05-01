@@ -5,6 +5,7 @@ mod cli_args;
 mod cli_config;
 mod cli_control;
 mod cli_doctor;
+mod cli_genesis;
 mod cli_output;
 mod cli_runtime;
 mod cli_subagent;
@@ -15,6 +16,7 @@ use cli_args::*;
 use cli_config::config_command;
 use cli_control::control_command;
 use cli_doctor::doctor_command;
+use cli_genesis::genesis_command;
 use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_subagent::subagent_command;
@@ -37,6 +39,7 @@ fn run_cli() -> Result<(), String> {
         Some("config") => config_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
         Some("subagent") => subagent_command(&args[2..]),
+        Some("genesis") => genesis_command(&args[2..]),
         _ => Err(usage()),
     }
 }

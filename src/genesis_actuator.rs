@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 mod autocli;
 mod fake;
 
@@ -9,7 +11,7 @@ pub use autocli::{
 };
 pub use fake::FakeGenesisActuator;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum GenesisChannel {
     UserDataDir,
     Cdp,
@@ -29,14 +31,14 @@ pub struct GenesisAskRequest {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GenesisAskResponse {
     pub answer: String,
     pub channel: GenesisChannel,
     pub primary_repair: Option<GenesisRepairPlan>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GenesisRepairPlan {
     pub reason: String,
     pub recommended_action: String,
