@@ -37,6 +37,7 @@
 - `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch 并写入模拟 report，不执行真实命令。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
+- `summary_compression` 非默认占位策略：当前委托同一预算 packer，不做模型摘要，用于验证配置切换面。
 
 ## 当前明确不做
 
@@ -51,7 +52,7 @@
 ## 下一步优先级
 
 1. 把子代理文件队列接到真实 runner adapter，但默认仍保持 fake/queued，不自动执行危险命令。
-2. 给 context engine 增加第二个非默认策略占位，例如 summary_compression，但默认仍保持 deterministic_budget。
+2. 给 `summary_compression` 接入真实摘要压缩 adapter，但默认仍保持 `deterministic_budget`。
 3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
 4. 最后再接桌面壳、飞书插件和服务控制 UI。
 

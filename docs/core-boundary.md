@@ -49,7 +49,7 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现已拆到子模块。真实技能提炼/固化必须单独作为 evolver adapter。
 - `memory_store` 主文件保留记忆记录、查询、命中、trait 和错误类型；in-memory 测试/开发实现已拆到子模块。SQLite、Hermes 双文件、未来向量/远程记忆都必须作为独立实现。
 - `hermes_memory` 主文件保留 Hermes 双文件记忆配置、快照、条目、错误和 trait；真实文件读写实现已拆到子模块。
-- `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 策略包装已拆到子模块。未来摘要压缩/优先级/对话树策略必须作为独立 engine。
+- `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 与 summary_compression 策略包装已拆到子模块。未来真实摘要压缩/优先级/对话树策略必须作为独立 engine。
 - `governance` 主文件保留动作、风险决策、错误类型和 trait；static-rule 实现已拆到子模块。未来策略引擎/审批通道/组织规则必须作为独立治理实现。
 - `slot_registry` 已引入 `ProviderSlot / GovernanceSlot / ActuatorSlot / EvolutionSlot / ControlPlaneSlot`，避免 `RuntimeSlots` 字段直接绑定具体实现类型。
 - `browser_worker` 明确属于 adapter/plugin 能力线。它可以保留在仓库中继续试验 opencli/网页外脑能力，但 MVP 主入口、runtime、kernel、slot registry 不应直接依赖它。

@@ -56,6 +56,7 @@ pub enum IdentityMemoryConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextEngineConfig {
     DeterministicBudget,
+    SummaryCompression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +311,7 @@ impl ContextEngineConfig {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::DeterministicBudget => "deterministic_budget",
+            Self::SummaryCompression => "summary_compression",
         }
     }
 

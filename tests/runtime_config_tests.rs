@@ -68,6 +68,17 @@ fn context_engine_config_exposes_deterministic_budget_kind() {
 }
 
 #[test]
+fn context_engine_config_exposes_summary_compression_kind() {
+    let config = ContextEngineConfig::SummaryCompression;
+
+    config
+        .validate()
+        .expect("summary compression config is valid");
+
+    assert_eq!(config.kind(), "summary_compression");
+}
+
+#[test]
 fn openai_provider_config_redacts_api_key_in_summary() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.provider = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {

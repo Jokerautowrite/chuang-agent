@@ -201,6 +201,35 @@ fn cli_status_can_override_context_budget_fields() {
 }
 
 #[test]
+fn cli_status_can_select_summary_compression_context_engine() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--context-engine",
+            "summary_compression",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(
+        parsed["config"]["context_engine_kind"],
+        "summary_compression"
+    );
+}
+
+#[test]
 fn cli_status_can_load_simple_config_file_and_accept_cli_overrides() {
     let root = temp_identity_root("config");
     let identity_root = root.join("identity");

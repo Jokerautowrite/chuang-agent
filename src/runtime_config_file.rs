@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use crate::hermes_memory::{DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS};
 use crate::provider_openai_compatible::ProviderTransport;
 use crate::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
+    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +53,9 @@ pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, Runtime
         config.subagent_queue = SubagentQueueConfig {
             root: PathBuf::from(value),
         };
+    }
+    if let Some(value) = get_any(&values, &["context.engine", "context_engine"]) {
+        config.context_engine = parse_context_engine(value)?;
     }
     if let Some(value) = get_any(&values, &["context.max_tokens", "context_max_tokens"]) {
         config.context_budget.max_tokens = parse_u16("context.max_tokens", value)?;
@@ -219,6 +222,17 @@ fn parse_subagent(raw: &str) -> Result<SubagentConfig, RuntimeConfigFileError> {
         "queued_external" => Ok(SubagentConfig::QueuedExternal),
         other => Err(RuntimeConfigFileError::InvalidValue {
             key: "subagent".to_string(),
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn parse_context_engine(raw: &str) -> Result<ContextEngineConfig, RuntimeConfigFileError> {
+    match raw {
+        "deterministic_budget" => Ok(ContextEngineConfig::DeterministicBudget),
+        "summary_compression" => Ok(ContextEngineConfig::SummaryCompression),
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: "context.engine".to_string(),
             value: other.to_string(),
         }),
     }

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use chuang_agent::context_engine::{
     ContextBudget, ContextEngine, ContextPackError, ContextPacker, ContextSegment,
-    DeterministicContextEngine, SegmentSource, WorkingReservationReason,
+    DeterministicContextEngine, SegmentSource, SummaryCompressionContextEngine,
+    WorkingReservationReason,
 };
 
 fn ts(value: &str) -> DateTime<Utc> {
@@ -72,6 +73,27 @@ fn deterministic_context_engine_wraps_budget_packer_behavior() {
 
     assert_eq!(engine.kind(), "deterministic_budget");
     assert_eq!(packed.total_tokens, 18);
+    assert_eq!(packed.dropped_ids, Vec::<String>::new());
+}
+
+#[test]
+fn summary_compression_context_engine_is_selectable_placeholder() {
+    let engine = SummaryCompressionContextEngine::new(budget(30, 10, 0));
+
+    let packed = engine
+        .pack(vec![segment(
+            "working-1",
+            SegmentSource::Working,
+            "working",
+            Some(8),
+            200,
+            "2026-04-30T18:00:00Z",
+            "2026-04-30T18:00:00Z",
+        )])
+        .expect("summary compression placeholder should pack");
+
+    assert_eq!(engine.kind(), "summary_compression");
+    assert_eq!(packed.total_tokens, 8);
     assert_eq!(packed.dropped_ids, Vec::<String>::new());
 }
 

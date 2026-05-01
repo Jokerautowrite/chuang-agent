@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
 mod deterministic;
+mod summary_compression;
 
 pub use deterministic::DeterministicContextEngine;
+pub use summary_compression::SummaryCompressionContextEngine;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSegment {

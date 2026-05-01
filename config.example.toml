@@ -12,6 +12,7 @@ model = "stub-responder"
 subagent = "fake"
 subagent_queue_root = "./data/subagent-queue"
 
+context_engine = "deterministic_budget"
 context_max_tokens = 512
 context_reserve_system_tokens = 32
 context_min_working_tokens = 1

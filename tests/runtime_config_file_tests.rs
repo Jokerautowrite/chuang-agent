@@ -1,4 +1,4 @@
-use chuang_agent::runtime_config::{ProviderConfig, SubagentConfig};
+use chuang_agent::runtime_config::{ContextEngineConfig, ProviderConfig, SubagentConfig};
 use chuang_agent::runtime_config_file::{parse_runtime_config_file, RuntimeConfigFileError};
 
 #[test]
@@ -10,6 +10,7 @@ recall_limit = 7
 identity_memory_root = "./tmp/identity"
 subagent = "queued_external"
 subagent_queue_root = "./tmp/subagents"
+context_engine = "summary_compression"
 
 [provider]
 kind = "fake"
@@ -29,6 +30,10 @@ max_memory_segments = 3
     assert_eq!(config.db_path.display().to_string(), "./tmp/chuang.db");
     assert_eq!(config.recall_limit, 7);
     assert_eq!(config.subagent, SubagentConfig::QueuedExternal);
+    assert_eq!(
+        config.context_engine,
+        ContextEngineConfig::SummaryCompression
+    );
     assert_eq!(
         config.subagent_queue.root.display().to_string(),
         "./tmp/subagents"
@@ -85,6 +90,20 @@ context_max_memory_segments = 4
             model_name
         } if provider_id == "flat-fake" && model_name == "flat-stub"
     ));
+}
+
+#[test]
+fn config_file_rejects_unknown_context_engine() {
+    let err = parse_runtime_config_file(r#"context_engine = "unknown_engine""#)
+        .expect_err("unknown context engine should fail");
+
+    assert_eq!(
+        err,
+        RuntimeConfigFileError::InvalidValue {
+            key: "context.engine".to_string(),
+            value: "unknown_engine".to_string()
+        }
+    );
 }
 
 #[test]

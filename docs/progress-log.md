@@ -22,6 +22,7 @@
 - `run --dispatch-subagent` 增加失败路径覆盖：未选择 `queued_external` 时明确拒绝，不创建 dispatch 队列。
 - CLI 端到端测试已覆盖 `run --dispatch-subagent -> subagent run-once -> subagent report`，确认 run 产生的 dispatch 可被 fake runner 回写并读回 report。
 - CLI 新增 `subagent collect --run-id ID`：从持久化 dispatch 恢复 queued spawner，再经 `SubagentRuntimeSlot::collect()` 回收 report；身份不匹配会拒绝，避免只读文件绕过子代理协议校验。
+- Context engine 新增非默认 `summary_compression` 占位策略：实现独立 engine wrapper、配置文件字段 `context_engine`、CLI 参数 `--context-engine` 和 status 展示；当前仍委托预算 packer，默认保持 `deterministic_budget`。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。

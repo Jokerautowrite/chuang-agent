@@ -8,8 +8,8 @@ use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, Con
 use chuang_agent::hermes_memory::DEFAULT_USER_MEMORY_MAX_CHARS;
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
-    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
+    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
 use chuang_agent::subagent_spawner::{ContextIsolation, RunId, SpawnRequest, SubagentToolPolicy};
@@ -408,6 +408,7 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut identity_memory_root: Option<PathBuf> = None;
     let mut subagent_kind: Option<String> = None;
     let mut subagent_queue_root: Option<PathBuf> = None;
+    let mut context_engine: Option<String> = None;
     let mut context_max_tokens: Option<u16> = None;
     let mut context_reserve_system_tokens: Option<u16> = None;
     let mut context_min_working_tokens: Option<u16> = None;
@@ -451,6 +452,9 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             }
             "--subagent-queue-root" => {
                 subagent_queue_root = Some(PathBuf::from(take_value_or_usage(args, &mut index)?));
+            }
+            "--context-engine" => {
+                context_engine = Some(take_value_or_usage(args, &mut index)?);
             }
             "--context-max-tokens" => {
                 let value = take_value_or_usage(args, &mut index)?;
@@ -502,6 +506,9 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     }
     if let Some(root) = subagent_queue_root {
         runtime.subagent_queue = SubagentQueueConfig { root };
+    }
+    if let Some(value) = context_engine {
+        runtime.context_engine = parse_context_engine_config(&value)?;
     }
     if let Some(value) = context_max_tokens {
         runtime.context_budget.max_tokens = value;
@@ -559,6 +566,7 @@ fn is_runtime_value_flag(flag: &str) -> bool {
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"
+            | "--context-engine"
             | "--context-max-tokens"
             | "--context-reserve-system-tokens"
             | "--context-min-working-tokens"
@@ -638,6 +646,14 @@ fn parse_subagent_config(raw: &str) -> Result<SubagentConfig, String> {
         other => Err(format!(
             "unsupported subagent kind: {other} (supported: fake, queued_external)"
         )),
+    }
+}
+
+fn parse_context_engine_config(raw: &str) -> Result<ContextEngineConfig, String> {
+    match raw {
+        "deterministic_budget" => Ok(ContextEngineConfig::DeterministicBudget),
+        "summary_compression" => Ok(ContextEngineConfig::SummaryCompression),
+        _ => Err(format!("unsupported context engine: {raw}")),
     }
 }
 
