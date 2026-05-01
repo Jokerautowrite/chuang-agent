@@ -11,12 +11,13 @@ use chuang_agent::runtime_config::{
 };
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
 use chuang_agent::slot_registry::{
-    build_provider_responder, build_runtime_slots, summarize_runtime_slots,
+    build_provider_responder, build_runtime_slots, summarize_runtime_slots, SubagentRuntimeSlot,
 };
+use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
-use chuang_agent::{common::AgentId, common::TaskId};
+use chuang_agent::{common::AgentId, common::ReportId, common::TaskId, common::Timestamp};
 
 fn temp_queue_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -203,4 +204,71 @@ fn slot_registry_can_build_queued_external_subagent_slot() {
         .expect("collect should succeed")
         .is_none());
     assert_eq!(summarize_runtime_slots(&config).subagent, "queued_external");
+}
+
+#[test]
+fn slot_registry_queued_external_slot_attaches_report_from_queue_on_collect() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-report"),
+    };
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued-report".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "回收外部子代理报告".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("queued spawn should succeed");
+    let report = queued_slot_report(&receipt.run_id.0, &receipt.agent_id);
+
+    match &slots.subagent {
+        SubagentRuntimeSlot::QueuedExternal { queue, .. } => {
+            queue
+                .write_report(&receipt.run_id, &report)
+                .expect("report should be written to queue");
+        }
+        SubagentRuntimeSlot::Fake(_) => panic!("expected queued external subagent slot"),
+    }
+
+    let collected = slots
+        .subagent
+        .collect(&receipt.run_id)
+        .expect("queued collect should attach report")
+        .expect("queued report should be available");
+
+    assert_eq!(collected, report);
+    assert_eq!(collected.summary, "queued slot worker completed");
+}
+
+fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {
+    SubagentReport {
+        schema_version: "1.0".to_string(),
+        report_id: ReportId(format!("report-{run_id}")),
+        task_id: TaskId("task-queued-report".to_string()),
+        agent_id: agent_id.clone(),
+        parent_agent_id: Some(AgentId("xiaoce".to_string())),
+        status: ExecutionStatus::Success,
+        started_at: Timestamp("2026-05-01T00:00:00Z".to_string()),
+        finished_at: Timestamp("2026-05-01T00:00:01Z".to_string()),
+        summary: "queued slot worker completed".to_string(),
+        exit_code: Some(0),
+        stdout_preview: Some("queued slot ok".to_string()),
+        stderr_preview: None,
+        resource_usage: ResourceUsage::default(),
+        artifacts: Vec::new(),
+        replay_ref: Some(format!("queued-subagent://{run_id}")),
+        context_debug: None,
+        truncated: false,
+    }
 }
