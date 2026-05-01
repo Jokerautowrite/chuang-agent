@@ -103,6 +103,45 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
 }
 
 #[test]
+fn cli_run_dispatch_subagent_requires_queued_external_slot() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-run-dispatch-reject-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let db_path = temp_dir.join("memory.db");
+    let queue_root = temp_dir.join("queue");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--db",
+            db_path.to_str().expect("db path should be utf-8"),
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue path should be utf-8"),
+            "--input",
+            "没有选择 queued external",
+            "--dispatch-subagent",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("subagent_dispatch_requires_queued_external"));
+    assert!(!queue_root.join("dispatch").exists());
+}
+
+#[test]
 fn cli_repl_command_accepts_one_turn_and_exits() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;
