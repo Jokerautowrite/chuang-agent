@@ -13,6 +13,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         recall_limit: config.recall_limit,
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
     };
@@ -39,6 +40,7 @@ fn kernel_status_rejects_invalid_runtime_config() {
         recall_limit: config.recall_limit,
         metadata: config.metadata.clone(),
         context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
     };

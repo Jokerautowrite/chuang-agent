@@ -116,6 +116,38 @@ pub trait ContextEngine {
     fn pack(&self, segments: Vec<ContextSegment>) -> Result<PackedContext, ContextPackError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextEngineKind {
+    DeterministicBudget,
+    SummaryCompression,
+}
+
+impl Default for ContextEngineKind {
+    fn default() -> Self {
+        Self::DeterministicBudget
+    }
+}
+
+impl ContextEngineKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::DeterministicBudget => "deterministic_budget",
+            Self::SummaryCompression => "summary_compression",
+        }
+    }
+
+    pub fn pack(
+        &self,
+        budget: ContextBudget,
+        segments: Vec<ContextSegment>,
+    ) -> Result<PackedContext, ContextPackError> {
+        match self {
+            Self::DeterministicBudget => DeterministicContextEngine::new(budget).pack(segments),
+            Self::SummaryCompression => SummaryCompressionContextEngine::new(budget).pack(segments),
+        }
+    }
+}
+
 impl ContextPacker {
     pub fn new(budget: ContextBudget) -> Self {
         Self { budget }

@@ -66,6 +66,7 @@ pub(crate) fn kernel_config_from_runtime(
         recall_limit: runtime.recall_limit,
         metadata: runtime.metadata.clone(),
         context_budget: Some(runtime.context_budget.clone()),
+        context_engine_kind: Some(runtime.context_engine.to_context_engine_kind()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: Some(identity_snapshot),
     })

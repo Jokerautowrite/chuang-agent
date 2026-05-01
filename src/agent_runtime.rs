@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::context_engine::{
-    BudgetExceededReason, ContextBudget, ContextPackError, ContextPacker, ContextSegment,
+    BudgetExceededReason, ContextBudget, ContextEngineKind, ContextPackError, ContextSegment,
     DropReason, PackedContext, SegmentSource,
 };
 use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
@@ -31,6 +31,7 @@ pub struct RuntimeResult {
     pub response: RuntimeResponse,
     pub recall_summary: String,
     pub recall_hit_count: usize,
+    pub context_engine_kind: String,
     pub packed_context_preview: String,
     pub packed_token_count: u16,
     pub dropped_segment_ids: Vec<String>,
@@ -54,13 +55,23 @@ pub enum AgentRuntimeError {
 pub struct AgentRuntime<S, R> {
     recall: MemoryRecallPipeline<S>,
     responder: R,
+    context_engine_kind: ContextEngineKind,
 }
 
 impl<S, R> AgentRuntime<S, R> {
     pub fn with_responder(store: S, responder: R) -> Self {
+        Self::with_responder_and_context_engine(store, responder, ContextEngineKind::default())
+    }
+
+    pub fn with_responder_and_context_engine(
+        store: S,
+        responder: R,
+        context_engine_kind: ContextEngineKind,
+    ) -> Self {
         Self {
             recall: MemoryRecallPipeline::new(store),
             responder,
+            context_engine_kind,
         }
     }
 
@@ -101,6 +112,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             response: map_runtime_response(responder_output),
             recall_summary: recall_result.summary,
             recall_hit_count: recall_result.hits.len(),
+            context_engine_kind: self.context_engine_kind.as_str().to_string(),
             packed_context_preview,
             packed_token_count: packed_context.total_tokens,
             dropped_segment_ids: packed_context.dropped_ids.clone(),
@@ -125,13 +137,13 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
-        ContextPacker::new(
+        self.context_engine_kind.pack(
             request
                 .context_budget
                 .clone()
                 .unwrap_or_else(default_context_budget),
+            segments,
         )
-        .pack(segments)
     }
 }
 
@@ -198,7 +210,7 @@ pub fn debug_pack_for_test(
 ) -> Result<PackedContext, ContextPackError> {
     let mut segments = vec![build_system_segment(), build_working_segment(user_input)];
     segments.extend(recall_segments.iter().cloned());
-    ContextPacker::new(context_budget).pack(segments)
+    ContextEngineKind::DeterministicBudget.pack(context_budget, segments)
 }
 
 fn build_system_segment() -> ContextSegment {

@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use chuang_agent::agent_runtime::{
     debug_pack_for_test, AgentRuntime, AgentRuntimeError, RuntimeRequest,
 };
-use chuang_agent::context_engine::{ContextBudget, ContextSegment, SegmentSource};
+use chuang_agent::context_engine::{
+    ContextBudget, ContextEngineKind, ContextSegment, SegmentSource,
+};
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::responder::FakeResponder;
 
@@ -51,8 +53,31 @@ fn agent_runtime_runs_minimal_loop_with_packed_context() {
     assert!(result.prompt.contains("user_input=现在先把创项目跑起来"));
     assert!(result.packed_context_preview.contains("system-core"));
     assert!(result.packed_context_preview.contains("working-user-input"));
+    assert_eq!(result.context_engine_kind, "deterministic_budget");
     assert_eq!(result.response.model_name, "stub-responder");
     assert!(result.response.body.contains("现在先把创项目跑起来"));
+}
+
+#[test]
+fn agent_runtime_can_use_summary_compression_context_engine() {
+    let runtime = AgentRuntime::with_responder_and_context_engine(
+        InMemoryMemoryStore::new(),
+        FakeResponder::new("stub-responder"),
+        ContextEngineKind::SummaryCompression,
+    );
+
+    let result = runtime
+        .run(&RuntimeRequest {
+            user_input: "切换上下文引擎".to_string(),
+            recall_limit: 1,
+            metadata: BTreeMap::new(),
+            context_budget: None,
+            extra_context_segments: Vec::new(),
+        })
+        .expect("runtime should succeed");
+
+    assert_eq!(result.context_engine_kind, "summary_compression");
+    assert!(result.prompt.contains("切换上下文引擎"));
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
-use chuang_agent::context_engine::ContextBudget;
+use chuang_agent::context_engine::{ContextBudget, ContextEngineKind};
 use chuang_agent::hermes_memory::DualFileMemorySnapshot;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::responder::FakeResponder;
@@ -29,6 +29,7 @@ fn kernel_config() -> ChuangKernelConfig {
         recall_limit: 3,
         metadata: BTreeMap::new(),
         context_budget: None,
+        context_engine_kind: None,
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
     }
@@ -89,6 +90,21 @@ fn chuang_kernel_can_write_turn_summary_memory_after_execution() {
 }
 
 #[test]
+fn chuang_kernel_passes_context_engine_choice_to_runtime() {
+    let config = ChuangKernelConfig {
+        context_engine_kind: Some(ContextEngineKind::SummaryCompression),
+        ..kernel_config()
+    };
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
+
+    let turn = kernel
+        .run_turn("内核切换上下文引擎")
+        .expect("kernel turn should run");
+
+    assert_eq!(turn.result.context_engine_kind, "summary_compression");
+}
+
+#[test]
 fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
     let config = ChuangKernelConfig {
         agent_id: "chuang-mvp".to_string(),
@@ -102,6 +118,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
             max_tool_results: 3,
             max_memory_segments: 5,
         }),
+        context_engine_kind: None,
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
     };

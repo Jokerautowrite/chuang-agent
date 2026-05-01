@@ -40,11 +40,54 @@ fn cli_run_command_boots_and_returns_structured_response() {
     assert!(stdout.contains("body:"));
     assert!(stdout.contains("trace:"));
     assert!(stdout.contains("provider: fake-responder"));
+    assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("context_drop_reasons:"));
     assert!(stdout.contains("context_working_reservation:"));
     assert!(stdout.contains("context_budget_exceeded:"));
     assert!(stdout.contains("runtime_report: report-turn-1"));
     assert!(stdout.contains("创项目现在启动试试"));
+}
+
+#[test]
+fn cli_run_can_select_summary_compression_context_engine() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-context-engine-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let db_path = temp_dir.join("memory.db");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--db",
+            db_path.to_str().expect("db path should be utf-8"),
+            "--context-engine",
+            "summary_compression",
+            "--input",
+            "测试上下文引擎切换",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("context_engine: summary_compression"));
+    assert!(stdout.contains("测试上下文引擎切换"));
 }
 
 #[test]

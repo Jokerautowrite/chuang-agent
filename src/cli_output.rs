@@ -138,6 +138,7 @@ pub fn print_runtime_result(result: &RuntimeResult) {
             .as_deref()
             .unwrap_or("unknown")
     );
+    println!("context_engine: {}", result.context_engine_kind);
     println!("recall_hits: {}", result.recall_hit_count);
     println!("recall_summary: {}", result.recall_summary);
     println!(

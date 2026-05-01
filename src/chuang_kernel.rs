@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
-use crate::context_engine::{ContextBudget, ContextSegment, SegmentSource};
+use crate::context_engine::{ContextBudget, ContextEngineKind, ContextSegment, SegmentSource};
 use crate::hermes_memory::DualFileMemorySnapshot;
 use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
@@ -21,6 +21,7 @@ pub struct ChuangKernelConfig {
     pub recall_limit: usize,
     pub metadata: BTreeMap<String, String>,
     pub context_budget: Option<ContextBudget>,
+    pub context_engine_kind: Option<ContextEngineKind>,
     pub memory_write_max_chars: Option<usize>,
     pub identity_snapshot: Option<DualFileMemorySnapshot>,
 }
@@ -33,6 +34,7 @@ impl ChuangKernelConfig {
             recall_limit: 5,
             metadata: BTreeMap::new(),
             context_budget: None,
+            context_engine_kind: None,
             memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
             identity_snapshot: None,
         }
@@ -78,8 +80,12 @@ pub struct ChuangKernel<S, R> {
 impl<S, R> ChuangKernel<S, R> {
     pub fn with_responder(config: ChuangKernelConfig, store: S, responder: R) -> Self {
         Self {
+            runtime: AgentRuntime::with_responder_and_context_engine(
+                store,
+                responder,
+                config.context_engine_kind.clone().unwrap_or_default(),
+            ),
             config,
-            runtime: AgentRuntime::with_responder(store, responder),
             turn_count: 0,
         }
     }

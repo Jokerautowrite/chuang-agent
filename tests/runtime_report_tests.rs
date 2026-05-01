@@ -142,6 +142,7 @@ fn runtime_report_builder_carries_working_reservation_debug() {
         },
         recall_summary: "summary".to_string(),
         recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
         packed_context_preview: "preview".to_string(),
         packed_token_count: packed.total_tokens,
         dropped_segment_ids: packed.dropped_ids.clone(),

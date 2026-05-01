@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::context_engine::ContextBudget;
+use crate::context_engine::{ContextBudget, ContextEngineKind};
 use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
@@ -317,6 +317,13 @@ impl ContextEngineConfig {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
+    }
+
+    pub fn to_context_engine_kind(&self) -> ContextEngineKind {
+        match self {
+            Self::DeterministicBudget => ContextEngineKind::DeterministicBudget,
+            Self::SummaryCompression => ContextEngineKind::SummaryCompression,
+        }
     }
 }
 
