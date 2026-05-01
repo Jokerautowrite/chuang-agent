@@ -20,12 +20,17 @@ pub(crate) struct RunCliRequest {
     pub(crate) user_input: String,
     pub(crate) remember: bool,
     pub(crate) remember_identity: bool,
+    pub(crate) dispatch_subagent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct RememberedRecords {
     pub(crate) sqlite_record_id: Option<String>,
     pub(crate) identity_record_id: Option<String>,
+    pub(crate) runtime_report_id: Option<String>,
+    pub(crate) subagent_dispatch_run_id: Option<String>,
+    pub(crate) subagent_dispatch_agent_id: Option<String>,
+    pub(crate) subagent_dispatch_task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

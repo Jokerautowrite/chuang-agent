@@ -152,6 +152,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     let mut user_input: Option<String> = None;
     let mut remember = false;
     let mut remember_identity = false;
+    let mut dispatch_subagent = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -170,6 +171,10 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
                 remember_identity = true;
                 index += 1;
             }
+            "--dispatch-subagent" => {
+                dispatch_subagent = true;
+                index += 1;
+            }
             _ => return Err(usage()),
         }
     }
@@ -179,6 +184,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         user_input: user_input.ok_or_else(usage)?,
         remember,
         remember_identity,
+        dispatch_subagent,
     })
 }
 
@@ -417,6 +423,7 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             "--input" => index += 2,
             "--remember" => index += 1,
             "--remember-identity" => index += 1,
+            "--dispatch-subagent" => index += 1,
             "--provider-base-url" => {
                 provider_base_url = Some(take_value_or_usage(args, &mut index)?);
             }

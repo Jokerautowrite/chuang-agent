@@ -43,7 +43,63 @@ fn cli_run_command_boots_and_returns_structured_response() {
     assert!(stdout.contains("context_drop_reasons:"));
     assert!(stdout.contains("context_working_reservation:"));
     assert!(stdout.contains("context_budget_exceeded:"));
+    assert!(stdout.contains("runtime_report: report-turn-1"));
     assert!(stdout.contains("创项目现在启动试试"));
+}
+
+#[test]
+fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-run-dispatch-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let db_path = temp_dir.join("memory.db");
+    let queue_root = temp_dir.join("queue");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--db",
+            db_path.to_str().expect("db path should be utf-8"),
+            "--subagent",
+            "queued_external",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue path should be utf-8"),
+            "--input",
+            "把这一轮交给子代理复核",
+            "--dispatch-subagent",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("runtime_report: report-turn-1"));
+    assert!(stdout.contains("subagent_dispatch_run_id: queued-run-1"));
+    assert!(stdout.contains("subagent_dispatch_agent_id: worker-1"));
+    assert!(stdout.contains("subagent_dispatch_task_id: turn-1"));
+
+    let dispatch_path = queue_root.join("dispatch").join("queued-run-1.json");
+    assert!(dispatch_path.exists());
+    let dispatch = fs::read_to_string(dispatch_path).expect("dispatch should be readable");
+    assert!(dispatch.contains("\"source\": \"cli-run\""));
+    assert!(dispatch.contains("\"report_id\": \"report-turn-1\""));
+    assert!(dispatch.contains("把这一轮交给子代理复核"));
 }
 
 #[test]

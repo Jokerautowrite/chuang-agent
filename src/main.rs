@@ -48,6 +48,18 @@ fn run_command(args: &[String]) -> Result<(), String> {
     if let Some(record_id) = memory_records.identity_record_id {
         println!("identity_memory_recorded: {record_id}");
     }
+    if let Some(report_id) = memory_records.runtime_report_id {
+        println!("runtime_report: {report_id}");
+    }
+    if let Some(run_id) = memory_records.subagent_dispatch_run_id {
+        println!("subagent_dispatch_run_id: {run_id}");
+    }
+    if let Some(agent_id) = memory_records.subagent_dispatch_agent_id {
+        println!("subagent_dispatch_agent_id: {agent_id}");
+    }
+    if let Some(task_id) = memory_records.subagent_dispatch_task_id {
+        println!("subagent_dispatch_task_id: {task_id}");
+    }
     Ok(())
 }
 
@@ -73,6 +85,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             user_input: input.to_string(),
             remember: false,
             remember_identity: false,
+            dispatch_subagent: false,
         })?;
         print_runtime_result(&result);
         writeln!(stdout, "---").map_err(|e| format!("stdout_write_failed: {e}"))?;

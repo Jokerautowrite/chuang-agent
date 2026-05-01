@@ -8,8 +8,12 @@ use chuang_agent::chuang_kernel::{
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::runtime_config::RuntimeConfig;
-use chuang_agent::slot_registry::build_provider_responder;
+use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
+use chuang_agent::slot_registry::{build_provider_responder, build_runtime_slots};
+use chuang_agent::subagent_spawner::{
+    ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
+};
+use chuang_agent::{common::AgentId, common::TaskId};
 
 use crate::cli_types::{CliOptions, RememberedRecords, RunCliRequest};
 
@@ -88,6 +92,7 @@ where
     R: chuang_agent::responder::Responder,
 {
     let mut records = RememberedRecords::default();
+    records.runtime_report_id = Some(turn.report.report_id.0.clone());
 
     if request.remember {
         records.sqlite_record_id = Some(
@@ -101,7 +106,51 @@ where
         records.identity_record_id = Some(remember_identity_turn(options, &turn)?);
     }
 
+    if request.dispatch_subagent {
+        let receipt = dispatch_subagent_turn(options, &turn)?;
+        records.subagent_dispatch_run_id = Some(receipt.run_id.0);
+        records.subagent_dispatch_agent_id = Some(receipt.agent_id.0);
+        records.subagent_dispatch_task_id = Some(turn.report.task_id.0.clone());
+    }
+
     Ok((turn.result, records))
+}
+
+fn dispatch_subagent_turn(
+    options: &CliOptions,
+    turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
+) -> Result<chuang_agent::subagent_spawner::SpawnReceipt, String> {
+    if options.runtime.subagent != SubagentConfig::QueuedExternal {
+        return Err(
+            "subagent_dispatch_requires_queued_external: pass --subagent queued_external"
+                .to_string(),
+        );
+    }
+
+    let mut slots = build_runtime_slots(&options.runtime)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId(turn.report.task_id.0.clone()),
+            parent_agent_id: AgentId("chuang-cli".to_string()),
+            agent_name: "worker".to_string(),
+            task: format!(
+                "处理 runtime report {}: user={} summary={}",
+                turn.report.report_id.0, turn.user_input, turn.report.summary
+            ),
+            tool_policy: SubagentToolPolicy::Analyze,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 1024,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: BTreeMap::from([
+                ("source".to_string(), "cli-run".to_string()),
+                ("turn_id".to_string(), turn.turn_id.clone()),
+                ("report_id".to_string(), turn.report.report_id.0.clone()),
+            ]),
+        })
+        .map_err(|e| format!("subagent_dispatch_failed: {e:?}"))
 }
 
 fn remember_identity_turn(

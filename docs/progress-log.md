@@ -18,6 +18,7 @@
 - control CLI 命令执行已拆到 `src/cli_control.rs`：服务/Agent 控制台逻辑离开 `main.rs`，继续作为组合层使用 slot。
 - config CLI 命令执行已拆到 `src/cli_config.rs`：配置 check/show/init 逻辑离开 `main.rs`。
 - 核心边界测试新增薄入口护栏：`main.rs` 不应重新直接持有 subagent queue、control workflow、config template 等具体命令适配细节。
+- `run` 新增显式 `--dispatch-subagent`：当配置为 `--subagent queued_external` 时，会把本轮 runtime report 通过 `SubagentRuntimeSlot` 写入子代理 dispatch 队列，并输出 report/dispatch id。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
