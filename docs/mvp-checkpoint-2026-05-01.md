@@ -32,13 +32,13 @@ cargo run --quiet -- doctor --json
 - `doctor`：安全健康检查，覆盖配置、身份记忆、slot 装配、隔离 fake runtime、隔离子代理队列 dispatch。
 - `run`：默认经过治理层，治理结果进入 CLI 输出、runtime meta 和 report metadata。
 - `summary_compression`：非默认轻量压缩策略，会压缩长 memory / tool result 段。
-- `subagent queued_external`：文件队列 dispatch / list / report / collect 已闭环，fake runner 可模拟外部执行。
+- `subagent queued_external`：文件队列 dispatch / list / report / collect 已闭环，fake runner 可模拟外部执行，`command` runner 可在显式 `--approve-exec` 后把外部进程输出收成 report。
 - `config`：支持扁平配置、检查、脱敏展示、初始化。
 
 ## 下一阶段
 
 - 真实 provider native HTTPS adapter；当前先通过 `--provider-transport curl` 显式接入系统 curl。
-- 真实子代理 runner adapter。
+- 真实子代理 runner adapter 继续增强；当前已有显式审批的 `command` runner 最小接缝。
 - 真实 control plane adapter。
 - 桌面/飞书控制台读取 `doctor --json` 和 `status --json`。
 

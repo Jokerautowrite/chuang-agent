@@ -361,6 +361,9 @@ pub(crate) fn parse_subagent_run_once(
     let mut runtime_args: Vec<String> = Vec::new();
     let mut output = ControlOutputFormat::Text;
     let mut runner: Option<String> = None;
+    let mut runner_command: Option<String> = None;
+    let mut runner_args: Vec<String> = Vec::new();
+    let mut approve_exec = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -376,6 +379,24 @@ pub(crate) fn parse_subagent_run_once(
                 runner = Some(value.clone());
                 index += 2;
             }
+            "--runner-command" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent run-once requires value after --runner-command".to_string()
+                })?;
+                runner_command = Some(value.clone());
+                index += 2;
+            }
+            "--runner-arg" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent run-once requires value after --runner-arg".to_string()
+                })?;
+                runner_args.push(value.clone());
+                index += 2;
+            }
+            "--approve-exec" => {
+                approve_exec = true;
+                index += 1;
+            }
             flag if is_runtime_value_flag(flag) => {
                 copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
             }
@@ -384,16 +405,41 @@ pub(crate) fn parse_subagent_run_once(
     }
 
     let runner = runner.unwrap_or_else(|| "fake".to_string());
-    if runner != "fake" {
-        return Err(format!(
-            "unsupported subagent runner: {runner} (supported: fake)"
-        ));
+    match runner.as_str() {
+        "fake" => {
+            if runner_command.is_some() || !runner_args.is_empty() || approve_exec {
+                return Err(
+                    "subagent fake runner does not accept command execution flags".to_string(),
+                );
+            }
+        }
+        "command" => {
+            if !approve_exec {
+                return Err("command_runner_requires_approve_exec: pass --approve-exec".to_string());
+            }
+            if runner_command
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err("command_runner_requires_runner_command".to_string());
+            }
+        }
+        _ => {
+            return Err(format!(
+                "unsupported subagent runner: {runner} (supported: fake, command)"
+            ));
+        }
     }
 
     Ok(SubagentRunOnceCliRequest {
         options: parse_cli_options(&runtime_args)?,
         output,
         runner,
+        runner_command,
+        runner_args,
+        approve_exec,
     })
 }
 

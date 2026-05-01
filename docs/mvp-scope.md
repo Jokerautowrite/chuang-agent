@@ -37,6 +37,7 @@
 - `cargo run -- subagent collect --run-id ID`：从 dispatch 恢复运行身份，经 queued slot 校验并回收 report。
 - `cargo run -- subagent list`：只读查看 dispatch 队列和 report presence；同一队列目录可连续派发多个任务。
 - `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch 并写入模拟 report，不执行真实命令。
+- `cargo run -- subagent run-once --runner command --runner-command PATH --approve-exec`：显式审批后执行一个外部 runner 命令，把 dispatch JSON 写到 stdin，并把进程输出收成 report。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 - `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
@@ -53,7 +54,7 @@
 
 ## 下一步优先级
 
-1. 把子代理文件队列接到真实 runner adapter，但默认仍保持 fake/queued，不自动执行危险命令。
+1. 继续完善真实子代理 runner adapter 的协议约束；当前已有显式审批的 `command` runner 接缝，默认仍保持 fake/queued，不自动执行危险命令。
 2. 继续增强 `summary_compression` 的压缩质量，但默认仍保持 `deterministic_budget`。
 3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
 4. 最后再接桌面壳、飞书插件和服务控制 UI。
@@ -71,6 +72,7 @@
 - 同一个 `--subagent-queue-root PATH` 下连续 dispatch 多个任务不会覆盖。
 - `cargo run -- subagent list --subagent-queue-root PATH` 能列出 dispatch 数量和 report presence。
 - `cargo run -- subagent run-once --subagent-queue-root PATH` 能把一个 pending dispatch 转成 fake report。
+- `cargo run -- subagent run-once --runner command --runner-command PATH --approve-exec --subagent-queue-root PATH` 能把外部 runner 进程输出转成 report，且缺少审批时拒绝执行。
 - `cargo run -- subagent report --run-id ID --subagent-queue-root PATH` 能读取或轮询 report JSON。
 - `cargo run -- subagent collect --run-id ID --subagent-queue-root PATH` 能经 dispatch 身份校验回收 report。
 - 所有危险操作仍需显式审批或保持 fake。

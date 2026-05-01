@@ -170,6 +170,9 @@
 - **新增回归测试：`openai_compatible_http_transport_preserves_non_200_status_with_structured_metadata` 与 `cli_run_http_transport_reports_invalid_port_shape`，已红转绿并纳入全量 `cargo test`**
 - **新增 curl provider transport：`--provider-transport curl` 会通过系统 `curl` 执行真实 POST，支持 HTTP/HTTPS 交给 curl 处理，默认仍是 `stub`，核心 runtime 不直接依赖 TLS/网络实现**
 - **新增验证：`tests/openai_compatible_curl_transport_tests.rs` 与 `cli_run_with_provider_and_curl_transport_executes_local_post`，覆盖 adapter 和 CLI 两层 curl POST 闭环**
+- **新增子代理 command runner 最小接缝：`subagent run-once --runner command --runner-command PATH --approve-exec` 会显式执行外部进程，不走 shell，把 dispatch JSON 写入 stdin，并把 stdout/stderr/exit_code 收成 `SubagentReport`**
+- **安全边界：command runner 缺少 `--approve-exec` 会拒绝执行；默认 runner 仍是 `fake`，不会自动启动真实 Agent**
+- **新增验证：`cli_subagent_run_once_command_runner_requires_explicit_approval` 与 `cli_subagent_run_once_command_runner_writes_report_from_process_output`，覆盖审批拒绝和外部进程输出写 report**
 - **新增 context engine 保底预留能力：当 `min_working_tokens` 配置生效时，`ContextPacker` 现在会优先为 working segment 预留预算，再决定是否挤掉较低优先级 segment**
 - **新增红转绿测试：`pack_reserves_minimum_working_tokens_before_lower_priority_segments`，验证 working 保底预算会先于 lower-priority memory 生效**
 - **顺手修掉一个隐藏重复上报问题：`budget_exceeded_reasons` 不再把 `min_working_tokens_unmet` 重复写两次，`runtime_report_tests` 已重新全绿**

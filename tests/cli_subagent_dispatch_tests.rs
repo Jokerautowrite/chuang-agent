@@ -213,6 +213,91 @@ fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
 }
 
 #[test]
+fn cli_subagent_run_once_command_runner_requires_explicit_approval() {
+    let queue_root = temp_queue_root("command-runner-approval");
+    let _dispatch = dispatch_task(&queue_root, "task-cli-command-approval", "命令 runner 审批");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "printf",
+            "--runner-arg",
+            "command runner ok",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("command_runner_requires_approve_exec"),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
+fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
+    let queue_root = temp_queue_root("command-runner");
+    let dispatch = dispatch_task(&queue_root, "task-cli-command", "命令 runner 任务");
+    let run_id = dispatch["run_id"].as_str().expect("run id");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "printf",
+            "--runner-arg",
+            "command runner ok",
+            "--approve-exec",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["runner"], "command");
+    assert_eq!(parsed["ran"], true);
+    assert_eq!(parsed["run_id"], run_id);
+
+    let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
+    let report: Value = serde_json::from_str(
+        &std::fs::read_to_string(report_path).expect("report file should exist"),
+    )
+    .expect("report should be json");
+    assert_eq!(report["status"], "Success");
+    assert_eq!(report["exit_code"], 0);
+    assert_eq!(report["stdout_preview"], "command runner ok");
+    assert_eq!(
+        report["replay_ref"],
+        format!("queued-subagent-command://{run_id}")
+    );
+}
+
+#[test]
 fn cli_subagent_dispatch_requires_task() {
     let queue_root = temp_queue_root("missing-task");
     let output = Command::new("cargo")

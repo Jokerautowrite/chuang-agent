@@ -116,6 +116,9 @@ pub(crate) struct SubagentRunOnceCliRequest {
     pub(crate) options: CliOptions,
     pub(crate) output: ControlOutputFormat,
     pub(crate) runner: String,
+    pub(crate) runner_command: Option<String>,
+    pub(crate) runner_args: Vec<String>,
+    pub(crate) approve_exec: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
