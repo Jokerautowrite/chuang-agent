@@ -90,3 +90,30 @@ fn mvp_runtime_entrypoints_do_not_import_browser_worker_adapter_line() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn main_entrypoint_stays_thin_and_does_not_own_cli_adapters() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let content =
+        fs::read_to_string(repo_root.join("src/main.rs")).expect("main source should be readable");
+    let forbidden = [
+        "FileSubagentQueue",
+        "QueuedSubagentSpawner",
+        "run_control_surface_intent",
+        "DEFAULT_CONFIG_TEMPLATE",
+        "OpenAICompatibleProviderAdapter",
+    ];
+    let mut violations = Vec::new();
+
+    for token in forbidden {
+        if content.contains(token) {
+            violations.push(format!("src/main.rs contains {token}"));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "main.rs should remain a thin CLI entrypoint; move concrete command adapters to cli_* modules:\n{}",
+        violations.join("\n")
+    );
+}
