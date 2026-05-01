@@ -25,6 +25,7 @@
 - 新增边界测试，防止 `runtime_config` 重新引入 `OpenAICompatibleProviderAdapter` 构造逻辑。
 - `RuntimeSlotsSummary` 和 CLI `status` 已补 provider slot，控制台视角下所有当前 slot 都能统一展示。
 - `SubagentConfig::QueuedExternal` 在 slot registry 中已接入 `FileSubagentQueue`：spawn 会写入 dispatch 文件，collect 会尝试吸收 report 文件。
+- 新增 `/new` 接续文档：`docs/handoff-current.md`，记录当前目标、用户约束、最新提交、验证状态、重要文件和下一步建议。
 
 ## 2026-04-30
 
