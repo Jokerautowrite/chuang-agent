@@ -15,7 +15,7 @@ use chuang_agent::slot_registry::{
 };
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
-    ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
+    ContextIsolation, SpawnRequest, SubagentError, SubagentSpawner, SubagentToolPolicy,
 };
 use chuang_agent::{common::AgentId, common::ReportId, common::TaskId, common::Timestamp};
 
@@ -241,6 +241,53 @@ fn slot_registry_can_build_queued_external_subagent_slot() {
         .expect("collect should succeed")
         .is_none());
     assert_eq!(summarize_runtime_slots(&config).subagent, "queued_external");
+}
+
+#[test]
+fn slot_registry_rejects_queued_external_subagent_with_invalid_queue_root() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: PathBuf::new(),
+    };
+
+    let err = build_runtime_slots(&config).expect_err("empty queue root should reject slots");
+
+    assert_eq!(err.field, "subagent_queue.root");
+}
+
+#[test]
+fn slot_registry_queued_external_rejects_invalid_spawn_without_dispatch_file() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-invalid-spawn"),
+    };
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let err = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-invalid-spawn".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "坏请求不能写入外部队列".to_string(),
+            tool_policy: SubagentToolPolicy::Analyze,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 512,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: true,
+            metadata: Default::default(),
+        })
+        .expect_err("invalid queued spawn should be rejected before dispatch write");
+
+    assert!(matches!(err, SubagentError::InvalidRequest(_)));
+    assert!(!config
+        .subagent_queue
+        .root
+        .join("dispatch")
+        .join("queued-run-1.json")
+        .exists());
 }
 
 #[test]

@@ -12,6 +12,7 @@
 - CLI DTO 已拆到 `src/cli_types.rs`：request/output 数据结构离开 `main.rs`，入口继续保留命令执行和解析流程。
 - CLI 运行时组合已拆到 `src/cli_runtime.rs`：一轮运行、SQLite 记忆种子、身份记忆写回、kernel 配置从 `main.rs` 移出。
 - `slot_registry_tests` 新增 provider slot 错误路径：无效 fake/openai-compatible provider 配置会在 slot 装配前返回 `ConfigError`。
+- `slot_registry_tests` 新增 queued external subagent 错误路径：空队列根目录会拒绝装配，非法 spawn 不会写入 dispatch 文件。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
