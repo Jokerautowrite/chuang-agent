@@ -167,6 +167,43 @@ fn slot_registry_builds_provider_responder_from_config() {
 }
 
 #[test]
+fn slot_registry_rejects_invalid_provider_config_before_adapter_use() {
+    let fake_err = build_provider_responder(&ProviderConfig::Fake {
+        provider_id: "fake-runtime".to_string(),
+        model_name: String::new(),
+    })
+    .expect_err("fake provider with empty model should be rejected");
+    assert_eq!(fake_err.field, "provider.model_name");
+
+    let openai_err =
+        build_provider_responder(&ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "custom-openai".to_string(),
+            base_url: String::new(),
+            api_key: "test-key".to_string(),
+            model_name: "gpt-4.1-mini".to_string(),
+            transport: ProviderTransport::Stub,
+        }))
+        .expect_err("openai-compatible provider with empty base_url should be rejected");
+    assert_eq!(openai_err.field, "provider.base_url");
+}
+
+#[test]
+fn slot_registry_rejects_runtime_with_invalid_provider_slot() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.provider = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+        provider_id: "custom-openai".to_string(),
+        base_url: "https://api.example.com/v1".to_string(),
+        api_key: String::new(),
+        model_name: "gpt-4.1-mini".to_string(),
+        transport: ProviderTransport::Stub,
+    });
+
+    let err = build_runtime_slots(&config).expect_err("invalid provider should reject slots");
+
+    assert_eq!(err.field, "provider.api_key");
+}
+
+#[test]
 fn slot_registry_can_build_queued_external_subagent_slot() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.subagent = SubagentConfig::QueuedExternal;
