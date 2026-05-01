@@ -305,13 +305,132 @@ fn cli_subagent_report_marks_missing_report_without_error() {
     assert_eq!(parsed["report"], Value::Null);
 }
 
+#[test]
+fn cli_subagent_collect_uses_dispatch_identity_before_returning_report() {
+    let queue_root = temp_queue_root("collect");
+    let dispatch_output = dispatch_task(&queue_root, "task-cli-collect", "收集子代理报告");
+    let run_id = dispatch_output["run_id"].as_str().expect("run id");
+    let dispatch_path = queue_root.join("dispatch").join(format!("{run_id}.json"));
+    let dispatch: Value = serde_json::from_str(
+        &std::fs::read_to_string(dispatch_path).expect("dispatch should exist"),
+    )
+    .expect("dispatch should be json");
+    let agent_id = dispatch["agent_id"].as_str().expect("agent id");
+
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root.join("reports").join(format!("{run_id}.json")),
+        report_json("task-cli-collect", agent_id, "identity checked report"),
+    )
+    .expect("report should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            run_id,
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["run_id"], run_id);
+    assert_eq!(parsed["dispatch_available"], true);
+    assert_eq!(parsed["report_available"], true);
+    assert_eq!(parsed["report"]["summary"], "identity checked report");
+}
+
+#[test]
+fn cli_subagent_collect_rejects_mismatched_report_identity() {
+    let queue_root = temp_queue_root("collect-mismatch");
+    let dispatch_output = dispatch_task(&queue_root, "task-cli-mismatch", "收集坏报告");
+    let run_id = dispatch_output["run_id"].as_str().expect("run id");
+
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root.join("reports").join(format!("{run_id}.json")),
+        report_json("task-cli-mismatch", "wrong-agent", "wrong identity report"),
+    )
+    .expect("report should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            run_id,
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("subagent_collect_failed"));
+}
+
+#[test]
+fn cli_subagent_collect_marks_missing_dispatch_without_error() {
+    let queue_root = temp_queue_root("collect-missing-dispatch");
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            "missing-run",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["run_id"], "missing-run");
+    assert_eq!(parsed["dispatch_available"], false);
+    assert_eq!(parsed["report_available"], false);
+    assert_eq!(parsed["report"], Value::Null);
+}
+
 fn sample_report_json(summary: &str) -> String {
+    report_json("task-cli-1", "worker-1", summary)
+}
+
+fn report_json(task_id: &str, agent_id: &str, summary: &str) -> String {
     format!(
         r#"{{
   "schema_version": "1.0",
   "report_id": "report-queued-run-1",
-  "task_id": "task-cli-1",
-  "agent_id": "worker-1",
+  "task_id": "{task_id}",
+  "agent_id": "{agent_id}",
   "parent_agent_id": "chuang-cli",
   "status": "Success",
   "started_at": "2026-05-01T00:00:00Z",

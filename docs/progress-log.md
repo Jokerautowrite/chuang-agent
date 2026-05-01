@@ -21,6 +21,7 @@
 - `run` 新增显式 `--dispatch-subagent`：当配置为 `--subagent queued_external` 时，会把本轮 runtime report 通过 `SubagentRuntimeSlot` 写入子代理 dispatch 队列，并输出 report/dispatch id。
 - `run --dispatch-subagent` 增加失败路径覆盖：未选择 `queued_external` 时明确拒绝，不创建 dispatch 队列。
 - CLI 端到端测试已覆盖 `run --dispatch-subagent -> subagent run-once -> subagent report`，确认 run 产生的 dispatch 可被 fake runner 回写并读回 report。
+- CLI 新增 `subagent collect --run-id ID`：从持久化 dispatch 恢复 queued spawner，再经 `SubagentRuntimeSlot::collect()` 回收 report；身份不匹配会拒绝，避免只读文件绕过子代理协议校验。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。

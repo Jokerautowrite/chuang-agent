@@ -28,11 +28,16 @@ fn file_subagent_queue_writes_dispatch_json() {
     let path = queue
         .write_dispatch(&dispatch)
         .expect("dispatch should write");
+    let read_back = queue
+        .read_dispatch(&dispatch.run_id)
+        .expect("dispatch should read")
+        .expect("dispatch should exist");
     let payload = std::fs::read_to_string(path).expect("dispatch file should be readable");
     let decoded: SubagentDispatch =
         serde_json::from_str(&payload).expect("dispatch json should decode");
 
     assert_eq!(decoded, dispatch);
+    assert_eq!(read_back, dispatch);
     assert!(root.join("dispatch").join("queued-run-1.json").exists());
 }
 

@@ -64,6 +64,22 @@ impl FileSubagentQueue {
         Ok(path)
     }
 
+    pub fn read_dispatch(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<SubagentDispatch>, FileSubagentQueueError> {
+        let path = self.config.dispatch_path(run_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let payload = fs::read_to_string(&path)
+            .map_err(|_| FileSubagentQueueError::StorageUnavailable { path: path.clone() })?;
+        let dispatch = serde_json::from_str(&payload)
+            .map_err(|e| FileSubagentQueueError::Decode(e.to_string()))?;
+        Ok(Some(dispatch))
+    }
+
     pub fn read_report(
         &self,
         run_id: &RunId,

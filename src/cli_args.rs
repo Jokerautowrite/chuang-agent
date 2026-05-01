@@ -327,6 +327,10 @@ pub(crate) fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCli
     })
 }
 
+pub(crate) fn parse_subagent_collect(args: &[String]) -> Result<SubagentReportCliRequest, String> {
+    parse_subagent_report(args)
+}
+
 pub(crate) fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String> {
     let mut runtime_args: Vec<String> = Vec::new();
     let mut output = ControlOutputFormat::Text;

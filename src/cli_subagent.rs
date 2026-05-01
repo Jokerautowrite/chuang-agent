@@ -1,12 +1,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
+use chuang_agent::slot_registry::SubagentRuntimeSlot;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
-use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId};
+use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId, SubagentSpawner};
 
 use crate::cli_args::{
-    parse_subagent_dispatch, parse_subagent_list, parse_subagent_report, parse_subagent_run_once,
+    parse_subagent_collect, parse_subagent_dispatch, parse_subagent_list, parse_subagent_report,
+    parse_subagent_run_once,
 };
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_types::*;
@@ -15,6 +17,7 @@ pub(crate) fn subagent_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dispatch") => subagent_dispatch_command(&args[1..]),
         Some("report") => subagent_report_command(&args[1..]),
+        Some("collect") => subagent_collect_command(&args[1..]),
         Some("list") => subagent_list_command(&args[1..]),
         Some("run-once") => subagent_run_once_command(&args[1..]),
         _ => Err(usage()),
@@ -227,6 +230,67 @@ fn subagent_report_command(args: &[String]) -> Result<(), String> {
                 );
             } else {
                 println!("subagent_report_missing run_id={}", output.run_id);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn subagent_collect_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_collect(args)?;
+    let queue_config = request
+        .options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let queue = FileSubagentQueue::open(queue_config)
+        .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
+    let Some(dispatch) = queue
+        .read_dispatch(&request.run_id)
+        .map_err(|e| format!("subagent_dispatch_read_failed: {e:?}"))?
+    else {
+        let output = SubagentCollectCliOutput {
+            run_id: request.run_id.0.clone(),
+            dispatch_available: false,
+            report_available: false,
+            report: None,
+        };
+        return match request.output {
+            ControlOutputFormat::Text => {
+                println!("subagent_collect_missing_dispatch run_id={}", output.run_id);
+                Ok(())
+            }
+            ControlOutputFormat::Json => print_json(&output),
+        };
+    };
+
+    let mut spawner = QueuedSubagentSpawner::new();
+    spawner
+        .restore_dispatch(dispatch)
+        .map_err(|e| format!("subagent_dispatch_restore_failed: {e:?}"))?;
+    let mut slot = SubagentRuntimeSlot::QueuedExternal { spawner, queue };
+    let report = slot
+        .collect(&request.run_id)
+        .map_err(|e| format!("subagent_collect_failed: {e:?}"))?;
+    let output = SubagentCollectCliOutput {
+        run_id: request.run_id.0.clone(),
+        dispatch_available: true,
+        report_available: report.is_some(),
+        report,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            if let Some(report) = &output.report {
+                println!(
+                    "subagent_collect_available run_id={} status={:?} summary={}",
+                    output.run_id, report.status, report.summary
+                );
+            } else {
+                println!("subagent_collect_pending run_id={}", output.run_id);
             }
         }
         ControlOutputFormat::Json => print_json(&output)?,

@@ -77,6 +77,14 @@ pub(crate) struct SubagentReportCliOutput {
     pub(crate) report: Option<SubagentReport>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SubagentCollectCliOutput {
+    pub(crate) run_id: String,
+    pub(crate) dispatch_available: bool,
+    pub(crate) report_available: bool,
+    pub(crate) report: Option<SubagentReport>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SubagentListCliRequest {
     pub(crate) options: CliOptions,

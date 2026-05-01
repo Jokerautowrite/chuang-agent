@@ -153,6 +153,33 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     let report_stdout = String::from_utf8_lossy(&report.stdout);
     assert!(report_stdout.contains("\"available\": true"));
     assert!(report_stdout.contains("fake runner completed turn-1"));
+
+    let collect = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue path should be utf-8"),
+            "--run-id",
+            "queued-run-1",
+            "--json",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo subagent collect should execute");
+
+    assert!(
+        collect.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&collect.stderr)
+    );
+    let collect_stdout = String::from_utf8_lossy(&collect.stdout);
+    assert!(collect_stdout.contains("\"dispatch_available\": true"));
+    assert!(collect_stdout.contains("\"report_available\": true"));
+    assert!(collect_stdout.contains("fake runner completed turn-1"));
 }
 
 #[test]

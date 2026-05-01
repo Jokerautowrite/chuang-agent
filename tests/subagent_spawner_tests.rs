@@ -220,6 +220,38 @@ fn queued_spawner_can_spawn_with_explicit_ids() {
 }
 
 #[test]
+fn queued_spawner_can_restore_persisted_dispatch_and_collect_report() {
+    let mut original = QueuedSubagentSpawner::new();
+    let receipt = original
+        .spawn_with_ids(
+            request(SubagentToolPolicy::Execute),
+            chuang_agent::subagent_spawner::RunId("persisted-run-1".to_string()),
+            AgentId("persisted-worker-1".to_string()),
+        )
+        .expect("explicit ids should spawn");
+    let dispatch = original
+        .pending_dispatches()
+        .into_iter()
+        .find(|dispatch| dispatch.run_id == receipt.run_id)
+        .expect("dispatch should be pending");
+
+    let mut restored = QueuedSubagentSpawner::new();
+    restored
+        .restore_dispatch(dispatch)
+        .expect("dispatch should restore into running state");
+    let report = queued_report(&receipt.agent_id);
+    restored
+        .attach_report(&receipt.run_id, report.clone())
+        .expect("restored run should accept matching report");
+    let collected = restored
+        .collect(&receipt.run_id)
+        .expect("collect should succeed")
+        .expect("report should be available");
+
+    assert_eq!(collected, report);
+}
+
+#[test]
 fn queued_spawner_rejects_duplicate_explicit_run_id() {
     let mut spawner = QueuedSubagentSpawner::new();
     spawner

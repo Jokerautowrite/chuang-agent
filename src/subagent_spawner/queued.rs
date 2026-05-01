@@ -37,6 +37,25 @@ impl QueuedSubagentSpawner {
         self.spawn_inner(request, run_id, agent_id)
     }
 
+    pub fn restore_dispatch(
+        &mut self,
+        dispatch: SubagentDispatch,
+    ) -> Result<SpawnReceipt, SubagentError> {
+        let request = SpawnRequest {
+            task_id: dispatch.task_id.clone(),
+            parent_agent_id: dispatch.parent_agent_id.clone(),
+            agent_name: dispatch.agent_name.clone(),
+            task: dispatch.task.clone(),
+            tool_policy: dispatch.tool_policy.clone(),
+            context_isolation: dispatch.context_isolation.clone(),
+            token_budget: dispatch.token_budget,
+            idle_timeout_ms: dispatch.idle_timeout_ms,
+            recursive_spawn: dispatch.recursive_spawn,
+            metadata: dispatch.metadata.clone(),
+        };
+        self.spawn_inner(request, dispatch.run_id, dispatch.agent_id)
+    }
+
     pub fn pending_dispatches(&self) -> Vec<SubagentDispatch> {
         self.dispatch_queue
             .iter()
