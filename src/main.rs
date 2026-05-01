@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod cli_output;
+mod cli_types;
 
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS,
@@ -26,8 +27,8 @@ use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
-    ConfigSummary, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig,
-    SubagentConfig, SubagentQueueConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
 use chuang_agent::slot_registry::{build_provider_responder, build_runtime_slots};
@@ -40,26 +41,7 @@ use cli_output::{
     print_config_summary, print_control_unit_view, print_control_view_with_format, print_json,
     print_runtime_result, print_status, usage, ControlOutputFormat,
 };
-use serde::Serialize;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CliOptions {
-    runtime: RuntimeConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RunCliRequest {
-    options: CliOptions,
-    user_input: String,
-    remember: bool,
-    remember_identity: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct RememberedRecords {
-    sqlite_record_id: Option<String>,
-    identity_record_id: Option<String>,
-}
+use cli_types::*;
 
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../config.example.toml");
 
@@ -724,109 +706,6 @@ fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemo
             }
         ),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ControlApplyCliRequest {
-    intent: ControlIntentInput,
-    approve: bool,
-    output: ControlOutputFormat,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SubagentDispatchCliRequest {
-    options: CliOptions,
-    output: ControlOutputFormat,
-    task_id: TaskId,
-    spawn: SpawnRequest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SubagentDispatchCliOutput {
-    run_id: String,
-    agent_id: String,
-    task_id: String,
-    dispatch_path: String,
-    queue_root: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CliSubagentIds {
-    run_id: RunId,
-    agent_id: AgentId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SubagentReportCliRequest {
-    options: CliOptions,
-    output: ControlOutputFormat,
-    run_id: RunId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SubagentReportCliOutput {
-    run_id: String,
-    available: bool,
-    report: Option<chuang_agent::subagent_report::SubagentReport>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SubagentListCliRequest {
-    options: CliOptions,
-    output: ControlOutputFormat,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SubagentListCliOutput {
-    queue_root: String,
-    dispatch_count: usize,
-    report_count: usize,
-    items: Vec<SubagentListItem>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SubagentListItem {
-    run_id: String,
-    agent_id: String,
-    task_id: String,
-    agent_name: String,
-    tool_policy: String,
-    has_report: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SubagentRunOnceCliRequest {
-    options: CliOptions,
-    output: ControlOutputFormat,
-    runner: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SubagentRunOnceCliOutput {
-    runner: String,
-    ran: bool,
-    run_id: Option<String>,
-    report_path: Option<String>,
-    summary: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ConfigCheckCliOutput {
-    ok: bool,
-    source: String,
-    summary: ConfigSummary,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ConfigInitCliRequest {
-    output: ControlOutputFormat,
-    path: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ConfigInitCliOutput {
-    written: bool,
-    path: String,
 }
 
 fn parse_control_output(args: &[String]) -> Result<ControlOutputFormat, String> {
