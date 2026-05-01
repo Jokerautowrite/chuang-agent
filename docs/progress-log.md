@@ -16,6 +16,7 @@
 - CLI 参数解析已拆到 `src/cli_args.rs`：`main.rs` 从 1264 行降到约 612 行，入口文件只保留命令分发和执行流程。
 - subagent CLI 命令执行已拆到 `src/cli_subagent.rs`：dispatch/list/report/run-once 队列适配逻辑离开 `main.rs`。
 - control CLI 命令执行已拆到 `src/cli_control.rs`：服务/Agent 控制台逻辑离开 `main.rs`，继续作为组合层使用 slot。
+- config CLI 命令执行已拆到 `src/cli_config.rs`：配置 check/show/init 逻辑离开 `main.rs`。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
