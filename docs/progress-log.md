@@ -8,6 +8,7 @@
 - `main.rs` 中重复的 runtime 参数白名单已收口为 `is_runtime_value_flag()` / `copy_runtime_value_arg()`，降低后续新增配置字段时多处漏改的风险。
 - `slot_registry_tests` 新增 control plane slot contract：通过 `ControlPlaneSlot` 执行服务重启和 Agent 换模型，确认控制台能力仍走 trait 边界。
 - `slot_registry_tests` 新增 queued external subagent 回收 contract：外部 report 写入文件队列后，`SubagentRuntimeSlot::collect()` 会经 slot wrapper 吸收并返回结构化报告。
+- CLI 参数解析继续瘦身：新增 `take_value_or_usage()` / `skip_value_arg()`，把 `--flag value` 的取值和索引推进逻辑收口，减少入口文件重复细节。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。

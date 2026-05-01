@@ -1236,85 +1236,62 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     while index < args.len() {
         match args[index].as_str() {
             "--config" => {
-                index += 2;
+                skip_value_arg(args, &mut index)?;
             }
             "--db" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                db_path = Some(PathBuf::from(value));
-                index += 2;
+                db_path = Some(PathBuf::from(take_value_or_usage(args, &mut index)?));
             }
             "--json" => index += 1,
             "--input" => index += 2,
             "--remember" => index += 1,
             "--remember-identity" => index += 1,
             "--provider-base-url" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                provider_base_url = Some(value.clone());
-                index += 2;
+                provider_base_url = Some(take_value_or_usage(args, &mut index)?);
             }
             "--provider-api-key" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                provider_api_key = Some(value.clone());
-                index += 2;
+                provider_api_key = Some(take_value_or_usage(args, &mut index)?);
             }
             "--provider-model" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                provider_model = Some(value.clone());
-                index += 2;
+                provider_model = Some(take_value_or_usage(args, &mut index)?);
             }
             "--provider-transport" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                provider_transport = Some(value.clone());
-                index += 2;
+                provider_transport = Some(take_value_or_usage(args, &mut index)?);
             }
             "--provider-id" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                provider_id = Some(value.clone());
-                index += 2;
+                provider_id = Some(take_value_or_usage(args, &mut index)?);
             }
             "--identity-memory-root" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                identity_memory_root = Some(PathBuf::from(value));
-                index += 2;
+                identity_memory_root = Some(PathBuf::from(take_value_or_usage(args, &mut index)?));
             }
             "--subagent" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                subagent_kind = Some(value.clone());
-                index += 2;
+                subagent_kind = Some(take_value_or_usage(args, &mut index)?);
             }
             "--subagent-queue-root" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                subagent_queue_root = Some(PathBuf::from(value));
-                index += 2;
+                subagent_queue_root = Some(PathBuf::from(take_value_or_usage(args, &mut index)?));
             }
             "--context-max-tokens" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                context_max_tokens = Some(parse_u16_flag("--context-max-tokens", value)?);
-                index += 2;
+                let value = take_value_or_usage(args, &mut index)?;
+                context_max_tokens = Some(parse_u16_flag("--context-max-tokens", &value)?);
             }
             "--context-reserve-system-tokens" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = take_value_or_usage(args, &mut index)?;
                 context_reserve_system_tokens =
-                    Some(parse_u16_flag("--context-reserve-system-tokens", value)?);
-                index += 2;
+                    Some(parse_u16_flag("--context-reserve-system-tokens", &value)?);
             }
             "--context-min-working-tokens" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = take_value_or_usage(args, &mut index)?;
                 context_min_working_tokens =
-                    Some(parse_u16_flag("--context-min-working-tokens", value)?);
-                index += 2;
+                    Some(parse_u16_flag("--context-min-working-tokens", &value)?);
             }
             "--context-max-tool-results" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = take_value_or_usage(args, &mut index)?;
                 context_max_tool_results =
-                    Some(parse_usize_flag("--context-max-tool-results", value)?);
-                index += 2;
+                    Some(parse_usize_flag("--context-max-tool-results", &value)?);
             }
             "--context-max-memory-segments" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
+                let value = take_value_or_usage(args, &mut index)?;
                 context_max_memory_segments =
-                    Some(parse_usize_flag("--context-max-memory-segments", value)?);
-                index += 2;
+                    Some(parse_usize_flag("--context-max-memory-segments", &value)?);
             }
             _ => return Err(usage()),
         }
@@ -1406,11 +1383,21 @@ fn copy_runtime_value_arg(
     index: &mut usize,
     runtime_args: &mut Vec<String>,
 ) -> Result<(), String> {
-    let value = args.get(*index + 1).ok_or_else(usage)?;
-    runtime_args.push(args[*index].clone());
-    runtime_args.push(value.clone());
-    *index += 2;
+    let flag = args[*index].clone();
+    let value = take_value_or_usage(args, index)?;
+    runtime_args.push(flag);
+    runtime_args.push(value);
     Ok(())
+}
+
+fn skip_value_arg(args: &[String], index: &mut usize) -> Result<(), String> {
+    take_value_or_usage(args, index).map(|_| ())
+}
+
+fn take_value_or_usage(args: &[String], index: &mut usize) -> Result<String, String> {
+    let value = args.get(*index + 1).ok_or_else(usage)?.clone();
+    *index += 2;
+    Ok(value)
 }
 
 fn find_config_path(args: &[String]) -> Result<Option<PathBuf>, String> {
