@@ -849,21 +849,7 @@ fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
                 output = ControlOutputFormat::Json;
                 index += 1;
             }
-            "--db"
-            | "--config"
-            | "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => index += 2,
+            flag if is_runtime_value_flag(flag) => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -1002,11 +988,7 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--db"
-            | "--config"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root" => index += 2,
+            flag if is_runtime_value_flag(flag) => index += 2,
             "--input" => {
                 let value = args.get(index + 1).ok_or_else(usage)?;
                 user_input = Some(value.clone());
@@ -1020,16 +1002,6 @@ fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String> {
                 remember_identity = true;
                 index += 1;
             }
-            "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => index += 2,
             _ => return Err(usage()),
         }
     }
@@ -1060,25 +1032,8 @@ fn parse_subagent_dispatch(args: &[String]) -> Result<SubagentDispatchCliRequest
                 output = ControlOutputFormat::Json;
                 index += 1;
             }
-            "--db"
-            | "--config"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root"
-            | "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                runtime_args.push(args[index].clone());
-                runtime_args.push(value.clone());
-                index += 2;
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
             }
             "--task" => {
                 let value = args
@@ -1172,25 +1127,8 @@ fn parse_subagent_report(args: &[String]) -> Result<SubagentReportCliRequest, St
                 output = ControlOutputFormat::Json;
                 index += 1;
             }
-            "--db"
-            | "--config"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root"
-            | "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                runtime_args.push(args[index].clone());
-                runtime_args.push(value.clone());
-                index += 2;
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
             }
             "--run-id" => {
                 let value = args
@@ -1224,25 +1162,8 @@ fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String
                 output = ControlOutputFormat::Json;
                 index += 1;
             }
-            "--db"
-            | "--config"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root"
-            | "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                runtime_args.push(args[index].clone());
-                runtime_args.push(value.clone());
-                index += 2;
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
             }
             _ => return Err(usage()),
         }
@@ -1273,25 +1194,8 @@ fn parse_subagent_run_once(args: &[String]) -> Result<SubagentRunOnceCliRequest,
                 runner = Some(value.clone());
                 index += 2;
             }
-            "--db"
-            | "--config"
-            | "--identity-memory-root"
-            | "--subagent"
-            | "--subagent-queue-root"
-            | "--provider-base-url"
-            | "--provider-api-key"
-            | "--provider-model"
-            | "--provider-id"
-            | "--provider-transport"
-            | "--context-max-tokens"
-            | "--context-reserve-system-tokens"
-            | "--context-min-working-tokens"
-            | "--context-max-tool-results"
-            | "--context-max-memory-segments" => {
-                let value = args.get(index + 1).ok_or_else(usage)?;
-                runtime_args.push(args[index].clone());
-                runtime_args.push(value.clone());
-                index += 2;
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
             }
             _ => return Err(usage()),
         }
@@ -1474,6 +1378,39 @@ fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     };
 
     Ok(CliOptions { runtime })
+}
+
+fn is_runtime_value_flag(flag: &str) -> bool {
+    matches!(
+        flag,
+        "--db"
+            | "--config"
+            | "--provider-base-url"
+            | "--provider-api-key"
+            | "--provider-model"
+            | "--provider-id"
+            | "--provider-transport"
+            | "--identity-memory-root"
+            | "--subagent"
+            | "--subagent-queue-root"
+            | "--context-max-tokens"
+            | "--context-reserve-system-tokens"
+            | "--context-min-working-tokens"
+            | "--context-max-tool-results"
+            | "--context-max-memory-segments"
+    )
+}
+
+fn copy_runtime_value_arg(
+    args: &[String],
+    index: &mut usize,
+    runtime_args: &mut Vec<String>,
+) -> Result<(), String> {
+    let value = args.get(*index + 1).ok_or_else(usage)?;
+    runtime_args.push(args[*index].clone());
+    runtime_args.push(value.clone());
+    *index += 2;
+    Ok(())
 }
 
 fn find_config_path(args: &[String]) -> Result<Option<PathBuf>, String> {
