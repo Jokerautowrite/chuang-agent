@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 
 use serde_json::json;
@@ -58,6 +59,7 @@ pub struct HttpCallResult {
 pub enum ProviderTransport {
     Stub,
     Http,
+    Curl,
 }
 
 impl ProviderTransport {
@@ -65,6 +67,7 @@ impl ProviderTransport {
         match self {
             Self::Stub => "stub",
             Self::Http => "http",
+            Self::Curl => "curl",
         }
     }
 }
@@ -82,8 +85,9 @@ impl FromStr for ProviderTransport {
         match raw {
             "stub" => Ok(Self::Stub),
             "http" => Ok(Self::Http),
+            "curl" => Ok(Self::Curl),
             other => Err(format!(
-                "unsupported provider transport: {other} (supported: stub, http)"
+                "unsupported provider transport: {other} (supported: stub, http, curl)"
             )),
         }
     }
@@ -292,17 +296,116 @@ impl OpenAICompatibleProviderAdapter {
         })
     }
 
+    pub fn execute_curl_post_call(
+        &self,
+        request: &ResponderRequest,
+    ) -> Result<HttpCallResult, ProviderConfigError> {
+        let preview = self.build_http_request_preview(request)?;
+        let authorization_header = preview
+            .headers
+            .get("authorization")
+            .map(|value| format!("Authorization: {value}"))
+            .unwrap_or_else(|| "Authorization:".to_string());
+        let content_type_header = preview
+            .headers
+            .get("content-type")
+            .map(|value| format!("Content-Type: {value}"))
+            .unwrap_or_else(|| "Content-Type: application/json".to_string());
+        let args = vec![
+            "--silent".to_string(),
+            "--show-error".to_string(),
+            "--location".to_string(),
+            "--max-time".to_string(),
+            "60".to_string(),
+            "--request".to_string(),
+            "POST".to_string(),
+            "--header".to_string(),
+            authorization_header,
+            "--header".to_string(),
+            content_type_header,
+            "--data-binary".to_string(),
+            "@-".to_string(),
+            "--write-out".to_string(),
+            "\n__CHUANG_CURL_STATUS__:%{http_code}".to_string(),
+            preview.url.clone(),
+        ];
+        let mut child = Command::new("curl")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| ProviderConfigError {
+                field: "curl_spawn".to_string(),
+                message: error.to_string(),
+            })?;
+
+        let mut stdin = child.stdin.take().ok_or_else(|| ProviderConfigError {
+            field: "curl_stdin".to_string(),
+            message: "stdin_unavailable".to_string(),
+        })?;
+        stdin
+            .write_all(preview.body_json.as_bytes())
+            .map_err(|error| ProviderConfigError {
+                field: "curl_write".to_string(),
+                message: error.to_string(),
+            })?;
+        stdin.flush().map_err(|error| ProviderConfigError {
+            field: "curl_write".to_string(),
+            message: error.to_string(),
+        })?;
+        drop(stdin);
+
+        let output = child
+            .wait_with_output()
+            .map_err(|error| ProviderConfigError {
+                field: "curl_wait".to_string(),
+                message: error.to_string(),
+            })?;
+        if !output.status.success() {
+            return Err(ProviderConfigError {
+                field: "curl_exit".to_string(),
+                message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let (response_body_json, status_raw) = stdout
+            .rsplit_once("\n__CHUANG_CURL_STATUS__:")
+            .ok_or_else(|| ProviderConfigError {
+                field: "curl_response".to_string(),
+                message: "missing_status_marker".to_string(),
+            })?;
+        let status_code = status_raw
+            .trim()
+            .parse::<u16>()
+            .map_err(|_| ProviderConfigError {
+                field: "curl_response".to_string(),
+                message: format!("invalid_status_code:{status_raw}"),
+            })?;
+
+        Ok(HttpCallResult {
+            status_code,
+            url: preview.url,
+            request_body_json: preview.body_json,
+            response_body_json: response_body_json.to_string(),
+        })
+    }
+
     fn execute_transport(
         &self,
         request: &ResponderRequest,
     ) -> Result<TransportCallResult, ProviderConfigError> {
         match self.transport {
-            ProviderTransport::Stub => self
-                .execute_stub_post_call(request)
-                .map(TransportCallResult::Stub),
+            ProviderTransport::Stub => Ok(TransportCallResult::Stub(
+                self.execute_stub_post_call(request)?,
+            )),
             ProviderTransport::Http => self
                 .execute_http_post_call(request)
                 .map(TransportCallResult::Http),
+            ProviderTransport::Curl => self
+                .execute_curl_post_call(request)
+                .map(TransportCallResult::Curl),
         }
     }
 }
@@ -382,6 +485,7 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
 enum TransportCallResult {
     Stub(StubHttpCallResult),
     Http(HttpCallResult),
+    Curl(HttpCallResult),
 }
 
 impl TransportCallResult {
@@ -389,6 +493,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(_) => ProviderTransport::Stub,
             Self::Http(_) => ProviderTransport::Http,
+            Self::Curl(_) => ProviderTransport::Curl,
         }
     }
 
@@ -396,6 +501,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => result.status_code,
             Self::Http(result) => result.status_code,
+            Self::Curl(result) => result.status_code,
         }
     }
 
@@ -403,6 +509,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.url,
             Self::Http(result) => &result.url,
+            Self::Curl(result) => &result.url,
         }
     }
 
@@ -410,6 +517,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.request_body_json,
             Self::Http(result) => &result.request_body_json,
+            Self::Curl(result) => &result.request_body_json,
         }
     }
 
@@ -417,6 +525,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.response_body_json,
             Self::Http(result) => &result.response_body_json,
+            Self::Curl(result) => &result.response_body_json,
         }
     }
 }
@@ -572,5 +681,6 @@ fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static
     match transport {
         ProviderTransport::Stub => "stubbed-openai-compatible",
         ProviderTransport::Http => "http-openai-compatible",
+        ProviderTransport::Curl => "curl-openai-compatible",
     }
 }

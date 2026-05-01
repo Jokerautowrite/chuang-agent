@@ -37,7 +37,7 @@ cargo run --quiet -- doctor --json
 
 ## 下一阶段
 
-- 真实 provider HTTPS adapter。
+- 真实 provider native HTTPS adapter；当前先通过 `--provider-transport curl` 显式接入系统 curl。
 - 真实子代理 runner adapter。
 - 真实 control plane adapter。
 - 桌面/飞书控制台读取 `doctor --json` 和 `status --json`。

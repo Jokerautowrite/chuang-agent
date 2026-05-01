@@ -1,0 +1,69 @@
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+use chuang_agent::provider_openai_compatible::{
+    OpenAICompatibleProviderAdapter, ProviderTransport,
+};
+use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
+
+#[test]
+fn openai_compatible_curl_transport_executes_post_against_local_server() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let bytes = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+
+        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.contains("Authorization: Bearer test-key"));
+        assert!(request_text.contains("Content-Type: application/json"));
+        assert!(request_text.contains("curl真实通道"));
+
+        let body = r#"{"id":"chatcmpl-curl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_curl_ok"},"finish_reason":"stop"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Curl);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "curl真实通道".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.body, "real_curl_ok");
+    assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("transport_mode")
+            .map(String::as_str),
+        Some("curl")
+    );
+    assert_eq!(
+        response.extra_meta.get("status_code").map(String::as_str),
+        Some("200")
+    );
+    assert!(response.trace.contains("transport_mode=curl"));
+}

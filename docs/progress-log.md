@@ -153,10 +153,10 @@
 - **`OpenAICompatibleProviderAdapter::execute_stub_post_call()` 已落地：当前会在本地生成 chat.completion 风格 stub 响应，先打通“request preview -> post result -> assistant content extract”闭环**
 - **新增测试：`tests/openai_compatible_stub_post_tests.rs`，2 条已全绿，覆盖 stub post 返回 request/response body + respond 透出 stub_status_code/stub_response_kind**
 - **CLI 现在会打印 `response.meta.extra` 全部扩展字段；新增测试：`tests/cli_provider_stub_metadata_tests.rs` 已实测通过，确认 stdout 能看到 `stub_status_code: 200` 与 `stub_response_kind: chat.completion`**
-- **provider transport 开关已落地：`ProviderTransport::{Stub,Http}` + `OpenAICompatibleProviderAdapter::with_transport()` 已接上，CLI 新增 `--provider-transport stub|http`**
-- **当前 `http` 还没真发请求，但接缝已前推：`ProviderTransport` 现已实现 `FromStr/as_str/Display`，CLI 能识别 `http`，并稳定返回 `transport` 配置错误而不是参数层直接拦死**
-- **`http` 占位态现在也会保留 request 预览证据：即使 transport 还没实现，`respond()` 在报 `invalid-config` 时也会把 `request_url/request_method/request_message_count/transport_mode` 带出来，方便下一步直接替换成真 HTTP 调用**
-- **新增测试：`tests/cli_provider_transport_flag_tests.rs`、`tests/cli_provider_transport_reject_tests.rs`、`tests/cli_repl_provider_transport_tests.rs`、`tests/openai_compatible_transport_mode_tests.rs`、`tests/cli_provider_default_transport_tests.rs`、`tests/cli_repl_default_transport_tests.rs`、`tests/provider_transport_parse_tests.rs`、`tests/cli_provider_http_not_implemented_tests.rs`、`tests/openai_compatible_http_transport_preview_tests.rs` 已全绿，确认 run/repl/adapter 三层 transport seam 都通了，默认回落到 `stub`，`http` 进入实现前占位态**
+- **provider transport 开关已落地：`ProviderTransport::{Stub,Http,Curl}` + `OpenAICompatibleProviderAdapter::with_transport()` 已接上，CLI 新增 `--provider-transport stub|http|curl`**
+- **`ProviderTransport` 现已实现 `FromStr/as_str/Display`，CLI 能识别 `stub/http/curl`，非法 transport 会在参数层稳定拒绝**
+- **transport 失败态会保留 request 预览证据：`respond()` 在报 `invalid-config` 时也会把 `request_url/request_method/request_message_count/transport_mode` 带出来，便于定位 provider 接线问题**
+- **新增测试：`tests/cli_provider_transport_flag_tests.rs`、`tests/cli_provider_transport_reject_tests.rs`、`tests/cli_repl_provider_transport_tests.rs`、`tests/openai_compatible_transport_mode_tests.rs`、`tests/cli_provider_default_transport_tests.rs`、`tests/cli_repl_default_transport_tests.rs`、`tests/provider_transport_parse_tests.rs`、`tests/cli_provider_http_not_implemented_tests.rs`、`tests/openai_compatible_http_transport_preview_tests.rs` 已全绿，确认 run/repl/adapter 三层 transport seam 都通了，默认回落到 `stub`**
 - **新增 runtime->subagent_report 桥接层：`src/runtime_report.rs` 已落地，可把 `RuntimeResult` 收口成结构化 `SubagentReport`**
 - **新增测试：`tests/runtime_report_tests.rs`，2 条已全绿，覆盖 runtime context debug -> report 映射、report metadata 收口**
 - **`SubagentReportBuilder::from_runtime()` 已接上最小运行时输入结构 `RuntimeReportInput`，为后续子代理执行结果统一出 report 铺平**
@@ -168,6 +168,8 @@
 - **HTTP 响应解析失败闭环已补：远端回 malformed response 时，`missing_header_separator` / `missing_status_code` 会收口成 `config_error_field=http_response`，不再静默吞掉**
 - **HTTP 非 200 返回的证据链也补上了：429 等状态现在会稳定保留 `status_code / response_kind / response_finish_reason`，即使没有 assistant content 也会给出 `provider_response_missing_content` 占位并带 trace 证据**
 - **新增回归测试：`openai_compatible_http_transport_preserves_non_200_status_with_structured_metadata` 与 `cli_run_http_transport_reports_invalid_port_shape`，已红转绿并纳入全量 `cargo test`**
+- **新增 curl provider transport：`--provider-transport curl` 会通过系统 `curl` 执行真实 POST，支持 HTTP/HTTPS 交给 curl 处理，默认仍是 `stub`，核心 runtime 不直接依赖 TLS/网络实现**
+- **新增验证：`tests/openai_compatible_curl_transport_tests.rs` 与 `cli_run_with_provider_and_curl_transport_executes_local_post`，覆盖 adapter 和 CLI 两层 curl POST 闭环**
 - **新增 context engine 保底预留能力：当 `min_working_tokens` 配置生效时，`ContextPacker` 现在会优先为 working segment 预留预算，再决定是否挤掉较低优先级 segment**
 - **新增红转绿测试：`pack_reserves_minimum_working_tokens_before_lower_priority_segments`，验证 working 保底预算会先于 lower-priority memory 生效**
 - **顺手修掉一个隐藏重复上报问题：`budget_exceeded_reasons` 不再把 `min_working_tokens_unmet` 重复写两次，`runtime_report_tests` 已重新全绿**
