@@ -16,6 +16,7 @@
 - `doctor --json` 已支持结构化输出且会继续脱敏 provider key，方便后续桌面控制台直接读取健康状态。
 - README 已从早期协作说明更新为当前 MVP 入口，直接列出 `doctor/status/run/subagent` 等最小可用命令。
 - 已按 `docs/mvp-scope.md` 跑过一组端到端 MVP 验收：`status -> doctor -> run --remember -> run --remember-identity -> subagent dispatch/list/run-once/report/collect -> status --json -> doctor --json` 全部通过。
+- 新增 `docs/mvp-checkpoint-2026-05-01.md`，记录当前 MVP 已验收命令、可用能力、下一阶段边界。
 - 刚刚补完的治理元数据已经通过 `cargo test` 全量验证，当前主链保持全绿。
 - CLI 展示层已从 `main.rs` 拆到 `src/cli_output.rs`：usage、JSON 输出、status/config/runtime/control 打印逻辑不再挤在入口文件里，运行链路行为保持不变。
 - `browser_worker` 已明确标记为 adapter/plugin 能力线，并新增核心边界测试，防止 MVP 主入口、runtime、kernel、slot registry 直接依赖浏览器外脑实现。
