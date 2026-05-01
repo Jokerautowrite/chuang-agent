@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::agent_runtime::{ContextDebugInfo, RuntimeResult};
 use crate::subagent_report::{
-    ExecutionStatus, ReportBuilder, RuntimeReportInput, SubagentReport, SubagentReportBuilder,
+    governance_metadata, ExecutionStatus, ReportBuilder, RuntimeReportInput, SubagentReport,
+    SubagentReportBuilder,
 };
 
 pub fn build_runtime_report(
@@ -88,6 +89,9 @@ pub fn report_metadata(report: &SubagentReport) -> BTreeMap<String, String> {
     metadata.insert("agent_id".to_string(), report.agent_id.0.clone());
     if let Some(parent) = &report.parent_agent_id {
         metadata.insert("parent_agent_id".to_string(), parent.0.clone());
+    }
+    if let Some(decision) = &report.governance_decision {
+        metadata.extend(governance_metadata(decision));
     }
     metadata
 }

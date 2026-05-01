@@ -3,6 +3,20 @@
 ## 2026-05-01
 
 ### 最新进展
+- MVP 主链路补上 kernel 级治理入口：`ChuangKernel::run_governed_turn()` 会先通过 `Governance` trait 分类，非允许决策会在 runtime 前阻断，允许后再执行并写 audit。
+- `ChuangKernelTurn` 现在可携带 `governance_decision`，普通 `run_turn` 保持兼容并留空；CLI `run/repl` 默认通过 slot registry 的治理 slot 走 governed turn。
+- CLI `run` 输出新增 `governance_decision: allowed:...`，让 `input -> context -> runtime -> governance -> report` 的 MVP 链路有可见证据。
+- `runtime_report` 和 `SubagentReport` 也已携带治理元数据，`governance_action_id / governance_decision / governance_reason` 会随 report 结构化输出，避免只靠文本日志理解治理结果。
+- `run` 的治理结果现在也写进 `RuntimeResult.response.meta.extra`，CLI runtime 输出层可以直接打印结构化治理字段，`main.rs` 不再单独重复打印。
+- `cli_runtime` 新增单测，直接验证 `run_with_options()` 的返回值里带有治理元数据，避免以后只改 stdout 忘了结构化字段。
+- 治理元数据 key 的组装已经抽成共享 helper，`cli_runtime` 和 `runtime_report` 现在共用同一份字段拼装逻辑。
+- `summary_compression` 现在不是纯壳了：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer。
+- `context_engine_tests` 新增回归，确认长 memory 段会被轻量压缩并保留结构化压缩元数据。
+- CLI 新增 `doctor` 命令：安全校验配置、身份记忆、slot 装配，并用临时 fake provider / 临时 DB 跑隔离 runtime smoke，用临时队列跑子代理 dispatch smoke。
+- `doctor --json` 已支持结构化输出且会继续脱敏 provider key，方便后续桌面控制台直接读取健康状态。
+- README 已从早期协作说明更新为当前 MVP 入口，直接列出 `doctor/status/run/subagent` 等最小可用命令。
+- 已按 `docs/mvp-scope.md` 跑过一组端到端 MVP 验收：`status -> doctor -> run --remember -> run --remember-identity -> subagent dispatch/list/run-once/report/collect -> status --json -> doctor --json` 全部通过。
+- 刚刚补完的治理元数据已经通过 `cargo test` 全量验证，当前主链保持全绿。
 - CLI 展示层已从 `main.rs` 拆到 `src/cli_output.rs`：usage、JSON 输出、status/config/runtime/control 打印逻辑不再挤在入口文件里，运行链路行为保持不变。
 - `browser_worker` 已明确标记为 adapter/plugin 能力线，并新增核心边界测试，防止 MVP 主入口、runtime、kernel、slot registry 直接依赖浏览器外脑实现。
 - `main.rs` 中重复的 runtime 参数白名单已收口为 `is_runtime_value_flag()` / `copy_runtime_value_arg()`，降低后续新增配置字段时多处漏改的风险。
@@ -22,7 +36,7 @@
 - `run --dispatch-subagent` 增加失败路径覆盖：未选择 `queued_external` 时明确拒绝，不创建 dispatch 队列。
 - CLI 端到端测试已覆盖 `run --dispatch-subagent -> subagent run-once -> subagent report`，确认 run 产生的 dispatch 可被 fake runner 回写并读回 report。
 - CLI 新增 `subagent collect --run-id ID`：从持久化 dispatch 恢复 queued spawner，再经 `SubagentRuntimeSlot::collect()` 回收 report；身份不匹配会拒绝，避免只读文件绕过子代理协议校验。
-- Context engine 新增非默认 `summary_compression` 占位策略：实现独立 engine wrapper、配置文件字段 `context_engine`、CLI 参数 `--context-engine` 和 status 展示；当前仍委托预算 packer，默认保持 `deterministic_budget`。
+- Context engine 新增非默认 `summary_compression` 轻量压缩策略：实现独立 engine wrapper、配置文件字段 `context_engine`、CLI 参数 `--context-engine` 和 status 展示；默认仍保持 `deterministic_budget`。
 - Runtime 已实际接入 context engine 选择：`ChuangKernelConfig` 会把配置传给 `AgentRuntime`，`RuntimeResult` 和 CLI run 输出会显示本轮实际使用的 `context_engine`。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。

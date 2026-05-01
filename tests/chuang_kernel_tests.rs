@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::chuang_kernel::{
-    ChuangKernel, ChuangKernelConfig, ChuangKernelMemoryError, DEFAULT_MEMORY_WRITE_MAX_CHARS,
+    ChuangKernel, ChuangKernelConfig, ChuangKernelGovernanceError, ChuangKernelMemoryError,
+    DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextBudget, ContextEngineKind};
+use chuang_agent::governance::{
+    ActionKind, Governance, GovernanceError, ProposedAction, RiskDecision, StaticRuleGovernance,
+};
 use chuang_agent::hermes_memory::DualFileMemorySnapshot;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::responder::FakeResponder;
@@ -62,10 +66,71 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
     assert_eq!(turn.report.report_id.0, "report-turn-1");
     assert_eq!(turn.report.agent_id.0, "chuang-mvp");
     assert_eq!(turn.report.status, ExecutionStatus::Success);
+    assert_eq!(turn.governance_decision, None);
     assert!(turn.result.prompt.contains("[chuang-agent-runtime]"));
     assert!(turn.result.packed_context_preview.contains("system-core"));
     assert!(turn.report.summary.contains("model=stub-responder"));
     assert_eq!(kernel.snapshot().turn_count, 1);
+}
+
+#[test]
+fn chuang_kernel_can_run_turn_through_governance_and_audit() {
+    let mut kernel = kernel(kernel_config(), InMemoryMemoryStore::new());
+    let mut governance = StaticRuleGovernance::new();
+
+    let turn = kernel
+        .run_governed_turn("通过治理层跑一轮", &mut governance)
+        .expect("governed turn should run");
+
+    assert_eq!(turn.turn_id, "turn-1");
+    assert!(matches!(
+        turn.governance_decision,
+        Some(RiskDecision::Allowed { .. })
+    ));
+    assert_eq!(kernel.snapshot().turn_count, 1);
+
+    let audit = governance.audit_records();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0].operation, "run_governed_turn");
+    assert_eq!(audit[0].agent_id.0, "chuang-mvp");
+    assert_eq!(audit[0].task_id.0, "turn-1");
+    assert!(audit[0].delta_bytes > 0);
+    assert!(audit[0].reason.starts_with("allowed:"));
+}
+
+#[derive(Debug, Clone)]
+struct BlockingGovernance;
+
+impl Governance for BlockingGovernance {
+    fn classify(&self, action: &ProposedAction) -> Result<RiskDecision, GovernanceError> {
+        assert_eq!(action.kind, ActionKind::Draft);
+        assert_eq!(action.action_id, "run-turn-1");
+        Ok(RiskDecision::Blocked {
+            reason: "test block before runtime".to_string(),
+        })
+    }
+
+    fn audit(&mut self, _record: chuang_agent::common::AuditRecord) -> Result<(), GovernanceError> {
+        panic!("blocked turn should not be audited as executed");
+    }
+}
+
+#[test]
+fn chuang_kernel_blocks_governed_turn_before_runtime() {
+    let mut kernel = kernel(kernel_config(), InMemoryMemoryStore::new());
+    let mut governance = BlockingGovernance;
+
+    let err = kernel
+        .run_governed_turn("这轮不应该执行", &mut governance)
+        .expect_err("blocked governance decision should stop runtime");
+
+    assert!(matches!(
+        err,
+        ChuangKernelGovernanceError::NotAllowed {
+            decision: RiskDecision::Blocked { .. }
+        }
+    ));
+    assert_eq!(kernel.snapshot().turn_count, 0);
 }
 
 #[test]

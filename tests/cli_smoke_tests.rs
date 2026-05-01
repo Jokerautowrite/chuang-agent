@@ -45,6 +45,7 @@ fn cli_run_command_boots_and_returns_structured_response() {
     assert!(stdout.contains("context_working_reservation:"));
     assert!(stdout.contains("context_budget_exceeded:"));
     assert!(stdout.contains("runtime_report: report-turn-1"));
+    assert_eq!(stdout.matches("governance_decision: allowed:").count(), 1);
     assert!(stdout.contains("创项目现在启动试试"));
 }
 

@@ -330,6 +330,7 @@ fn queued_report(agent_id: &AgentId) -> SubagentReport {
         artifacts: Vec::new(),
         replay_ref: Some("queued-subagent://queued-run-1".to_string()),
         context_debug: None,
+        governance_decision: None,
         truncated: false,
     }
 }

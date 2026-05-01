@@ -1,21 +1,32 @@
 # chuang-agent
 
-本地协作项目，用于沉淀小创 × 小承（DeepSeek）关于“创项目”的规格、方案、实验记录与实现计划。
+创项目本地 Agent 内核 MVP。
 
 ## 当前目标
-- 打通小创与 DeepSeek（小承）的稳定协作链路
-- 产出 3 份最小规格草案：SubagentReport / MemoryAdmissionPolicy / ContextEngineLifecycle
-- 后续由小创审稿、收敛并推进实现
+
+先打通一条稳定、可审计、可插拔的最小主链：
+
+```text
+input -> identity/memory -> context -> runtime -> governance -> report -> memory
+```
+
+核心只保留身份、记忆、上下文、治理和报告。provider、子代理、桌面/浏览器、控制面、飞书等外部能力走 slot / adapter / plugin。
 
 ## 当前状态
-- 创建时间：2026-04-30 13:41:58 CST
-- DeepSeek 当前通过可见 Chrome + X11 桌面输入协作
-- `opencli deepseek status/read` 可用
-- `opencli deepseek ask` 当前不可用，原因是发送前强制切模型失败
-- 当前已将“致下一个窗口的我”长提示词发送到 DeepSeek 当前窗口
-- 本地实现主进度以 `docs/progress-log.md` 为准，new 后先读它续上
+
+- `cargo run -- doctor`：安全健康检查，校验配置、身份记忆、slot 装配和隔离 runtime smoke。
+- `cargo run -- status`：查看核心状态。
+- `cargo run -- run --input TEXT`：跑一轮本地 runtime。
+- `cargo run -- run --input TEXT --remember`：跑完后写回 SQLite turn summary。
+- `cargo run -- subagent dispatch --task TEXT`：写入子代理 dispatch 文件队列。
+- `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch。
+- `cargo test`：全量回归。
+
+当前 MVP 边界见 `docs/mvp-scope.md`，核心边界见 `docs/core-boundary.md`，长期进度见 `docs/progress-log.md`。
 
 ## 目录约定
+
+- `src/`：Rust 实现。
 - `docs/`：规格草案、架构说明、评审结论
-- `context/`：协作上下文、提示词、窗口接续材料
-- `.hermes/plans/`：计划文档
+- `tests/`：MVP 合同和回归测试。
+- `context/`：协作上下文、提示词、窗口接续材料。

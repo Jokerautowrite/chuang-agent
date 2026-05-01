@@ -353,6 +353,7 @@ fn build_fake_runner_report(
         artifacts: Vec::new(),
         replay_ref: Some(format!("queued-subagent://{}", dispatch.run_id.0)),
         context_debug: None,
+        governance_decision: None,
         truncated: false,
     })
 }

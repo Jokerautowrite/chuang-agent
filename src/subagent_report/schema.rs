@@ -60,6 +60,13 @@ pub struct WorkingReservationDebug {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GovernanceDecisionSummary {
+    pub action_id: String,
+    pub decision: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ResourceUsage {
     pub prompt_tokens: u64,
@@ -87,5 +94,6 @@ pub struct SubagentReport {
     pub artifacts: Vec<ArtifactRef>,
     pub replay_ref: Option<String>,
     pub context_debug: Option<ContextDebugSummary>,
+    pub governance_decision: Option<GovernanceDecisionSummary>,
     pub truncated: bool,
 }

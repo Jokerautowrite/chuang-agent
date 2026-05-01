@@ -77,24 +77,45 @@ fn deterministic_context_engine_wraps_budget_packer_behavior() {
 }
 
 #[test]
-fn summary_compression_context_engine_is_selectable_placeholder() {
-    let engine = SummaryCompressionContextEngine::new(budget(30, 10, 0));
+fn summary_compression_context_engine_is_selectable_and_compresses_long_memory_segments() {
+    let engine = SummaryCompressionContextEngine::new(budget(100, 10, 0));
 
     let packed = engine
-        .pack(vec![segment(
-            "working-1",
-            SegmentSource::Working,
-            "working",
-            Some(8),
-            200,
-            "2026-04-30T18:00:00Z",
-            "2026-04-30T18:00:00Z",
-        )])
-        .expect("summary compression placeholder should pack");
+        .pack(vec![
+            segment(
+                "working-1",
+                SegmentSource::Working,
+                "working",
+                Some(8),
+                200,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &"memory-".repeat(20),
+                Some(140),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("summary compression engine should pack");
 
     assert_eq!(engine.kind(), "summary_compression");
-    assert_eq!(packed.total_tokens, 8);
+    assert_eq!(packed.total_tokens, 91);
     assert_eq!(packed.dropped_ids, Vec::<String>::new());
+    let memory = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "memory-1")
+        .expect("memory segment should exist");
+    assert!(memory.content.ends_with("..."));
+    assert!(memory
+        .metadata
+        .get("summary_compressed")
+        .is_some_and(|value| value == "true"));
 }
 
 #[test]

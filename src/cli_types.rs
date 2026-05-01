@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use chuang_agent::common::{AgentId, TaskId};
 use chuang_agent::control_intent::ControlIntentInput;
+use chuang_agent::kernel_status::ChuangMvpStatus;
 use chuang_agent::runtime_config::{ConfigSummary, RuntimeConfig};
 use chuang_agent::subagent_report::SubagentReport;
 use chuang_agent::subagent_spawner::{RunId, SpawnRequest};
@@ -28,6 +29,7 @@ pub(crate) struct RememberedRecords {
     pub(crate) sqlite_record_id: Option<String>,
     pub(crate) identity_record_id: Option<String>,
     pub(crate) runtime_report_id: Option<String>,
+    pub(crate) governance_decision: Option<String>,
     pub(crate) subagent_dispatch_run_id: Option<String>,
     pub(crate) subagent_dispatch_agent_id: Option<String>,
     pub(crate) subagent_dispatch_task_id: Option<String>,
@@ -142,4 +144,18 @@ pub(crate) struct ConfigInitCliRequest {
 pub(crate) struct ConfigInitCliOutput {
     pub(crate) written: bool,
     pub(crate) path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct DoctorCliOutput {
+    pub(crate) ok: bool,
+    pub(crate) checks: Vec<DoctorCheck>,
+    pub(crate) status: ChuangMvpStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct DoctorCheck {
+    pub(crate) name: String,
+    pub(crate) ok: bool,
+    pub(crate) detail: String,
 }

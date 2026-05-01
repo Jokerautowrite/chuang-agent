@@ -231,6 +231,7 @@ impl SubagentReportBuilder {
                     budget_exceeded_reasons: input.budget_exceeded_reasons,
                     working_reservation: input.working_reservation,
                 }),
+                governance_decision: None,
                 truncated: false,
             },
         }

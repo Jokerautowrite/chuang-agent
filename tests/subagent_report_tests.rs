@@ -40,6 +40,7 @@ fn sample_report() -> SubagentReport {
                 reason: "minimum_working_tokens".to_string(),
             }),
         }),
+        governance_decision: None,
         truncated: false,
     }
 }
@@ -66,6 +67,23 @@ fn report_can_carry_context_debug_summary() {
         .expect("working reservation should exist");
     assert_eq!(reservation.reserved_segment_id, "working-user-input");
     assert_eq!(reservation.reason, "minimum_working_tokens");
+}
+
+#[test]
+fn report_can_carry_governance_decision_summary() {
+    let mut report = sample_report();
+    report.governance_decision = Some(chuang_agent::subagent_report::GovernanceDecisionSummary {
+        action_id: "run-turn-1".to_string(),
+        decision: "allowed".to_string(),
+        reason: "read-only or draft action".to_string(),
+    });
+
+    let governance = report
+        .governance_decision
+        .expect("governance decision should exist");
+    assert_eq!(governance.action_id, "run-turn-1");
+    assert_eq!(governance.decision, "allowed");
+    assert_eq!(governance.reason, "read-only or draft action");
 }
 
 #[test]
@@ -126,6 +144,7 @@ fn subagent_report_can_roundtrip_as_json() {
     assert_eq!(decoded, report);
     assert!(encoded.contains("\"status\":\"Success\""));
     assert!(encoded.contains("\"report_id\":\"report-1\""));
+    assert!(encoded.contains("\"governance_decision\":null"));
 }
 
 #[test]

@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 mod cli_args;
 mod cli_config;
 mod cli_control;
+mod cli_doctor;
 mod cli_output;
 mod cli_runtime;
 mod cli_subagent;
@@ -13,6 +14,7 @@ use chuang_agent::kernel_status::build_chuang_mvp_status;
 use cli_args::*;
 use cli_config::config_command;
 use cli_control::control_command;
+use cli_doctor::doctor_command;
 use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_subagent::subagent_command;
@@ -31,6 +33,7 @@ fn run_cli() -> Result<(), String> {
         Some("run") => run_command(&args[2..]),
         Some("repl") => repl_command(&args[2..]),
         Some("status") => status_command(&args[2..]),
+        Some("doctor") => doctor_command(&args[2..]),
         Some("config") => config_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
         Some("subagent") => subagent_command(&args[2..]),

@@ -9,7 +9,8 @@ use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, 
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
-use chuang_agent::slot_registry::{build_provider_responder, build_runtime_slots};
+use chuang_agent::slot_registry::build_runtime_slots;
+use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
@@ -32,7 +33,7 @@ pub(crate) fn run_with_options(
         .validate()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    let provider = build_provider_responder(&request.options.runtime.provider)
+    let mut slots = build_runtime_slots(&request.options.runtime)
         .map_err(|err| format!("config_invalid: {}: {}", err.field, err.message))?;
     let mut store = SqliteMemoryStore::open(&request.options.runtime.db_path)
         .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
@@ -40,10 +41,10 @@ pub(crate) fn run_with_options(
     let mut kernel = ChuangKernel::with_responder(
         kernel_config_from_runtime(&request.options.runtime)?,
         store,
-        provider,
+        slots.provider,
     );
     kernel
-        .run_turn(request.user_input.clone())
+        .run_governed_turn(request.user_input.clone(), &mut slots.governance)
         .map_err(|e| format!("runtime_failed: {e:?}"))
         .and_then(|turn| remember_turn_if_requested(&request.options, &mut kernel, turn, request))
 }
@@ -79,7 +80,7 @@ pub(crate) fn default_db_path() -> PathBuf {
 fn remember_turn_if_requested<S, R>(
     options: &CliOptions,
     kernel: &mut ChuangKernel<S, R>,
-    turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
+    mut turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
     request: &RunCliRequest,
 ) -> Result<
     (
@@ -94,6 +95,20 @@ where
 {
     let mut records = RememberedRecords::default();
     records.runtime_report_id = Some(turn.report.report_id.0.clone());
+
+    if let Some(decision) = &turn.report.governance_decision {
+        turn.result
+            .response
+            .meta
+            .extra
+            .extend(governance_metadata(decision));
+        records.governance_decision = Some(format!("{}:{}", decision.decision, decision.reason));
+    } else {
+        records.governance_decision = turn
+            .governance_decision
+            .as_ref()
+            .map(format_governance_decision);
+    }
 
     if request.remember {
         records.sqlite_record_id = Some(
@@ -115,6 +130,23 @@ where
     }
 
     Ok((turn.result, records))
+}
+
+fn format_governance_decision(decision: &chuang_agent::governance::RiskDecision) -> String {
+    match decision {
+        chuang_agent::governance::RiskDecision::Allowed { reason } => {
+            format!("allowed:{reason}")
+        }
+        chuang_agent::governance::RiskDecision::DraftOnly { reason } => {
+            format!("draft_only:{reason}")
+        }
+        chuang_agent::governance::RiskDecision::NeedsApproval { reason } => {
+            format!("needs_approval:{reason}")
+        }
+        chuang_agent::governance::RiskDecision::Blocked { reason } => {
+            format!("blocked:{reason}")
+        }
+    }
 }
 
 fn dispatch_subagent_turn(
@@ -272,4 +304,74 @@ fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), Str
         .map_err(|e| format!("seed_put_failed: {e:?}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn run_with_options_surfaces_governance_metadata_in_runtime_result() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-runtime-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let db_path = temp_dir.join("memory.db");
+        let identity_root = temp_dir.join("identity");
+        fs::create_dir_all(&identity_root).expect("identity root should be created");
+
+        let mut runtime = RuntimeConfig::new(db_path);
+        runtime.identity_memory =
+            chuang_agent::runtime_config::IdentityMemoryConfig::HermesDualFile {
+                root: identity_root,
+                user_max_chars: chuang_agent::hermes_memory::DEFAULT_USER_MEMORY_MAX_CHARS,
+                memory_max_chars: chuang_agent::hermes_memory::DEFAULT_HOT_MEMORY_MAX_CHARS,
+            };
+
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "确认治理元数据进入 runtime result".to_string(),
+            remember: false,
+            remember_identity: false,
+            dispatch_subagent: false,
+        };
+
+        let (result, records) = run_with_options(&request).expect("run should succeed");
+
+        assert_eq!(
+            records.governance_decision.as_deref(),
+            Some("allowed:read-only or draft action")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("governance_decision")
+                .map(String::as_str),
+            Some("allowed:read-only or draft action")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("governance_reason")
+                .map(String::as_str),
+            Some("read-only or draft action")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("governance_action_id")
+                .map(String::as_str),
+            Some("run-turn-1")
+        );
+    }
 }

@@ -212,3 +212,41 @@ fn runtime_report_metadata_exposes_core_fields() {
         .contains("recall_hits=1"));
     assert!(!metadata.contains_key("parent_agent_id"));
 }
+
+#[test]
+fn runtime_report_metadata_exposes_governance_decision_when_present() {
+    let mut report = build_runtime_report(
+        &runtime(SqliteMemoryStore::open(temp_db_path("report-governance")).expect("sqlite store"))
+            .run(&RuntimeRequest {
+                user_input: "治理决策元数据".to_string(),
+                recall_limit: 1,
+                metadata: BTreeMap::new(),
+                context_budget: None,
+                extra_context_segments: Vec::new(),
+            })
+            .expect("runtime should succeed"),
+        "report-governance",
+        "task-governance",
+        "agent-governance",
+        None,
+    );
+    report.governance_decision = Some(chuang_agent::subagent_report::GovernanceDecisionSummary {
+        action_id: "run-turn-1".to_string(),
+        decision: "allowed".to_string(),
+        reason: "read-only or draft action".to_string(),
+    });
+
+    let metadata = report_metadata(&report);
+    assert_eq!(
+        metadata.get("governance_action_id"),
+        Some(&"run-turn-1".to_string())
+    );
+    assert_eq!(
+        metadata.get("governance_decision"),
+        Some(&"allowed:read-only or draft action".to_string())
+    );
+    assert_eq!(
+        metadata.get("governance_reason"),
+        Some(&"read-only or draft action".to_string())
+    );
+}

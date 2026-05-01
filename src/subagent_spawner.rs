@@ -199,6 +199,7 @@ pub(crate) fn build_subagent_report(
         artifacts: Vec::new(),
         replay_ref: Some(format!("{replay_prefix}://{}", receipt.run_id.0)),
         context_debug: None,
+        governance_decision: None,
         truncated: false,
     }
 }

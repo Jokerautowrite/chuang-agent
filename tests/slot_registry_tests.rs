@@ -353,6 +353,7 @@ fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {
         artifacts: Vec::new(),
         replay_ref: Some(format!("queued-subagent://{run_id}")),
         context_debug: None,
+        governance_decision: None,
         truncated: false,
     }
 }

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
+use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::context_engine::{ContextBudget, ContextEngineKind, ContextSegment, SegmentSource};
+use crate::governance::{ActionKind, Governance, GovernanceError, ProposedAction, RiskDecision};
 use crate::hermes_memory::DualFileMemorySnapshot;
 use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
@@ -9,7 +11,7 @@ use crate::memory_admission::{
 use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::Responder;
 use crate::runtime_report::build_runtime_report;
-use crate::subagent_report::SubagentReport;
+use crate::subagent_report::{GovernanceDecisionSummary, SubagentReport};
 use serde::Serialize;
 
 pub use crate::memory_admission::DEFAULT_MEMORY_WRITE_MAX_CHARS;
@@ -47,6 +49,7 @@ pub struct ChuangKernelTurn {
     pub user_input: String,
     pub result: RuntimeResult,
     pub report: SubagentReport,
+    pub governance_decision: Option<RiskDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -69,6 +72,13 @@ pub enum ChuangKernelMemoryError {
         attempted_chars: usize,
         existing_entries: Vec<MemoryEntryView>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChuangKernelGovernanceError {
+    Governance(GovernanceError),
+    NotAllowed { decision: RiskDecision },
+    Runtime(AgentRuntimeError),
 }
 
 pub struct ChuangKernel<S, R> {
@@ -117,13 +127,56 @@ impl<S, R> ChuangKernel<S, R> {
 }
 
 impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
+    pub fn run_governed_turn<G: Governance>(
+        &mut self,
+        user_input: impl Into<String>,
+        governance: &mut G,
+    ) -> Result<ChuangKernelTurn, ChuangKernelGovernanceError> {
+        let next_turn = self.turn_count + 1;
+        let turn_id = format!("turn-{next_turn}");
+        let action = self.propose_runtime_turn_action(&turn_id);
+        let decision = governance
+            .classify(&action)
+            .map_err(ChuangKernelGovernanceError::Governance)?;
+
+        if !matches!(decision, RiskDecision::Allowed { .. }) {
+            return Err(ChuangKernelGovernanceError::NotAllowed { decision });
+        }
+
+        let mut turn = self
+            .run_turn_with_id(turn_id.clone(), user_input.into())
+            .map_err(ChuangKernelGovernanceError::Runtime)?;
+        turn.report.governance_decision = Some(governance_decision_summary(&action, &decision));
+        turn.governance_decision = Some(decision.clone());
+
+        governance
+            .audit(AuditRecord {
+                operation: "run_governed_turn".to_string(),
+                agent_id: AgentId(self.config.agent_id.clone()),
+                task_id: TaskId(turn_id),
+                delta_bytes: turn.report.summary.len() as i64,
+                reason: render_governance_audit_reason(&decision),
+                timestamp: Timestamp("2026-05-01T00:00:00Z".to_string()),
+            })
+            .map_err(ChuangKernelGovernanceError::Governance)?;
+
+        Ok(turn)
+    }
+
     pub fn run_turn(
         &mut self,
         user_input: impl Into<String>,
     ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
         let next_turn = self.turn_count + 1;
         let turn_id = format!("turn-{next_turn}");
-        let user_input = user_input.into();
+        self.run_turn_with_id(turn_id, user_input.into())
+    }
+
+    fn run_turn_with_id(
+        &mut self,
+        turn_id: String,
+        user_input: String,
+    ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
         let result = self.runtime.run(&RuntimeRequest {
             user_input: user_input.clone(),
             recall_limit: self.config.recall_limit,
@@ -138,13 +191,14 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             self.config.agent_id.clone(),
             self.config.parent_agent_id.clone(),
         );
-        self.turn_count = next_turn;
+        self.turn_count += 1;
 
         Ok(ChuangKernelTurn {
             turn_id,
             user_input,
             result,
             report,
+            governance_decision: None,
         })
     }
 
@@ -240,6 +294,42 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             ));
         }
         segments
+    }
+
+    fn propose_runtime_turn_action(&self, turn_id: &str) -> ProposedAction {
+        ProposedAction {
+            action_id: format!("run-{turn_id}"),
+            kind: ActionKind::Draft,
+            target: format!("{}:{turn_id}", self.config.agent_id),
+            summary: "run local runtime turn and build auditable report".to_string(),
+        }
+    }
+}
+
+fn render_governance_audit_reason(decision: &RiskDecision) -> String {
+    match decision {
+        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
+        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
+        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
+        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
+    }
+}
+
+fn governance_decision_summary(
+    action: &ProposedAction,
+    decision: &RiskDecision,
+) -> GovernanceDecisionSummary {
+    let (decision, reason) = match decision {
+        RiskDecision::Allowed { reason } => ("allowed", reason),
+        RiskDecision::DraftOnly { reason } => ("draft_only", reason),
+        RiskDecision::NeedsApproval { reason } => ("needs_approval", reason),
+        RiskDecision::Blocked { reason } => ("blocked", reason),
+    };
+
+    GovernanceDecisionSummary {
+        action_id: action.action_id.clone(),
+        decision: decision.to_string(),
+        reason: reason.clone(),
     }
 }
 

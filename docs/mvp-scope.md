@@ -25,6 +25,8 @@
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- status`：查看 MVP 核心状态。
 - `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
+- `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、隔离 fake runtime smoke 和隔离子代理队列 smoke。
+- `cargo run -- doctor --json`：输出结构化健康检查结果，给桌面控制台或插件读取。
 - `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
 - `cargo run -- config init`：生成默认 `config.toml`；目标文件已存在时拒绝覆盖。
 - `cargo run -- config check`：只校验配置和内核快照，不执行任务；未传 `--config` 时会自动读取当前目录 `config.toml`（如果存在）。
@@ -37,7 +39,7 @@
 - `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch 并写入模拟 report，不执行真实命令。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
-- `summary_compression` 非默认占位策略：当前委托同一预算 packer，不做模型摘要，用于验证配置切换面。
+- `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
 
 ## 当前明确不做
 
@@ -52,7 +54,7 @@
 ## 下一步优先级
 
 1. 把子代理文件队列接到真实 runner adapter，但默认仍保持 fake/queued，不自动执行危险命令。
-2. 给 `summary_compression` 接入真实摘要压缩 adapter，但默认仍保持 `deterministic_budget`。
+2. 继续增强 `summary_compression` 的压缩质量，但默认仍保持 `deterministic_budget`。
 3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
 4. 最后再接桌面壳、飞书插件和服务控制 UI。
 
@@ -60,6 +62,7 @@
 
 - `cargo test` 全仓通过。
 - `cargo run -- status` 能显示核心状态。
+- `cargo run -- doctor` 能确认配置、slot 和隔离 runtime smoke 正常。
 - `cargo run -- run --input TEXT` 能返回结构化响应。
 - `cargo run -- status --config PATH` 能加载简单配置文件，且 CLI 参数可覆盖配置。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
