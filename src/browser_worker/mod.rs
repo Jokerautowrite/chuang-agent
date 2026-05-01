@@ -1,3 +1,10 @@
+//! Browser-backed external worker adapter line.
+//!
+//! `browser_worker` belongs to the adapter/plugin side of Chuang Agent. It can drive browser
+//! surfaces such as DeepSeek Web through fake, injected, or opencli-backed drivers, but the core
+//! runtime must continue to depend on generic provider/subagent/actuator ports instead of this
+//! module directly.
+
 pub mod adapters;
 mod coordinator;
 mod hash;

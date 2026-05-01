@@ -61,3 +61,32 @@ fn runtime_config_describes_provider_but_does_not_construct_adapters() {
         "runtime_config must not construct provider adapters; use slot_registry composition instead"
     );
 }
+
+#[test]
+fn mvp_runtime_entrypoints_do_not_import_browser_worker_adapter_line() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let files = [
+        "src/main.rs",
+        "src/agent_runtime.rs",
+        "src/chuang_kernel.rs",
+        "src/slot_registry.rs",
+    ];
+    let forbidden = ["crate::browser_worker", "chuang_agent::browser_worker"];
+    let mut violations = Vec::new();
+
+    for relative_path in files {
+        let content = fs::read_to_string(repo_root.join(relative_path))
+            .expect("source file should be readable");
+        for token in forbidden {
+            if content.contains(token) {
+                violations.push(format!("{relative_path} imports {token}"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "browser_worker is an adapter/plugin line and must not enter MVP runtime entrypoints:\n{}",
+        violations.join("\n")
+    );
+}

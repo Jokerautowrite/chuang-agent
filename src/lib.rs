@@ -1,5 +1,9 @@
 pub mod actuator;
 pub mod agent_runtime;
+/// Adapter/plugin line for browser-backed external workers.
+///
+/// This module is intentionally exported for experiments and future plugins, but it must not
+/// become a dependency of the core runtime chain.
 pub mod browser_worker;
 pub mod chuang_kernel;
 pub mod common;
