@@ -10,6 +10,7 @@
 - `slot_registry_tests` 新增 queued external subagent 回收 contract：外部 report 写入文件队列后，`SubagentRuntimeSlot::collect()` 会经 slot wrapper 吸收并返回结构化报告。
 - CLI 参数解析继续瘦身：新增 `take_value_or_usage()` / `skip_value_arg()`，把 `--flag value` 的取值和索引推进逻辑收口，减少入口文件重复细节。
 - CLI DTO 已拆到 `src/cli_types.rs`：request/output 数据结构离开 `main.rs`，入口继续保留命令执行和解析流程。
+- CLI 运行时组合已拆到 `src/cli_runtime.rs`：一轮运行、SQLite 记忆种子、身份记忆写回、kernel 配置从 `main.rs` 移出。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
