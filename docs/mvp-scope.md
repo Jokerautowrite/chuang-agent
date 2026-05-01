@@ -42,7 +42,7 @@
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 - `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
 - `GenesisActuator` trait + `AutoCliGenesisActuator` 最小实现：主通道 userDataDir，备用 CDP，登录态失效时 fallback，并返回需审批的修复计划，不自动删除 profile。
-- `cargo run -- genesis ask --prompt TEXT --approve-exec`：手动验证 Genesis 查询入口；真实外部程序执行必须显式审批。
+- `cargo run -- genesis ask --prompt TEXT --approve-exec`：手动验证 Genesis 查询入口；真实外部程序执行必须显式审批，并输出治理决策与审计状态。
 
 ## 当前明确不做
 

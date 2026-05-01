@@ -53,7 +53,15 @@ fn cli_genesis_ask_can_run_approved_program_and_render_json() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be json");
-    assert_eq!(parsed["channel"], "UserDataDir");
-    assert_eq!(parsed["answer"], "deepseek");
-    assert_eq!(parsed["primary_repair"], serde_json::Value::Null);
+    assert_eq!(parsed["response"]["channel"], "UserDataDir");
+    assert_eq!(parsed["response"]["answer"], "deepseek");
+    assert_eq!(
+        parsed["response"]["primary_repair"],
+        serde_json::Value::Null
+    );
+    assert_eq!(parsed["audit_recorded"], true);
+    assert!(parsed["governance_decision"]
+        .as_str()
+        .expect("decision should be string")
+        .starts_with("needs_approval:"));
 }

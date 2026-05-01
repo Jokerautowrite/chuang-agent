@@ -11,6 +11,7 @@
 - 新增 `tests/genesis_actuator_tests.rs`，覆盖 fake 查询、AutoCLI 命令形状、主通道成功、CDP fallback、双通道失败。
 - CLI 新增 `genesis ask --prompt TEXT --approve-exec`：可手动验证 Genesis 查询入口；缺少 `--approve-exec` 时拒绝执行外部程序。
 - 新增 `tests/cli_genesis_tests.rs`，覆盖 Genesis CLI 审批拒绝和已审批执行路径。
+- Genesis CLI 现在会先走 `StaticRuleGovernance`：外部网页 AI 查询按 `ExternalSend` 分类为 `needs_approval`，显式审批后执行，并写入审计记录；JSON 输出带 `governance_decision` 和 `audit_recorded`。
 - MVP 主链路补上 kernel 级治理入口：`ChuangKernel::run_governed_turn()` 会先通过 `Governance` trait 分类，非允许决策会在 runtime 前阻断，允许后再执行并写 audit。
 - `ChuangKernelTurn` 现在可携带 `governance_decision`，普通 `run_turn` 保持兼容并留空；CLI `run/repl` 默认通过 slot registry 的治理 slot 走 governed turn。
 - CLI `run` 输出新增 `governance_decision: allowed:...`，让 `input -> context -> runtime -> governance -> report` 的 MVP 链路有可见证据。

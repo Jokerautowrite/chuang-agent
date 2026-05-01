@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use chuang_agent::common::{AgentId, TaskId};
 use chuang_agent::control_intent::ControlIntentInput;
+use chuang_agent::genesis_actuator::GenesisAskResponse;
 use chuang_agent::kernel_status::ChuangMvpStatus;
 use chuang_agent::runtime_config::{ConfigSummary, RuntimeConfig};
 use chuang_agent::subagent_report::SubagentReport;
@@ -152,6 +153,13 @@ pub(crate) struct GenesisAskCliRequest {
     pub(crate) cdp_port: u16,
     pub(crate) timeout_ms: u64,
     pub(crate) approve_exec: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct GenesisAskCliOutput {
+    pub(crate) response: GenesisAskResponse,
+    pub(crate) governance_decision: String,
+    pub(crate) audit_recorded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
