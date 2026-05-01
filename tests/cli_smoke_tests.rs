@@ -100,6 +100,59 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     assert!(dispatch.contains("\"source\": \"cli-run\""));
     assert!(dispatch.contains("\"report_id\": \"report-turn-1\""));
     assert!(dispatch.contains("把这一轮交给子代理复核"));
+
+    let run_once = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue path should be utf-8"),
+            "--json",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo subagent run-once should execute");
+
+    assert!(
+        run_once.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run_once.stderr)
+    );
+    let run_once_stdout = String::from_utf8_lossy(&run_once.stdout);
+    assert!(run_once_stdout.contains("\"run_id\": \"queued-run-1\""));
+    assert!(queue_root
+        .join("reports")
+        .join("queued-run-1.json")
+        .exists());
+
+    let report = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "report",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue path should be utf-8"),
+            "--run-id",
+            "queued-run-1",
+            "--json",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo subagent report should execute");
+
+    assert!(
+        report.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let report_stdout = String::from_utf8_lossy(&report.stdout);
+    assert!(report_stdout.contains("\"available\": true"));
+    assert!(report_stdout.contains("fake runner completed turn-1"));
 }
 
 #[test]
