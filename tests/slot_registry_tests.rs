@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
-use chuang_agent::control_plane::ControlPlane;
+use chuang_agent::control_plane::{ControlAction, ControlPlane, ControlRequest, ManagedUnitStatus};
 use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecision};
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::responder::{Responder, ResponderRequest};
@@ -89,6 +89,37 @@ fn slot_registry_builds_subagent_spawner_that_can_spawn_and_collect() {
 
     assert_eq!(report.agent_id, receipt.agent_id);
     assert_eq!(report.task_id.0, "task-1");
+}
+
+#[test]
+fn slot_registry_control_plane_slot_applies_state_and_model_changes() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut slots = build_runtime_slots(&config).expect("default slots should build");
+
+    let restart = slots
+        .control_plane
+        .apply(ControlRequest {
+            unit_id: "codex-feishu-bot.service".to_string(),
+            action: ControlAction::Restart,
+            reason: "slot contract restart".to_string(),
+        })
+        .expect("control slot should restart services");
+    let model_change = slots
+        .control_plane
+        .apply(ControlRequest {
+            unit_id: "codex-xiaoce".to_string(),
+            action: ControlAction::ChangeModel {
+                model_name: "gpt-5.5".to_string(),
+            },
+            reason: "slot contract model change".to_string(),
+        })
+        .expect("control slot should change agent model");
+
+    assert_eq!(restart.next_status, ManagedUnitStatus::Running);
+    assert_eq!(model_change.model_name, Some("gpt-5.5".to_string()));
+    assert!(slots.control_plane.list_units().iter().any(|unit| {
+        unit.unit_id == "codex-xiaoce" && unit.model_name.as_deref() == Some("gpt-5.5")
+    }));
 }
 
 #[test]

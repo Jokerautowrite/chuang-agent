@@ -6,6 +6,7 @@
 - CLI 展示层已从 `main.rs` 拆到 `src/cli_output.rs`：usage、JSON 输出、status/config/runtime/control 打印逻辑不再挤在入口文件里，运行链路行为保持不变。
 - `browser_worker` 已明确标记为 adapter/plugin 能力线，并新增核心边界测试，防止 MVP 主入口、runtime、kernel、slot registry 直接依赖浏览器外脑实现。
 - `main.rs` 中重复的 runtime 参数白名单已收口为 `is_runtime_value_flag()` / `copy_runtime_value_arg()`，降低后续新增配置字段时多处漏改的风险。
+- `slot_registry_tests` 新增 control plane slot contract：通过 `ControlPlaneSlot` 执行服务重启和 Agent 换模型，确认控制台能力仍走 trait 边界。
 - 配置文件体验已简化：`config.example.toml` 改为扁平字段，适合长期手工维护。
 - 配置解析保持向后兼容：旧的 `[provider]` / `[context]` 分段写法继续可用，同时新增 `provider / provider_id / model / context_max_tokens` 等扁平字段。
 - CLI 新增 `config check` 与 `config show`：可只校验或查看脱敏配置摘要，不执行任务。
