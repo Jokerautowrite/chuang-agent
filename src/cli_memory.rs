@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+
 use chuang_agent::hermes_memory::{
     DualFileMemoryError, DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry,
 };
+use chuang_agent::memory_store::{MemoryQuery, MemoryStore};
+use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use serde::Serialize;
 
 use crate::cli_args::parse_cli_options;
@@ -9,6 +13,7 @@ use crate::cli_output::{print_json, usage, ControlOutputFormat};
 pub(crate) fn memory_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("identity") => identity_memory_command(&args[1..]),
+        Some("session") => session_memory_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -26,6 +31,69 @@ fn identity_memory_command(args: &[String]) -> Result<(), String> {
         }
         _ => Err(usage()),
     }
+}
+
+fn session_memory_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("search") => session_memory_search_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn session_memory_search_command(args: &[String]) -> Result<(), String> {
+    let request = parse_session_memory_search(args)?;
+    let options = parse_cli_options(&request.runtime_args)?;
+    let store = SqliteMemoryStore::open(&options.runtime.db_path)
+        .map_err(|e| format!("session_memory_open_failed: {e:?}"))?;
+    let mut metadata = BTreeMap::from([("kind".to_string(), "turn_summary".to_string())]);
+    if let Some(session_id) = &request.session_id {
+        metadata.insert("memory_scope".to_string(), "session".to_string());
+        metadata.insert("session_id".to_string(), session_id.clone());
+    }
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some(request.query.clone()),
+            metadata,
+            limit: request.limit,
+        })
+        .map_err(|e| format!("session_memory_search_failed: {e:?}"))?;
+    let output = SessionMemorySearchOutput {
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+        hit_count: hits.len(),
+        hits: hits
+            .into_iter()
+            .map(|hit| SessionMemorySearchHitOutput {
+                id: hit.record.id,
+                score: hit.score,
+                content: hit.record.content,
+                metadata: hit.record.metadata,
+                created_at: hit.record.created_at,
+            })
+            .collect(),
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "session_memory_search query={} session_id={} hits={}",
+                output.query,
+                output.session_id.as_deref().unwrap_or("any"),
+                output.hit_count
+            );
+            for hit in &output.hits {
+                println!(
+                    "hit id={} score={} created_at={}",
+                    hit.id, hit.score, hit.created_at
+                );
+                println!("{}", hit.content);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
 }
 
 fn identity_memory_show_command(args: &[String]) -> Result<(), String> {
@@ -200,6 +268,59 @@ fn parse_identity_memory_show(args: &[String]) -> Result<IdentityMemoryShowReque
     })
 }
 
+fn parse_session_memory_search(args: &[String]) -> Result<SessionMemorySearchRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut query = None;
+    let mut session_id = None;
+    let mut limit = 5usize;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--query" => {
+                query = Some(take_local_value(args, &mut index, "--query")?);
+            }
+            "--session-id" => {
+                let value = take_local_value(args, &mut index, "--session-id")?;
+                if value.trim().is_empty() {
+                    return Err("session memory search requires non-empty --session-id".to_string());
+                }
+                session_id = Some(value);
+            }
+            "--limit" => {
+                let value = take_local_value(args, &mut index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| "session memory search requires numeric --limit".to_string())?;
+                if limit == 0 {
+                    return Err("session memory search requires --limit > 0".to_string());
+                }
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let query = query.ok_or_else(|| "session memory search requires --query".to_string())?;
+    if query.trim().is_empty() {
+        return Err("session memory search requires non-empty --query".to_string());
+    }
+
+    Ok(SessionMemorySearchRequest {
+        runtime_args,
+        output,
+        query,
+        session_id,
+        limit,
+    })
+}
+
 fn parse_identity_memory_append(args: &[String]) -> Result<IdentityMemoryAppendRequest, String> {
     let mut runtime_args = Vec::new();
     let mut output = ControlOutputFormat::Text;
@@ -300,7 +421,7 @@ fn push_value_arg(
 fn take_local_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, String> {
     let value = args
         .get(*index + 1)
-        .ok_or_else(|| format!("identity memory requires value after {flag}"))?
+        .ok_or_else(|| format!("memory command requires value after {flag}"))?
         .clone();
     *index += 2;
     Ok(value)
@@ -376,6 +497,33 @@ struct IdentityMemoryWriteRequest {
     output: ControlOutputFormat,
     content: String,
     approve_overwrite: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionMemorySearchRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SessionMemorySearchOutput {
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+    hit_count: usize,
+    hits: Vec<SessionMemorySearchHitOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SessionMemorySearchHitOutput {
+    id: String,
+    score: u32,
+    content: String,
+    metadata: BTreeMap<String, String>,
+    created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -83,12 +83,13 @@ Chuang 当前已实现：
 session_id / thread recall
 app-server 使用 thread id 写会话记忆
 session recall isolation diagnostics
+memory session search --query TEXT [--session-id ID]
 ```
 
 待补：
 
 ```text
-更强的 session_search 工具入口
+把 session_search 挂成主进程可调用工具
 会话摘要与原文归档的边界
 ```
 

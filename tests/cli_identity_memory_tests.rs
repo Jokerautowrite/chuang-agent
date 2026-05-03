@@ -169,6 +169,97 @@ fn cli_identity_memory_can_append_experience_entry() {
 }
 
 #[test]
+fn cli_memory_session_search_filters_by_session_id() {
+    let root = temp_root("session-search");
+    let config_path = write_fake_config(&root);
+
+    for (session_id, text) in [("alpha", "历史会话锚点A"), ("beta", "历史会话锚点B")] {
+        let output = Command::new("cargo")
+            .args([
+                "run",
+                "--quiet",
+                "--",
+                "run",
+                "--config",
+                config_path.to_str().expect("config path should be utf8"),
+                "--input",
+                text,
+                "--session-id",
+                session_id,
+                "--remember-session",
+            ])
+            .output()
+            .expect("cargo run should execute");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let search = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "session",
+            "search",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--query",
+            "历史会话锚点B",
+            "--session-id",
+            "alpha",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        search.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&search.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&search.stdout)).expect("stdout json");
+    assert_eq!(parsed["query"], "历史会话锚点B");
+    assert_eq!(parsed["session_id"], "alpha");
+    assert_eq!(parsed["hit_count"], 0);
+
+    let same_session = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "session",
+            "search",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--query",
+            "历史会话锚点B",
+            "--session-id",
+            "beta",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        same_session.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&same_session.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&same_session.stdout)).expect("stdout json");
+    assert_eq!(parsed["hit_count"], 1);
+    assert!(parsed["hits"][0]["content"]
+        .as_str()
+        .expect("content should be string")
+        .contains("历史会话锚点B"));
+    assert_eq!(parsed["hits"][0]["metadata"]["session_id"], "beta");
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);
