@@ -303,7 +303,7 @@
 - **HTTP 边界现在补齐了失败闭环：本地端口不可达时会稳定返回 `config_error_field=http_connect`，并保留 `request_url/request_method/request_message_count/transport_mode` 供上层解释**
 - **HTTP 输入形状错误也已补验证：非法端口（如 `http://127.0.0.1:notaport/v1`）会稳定返回 `config_error_field=base_url` + `invalid_port:...`，CLI/adapter 两层都已实测收口**
 - **HTTP 响应解析失败闭环已补：远端回 malformed response 时，`missing_header_separator` / `missing_status_code` 会收口成 `config_error_field=http_response`，不再静默吞掉**
-- **HTTP 非 200 返回的证据链也补上了：429 等状态现在会稳定保留 `status_code / response_kind / response_finish_reason`，即使没有 assistant content 也会给出 `provider_response_missing_content` 占位并带 trace 证据**
+- **HTTP 非 200 返回的证据链也补上了：429 等状态现在会稳定保留 `status_code / response_kind / response_finish_reason` 并返回 `PROVIDER_HTTP_ERROR`；2xx 但缺少 assistant content 的情况改为结构化 `PROVIDER_MISSING_CONTENT`，不再复用旧的 `provider_response_missing_content` 占位**
 - **新增回归测试：`openai_compatible_http_transport_preserves_non_200_status_with_structured_metadata` 与 `cli_run_http_transport_reports_invalid_port_shape`，已红转绿并纳入全量 `cargo test`**
 - **新增 curl provider transport：`--provider-transport curl` 会通过系统 `curl` 执行真实 POST，支持 HTTP/HTTPS 交给 curl 处理，默认仍是 `stub`，核心 runtime 不直接依赖 TLS/网络实现**
 - **新增 native provider transport：`--provider-transport native` 会直接用 Rust HTTP client 发真实 POST，作为真实 provider 的主实现路径，默认仍是 `stub`**
@@ -1043,7 +1043,7 @@
   - 新增 `src/plugin_registry.rs`，定义 `PluginRegistry / PluginManifest / PluginKind` 和只读 `check_plugin_registry()`。
   - 新增 `plugins/registry.example.json`，登记 Chuang Feishu bridge、Codex runner、real control、real actuator、Genesis AutoCLI adapter。
   - CLI 新增 `plugin list|check --registry PATH [--json]`，只读取 manifest 和检查命令/配置路径是否存在，不执行插件、不读取密钥。
-  - `status` 已暴露只读 `plugin_registry` 摘要：registry path、available、ok、plugin_count、enabled_count、issue_count，方便未来桌面控制台直接读取插件槽位健康状态。
+  - `status` 已暴露只读 `plugin_registry` 摘要：registry path、available、ok、plugin_count、enabled_count、issue_count；其中 `ok` 只统计已启用插件的 readiness，禁用插件即使路径缺失也只作为 manifest 级提示，方便未来桌面控制台直接读取插件槽位健康状态。
   - 示例注册表当前 5 个插件都已登记但默认 disabled，符合安全默认不开启真实外部能力的策略。
   - `scripts/chuang-mvp-smoke.sh` 已加入 plugin registry check。
   - 新增 `docs/actuator-command-protocol.md`，说明 request/response shape 和安全约束。

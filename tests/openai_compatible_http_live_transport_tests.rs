@@ -434,6 +434,13 @@ fn openai_compatible_http_transport_surfaces_success_metadata_when_server_reacha
         response.extra_meta.get("status_code").map(String::as_str),
         Some("200")
     );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_response_ok")
+            .map(String::as_str),
+        Some("true")
+    );
     assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     assert_eq!(
         response
@@ -510,6 +517,14 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
     assert!(response.body.contains("PROVIDER_HTTP_ERROR"));
     assert!(response.body.contains("status_code=429"));
     assert!(response.trace.contains("provider_http_error"));
+    assert!(!response.body.contains("provider_response_missing_content"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_response_ok")
+            .map(String::as_str),
+        Some("false")
+    );
     assert_eq!(
         response
             .extra_meta
@@ -523,6 +538,74 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
             .get("provider_error_message")
             .map(String::as_str),
         Some("rate limit hit")
+    );
+}
+
+#[test]
+fn openai_compatible_http_transport_marks_200_missing_content_as_structured_provider_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+
+        let body = r#"{"id":"chatcmpl-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Http);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "继续推进 missing content".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert!(response.body.starts_with("PROVIDER_MISSING_CONTENT"));
+    assert!(!response.body.contains("provider_response_missing_content"));
+    assert_eq!(
+        response.extra_meta.get("status_code").map(String::as_str),
+        Some("200")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_response_ok")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("missing_content")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_retryable")
+            .map(String::as_str),
+        Some("false")
     );
 }
 

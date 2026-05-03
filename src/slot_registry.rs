@@ -295,8 +295,12 @@ impl Responder for ProviderSlot {
                 fallback,
                 policy,
             } => {
-                let primary_output = primary.generate(request);
+                let mut primary_output = primary.generate(request);
                 if !provider_output_should_fallback(&primary_output, policy) {
+                    primary_output
+                        .meta
+                        .extra
+                        .insert("provider_fallback_used".to_string(), "false".to_string());
                     return primary_output;
                 }
 
@@ -317,6 +321,27 @@ impl Responder for ProviderSlot {
                     "provider_fallback_reason".to_string(),
                     provider_fallback_reason(&primary_output),
                 );
+                fallback_output.meta.extra.insert(
+                    "provider_fallback_primary_retryable".to_string(),
+                    primary_output
+                        .meta
+                        .extra
+                        .get("provider_retryable")
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                );
+                if let Some(status_code) = primary_output.meta.extra.get("status_code") {
+                    fallback_output.meta.extra.insert(
+                        "provider_fallback_primary_status_code".to_string(),
+                        status_code.clone(),
+                    );
+                }
+                if let Some(error_class) = primary_output.meta.extra.get("provider_error_class") {
+                    fallback_output.meta.extra.insert(
+                        "provider_fallback_primary_error_class".to_string(),
+                        error_class.clone(),
+                    );
+                }
                 fallback_output.trace = format!(
                     "{} fallback_from_trace=({})",
                     fallback_output.trace, primary_output.trace

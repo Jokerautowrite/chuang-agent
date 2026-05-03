@@ -624,6 +624,7 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                         finish_reason: Some(format!("http-error-{status_code}")),
                         extra_meta: {
                             let mut meta = build_success_meta(&call);
+                            meta.insert("provider_response_ok".to_string(), "false".to_string());
                             meta.insert("provider_error_class".to_string(), "http_status".to_string());
                             meta.insert("provider_error_message".to_string(), error_message);
                             meta
@@ -634,16 +635,36 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                 let finish_reason = extract_finish_reason(response_body).or_else(|| {
                     Some(default_finish_reason_for_transport(call.transport()).to_string())
                 });
+                let assistant_content = extract_assistant_content(response_body);
+                let mut extra_meta = build_success_meta(&call);
+                let body = if let Some(content) = assistant_content {
+                    extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
+                    content
+                } else {
+                    extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
+                    extra_meta.insert(
+                        "provider_error_class".to_string(),
+                        "missing_content".to_string(),
+                    );
+                    extra_meta.insert(
+                        "provider_error_message".to_string(),
+                        "missing assistant content in successful provider response".to_string(),
+                    );
+                    extra_meta.insert("provider_retryable".to_string(), "false".to_string());
+                    format!(
+                        "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
+                        self.identity.provider_id,
+                        self.identity.model_name,
+                        call.transport().as_str(),
+                        call.status_code(),
+                        extra_meta
+                            .get("response_kind")
+                            .map(String::as_str)
+                            .unwrap_or("unknown")
+                    )
+                };
                 ProviderAdapterResponse {
-                    body: extract_assistant_content(response_body).unwrap_or_else(|| {
-                        format!(
-                            "provider_response_missing_content: provider={} model={} transport={} user_input=《{}》",
-                            self.identity.provider_id,
-                            self.identity.model_name,
-                            call.transport().as_str(),
-                            request.user_input
-                        )
-                    }),
+                    body,
                     trace: format!(
                         "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={}",
                         self.identity.provider_id,
@@ -657,7 +678,7 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                         call.transport().as_str(),
                     ),
                     finish_reason,
-                    extra_meta: build_success_meta(&call),
+                    extra_meta,
                 }
             }
             Err(error) => {

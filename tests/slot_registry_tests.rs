@@ -227,6 +227,22 @@ fn slot_registry_provider_fallback_uses_secondary_on_primary_error() {
             .map(String::as_str),
         Some("primary-openai")
     );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_primary_retryable")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_primary_error_class")
+            .map(String::as_str),
+        Some("transport")
+    );
 }
 
 #[test]
@@ -271,6 +287,14 @@ fn slot_registry_provider_fallback_does_not_mask_unlisted_error() {
             .get("provider_fallback_used")
             .map(String::as_str),
         Some("true")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
+        Some("false")
     );
 }
 
