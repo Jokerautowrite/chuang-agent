@@ -112,16 +112,60 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
     }
 
     if ToolActionEnvelope::schema_version() != 1
-        || !ToolActionEnvelope::schema_fields().contains(&"type")
-        || !ToolActionEnvelope::call_schema_fields().contains(&"tool")
+        || ToolActionEnvelope::schema_fields() != ["schema_version", "type", "call", "answer"]
+        || ToolActionEnvelope::call_schema_fields() != ["tool", "path", "content", "command", "cwd"]
     {
         return Err("doctor_atomic_tools_failed invalid tool action schema".to_string());
     }
 
     if ToolLoopReport::schema_version() != 6
-        || !ToolLoopReport::schema_fields().contains(&"calls")
-        || !ToolLoopReport::call_schema_fields().contains(&"atomic_tool_name")
-        || !ToolLoopReport::call_schema_fields().contains(&"write_diff_preview")
+        || ToolLoopReport::schema_fields()
+            != [
+                "schema_version",
+                "status",
+                "workspace_root",
+                "rounds",
+                "call_count",
+                "calls",
+            ]
+        || ToolLoopReport::call_schema_fields()
+            != [
+                "call",
+                "tool_name",
+                "atomic_tool_name",
+                "ok",
+                "summary",
+                "decision",
+                "duration_ms",
+                "retryable",
+                "target_path",
+                "resolved_path",
+                "cwd",
+                "command",
+                "entries",
+                "output_bytes",
+                "output_lines",
+                "stderr_bytes",
+                "stderr_lines",
+                "output",
+                "stdout",
+                "stderr",
+                "exit_code",
+                "changed_files",
+                "write_before_bytes",
+                "write_after_bytes",
+                "write_changed",
+                "write_operation",
+                "write_diff_preview",
+                "write_diff_truncated",
+                "failure_class",
+                "output_redacted",
+                "stdout_redacted",
+                "stderr_redacted",
+                "output_truncated",
+                "stdout_truncated",
+                "stderr_truncated",
+            ]
     {
         return Err("doctor_atomic_tools_failed invalid tool report schema".to_string());
     }
