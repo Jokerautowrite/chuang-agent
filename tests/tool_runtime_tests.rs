@@ -172,23 +172,46 @@ fn tool_loop_report_exposes_schema_contract_fields() {
             "calls",
         ]
     );
-    assert!(ToolLoopReport::call_schema_fields().contains(&"atomic_tool_name"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"failure_class"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"target_path"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"resolved_path"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"cwd"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"command"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"entries"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"output_bytes"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"output_lines"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"stderr_bytes"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"stderr_lines"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"write_operation"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"write_diff_preview"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"write_diff_truncated"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"output_redacted"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"stdout_redacted"));
-    assert!(ToolLoopReport::call_schema_fields().contains(&"stderr_redacted"));
+    assert_eq!(
+        ToolLoopReport::call_schema_fields(),
+        &[
+            "call",
+            "tool_name",
+            "atomic_tool_name",
+            "ok",
+            "summary",
+            "decision",
+            "duration_ms",
+            "retryable",
+            "target_path",
+            "resolved_path",
+            "cwd",
+            "command",
+            "entries",
+            "output_bytes",
+            "output_lines",
+            "stderr_bytes",
+            "stderr_lines",
+            "output",
+            "stdout",
+            "stderr",
+            "exit_code",
+            "changed_files",
+            "write_before_bytes",
+            "write_after_bytes",
+            "write_changed",
+            "write_operation",
+            "write_diff_preview",
+            "write_diff_truncated",
+            "failure_class",
+            "output_redacted",
+            "stdout_redacted",
+            "stderr_redacted",
+            "output_truncated",
+            "stdout_truncated",
+            "stderr_truncated",
+        ]
+    );
 }
 
 #[test]
@@ -261,6 +284,23 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(rewrite.write_operation, Some(WriteOperation::Unchanged));
     assert_eq!(rewrite.write_diff_preview.as_deref(), Some("unchanged"));
 
+    let modify = execute_tool_call(
+        &root,
+        &ToolCall::WriteFile {
+            path: "nested/output.txt".to_string(),
+            content: "world again".to_string(),
+        },
+    );
+    assert!(modify.ok, "modify should succeed: {}", modify.summary);
+    assert_eq!(modify.write_before_bytes, Some(5));
+    assert_eq!(modify.write_after_bytes, Some(11));
+    assert_eq!(modify.write_changed, Some(true));
+    assert_eq!(modify.write_operation, Some(WriteOperation::Modified));
+    assert!(modify
+        .write_diff_preview
+        .as_deref()
+        .is_some_and(|preview| preview.contains("-world") && preview.contains("+world again")));
+
     let list = execute_tool_call(
         &root,
         &ToolCall::ListDir {
@@ -293,10 +333,10 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
         },
     );
     assert!(read.ok, "read should succeed: {}", read.summary);
-    assert!(read.summary.contains("world"));
-    assert_eq!(read.output.as_deref(), Some("world"));
+    assert!(read.summary.contains("world again"));
+    assert_eq!(read.output.as_deref(), Some("world again"));
     assert_eq!(read.target_path.as_deref(), Some("nested/output.txt"));
-    assert_eq!(read.output_bytes, Some(5));
+    assert_eq!(read.output_bytes, Some(11));
     assert_eq!(read.output_lines, Some(1));
     assert!(!read.output_truncated);
 
@@ -372,6 +412,35 @@ fn read_file_redacts_secret_like_content() {
     assert!(record.output_redacted);
     assert_eq!(record.output_bytes, Some("API_KEY=secret-value".len()));
     assert_eq!(record.output_lines, Some(1));
+}
+
+#[test]
+fn shell_exec_redacts_secret_like_stdout_and_stderr() {
+    let root = temp_workspace("shell-redact");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+
+    let record = execute_tool_call(
+        &root,
+        &ToolCall::ShellExec {
+            command: "printf 'API_KEY=secret-value'; printf 'password=hidden' >&2".to_string(),
+            cwd: Some(".".to_string()),
+        },
+    );
+
+    assert!(record.ok);
+    assert_eq!(
+        record.stdout.as_deref(),
+        Some("[redacted: secret-like command or output]")
+    );
+    assert_eq!(
+        record.stderr.as_deref(),
+        Some("[redacted: secret-like command or output]")
+    );
+    assert!(record.output_redacted);
+    assert!(record.stdout_redacted);
+    assert!(record.stderr_redacted);
+    assert_eq!(record.output_bytes, Some("API_KEY=secret-value".len()));
+    assert_eq!(record.stderr_bytes, Some("password=hidden".len()));
 }
 
 #[test]
@@ -635,6 +704,50 @@ fn execution_slot_can_return_governance_rejection_as_record() {
         .decision
         .as_deref()
         .is_some_and(|decision| decision.starts_with("draft_only:")));
+    assert_eq!(
+        governance.audit_records()[0].operation,
+        "tool.code_execute.rejected"
+    );
+}
+
+#[test]
+fn execution_slot_can_return_needs_approval_rejection_as_record() {
+    let root = temp_workspace("governance-needs-approval-record");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+
+    let outcome = slot
+        .execute_or_reject_with_governance(
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-1:tool-1",
+        )
+        .expect("needs approval rejection should still become a tool record");
+
+    assert!(matches!(
+        outcome.decision,
+        RiskDecision::NeedsApproval { .. }
+    ));
+    assert!(!outcome.record.ok);
+    assert_eq!(
+        outcome.record.failure_class.as_deref(),
+        Some("governance_rejected")
+    );
+    assert!(outcome
+        .record
+        .decision
+        .as_deref()
+        .is_some_and(|decision| decision.starts_with("needs_approval:")));
+    assert_eq!(
+        outcome.record.atomic_tool_name.as_deref(),
+        Some("code_execute")
+    );
     assert_eq!(
         governance.audit_records()[0].operation,
         "tool.code_execute.rejected"

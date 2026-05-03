@@ -127,6 +127,32 @@ fn atomic_tool_registry_maps_mvp_calls_without_promoting_list_dir() {
     );
     assert!(read.callable_now);
 
+    let write = registry.mapping_for_call(&ToolCall::WriteFile {
+        path: "notes/out.txt".to_string(),
+        content: "hello".to_string(),
+    });
+    assert_eq!(write.protocol_tool_name, "write_file");
+    assert_eq!(write.atomic_tool_name, Some("file_write"));
+    assert_eq!(write.audit_operation, "tool.file_write");
+    assert_eq!(
+        write.kind,
+        ToolCallAtomicKind::Atomic(AtomicToolKind::FileWrite)
+    );
+    assert!(write.callable_now);
+
+    let execute = registry.mapping_for_call(&ToolCall::ShellExec {
+        command: "cargo test".to_string(),
+        cwd: Some(".".to_string()),
+    });
+    assert_eq!(execute.protocol_tool_name, "shell_exec");
+    assert_eq!(execute.atomic_tool_name, Some("code_execute"));
+    assert_eq!(execute.audit_operation, "tool.code_execute");
+    assert_eq!(
+        execute.kind,
+        ToolCallAtomicKind::Atomic(AtomicToolKind::CodeExecute)
+    );
+    assert!(execute.callable_now);
+
     let list = registry.mapping_for_call(&ToolCall::ListDir {
         path: ".".to_string(),
     });

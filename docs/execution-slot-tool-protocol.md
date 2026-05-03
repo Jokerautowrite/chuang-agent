@@ -71,6 +71,12 @@ ToolActionEnvelope::schema_fields()
 ToolActionEnvelope::call_schema_fields()
 ```
 
+协议回归要求：
+
+- `schema_version` 缺省时只兼容当前 v1，高于当前版本必须回灌 `unsupported_action_schema_version`。
+- `ACTION` 前缀缺失、JSON 错误、字段缺失、空 final answer 都必须变成 `protocol_error`，不得被当作普通最终回复。
+- `schema_fields()` / `call_schema_fields()` 的顺序和内容是对控制台、通道、doctor 的契约，改字段时必须同步升级测试和文档。
+
 兼容旧工具名：
 
 ```text
@@ -127,6 +133,12 @@ tool.list_dir
 
 主进程工具循环不会因为可预期的治理拒绝直接中断；`NeedsApproval / DraftOnly / Blocked` 会以 `ok=false`、`failure_class=governance_rejected` 的 `ToolExecutionRecord` 回灌给模型，模型应解释原因并收口，而不是继续强行执行。
 
+治理拒绝回灌要求：
+
+- `NeedsApproval`、`DraftOnly`、`Blocked` 都不能执行真实工具动作。
+- 回灌记录必须保留 `atomic_tool_name`、结构化 `decision` 和 `failure_class=governance_rejected`。
+- 审计 operation 必须使用 GA 原子工具名并追加 `.rejected`，例如 `tool.code_execute.rejected`。
+
 ## Report 字段
 
 当前代码中的 schema 常量：
@@ -165,6 +177,7 @@ call               原始结构化调用
 
 `write_diff_preview` 是有界预览，不是完整补丁；命中 `.env`、token、secret、password、private key 等疑似敏感路径或内容时只返回脱敏占位。
 `read_file` 和 `code_execute` 的文本输出命中疑似密钥路径或内容时也会返回脱敏占位，并通过 `*_redacted` 字段标记；`*_bytes / *_lines` 仍描述原始输出规模。
+`write_operation` 只允许 `created / modified / unchanged`，上层不要再从 `write_before_bytes / write_changed` 反推写入语义。
 
 通道层输出应保留 `atomicTool` 字段，和 runtime meta 的 `tool_report_json` 对齐。
 
