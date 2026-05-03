@@ -35,6 +35,66 @@ git diff --check
 timeout 240s cargo test -q
 ```
 
+## Codex 0.128 实战借鉴
+
+2026-05-03 用 Codex 子代理按 goal-style 连续推进 Chuang 主线，验证出一套可迁移到 Chuang 的长期任务组织方式。当前 Codex 侧没有可直接稳定调用的显式 `goal` 子命令，因此本轮使用 `GOAL_SPEC` 文本契约驱动子代理；对 Chuang 来说，真正值得吸收的是执行组织模式，不是某个 CLI 命令名字。
+
+### 已验证有效的模式
+
+1. 主进程只做目标拆分、边界定义、集成审核和最终提交。
+2. 每个子代理必须拿到完整 `GOAL_SPEC`：目标、写入范围、禁止事项、验收命令、最终报告格式。
+3. 子代理任务必须按文件和模块拆开，避免并行写同一核心文件。
+4. 子代理不直接提交，主进程统一审 diff、跑格式检查、跑 smoke、跑全量测试，再按逻辑提交。
+5. 每轮完成后关闭子代理，避免后台会话残留。
+6. 私有 `config.toml`、飞书桥、Hermes、本机密钥和真实服务控制都不进入子代理写入范围。
+
+本轮验证过的分工样例：
+
+```text
+Worker A: tool / GA atomic manifest
+Worker B: governance / runtime observability
+Worker C: identity / memory / context diagnostics
+Worker D: provider / fallback diagnostics
+Worker E: report / audit identity
+Worker F: config / doctor / readiness
+Worker G: app-server / channel protocol
+Worker H: control / actuator command contract
+```
+
+### 迁移成 Chuang 能力时的最小设计
+
+Chuang 后续可以在现有 `GoalSpec` 基础上增加一个轻量 `GoalRun` 概念，但仍不新增 core slot：
+
+```text
+GoalRun
+  -> goal_spec
+  -> worker_plan[]
+  -> disjoint_write_scopes[]
+  -> validation_plan
+  -> integration_policy
+  -> checkpoint_log
+```
+
+它应该落在现有主链外壳上：
+
+```text
+GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory
+```
+
+子代理并行属于 Execution Slot 下游能力。主进程必须保留唯一集成权：
+
+- 子代理只能产出 patch / report / validation result。
+- 主进程负责合并、复验、提交、更新记忆。
+- 失败子代理必须有结构化失败报告，不能悄悄消失。
+- 大任务优先拆为 2 个子代理，稳定后再扩到 3-4 个。
+
+### 不迁移的部分
+
+- 不把 Codex 的当前实现细节硬编码进 Chuang。
+- 不把 goal mode 做成无限后台循环。
+- 不允许子代理绕过 governance、approval、audit。
+- 不让子代理直接操作真实飞书、Hermes、密钥、本机服务或桌面控制。
+
 ## 近期优先级
 
 1. 继续收紧 Execution Slot 的正式 action/request schema，减少纯字符串协议。
