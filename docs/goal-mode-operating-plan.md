@@ -66,6 +66,15 @@ GoalSpec
 - Report 输出阶段性结果。
 - Memory 写入目标进度和下一步。
 
+当前最小落地：
+
+```text
+src/goal_mode.rs
+tests/goal_mode_tests.rs
+```
+
+`GoalSpec` 目前只定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。它不执行命令、不绕过治理、不新增 slot。
+
 ## 禁止事项
 
 - 不把 goal mode 做成绕过治理的后台执行器。

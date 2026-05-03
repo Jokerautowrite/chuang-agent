@@ -5,6 +5,8 @@
 ### 最新进展
 - 当前阶段结论：主进程工具口已进入收尾细化阶段，近期连续完成 action/report schema 契约、工具循环元数据统一视图、治理决策标签收口、治理拒绝路径结构化；下一步开始把注意力从工具细节转向 Memory/Context 会话稳定性、真实 subagent runner、Chuang 自身 goal mode 最小实现。
 - Codex 自身升级已完成：本机 Codex CLI 来源确认为全局 npm 包 `@openai/codex`，已从 `0.125.0` 升级到 `0.128.0`；验证命令 `/home/user/.npm-global/bin/codex --version` 返回 `codex-cli 0.128.0`。飞书桥通过该路径启动 Codex app-server，重启 `codex-feishu-bot.service` 后会加载新版；升级过程只处理 Codex，不碰 Hermes，不提交私有 `config.toml`。
+- Codex 0.128.0 的 `goals` feature 已低风险验证：`codex --enable goals features list` 会显示 `goals ... true`，但当前没有新增显式 `goal` 子命令；因此暂不默认开启到飞书主通道。
+- Chuang 自身 goal mode 最小骨架已开始落地：新增 `src/goal_mode.rs` 和 `tests/goal_mode_tests.rs`，只定义 `GoalSpec`、校验和 runtime context block 渲染，不执行命令、不绕过治理、不新增 slot。
 - 已新增 `docs/goal-mode-operating-plan.md`，把当前 Codex 侧的目标驱动推进方式固化为协作流程：每轮固定 Goal / Acceptance / Budget / Checkpoint，先用于推进 Chuang 主线，后续再迁移成 Chuang 自己的轻量 goal 能力。
 - goal mode 当前不新增核心 slot，不改变主链；未来目标态是 `GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory` 的长期任务外壳。
 - `ACTION` 协议也开始暴露 schema 契约：`ToolActionEnvelope::schema_version()`、`schema_fields()`、`call_schema_fields()` 已补齐，和 `ToolLoopReport` 一样可被测试和文档引用。
