@@ -4,7 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::context_engine::{ContextBudget, ContextEngineKind, ContextSegment, SegmentSource};
-use crate::governance::{ActionKind, Governance, GovernanceError, ProposedAction, RiskDecision};
+use crate::governance::{
+    risk_decision_label, risk_decision_parts, ActionKind, Governance, GovernanceError,
+    ProposedAction, RiskDecision,
+};
 use crate::hermes_memory::DualFileMemorySnapshot;
 use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
@@ -203,7 +206,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 agent_id: AgentId(self.config.agent_id.clone()),
                 task_id: TaskId(turn_id),
                 delta_bytes: turn.report.summary.len() as i64,
-                reason: render_governance_audit_reason(&decision),
+                reason: risk_decision_label(&decision),
                 timestamp: Timestamp("2026-05-01T00:00:00Z".to_string()),
             })
             .map_err(ChuangKernelGovernanceError::Governance)?;
@@ -428,30 +431,16 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
     }
 }
 
-fn render_governance_audit_reason(decision: &RiskDecision) -> String {
-    match decision {
-        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
-        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
-        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
-        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
-    }
-}
-
 fn governance_decision_summary(
     action: &ProposedAction,
     decision: &RiskDecision,
 ) -> GovernanceDecisionSummary {
-    let (decision, reason) = match decision {
-        RiskDecision::Allowed { reason } => ("allowed", reason),
-        RiskDecision::DraftOnly { reason } => ("draft_only", reason),
-        RiskDecision::NeedsApproval { reason } => ("needs_approval", reason),
-        RiskDecision::Blocked { reason } => ("blocked", reason),
-    };
+    let (decision, reason) = risk_decision_parts(decision);
 
     GovernanceDecisionSummary {
         action_id: action.action_id.clone(),
         decision: decision.to_string(),
-        reason: reason.clone(),
+        reason: reason.to_string(),
     }
 }
 

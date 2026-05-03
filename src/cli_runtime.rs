@@ -9,7 +9,7 @@ use chuang_agent::chuang_kernel::{
     DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
-use chuang_agent::governance::Governance;
+use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
@@ -185,7 +185,7 @@ where
                 transcript.push(format!(
                     "call={} decision={} ok={} summary={}",
                     tool_call_name(&record.call),
-                    decision_label(&outcome.decision),
+                    risk_decision_label(&outcome.decision),
                     record.ok,
                     record.summary
                 ));
@@ -194,7 +194,7 @@ where
                     kind: "tool_call".to_string(),
                     tool_name: Some(tool_call_name(&record.call).to_string()),
                     atomic_tool_name: record.atomic_tool_name.clone(),
-                    decision: Some(decision_label(&outcome.decision)),
+                    decision: Some(risk_decision_label(&outcome.decision)),
                     ok: Some(record.ok),
                     failure_class: record.failure_class.clone(),
                     duration_ms: Some(record.duration_ms),
@@ -383,10 +383,7 @@ where
             .extend(governance_metadata(decision));
         records.governance_decision = Some(format!("{}:{}", decision.decision, decision.reason));
     } else {
-        records.governance_decision = turn
-            .governance_decision
-            .as_ref()
-            .map(format_governance_decision);
+        records.governance_decision = turn.governance_decision.as_ref().map(risk_decision_label);
     }
 
     if request.remember {
@@ -421,23 +418,6 @@ where
     }
 
     Ok((turn.result, records))
-}
-
-fn format_governance_decision(decision: &chuang_agent::governance::RiskDecision) -> String {
-    match decision {
-        chuang_agent::governance::RiskDecision::Allowed { reason } => {
-            format!("allowed:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::DraftOnly { reason } => {
-            format!("draft_only:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::NeedsApproval { reason } => {
-            format!("needs_approval:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::Blocked { reason } => {
-            format!("blocked:{reason}")
-        }
-    }
 }
 
 fn dispatch_subagent_turn(
@@ -577,23 +557,6 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
         ToolCall::ShellExec { .. } => "shell_exec",
-    }
-}
-
-fn decision_label(decision: &chuang_agent::governance::RiskDecision) -> String {
-    match decision {
-        chuang_agent::governance::RiskDecision::Allowed { reason } => {
-            format!("allowed:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::DraftOnly { reason } => {
-            format!("draft_only:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::NeedsApproval { reason } => {
-            format!("needs_approval:{reason}")
-        }
-        chuang_agent::governance::RiskDecision::Blocked { reason } => {
-            format!("blocked:{reason}")
-        }
     }
 }
 

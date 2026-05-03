@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use crate::atomic_tool::AtomicToolRegistry;
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
-use crate::governance::{ActionKind, Governance, ProposedAction, RiskDecision};
+use crate::governance::{
+    risk_decision_label, risk_decision_reason, ActionKind, Governance, ProposedAction, RiskDecision,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -617,7 +619,7 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
             task_id.clone(),
             &decision,
         )?;
-        return Err(format!("tool_blocked: {}", decision_reason(&decision)));
+        return Err(format!("tool_blocked: {}", risk_decision_reason(&decision)));
     }
 
     if matches!(decision, RiskDecision::DraftOnly { .. }) {
@@ -629,7 +631,10 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
             task_id.clone(),
             &decision,
         )?;
-        return Err(format!("tool_draft_only: {}", decision_reason(&decision)));
+        return Err(format!(
+            "tool_draft_only: {}",
+            risk_decision_reason(&decision)
+        ));
     }
 
     if matches!(decision, RiskDecision::NeedsApproval { .. }) {
@@ -643,13 +648,13 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
         )?;
         return Err(format!(
             "tool_needs_approval: {}",
-            decision_reason(&decision)
+            risk_decision_reason(&decision)
         ));
     }
 
     let mut record =
         execute_tool_call_with_registry_and_config(workspace_root, registry, call, config);
-    record.decision = Some(decision_label(&decision));
+    record.decision = Some(risk_decision_label(&decision));
     let mapping = registry.mapping_for_call(call);
     let audit_record = AuditRecord {
         operation: mapping.audit_operation.to_string(),
@@ -658,7 +663,7 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
         delta_bytes: record.summary.len() as i64,
         reason: format!(
             "decision={}; ok={}; {}",
-            decision_label(&decision),
+            risk_decision_label(&decision),
             record.ok,
             record.summary
         ),
@@ -717,7 +722,7 @@ fn audit_tool_rejection<G: Governance>(
         agent_id: AgentId(agent_id),
         task_id: TaskId(task_id),
         delta_bytes: 0,
-        reason: format!("decision={}", decision_label(decision)),
+        reason: format!("decision={}", risk_decision_label(decision)),
         timestamp: Timestamp(now_timestamp()),
     };
     governance
@@ -1163,7 +1168,7 @@ fn governance_rejected_record(
 ) -> ToolExecutionRecord {
     let mut record = failed_record(registry, call, summary);
     record.failure_class = Some("governance_rejected".to_string());
-    record.decision = Some(decision_label(decision));
+    record.decision = Some(risk_decision_label(decision));
     record.retryable = false;
     record
 }
@@ -1291,24 +1296,6 @@ fn count_lines(value: &str) -> usize {
         0
     } else {
         value.lines().count()
-    }
-}
-
-fn decision_label(decision: &RiskDecision) -> String {
-    match decision {
-        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
-        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
-        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
-        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
-    }
-}
-
-fn decision_reason(decision: &RiskDecision) -> String {
-    match decision {
-        RiskDecision::Allowed { reason }
-        | RiskDecision::DraftOnly { reason }
-        | RiskDecision::NeedsApproval { reason }
-        | RiskDecision::Blocked { reason } => reason.clone(),
     }
 }
 

@@ -2,7 +2,7 @@ use crate::control_plane::{
     audit_record_for_control, proposed_action_for_control, ControlError, ControlPlane,
     ControlReceipt, ControlRequest, ManagedUnit,
 };
-use crate::governance::{Governance, GovernanceError, RiskDecision};
+use crate::governance::{risk_decision_label, Governance, GovernanceError, RiskDecision};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +148,7 @@ fn build_workflow_view(
     ControlWorkflowView {
         unit_id: unit.unit_id.clone(),
         display_name: unit.display_name.clone(),
-        decision: decision_label(decision),
+        decision: risk_decision_label(decision),
         action: receipt
             .map(|receipt| receipt.action.as_str().to_string())
             .unwrap_or_else(|| "pending".to_string()),
@@ -156,14 +156,5 @@ fn build_workflow_view(
         next_status: receipt.map(|receipt| format!("{:?}", receipt.next_status)),
         model_name: receipt.and_then(|receipt| receipt.model_name.clone()),
         audit_recorded,
-    }
-}
-
-fn decision_label(decision: &RiskDecision) -> String {
-    match decision {
-        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
-        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
-        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
-        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
     }
 }

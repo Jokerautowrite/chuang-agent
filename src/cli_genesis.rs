@@ -1,7 +1,7 @@
 use chuang_agent::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use chuang_agent::genesis_actuator::{GenesisActuator, GenesisAskRequest, GenesisConfig};
 use chuang_agent::governance::{
-    ActionKind, Governance, ProposedAction, RiskDecision, StaticRuleGovernance,
+    risk_decision_label, ActionKind, Governance, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
 use chuang_agent::slot_registry::build_genesis_actuator;
 
@@ -70,7 +70,7 @@ fn genesis_ask_command(args: &[String]) -> Result<(), String> {
     ) {
         return Err(format!(
             "genesis action was not allowed by governance: {}",
-            decision_label(&decision)
+            risk_decision_label(&decision)
         ));
     }
 
@@ -98,7 +98,7 @@ fn genesis_ask_command(args: &[String]) -> Result<(), String> {
         .map_err(|error| format!("genesis_audit_failed: {}", error.message))?;
     let output = GenesisAskCliOutput {
         response,
-        governance_decision: decision_label(&decision),
+        governance_decision: risk_decision_label(&decision),
         audit_recorded: true,
     };
 
@@ -122,15 +122,6 @@ fn genesis_ask_command(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         ControlOutputFormat::Json => print_json(&output),
-    }
-}
-
-fn decision_label(decision: &RiskDecision) -> String {
-    match decision {
-        RiskDecision::Allowed { reason } => format!("allowed:{reason}"),
-        RiskDecision::DraftOnly { reason } => format!("draft_only:{reason}"),
-        RiskDecision::NeedsApproval { reason } => format!("needs_approval:{reason}"),
-        RiskDecision::Blocked { reason } => format!("blocked:{reason}"),
     }
 }
 
