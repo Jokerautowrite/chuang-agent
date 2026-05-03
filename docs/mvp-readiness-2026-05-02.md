@@ -22,21 +22,36 @@ The current root `config.toml` uses:
 
 The checked-in actuator/control adapters are formal command-backed protocol adapters, but the example scripts are intentionally safe fixtures. They return deterministic JSON and do not operate the real desktop or real system services.
 
+As of 2026-05-03, the MVP readiness surface also expects:
+
+- execution slot: `generic_agent_mvp`
+- GA atomic tools: 9-tool manifest visible in `status` / `doctor`
+- mapped executable MVP tools: `file_read`, `file_write`, `code_execute`
+- auxiliary MVP tool: `list_dir`
+- interface-only tools: desktop/browser style atomic tools remain adapter/plugin boundaries
+- goal mode: lightweight `run --goal TEXT` context wrapper, not a new core slot and not a governance bypass
+- session memory diagnostics: `session_id`, recall isolation/filter/hit count, and writeback record metadata in runtime provider meta
+- channel goal input: `channel simulate --goal TEXT` can pass goal context through app-server input, but the real Feishu bridge is still a dedicated channel adapter concern
+- plugin registry: checked as manifest/path readiness only; disabled plugins are not executed
+
 ## Current Acceptance Commands
 
 ```bash
 cargo test -q
 git diff --check
 cargo run --quiet -- doctor --config config.toml
+cargo run --quiet -- status --config config.toml --json
 sh scripts/chuang-mvp-smoke.sh
 ```
 
 The smoke script uses a temporary directory and stub provider. It validates:
 
-- status
-- doctor
+- status JSON, including execution slot, atomic tool schemas, goal mode, plugin registry, and the expected `provider transport=stub` placeholder warning in the smoke config
+- doctor JSON, including config, identity, slots, atomic tools, goal mode, actuator/control smoke, isolated runtime smoke, isolated subagent queue smoke, and plugin registry
 - two session-memory turns
-- channel simulate
+- runtime `--goal` injection without changing the original user input path
+- session memory diagnostic meta for isolated recall and writeback
+- channel simulate with `--goal`
 - queued subagent dispatch/command-runner/collect with capability matching
 - command control example list/apply
 - experiment plan/show
@@ -59,6 +74,8 @@ It does not delete files and does not touch real services.
 - Worker capability declarations through `subagent run-loop --capability`.
 - Dispatch capability requirements through `subagent dispatch --requires-capability`.
 - Stale claim recovery for queued subagent workers using dispatch `idle_timeout_ms`.
+- Goal-scoped local CLI/runtime testing through `run --goal TEXT`.
+- Readiness dashboards based on `status --json`, `doctor --json`, and `console snapshot --json`.
 
 ## Not Ready For
 
@@ -71,11 +88,15 @@ It does not delete files and does not touch real services.
 - Automatic identity-memory compression without explicit model/operator overwrite.
 - Silent fallback to unconfigured providers.
 - Parallel subagent worker execution above `--max-concurrency 1`.
+- Treating plugin registry entries as installed/running integrations; they are readiness manifests until explicitly enabled and tested.
+- Treating GA interface-only atomic tools as real desktop/browser control; they currently define ports and mappings only.
+- Treating goal mode as an autonomous background executor; it is currently just structured runtime context.
 
 ## Next Build Steps
 
-1. Add a dedicated Chuang channel adapter for a new Feishu bot, separate from Codex and Hermes.
-2. Keep the adapter thin: Feishu message -> app-server or runtime command -> response.
-3. Replace the safe actuator/control example scripts with reviewed real adapters only after the target allowlists are explicit.
-4. Build real subagent runners against `docs/subagent-runner-protocol.md`, starting with single-worker queues and capability matching.
-5. Keep expanding smoke coverage only with non-destructive checks.
+1. Keep the main-process tool surface stable: status/doctor/smoke must continue to prove GA atomic tool schemas, structured tool reports, and safe command adapters.
+2. Harden memory/context readiness: keep session recall isolated and expose diagnostics in runtime/channel meta.
+3. Add a dedicated Chuang channel adapter for a new Feishu bot, separate from Codex and Hermes, using the existing app-server/channel protocol.
+4. Replace the safe actuator/control example scripts with reviewed real adapters only after the target allowlists are explicit.
+5. Build real subagent runners against `docs/subagent-runner-protocol.md`, starting with single-worker queues and capability matching.
+6. Keep expanding smoke coverage only with non-destructive checks.

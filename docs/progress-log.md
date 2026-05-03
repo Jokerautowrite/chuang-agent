@@ -3,6 +3,10 @@
 ## 2026-05-03
 
 ### 最新进展
+- MVP readiness / doctor / smoke 验收面已对齐到当前主线能力：`scripts/chuang-mvp-smoke.sh` 现在会断言 `status --json` 里的 `execution=generic_agent_mvp`、GA 原子工具 action/report schema、goal mode、plugin registry，以及 smoke 配置只出现预期的 stub provider placeholder warning。
+- smoke 脚本的 `doctor` 步骤改为 JSON 验收，明确要求 config、identity、slots、atomic_tools、goal_mode、actuator/control smoke、isolated runtime smoke、subagent queue smoke、plugin_registry 全部存在并通过。
+- smoke 脚本新增 goal/session/channel 验收：`run --goal` 必须写入 `goal_context_injected=true`，session memory 必须暴露 isolated recall/filter/writeback meta，`channel simulate --goal` 必须把 goal objective 传到 provider meta。
+- `docs/mvp-readiness-2026-05-02.md` 和 `docs/mvp-scope.md` 已刷新“已实现 vs 目标态/插件态”边界：goal mode 只是轻量 runtime context，GA interface-only 原子工具不是现实桌面控制，plugin registry 只是 manifest/path readiness，不代表插件已启用或运行。
 - Memory/Context 会话稳定性 MVP 补了一层可诊断元数据：`run --session-id ID` 的 runtime meta 会暴露 `session_id`、`session_memory_scope`、`session_memory_recall_isolated`、`session_memory_recall_filter`、`session_memory_recall_hit_count`；`--remember-session` 写回后会额外暴露 `session_memory_write_requested`、`session_memory_summary_kind`、`session_memory_record_id`。
 - 会话记忆隔离回归已增强：同一 SQLite store 内 `alpha` 和 `beta` 都写入 session summary 后，`alpha` 查询 `beta` 的锚点必须保持 `recall_hit_count=0`，防止不同 session 串记忆。专项验证已通过 `cargo fmt --all` 和 `cargo test -q cli_runtime::tests::run_with_options_remembers_and_recalls_session_turns`。
 - Goal mode 状态面已补：`status --json` 现在有 `goal_mode` 摘要，标明它是 `lightweight_runtime_context`、入口为 `run --goal TEXT`、不新增 core slot、不绕过 governance；`doctor` 增加只读 `goal_mode` 检查，确保默认 `GoalSpec` 和 context segment 可渲染。

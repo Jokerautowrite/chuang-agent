@@ -21,7 +21,9 @@
 - `ChuangKernel::run_turn()`：主运行入口，统一串起 recall、context packing、responder 和 report。
 - `ChuangKernel::remember_turn()`：显式写回普通 `turn_summary` 记忆。
 - `cargo run -- run --input TEXT`：通过内核运行一轮。
+- `cargo run -- run --goal TEXT --input TEXT`：把长期目标作为额外 context segment 注入 runtime；不改写原始 `user_input`，不新增 slot，不绕过治理。
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
+- `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
 - `cargo run -- memory identity append --id ID --content TEXT`：显式追加一条 `MEMORY.md` 热记忆。
@@ -33,12 +35,13 @@
 - `cargo run -- app-server`：JSON-RPC 式应用入口，会读取 workspace `config.toml`，并用 thread id 写会话记忆；后续新飞书机器人可接这个入口或独立 channel adapter。
 - `cargo run -- app-server health --workspace-root PATH --json`：只读健康检查 workspace runtime 配置，不发起模型请求。
 - `cargo run -- channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT`：本地演练外部消息通道，读取 workspace 配置并返回 `ChannelOutboundMessage`。
+- `cargo run -- channel simulate ... --goal TEXT`：本地演练通道目标上下文注入；真实飞书桥是否传 goal 仍由独立 channel adapter 决定。
 - `cargo run -- plugin list|check --registry PATH`：读取插件注册表，统一展示 channel、runner、control、actuator、genesis adapter，不执行插件。
 - `cargo run -- status`：查看 MVP 核心状态。
-- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含只读 `plugin_registry` 摘要。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、goal mode、只读 `plugin_registry` 摘要。
 - `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。
-- `cargo run -- doctor --json`：输出结构化健康检查结果，给桌面控制台或插件读取。
+- `cargo run -- doctor --json`：输出结构化健康检查结果，包含 atomic tools、goal mode、plugin registry 等只读验收项，给桌面控制台或插件读取。
 - `cargo run -- console snapshot --json`：只读聚合 `status`、插件注册表摘要、control unit 列表和插件清单，作为未来桌面/工具/服务控制台的数据源；不执行 control apply，不启动服务。
 - `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
 - `cargo run -- config init`：生成默认 `config.toml`；目标文件已存在时拒绝覆盖。
@@ -76,6 +79,8 @@
 - 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
 - 不把 API key 明文写进配置文件；真实 provider 使用 `api_key_env` 引用环境变量。
 - 不把 AutoResearch 的 `git reset --hard` 模式照搬进创项目；实验模块只能追加计划/报告，不能破坏主工作区。
+- 不把 goal mode 当成常驻后台执行器；当前它只是结构化目标上下文。
+- 不把插件注册表、GA interface-only 原子工具或安全示例 adapter 宣称为真实外部能力。
 
 ## 下一步优先级
 
@@ -108,7 +113,7 @@
 - `cargo run -- experiment complete --experiment-id ID --outcome inconclusive --summary TEXT --next TEXT --root PATH` 能生成不可覆盖的 `report.md`。
 - `cargo run -- experiment list --root PATH` 能只读列出 planned/completed 状态。
 - `cargo run -- experiment show --experiment-id ID --root PATH` 能只读展示 `experiment.md` 和可选 `report.md`。
-- `sh scripts/chuang-mvp-smoke.sh` 能串起 status、doctor、run、session memory、channel simulate、subagent queue、command control example 和 experiment show。
+- `sh scripts/chuang-mvp-smoke.sh` 能串起 status JSON、doctor JSON、goal runtime context、session memory diagnostics、channel simulate goal input、subagent queue、command control example 和 experiment show。
 - 所有危险操作仍需显式审批或保持 fake。
 - command 控制面示例配置能 `list` 和 `apply --approve` 跑通，但不会触碰真实服务。
 - 对话 provider、子代理、actuator、control plane 的项目根配置已去 fake；安全示例 adapter 不能伪装成真实桌面/服务控制。
