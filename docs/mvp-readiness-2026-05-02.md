@@ -32,7 +32,7 @@ As of 2026-05-03, the MVP readiness surface also expects:
 - goal mode: lightweight `run --goal TEXT` context wrapper, not a new core slot and not a governance bypass
 - session memory diagnostics: `session_id`, recall isolation/filter/hit count, and writeback record metadata in runtime provider meta
 - channel goal input: `channel simulate --goal TEXT` can pass goal context through app-server input, but the real Feishu bridge is still a dedicated channel adapter concern
-- plugin registry: checked as manifest/path readiness only; disabled plugins are not executed
+- plugin registry: checked as manifest/path readiness only; disabled plugins are not executed, and status/doctor readiness only treats enabled plugins as runtime failures
 
 ## Current Acceptance Commands
 

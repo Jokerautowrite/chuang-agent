@@ -89,7 +89,12 @@ pub fn check_plugin_registry(path: &Path) -> Result<PluginRegistryCheck, String>
         .iter()
         .map(|plugin| check_plugin(base_dir, plugin))
         .collect::<Vec<_>>();
-    let ok = plugins.iter().all(|plugin| plugin.issues.is_empty());
+    // Disabled entries are manifest/readiness records only.
+    // They may still surface path issues for visibility, but they do not
+    // make the registry unhealthy until they are enabled.
+    let ok = plugins
+        .iter()
+        .all(|plugin| !plugin.enabled || plugin.issues.is_empty());
     Ok(PluginRegistryCheck {
         ok,
         registry_path: path.display().to_string(),
@@ -117,7 +122,12 @@ pub fn summarize_plugin_registry(path: &Path) -> PluginRegistrySummary {
             ok: check.ok,
             plugin_count: check.plugin_count,
             enabled_count: check.plugins.iter().filter(|plugin| plugin.enabled).count(),
-            issue_count: check.plugins.iter().map(|plugin| plugin.issues.len()).sum(),
+            issue_count: check
+                .plugins
+                .iter()
+                .filter(|plugin| plugin.enabled)
+                .map(|plugin| plugin.issues.len())
+                .sum(),
         },
         Err(_) => PluginRegistrySummary {
             registry_path: path.display().to_string(),

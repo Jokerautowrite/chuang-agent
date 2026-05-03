@@ -63,7 +63,7 @@ fn plugin_registry_check_reports_missing_command_without_executing() {
     "display_name": "Missing",
     "command": "./missing.sh",
     "config_path": null,
-    "enabled": false
+    "enabled": true
   }]
 }"#,
     )
@@ -74,6 +74,45 @@ fn plugin_registry_check_reports_missing_command_without_executing() {
     assert!(!check.ok);
     assert_eq!(check.plugins[0].command_state, "missing");
     assert!(check.plugins[0].issues[0].starts_with("command_missing:"));
+}
+
+#[test]
+fn plugin_registry_check_keeps_disabled_manifest_issues_non_blocking() {
+    let root = temp_root("disabled-missing");
+    fs::create_dir_all(&root).expect("root should create");
+    let registry_path = root.join("registry.json");
+    fs::write(
+        &registry_path,
+        r#"{
+  "plugins": [{
+    "id": "disabled-missing",
+    "kind": "actuator_adapter",
+    "display_name": "Disabled Missing",
+    "command": "./missing-actuator.sh",
+    "config_path": "./missing-actuator.json",
+    "enabled": false
+  }]
+}"#,
+    )
+    .expect("registry should write");
+
+    let check = check_plugin_registry(&registry_path).expect("check should run");
+    let summary = summarize_plugin_registry(&registry_path);
+
+    assert!(check.ok);
+    assert_eq!(check.plugins[0].command_state, "missing");
+    assert_eq!(check.plugins[0].config_state, "missing");
+    assert!(check.plugins[0]
+        .issues
+        .iter()
+        .any(|issue| issue.starts_with("command_missing:")));
+    assert!(check.plugins[0]
+        .issues
+        .iter()
+        .any(|issue| issue.starts_with("config_path_missing:")));
+    assert!(summary.ok);
+    assert_eq!(summary.enabled_count, 0);
+    assert_eq!(summary.issue_count, 0);
 }
 
 #[test]
