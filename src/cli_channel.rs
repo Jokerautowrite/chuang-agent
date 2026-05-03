@@ -152,6 +152,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         session_id: Some(thread_id.clone()),
         remember_session: true,
         remember_identity: false,
+        remember_experience: false,
         dispatch_subagent: false,
         goal_spec: request
             .inbound

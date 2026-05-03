@@ -477,6 +477,7 @@ fn run_turn_with_tools(
         session_id: Some(thread_id.to_string()),
         remember_session: true,
         remember_identity: false,
+        remember_experience: false,
         dispatch_subagent: false,
         goal_spec,
     };

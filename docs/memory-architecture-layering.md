@@ -54,7 +54,7 @@ data/hermes-memory/experiences.md 入口 / config / status / doctor 可诊断
 待补：
 
 ```text
-experiences.md 写入策略 / admission / provenance
+experiences.md 从 session/LIM 自动抽取经验
 内部记忆健康检查的内容质量规则
 内部记忆流转规则
 ```
@@ -63,7 +63,8 @@ experiences.md 写入策略 / admission / provenance
 
 ```text
 已做：默认文件 contract、只读打开、status/config show 路径、doctor 存在性检查、memory identity show 展示
-未做：自动写经验、注入 runtime prompt、从 LIM/session 自动抽取经验
+已做：append_experience admission / provenance 入口，run --remember-experience 显式沉淀 runtime_turn
+未做：默认自动写经验、注入 runtime prompt、从 LIM/session 自动抽取经验
 ```
 
 ### 2. 历史会话层

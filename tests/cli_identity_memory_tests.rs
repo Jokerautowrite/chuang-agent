@@ -127,6 +127,48 @@ fn cli_identity_memory_show_append_and_compact_memory() {
 }
 
 #[test]
+fn cli_identity_memory_can_append_experience_entry() {
+    let root = temp_root("experience-flow");
+    let config_path = write_fake_config(&root);
+
+    let append = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "identity",
+            "append-experience",
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--id",
+            "exp-1",
+            "--content",
+            "source=manual\nlesson=工具失败先看结构化 stderr",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        append.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&append.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&append.stdout)).expect("stdout json");
+    assert_eq!(parsed["scope"], "experiences");
+    assert_eq!(parsed["id"], "exp-1");
+
+    let experiences = std::fs::read_to_string(root.join("experiences.md"))
+        .expect("experiences file should be readable");
+    assert!(experiences.contains("## exp-1"));
+    assert!(experiences.contains("source=manual"));
+    assert!(experiences.contains("lesson=工具失败先看结构化 stderr"));
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);

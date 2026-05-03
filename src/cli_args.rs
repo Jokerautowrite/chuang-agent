@@ -270,6 +270,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     let mut session_id: Option<String> = None;
     let mut remember_session = false;
     let mut remember_identity = false;
+    let mut remember_experience = false;
     let mut dispatch_subagent = false;
     let mut goal_spec: Option<GoalSpec> = None;
 
@@ -302,6 +303,10 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
                 remember_identity = true;
                 index += 1;
             }
+            "--remember-experience" => {
+                remember_experience = true;
+                index += 1;
+            }
             "--dispatch-subagent" => {
                 dispatch_subagent = true;
                 index += 1;
@@ -326,6 +331,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         session_id,
         remember_session,
         remember_identity,
+        remember_experience,
         dispatch_subagent,
         goal_spec,
     })

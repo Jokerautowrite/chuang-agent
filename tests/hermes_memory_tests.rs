@@ -56,6 +56,25 @@ fn dual_file_memory_snapshot_freezes_user_and_memory_text() {
 }
 
 #[test]
+fn dual_file_memory_can_append_provenanced_experience() {
+    let root = temp_root("append-experience");
+    let mut store =
+        FileDualFileMemoryStore::open(DualFileMemoryConfig::new(&root)).expect("open succeeds");
+
+    store
+        .append_experience(HotMemoryEntry {
+            id: "exp-1".to_string(),
+            content: "source=runtime_turn\nturn_id=turn-1\nlesson=失败先看 stderr".to_string(),
+        })
+        .expect("experience append succeeds");
+
+    let experiences = store.read_experiences().expect("experiences readable");
+    assert!(experiences.contains("## exp-1"));
+    assert!(experiences.contains("source=runtime_turn"));
+    assert!(experiences.contains("lesson=失败先看 stderr"));
+}
+
+#[test]
 fn dual_file_memory_rejects_user_text_over_hard_limit_without_mutation() {
     let root = temp_root("user-limit");
     let mut config = DualFileMemoryConfig::new(&root);

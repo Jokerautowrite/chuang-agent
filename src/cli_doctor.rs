@@ -307,6 +307,7 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
         session_id: None,
         remember_session: false,
         remember_identity: false,
+        remember_experience: false,
         dispatch_subagent: false,
         goal_spec: None,
     })

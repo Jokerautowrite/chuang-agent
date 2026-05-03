@@ -17,6 +17,7 @@ fn identity_memory_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("show") => identity_memory_show_command(&args[1..]),
         Some("append") => identity_memory_append_command(&args[1..]),
+        Some("append-experience") => identity_memory_append_experience_command(&args[1..]),
         Some("write-user") => {
             identity_memory_write_command(IdentityMemoryWriteScope::User, &args[1..])
         }
@@ -84,6 +85,36 @@ fn identity_memory_append_command(args: &[String]) -> Result<(), String> {
         .map_err(format_identity_memory_error)?;
     let output = IdentityMemoryMutationOutput {
         scope: "memory".to_string(),
+        id: Some(request.id),
+        written: true,
+        replaced: false,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "identity_memory_appended scope={} id={}",
+                output.scope,
+                output.id.as_deref().unwrap_or("none")
+            );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn identity_memory_append_experience_command(args: &[String]) -> Result<(), String> {
+    let request = parse_identity_memory_append(args)?;
+    let mut store = open_identity_memory_store(&request.runtime_args)?;
+    store
+        .append_experience(HotMemoryEntry {
+            id: request.id.clone(),
+            content: request.content,
+        })
+        .map_err(format_identity_memory_error)?;
+    let output = IdentityMemoryMutationOutput {
+        scope: "experiences".to_string(),
         id: Some(request.id),
         written: true,
         replaced: false,

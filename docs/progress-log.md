@@ -1,5 +1,13 @@
 # 协作进度日志
 
+## 2026-05-04
+
+### 最新进展
+- 长期记忆内部经验层补上第一条真实写入路径：`DualFileMemoryStore` 新增 `append_experience()`，`FileDualFileMemoryStore` 会把带 `## id` 的经验条目追加到 `experiences.md`，复用 Hermes 风格硬上限 admission、重复 id 拒绝和无变更失败语义。
+- CLI 新增显式经验沉淀入口：`run --remember-experience` 会把本轮 `runtime_turn` 按 provenance 写入 `experiences.md`，内容包含 `turn_id / report_id / agent_id / governance / user / summary / lesson`；普通运行不自动写，避免主进程乱写长期记忆。
+- `memory identity append-experience --id ID --content TEXT` 已补手动入口，用于人工或上层治理确认后写入经验层；`run` 完成后会输出 `experience_memory_recorded: ID`，方便通道和报告关联。
+- 已补回归：Hermes 双文件 store 可追加带来源经验；CLI 可手动追加 experience；`run_with_options()` 可通过 `--remember-experience` 生成带 provenance 的经验条目。
+
 ## 2026-05-03
 
 ### 最新进展

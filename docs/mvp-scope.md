@@ -25,9 +25,11 @@
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
 - `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
+- `cargo run -- run --input TEXT --remember-experience`：显式把本轮结果按 provenance 写入 `experiences.md`，用于内部经验层沉淀；默认运行不自动写经验。
 - `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
-- `data/hermes-memory/experiences.md`：内部经验层的 MVP contract；`status/config show/doctor/memory identity show` 可诊断它的路径和存在性，但当前不自动写入、不注入 prompt。
+- `data/hermes-memory/experiences.md`：内部经验层的 MVP contract；`status/config show/doctor/memory identity show` 可诊断它的路径和存在性，`--remember-experience` 或 `append-experience` 可显式写入，但当前不默认自动写入、不注入 prompt。
 - `cargo run -- memory identity append --id ID --content TEXT`：显式追加一条 `MEMORY.md` 热记忆。
+- `cargo run -- memory identity append-experience --id ID --content TEXT`：显式追加一条带来源的经验层条目。
 - `cargo run -- memory identity write-user|write-memory --content TEXT --approve-overwrite`：显式覆盖写入压缩后的 `USER.md` 或 `MEMORY.md`，用于完成“超限拒绝后由模型/老爸决定保留内容”的闭环。
 - `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`：最小身份启动层，启动时作为冻结 identity context 注入。
 - `rules/core.md`：治理层 Markdown 规则；slot 构建时加载，治理决策 reason 会带规则指纹，便于追溯。
@@ -105,6 +107,7 @@
 - `channel simulate` 通过 workspace `config.toml` 启动时不能回落到 `fake-responder`，必须走配置里的 provider。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
+- `cargo run -- run --input TEXT --remember-experience --identity-memory-root PATH` 能显式追加带 provenance 的经验层记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
 - 同一个 `--subagent-queue-root PATH` 下连续 dispatch 多个任务不会覆盖。
 - `cargo run -- subagent list --subagent-queue-root PATH` 能列出 dispatch 数量和 report presence。

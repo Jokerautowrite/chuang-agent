@@ -80,6 +80,7 @@ pub enum DualFileMemoryError {
 pub enum DualFileMemoryScope {
     User,
     Memory,
+    Experiences,
 }
 
 pub trait DualFileMemoryStore {
@@ -90,4 +91,5 @@ pub trait DualFileMemoryStore {
     fn write_user(&mut self, content: &str) -> Result<(), DualFileMemoryError>;
     fn write_memory(&mut self, content: &str) -> Result<(), DualFileMemoryError>;
     fn append_memory(&mut self, entry: HotMemoryEntry) -> Result<(), DualFileMemoryError>;
+    fn append_experience(&mut self, entry: HotMemoryEntry) -> Result<(), DualFileMemoryError>;
 }

@@ -449,6 +449,10 @@ where
         records.identity_record_id = Some(remember_identity_turn(options, &turn)?);
     }
 
+    if request.remember_experience {
+        records.experience_record_id = Some(remember_experience_turn(options, &turn)?);
+    }
+
     if request.dispatch_subagent {
         let receipt = dispatch_subagent_turn(options, &turn)?;
         records.subagent_dispatch_run_id = Some(receipt.run_id.0);
@@ -602,6 +606,44 @@ fn remember_identity_turn(
     Ok(entry_id)
 }
 
+fn remember_experience_turn(
+    options: &CliOptions,
+    turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
+) -> Result<String, String> {
+    let dual_file_config = options
+        .runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let mut store = FileDualFileMemoryStore::open(dual_file_config)
+        .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
+    let entry_id = unique_experience_turn_id(&turn.turn_id)?;
+    let governance = turn
+        .report
+        .governance_decision
+        .as_ref()
+        .map(|decision| format!("{}:{}", decision.decision, decision.reason))
+        .or_else(|| turn.governance_decision.as_ref().map(risk_decision_label))
+        .unwrap_or_else(|| "unknown".to_string());
+    let content = format!(
+        "source=runtime_turn\nturn_id={}\nreport_id={}\nagent_id={}\ngovernance={}\nuser={}\nsummary={}\nlesson={}",
+        turn.turn_id,
+        turn.report.report_id.0,
+        turn.report.agent_id.0,
+        governance,
+        turn.user_input,
+        turn.report.summary,
+        extract_experience_lesson(turn),
+    );
+    store
+        .append_experience(HotMemoryEntry {
+            id: entry_id.clone(),
+            content,
+        })
+        .map_err(format_identity_memory_error)?;
+    Ok(entry_id)
+}
+
 fn unique_identity_turn_id(turn_id: &str) -> Result<String, String> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -613,6 +655,31 @@ fn unique_identity_turn_id(turn_id: &str) -> Result<String, String> {
         std::process::id(),
         nanos
     ))
+}
+
+fn unique_experience_turn_id(turn_id: &str) -> Result<String, String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("clock_error: {e}"))?
+        .as_nanos();
+    Ok(format!(
+        "experience-{}-{}-{}",
+        turn_id,
+        std::process::id(),
+        nanos
+    ))
+}
+
+fn extract_experience_lesson(turn: &chuang_agent::chuang_kernel::ChuangKernelTurn) -> String {
+    let body = turn.result.response.body.trim();
+    if body.is_empty() {
+        return "本轮没有可沉淀正文，保留 report summary 作为来源。".to_string();
+    }
+
+    body.lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().chars().take(180).collect())
+        .unwrap_or_else(|| "本轮没有可沉淀正文，保留 report summary 作为来源。".to_string())
 }
 
 fn format_identity_memory_error(err: chuang_agent::hermes_memory::DualFileMemoryError) -> String {
@@ -740,6 +807,7 @@ mod tests {
             session_id: None,
             remember_session: false,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };
@@ -825,6 +893,7 @@ mod tests {
             session_id: None,
             remember_session: false,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: Some(GoalSpec::mainline_mvp("通过 CLI 注入 goal context")),
         };
@@ -863,6 +932,45 @@ mod tests {
     }
 
     #[test]
+    fn run_with_options_can_remember_experience_with_provenance() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-experience-memory-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        let runtime = test_runtime(temp_dir.join("memory.db"), identity_root.clone());
+
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "沉淀一次经验".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            remember_identity: false,
+            remember_experience: true,
+            dispatch_subagent: false,
+            goal_spec: None,
+        };
+
+        let (_, records) = run_with_options(&request).expect("run should succeed");
+        let record_id = records
+            .experience_record_id
+            .as_deref()
+            .expect("experience record id should exist");
+        assert!(record_id.starts_with("experience-turn-1-"));
+
+        let experiences = fs::read_to_string(identity_root.join("experiences.md"))
+            .expect("experiences should be readable");
+        assert!(experiences.contains("source=runtime_turn"));
+        assert!(experiences.contains("turn_id=turn-1"));
+        assert!(experiences.contains("report_id=report-turn-1"));
+        assert!(experiences.contains("user=沉淀一次经验"));
+        assert!(experiences.contains("lesson="));
+    }
+
+    #[test]
     fn run_with_options_remembers_and_recalls_session_turns() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-session-memory-test-{}",
@@ -882,6 +990,7 @@ mod tests {
             session_id: Some("alpha".to_string()),
             remember_session: true,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };
@@ -902,6 +1011,7 @@ mod tests {
             session_id: Some("alpha".to_string()),
             remember_session: false,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };
@@ -955,6 +1065,7 @@ mod tests {
             session_id: Some("beta".to_string()),
             remember_session: true,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };
@@ -988,6 +1099,7 @@ mod tests {
             session_id: Some("alpha".to_string()),
             remember_session: false,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };
@@ -1022,6 +1134,7 @@ mod tests {
             session_id: None,
             remember_session: true,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         };

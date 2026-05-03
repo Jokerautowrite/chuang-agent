@@ -26,6 +26,7 @@ pub(crate) struct RunCliRequest {
     pub(crate) session_id: Option<String>,
     pub(crate) remember_session: bool,
     pub(crate) remember_identity: bool,
+    pub(crate) remember_experience: bool,
     pub(crate) dispatch_subagent: bool,
     pub(crate) goal_spec: Option<GoalSpec>,
 }
@@ -35,6 +36,7 @@ pub(crate) struct RememberedRecords {
     pub(crate) sqlite_record_id: Option<String>,
     pub(crate) session_record_id: Option<String>,
     pub(crate) identity_record_id: Option<String>,
+    pub(crate) experience_record_id: Option<String>,
     pub(crate) runtime_report_id: Option<String>,
     pub(crate) governance_decision: Option<String>,
     pub(crate) subagent_dispatch_run_id: Option<String>,

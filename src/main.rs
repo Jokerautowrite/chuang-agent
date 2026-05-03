@@ -74,6 +74,9 @@ fn run_command(args: &[String]) -> Result<(), String> {
     if let Some(record_id) = memory_records.identity_record_id {
         println!("identity_memory_recorded: {record_id}");
     }
+    if let Some(record_id) = memory_records.experience_record_id {
+        println!("experience_memory_recorded: {record_id}");
+    }
     if let Some(report_id) = memory_records.runtime_report_id {
         println!("runtime_report: {report_id}");
     }
@@ -114,6 +117,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             session_id: None,
             remember_session: false,
             remember_identity: false,
+            remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
         })?;
