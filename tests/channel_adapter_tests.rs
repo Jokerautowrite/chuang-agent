@@ -12,6 +12,7 @@ fn inbound() -> ChannelInboundMessage {
         workspace_root: "/home/user/projects/chuang-agent".to_string(),
         text: "还在吗？".to_string(),
         thread_id: Some("chuang-thread-1".to_string()),
+        goal: None,
     }
 }
 
@@ -30,6 +31,16 @@ fn channel_adapter_builds_app_server_turn_start_request() {
     assert_eq!(request["params"]["channel"], "feishu-dedicated-chuang");
     assert_eq!(request["params"]["channelMessageId"], "msg-1");
     assert_eq!(request["params"]["senderId"], "user-1");
+}
+
+#[test]
+fn channel_adapter_forwards_optional_goal_to_app_server() {
+    let mut inbound = inbound();
+    inbound.goal = Some("稳定完成主线".to_string());
+
+    let request = app_server_turn_start_request(7, &inbound).expect("request should build");
+
+    assert_eq!(request["params"]["goal"], "稳定完成主线");
 }
 
 #[test]

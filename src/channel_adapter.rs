@@ -9,6 +9,7 @@ pub struct ChannelInboundMessage {
     pub workspace_root: String,
     pub text: String,
     pub thread_id: Option<String>,
+    pub goal: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,17 +36,27 @@ pub fn app_server_turn_start_request(
 ) -> Result<Value, String> {
     inbound.validate()?;
     let thread_id = inbound.thread_id.as_deref().unwrap_or("");
+    let mut params = json!({
+        "threadId": thread_id,
+        "workspaceRoot": inbound.workspace_root,
+        "text": inbound.text,
+        "channel": inbound.channel,
+        "channelMessageId": inbound.message_id,
+        "senderId": inbound.sender_id,
+    });
+    if let Some(goal) = inbound
+        .goal
+        .as_deref()
+        .map(str::trim)
+        .filter(|goal| !goal.is_empty())
+    {
+        params["goal"] = json!(goal);
+    }
+
     Ok(json!({
         "id": request_id.into(),
         "method": "turn/start",
-        "params": {
-            "threadId": thread_id,
-            "workspaceRoot": inbound.workspace_root,
-            "text": inbound.text,
-            "channel": inbound.channel,
-            "channelMessageId": inbound.message_id,
-            "senderId": inbound.sender_id,
-        }
+        "params": params
     }))
 }
 

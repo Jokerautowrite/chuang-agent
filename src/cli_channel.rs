@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use chuang_agent::channel_adapter::{
     app_server_turn_start_request, ChannelInboundMessage, ChannelOutboundMessage,
 };
+use chuang_agent::goal_mode::GoalSpec;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -28,6 +29,7 @@ struct ChannelSimulateOutput {
     tool_calls: Vec<Value>,
     tool_protocol_errors: Vec<Value>,
     tool_events: Vec<Value>,
+    provider_meta: BTreeMap<String, String>,
 }
 
 pub(crate) fn channel_command(args: &[String]) -> Result<(), String> {
@@ -148,7 +150,11 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         remember_session: true,
         remember_identity: false,
         dispatch_subagent: false,
-        goal_spec: None,
+        goal_spec: request
+            .inbound
+            .goal
+            .as_ref()
+            .map(|goal| GoalSpec::mainline_mvp(goal.clone())),
     })?;
     let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
     let outbound = ChannelOutboundMessage {
@@ -170,6 +176,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_calls: tool_meta.tool_calls,
         tool_protocol_errors: tool_meta.tool_protocol_errors,
         tool_events: tool_meta.tool_events,
+        provider_meta: result.response.meta.extra,
     };
 
     match request.output {
@@ -210,6 +217,7 @@ fn parse_channel_simulate(args: &[String]) -> Result<ChannelSimulateRequest, Str
     let mut workspace_root: Option<PathBuf> = None;
     let mut text: Option<String> = None;
     let mut thread_id: Option<String> = None;
+    let mut goal: Option<String> = None;
     let mut output = ControlOutputFormat::Text;
 
     let mut index = 0;
@@ -237,6 +245,13 @@ fn parse_channel_simulate(args: &[String]) -> Result<ChannelSimulateRequest, Str
             "--thread-id" => {
                 thread_id = Some(take_value(args, &mut index, "--thread-id")?);
             }
+            "--goal" => {
+                let value = take_value(args, &mut index, "--goal")?;
+                if value.trim().is_empty() {
+                    return Err("channel simulate requires non-empty --goal".to_string());
+                }
+                goal = Some(value);
+            }
             "--json" => {
                 output = ControlOutputFormat::Json;
                 index += 1;
@@ -255,6 +270,7 @@ fn parse_channel_simulate(args: &[String]) -> Result<ChannelSimulateRequest, Str
         workspace_root: workspace_root.display().to_string(),
         text: text.ok_or_else(|| "channel simulate requires --text".to_string())?,
         thread_id,
+        goal,
     };
     inbound.validate()?;
 

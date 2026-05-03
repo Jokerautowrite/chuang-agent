@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
+use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::runtime_config::{
     IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
     RulesConfig, RuntimeConfig, SubagentQueueConfig,
@@ -271,6 +272,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     if input_text.is_empty() {
         return Err("turn/start requires non-empty input".to_string());
     }
+    let goal_spec = extract_turn_goal(params)?;
 
     let thread_id = if thread_id.is_empty() {
         let thread = create_thread(
@@ -296,7 +298,13 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let runtime = override_runtime_model(runtime, params);
     let context_max_tokens = runtime.context_budget.max_tokens;
     let started_at = Instant::now();
-    let tool_run = run_turn_with_tools(&runtime, &thread_id, &workspace_root, &input_text)?;
+    let tool_run = run_turn_with_tools(
+        &runtime,
+        &thread_id,
+        &workspace_root,
+        &input_text,
+        goal_spec,
+    )?;
     let result = tool_run.result.clone();
     let tool_trace = tool_run.tool_trace.clone();
     let tool_calls = tool_run.tool_calls.clone();
@@ -449,6 +457,7 @@ fn run_turn_with_tools(
     thread_id: &str,
     workspace_root: &str,
     original_input: &str,
+    goal_spec: Option<GoalSpec>,
 ) -> Result<ToolLoopResult, String> {
     let request = RunCliRequest {
         options: CliOptions {
@@ -461,7 +470,7 @@ fn run_turn_with_tools(
         remember_session: true,
         remember_identity: false,
         dispatch_subagent: false,
-        goal_spec: None,
+        goal_spec,
     };
 
     let (result, _) = run_with_options(&request)?;
@@ -634,6 +643,17 @@ fn extract_turn_input_text(params: &Value) -> String {
     }
 
     String::new()
+}
+
+fn extract_turn_goal(params: &Value) -> Result<Option<GoalSpec>, String> {
+    let Some(goal) = params.get("goal").and_then(|value| value.as_str()) else {
+        return Ok(None);
+    };
+    let goal = normalize_text(Some(goal));
+    if goal.is_empty() {
+        return Err("turn/start goal must not be empty".to_string());
+    }
+    Ok(Some(GoalSpec::mainline_mvp(goal)))
 }
 
 pub(crate) fn build_runtime_for_workspace(workspace_root: &str) -> Result<RuntimeConfig, String> {

@@ -125,6 +125,54 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
 }
 
 #[test]
+fn cli_channel_simulate_can_forward_goal_context() {
+    let workspace = temp_workspace("simulate-goal");
+    write_workspace_config(&workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("simulate")
+        .arg("--workspace-root")
+        .arg(&workspace)
+        .arg("--message-id")
+        .arg("msg-goal-1")
+        .arg("--sender-id")
+        .arg("user-1")
+        .arg("--thread-id")
+        .arg("thread-goal-1")
+        .arg("--text")
+        .arg("继续推进")
+        .arg("--goal")
+        .arg("稳定完成 goal 通道接入")
+        .arg("--json")
+        .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
+        .output()
+        .expect("channel simulate should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
+
+    assert_eq!(
+        parsed["app_server_request"]["params"]["goal"],
+        "稳定完成 goal 通道接入"
+    );
+    assert_eq!(parsed["provider_meta"]["goal_context_injected"], "true");
+    assert_eq!(
+        parsed["provider_meta"]["goal_objective"],
+        "稳定完成 goal 通道接入"
+    );
+    assert_eq!(parsed["provider_meta"]["goal_id"], "mainline-mvp");
+    assert!(parsed["outbound"]["text"]
+        .as_str()
+        .expect("outbound text")
+        .contains("stubbed_post_ok"));
+}
+
+#[test]
 fn cli_channel_simulate_rejects_empty_text() {
     let workspace = temp_workspace("empty-text");
     write_workspace_config(&workspace);
