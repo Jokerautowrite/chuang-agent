@@ -359,6 +359,85 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
 }
 
 #[test]
+fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
+    let mut extra = BTreeMap::new();
+    extra.insert("provider_fallback_used".to_string(), "true".to_string());
+    extra.insert(
+        "provider_fallback_from".to_string(),
+        "primary-openai".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_reason".to_string(),
+        "status_code=429".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_retryable".to_string(),
+        "true".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_status_code".to_string(),
+        "429".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_error_class".to_string(),
+        "http_status".to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "fallback-model".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: Some("primary-openai->fallback-fake".to_string()),
+                recall_hit_count: Some(0),
+                finish_reason: Some("stop".to_string()),
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("provider_fallback_used"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_from"),
+        Some(&"primary-openai".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_reason"),
+        Some(&"status_code=429".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_retryable"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_status_code"),
+        Some(&"429".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_error_class"),
+        Some(&"http_status".to_string())
+    );
+}
+
+#[test]
 fn runtime_report_promotes_tool_report_metadata_to_artifact() {
     let mut extra = BTreeMap::new();
     extra.insert("tool_call_count".to_string(), "1".to_string());

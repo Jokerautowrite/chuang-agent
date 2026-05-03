@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use chuang_agent::chuang_kernel::{ChuangKernelConfig, DEFAULT_MEMORY_WRITE_MAX_CHARS};
+use chuang_agent::chuang_kernel::{
+    ChuangKernelConfig, IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
+};
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::runtime_config::RuntimeConfig;
 
@@ -68,6 +70,46 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.goal_mode.default_goal_id, "mainline-mvp");
     assert!(!status.goal_mode.bypasses_governance);
     assert!(!status.goal_mode.adds_core_slot);
+}
+
+#[test]
+fn kernel_status_exposes_identity_bootstrap_presence_flags() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+
+    let kernel = ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: config.recall_limit,
+        metadata: config.metadata.clone(),
+        context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
+        identity_bootstrap_snapshot: Some(IdentityBootstrapSnapshot {
+            soul: "创的核心锚点".to_string(),
+            soul_exists: true,
+            story: String::new(),
+            story_exists: false,
+            first_wake: String::new(),
+            first_wake_exists: false,
+            agents_registry: String::new(),
+            agents_registry_exists: false,
+        }),
+    };
+
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    assert_eq!(
+        status.kernel.identity_soul_chars,
+        Some("创的核心锚点".chars().count())
+    );
+    assert_eq!(status.kernel.identity_soul_exists, Some(true));
+    assert_eq!(status.kernel.identity_story_chars, Some(0));
+    assert_eq!(status.kernel.identity_story_exists, Some(false));
+    assert_eq!(status.kernel.identity_first_wake_chars, Some(0));
+    assert_eq!(status.kernel.identity_first_wake_exists, Some(false));
+    assert_eq!(status.kernel.identity_agents_registry_chars, Some(0));
+    assert_eq!(status.kernel.identity_agents_registry_exists, Some(false));
 }
 
 #[test]

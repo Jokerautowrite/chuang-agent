@@ -89,18 +89,34 @@ pub fn build_chuang_mvp_status(
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.soul.chars().count()),
+            identity_soul_exists: kernel
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.soul_exists),
             identity_story_chars: kernel
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.story.chars().count()),
+            identity_story_exists: kernel
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.story_exists),
             identity_first_wake_chars: kernel
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.first_wake.chars().count()),
+            identity_first_wake_exists: kernel
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.first_wake_exists),
             identity_agents_registry_chars: kernel
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.agents_registry.chars().count()),
+            identity_agents_registry_exists: kernel
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.agents_registry_exists),
         },
         plugin_registry: summarize_plugin_registry(Path::new("plugins/registry.example.json")),
         atomic_tools: AtomicToolSurfaceStatus {

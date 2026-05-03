@@ -3,6 +3,8 @@
 ## 2026-05-03
 
 ### 最新进展
+- provider fallback 的只读诊断面补齐：`runtime_observability_meta()` 现在会提升 `provider_fallback_primary_retryable / provider_fallback_primary_status_code / provider_fallback_primary_error_class`，app-server 的 `turn/start` response 和 `turn/completed` 事件不再只依赖原始 `providerMeta` 才能看懂 fallback 根因。
+- identity bootstrap 快照补了结构化存在性诊断：`status` / `doctor` 现在会同时暴露 `identity_bootstrap_present`，能区分“文件缺失”和“文件存在但为空”，避免 bootstrap 挂载问题只剩 0 字符这一种模糊信号。
 - GA 9 原子工具 manifest 契约补齐：`AtomicToolManifest` 现在暴露 `schema_version=1` 和字段列表，`status --json` / `doctor` 会同步校验并回传 manifest schema，smoke 与状态测试也锁住该契约。
 - 主线治理回传补齐一处输出面缺口：`runtime_observability_meta()` 现在会提升 `governance_action_id / governance_decision / governance_reason`，app-server `turn/start` response 和 `turn/completed` event 的 `runtimeObservability` 可直接读取治理决策，不必从 provider meta 间接解析。
 - 已补 runtime report 和 app-server 回归，锁定治理字段会随结构化观测面回传。

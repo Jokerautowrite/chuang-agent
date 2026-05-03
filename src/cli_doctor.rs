@@ -348,6 +348,33 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.goal_mode.cli_entrypoint,
         doctor.status.goal_mode.kind
     );
+    println!(
+        "identity_bootstrap_present: soul={} story={} first_wake={} agents={}",
+        doctor
+            .status
+            .kernel
+            .identity_soul_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        doctor
+            .status
+            .kernel
+            .identity_story_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        doctor
+            .status
+            .kernel
+            .identity_first_wake_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        doctor
+            .status
+            .kernel
+            .identity_agents_registry_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
     println!("control_plane: {}", doctor.status.slots.control_plane);
     if doctor.status.config.placeholder_warnings.is_empty() {
         println!("placeholder_warnings: none");

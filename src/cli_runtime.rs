@@ -118,11 +118,15 @@ fn load_identity_bootstrap_snapshot(
 ) -> Result<IdentityBootstrapSnapshot, String> {
     Ok(IdentityBootstrapSnapshot {
         soul: read_optional_identity_file(&runtime.identity_bootstrap.soul_path)?,
+        soul_exists: runtime.identity_bootstrap.soul_path.exists(),
         story: read_optional_identity_file(&runtime.identity_bootstrap.story_path)?,
+        story_exists: runtime.identity_bootstrap.story_path.exists(),
         first_wake: read_optional_identity_file(&runtime.identity_bootstrap.first_wake_path)?,
+        first_wake_exists: runtime.identity_bootstrap.first_wake_path.exists(),
         agents_registry: read_optional_identity_file(
             &runtime.identity_bootstrap.agents_registry_path,
         )?,
+        agents_registry_exists: runtime.identity_bootstrap.agents_registry_path.exists(),
     })
 }
 

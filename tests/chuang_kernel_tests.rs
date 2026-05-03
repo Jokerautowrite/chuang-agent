@@ -238,9 +238,13 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
     let config = ChuangKernelConfig {
         identity_bootstrap_snapshot: Some(IdentityBootstrapSnapshot {
             soul: "创的核心锚点：记忆是本体，runtime 是壳。".to_string(),
+            soul_exists: true,
             story: "创从小创、小承、OpenClaw 和 Codex 的经验里诞生。".to_string(),
+            story_exists: true,
             first_wake: "第一次醒来先确认身份、边界和老爸的禁令。".to_string(),
+            first_wake_exists: true,
             agents_registry: "agent_id = \"chuang\"".to_string(),
+            agents_registry_exists: true,
         }),
         ..kernel_config()
     };

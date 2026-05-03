@@ -67,6 +67,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("atomic_tool name=mouse status=interface_only"));
     assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
     assert!(stdout.contains("identity_bootstrap_chars: soul=0 story=0 first_wake=0 agents=0"));
+    assert!(stdout.contains(
+        "identity_bootstrap_present: soul=false story=false first_wake=false agents=false"
+    ));
     assert!(stdout.contains("governance: static_rule"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
@@ -116,6 +119,10 @@ fn cli_status_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["kernel"]["agent_id"], "chuang-cli");
+    assert_eq!(parsed["kernel"]["identity_soul_exists"], false);
+    assert_eq!(parsed["kernel"]["identity_story_exists"], false);
+    assert_eq!(parsed["kernel"]["identity_first_wake_exists"], false);
+    assert_eq!(parsed["kernel"]["identity_agents_registry_exists"], false);
     assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["config"]["provider_id"], "custom-openai");
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");

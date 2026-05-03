@@ -164,6 +164,29 @@ pub fn print_status(status: &ChuangMvpStatus) {
             .map(|value| value.to_string())
             .unwrap_or_else(|| "none".to_string())
     );
+    println!(
+        "identity_bootstrap_present: soul={} story={} first_wake={} agents={}",
+        status
+            .kernel
+            .identity_soul_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        status
+            .kernel
+            .identity_story_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        status
+            .kernel
+            .identity_first_wake_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        status
+            .kernel
+            .identity_agents_registry_exists
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
     println!("governance: {}", status.slots.governance);
     println!("execution: {}", status.slots.execution);
     println!("actuator: {}", status.slots.actuator);

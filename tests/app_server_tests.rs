@@ -1,5 +1,7 @@
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::PathBuf};
 
@@ -194,6 +196,146 @@ transport = "stub"
             .as_str()
             .expect("event governance decision should be string")
             .starts_with("allowed:")
+    );
+}
+
+#[test]
+fn app_server_turn_surfaces_provider_fallback_diagnostics() {
+    let workspace = temp_workspace("provider-fallback");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang test soul\n").expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+
+        let body = r#"{"error":{"message":"rate limited"}}"#;
+        let response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-primary"
+base_url = "http://{address}/v1"
+model = "gpt-app-server-primary"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "http"
+
+fallback_provider = "fake"
+fallback_provider_id = "app-server-fallback"
+fallback_model = "gpt-app-server-fallback"
+"#,
+        ),
+    )
+    .expect("config should write");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"触发 fallback"}}}}"#,
+        workspace.display()
+    )
+    .expect("turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("server thread should finish");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let responses = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let turn_response = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("turn/start response should be present");
+
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["provider_fallback_used"],
+        "true"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["provider_fallback_from"],
+        "app-server-primary"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["provider_fallback_reason"],
+        "status_code=429"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["provider_fallback_used"],
+        "true"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["provider_fallback_from"],
+        "app-server-primary"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["provider_fallback_reason"],
+        "status_code=429"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["provider_fallback_primary_status_code"],
+        "429"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["provider_fallback_primary_error_class"],
+        "http_status"
     );
 }
 

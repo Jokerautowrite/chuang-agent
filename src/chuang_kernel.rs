@@ -36,9 +36,13 @@ pub struct ChuangKernelConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IdentityBootstrapSnapshot {
     pub soul: String,
+    pub soul_exists: bool,
     pub story: String,
+    pub story_exists: bool,
     pub first_wake: String,
+    pub first_wake_exists: bool,
     pub agents_registry: String,
+    pub agents_registry_exists: bool,
 }
 
 impl ChuangKernelConfig {
@@ -77,9 +81,13 @@ pub struct ChuangKernelSnapshot {
     pub identity_user_chars: Option<usize>,
     pub identity_memory_chars: Option<usize>,
     pub identity_soul_chars: Option<usize>,
+    pub identity_soul_exists: Option<bool>,
     pub identity_story_chars: Option<usize>,
+    pub identity_story_exists: Option<bool>,
     pub identity_first_wake_chars: Option<usize>,
+    pub identity_first_wake_exists: Option<bool>,
     pub identity_agents_registry_chars: Option<usize>,
+    pub identity_agents_registry_exists: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,21 +153,41 @@ impl<S, R> ChuangKernel<S, R> {
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.soul.chars().count()),
+            identity_soul_exists: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.soul_exists),
             identity_story_chars: self
                 .config
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.story.chars().count()),
+            identity_story_exists: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.story_exists),
             identity_first_wake_chars: self
                 .config
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.first_wake.chars().count()),
+            identity_first_wake_exists: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.first_wake_exists),
             identity_agents_registry_chars: self
                 .config
                 .identity_bootstrap_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.agents_registry.chars().count()),
+            identity_agents_registry_exists: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.agents_registry_exists),
         }
     }
 }
