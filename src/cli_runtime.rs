@@ -400,6 +400,24 @@ where
         records.governance_decision = turn.governance_decision.as_ref().map(risk_decision_label);
     }
 
+    if let Some(goal) = &request.goal_spec {
+        turn.result
+            .response
+            .meta
+            .extra
+            .insert("goal_id".to_string(), goal.goal_id.clone());
+        turn.result
+            .response
+            .meta
+            .extra
+            .insert("goal_objective".to_string(), goal.objective.clone());
+        turn.result
+            .response
+            .meta
+            .extra
+            .insert("goal_context_injected".to_string(), "true".to_string());
+    }
+
     if request.remember {
         records.sqlite_record_id = Some(
             kernel
@@ -420,6 +438,8 @@ where
         );
     }
 
+    insert_session_memory_metadata(&mut turn, request, &records);
+
     if request.remember_identity {
         records.identity_record_id = Some(remember_identity_turn(options, &turn)?);
     }
@@ -432,6 +452,61 @@ where
     }
 
     Ok((turn.result, records))
+}
+
+fn insert_session_memory_metadata(
+    turn: &mut chuang_agent::chuang_kernel::ChuangKernelTurn,
+    request: &RunCliRequest,
+    records: &RememberedRecords,
+) {
+    let extra = &mut turn.result.response.meta.extra;
+    let Some(session_id) = &request.session_id else {
+        extra.insert("session_memory_scope".to_string(), "global".to_string());
+        extra.insert(
+            "session_memory_recall_isolated".to_string(),
+            "false".to_string(),
+        );
+        extra.insert(
+            "session_memory_write_requested".to_string(),
+            "false".to_string(),
+        );
+        extra.insert(
+            "session_memory_summary_kind".to_string(),
+            "none".to_string(),
+        );
+        return;
+    };
+
+    extra.insert("session_id".to_string(), session_id.clone());
+    extra.insert("session_memory_scope".to_string(), "session".to_string());
+    extra.insert(
+        "session_memory_recall_isolated".to_string(),
+        "true".to_string(),
+    );
+    extra.insert(
+        "session_memory_recall_filter".to_string(),
+        format!("memory_scope=session,session_id={session_id}"),
+    );
+    extra.insert(
+        "session_memory_recall_hit_count".to_string(),
+        turn.result.recall_hit_count.to_string(),
+    );
+    extra.insert(
+        "session_memory_write_requested".to_string(),
+        request.remember_session.to_string(),
+    );
+    extra.insert(
+        "session_memory_summary_kind".to_string(),
+        if records.session_record_id.is_some() {
+            "turn_summary"
+        } else {
+            "none"
+        }
+        .to_string(),
+    );
+    if let Some(record_id) = &records.session_record_id {
+        extra.insert("session_memory_record_id".to_string(), record_id.clone());
+    }
 }
 
 fn dispatch_subagent_turn(
@@ -674,6 +749,61 @@ mod tests {
     }
 
     #[test]
+    fn run_with_options_surfaces_goal_metadata_without_polluting_user_input() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-runtime-goal-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        runtime.context_budget = goal_context_test_budget();
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "保持主链输入稳定".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            remember_identity: false,
+            dispatch_subagent: false,
+            goal_spec: Some(GoalSpec::mainline_mvp("通过 CLI 注入 goal context")),
+        };
+
+        let (result, _) = run_with_options(&request).expect("run should succeed");
+
+        assert!(result.response.body.contains("保持主链输入稳定"));
+        assert!(!result.response.body.contains("GOAL_SPEC"));
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("goal_id")
+                .map(String::as_str),
+            Some("mainline-mvp")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("goal_objective")
+                .map(String::as_str),
+            Some("通过 CLI 注入 goal context")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("goal_context_injected")
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
     fn run_with_options_remembers_and_recalls_session_turns() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-session-memory-test-{}",
@@ -719,13 +849,84 @@ mod tests {
         let (same_session, _) = run_with_options(&second).expect("second run should succeed");
         assert_eq!(same_session.recall_hit_count, 1);
         assert!(same_session.recall_summary.contains("会话记忆锚点A"));
+        assert_eq!(
+            same_session
+                .response
+                .meta
+                .extra
+                .get("session_memory_scope")
+                .map(String::as_str),
+            Some("session")
+        );
+        assert_eq!(
+            same_session
+                .response
+                .meta
+                .extra
+                .get("session_memory_recall_isolated")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            same_session
+                .response
+                .meta
+                .extra
+                .get("session_memory_recall_filter")
+                .map(String::as_str),
+            Some("memory_scope=session,session_id=alpha")
+        );
+        assert_eq!(
+            same_session
+                .response
+                .meta
+                .extra
+                .get("session_memory_recall_hit_count")
+                .map(String::as_str),
+            Some("1")
+        );
 
-        let third = RunCliRequest {
-            options: CliOptions { runtime },
-            user_input: "会话记忆锚点A".to_string(),
+        let beta_write = RunCliRequest {
+            options: CliOptions {
+                runtime: runtime.clone(),
+            },
+            user_input: "会话记忆锚点B".to_string(),
             workspace_root: Some(temp_dir.clone()),
             remember: false,
             session_id: Some("beta".to_string()),
+            remember_session: true,
+            remember_identity: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+        };
+        let (beta_written, beta_records) =
+            run_with_options(&beta_write).expect("beta run should succeed");
+        assert!(beta_records.session_record_id.is_some());
+        assert_eq!(
+            beta_written
+                .response
+                .meta
+                .extra
+                .get("session_memory_summary_kind")
+                .map(String::as_str),
+            Some("turn_summary")
+        );
+        assert_eq!(
+            beta_written
+                .response
+                .meta
+                .extra
+                .get("session_memory_write_requested")
+                .map(String::as_str),
+            Some("true")
+        );
+
+        let third = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "会话记忆锚点B".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("alpha".to_string()),
             remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
@@ -733,6 +934,15 @@ mod tests {
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
         assert_eq!(other_session.recall_hit_count, 0);
+        assert_eq!(
+            other_session
+                .response
+                .meta
+                .extra
+                .get("session_memory_recall_filter")
+                .map(String::as_str),
+            Some("memory_scope=session,session_id=alpha")
+        );
     }
 
     #[test]

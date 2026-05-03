@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::chuang_kernel::DEFAULT_MEMORY_WRITE_MAX_CHARS;
 use chuang_agent::common::{AgentId, TaskId};
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentError, ControlIntentInput};
+use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::hermes_memory::DEFAULT_USER_MEMORY_MAX_CHARS;
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
@@ -270,6 +271,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     let mut remember_session = false;
     let mut remember_identity = false;
     let mut dispatch_subagent = false;
+    let mut goal_spec: Option<GoalSpec> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -304,6 +306,14 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
                 dispatch_subagent = true;
                 index += 1;
             }
+            "--goal" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                if value.trim().is_empty() {
+                    return Err("--goal requires non-empty value".to_string());
+                }
+                goal_spec = Some(GoalSpec::mainline_mvp(value.clone()));
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
@@ -317,7 +327,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         remember_session,
         remember_identity,
         dispatch_subagent,
-        goal_spec: None,
+        goal_spec,
     })
 }
 
@@ -793,6 +803,7 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             "--remember-session" => index += 1,
             "--remember-identity" => index += 1,
             "--dispatch-subagent" => index += 1,
+            "--goal" => index += 2,
             "--provider-base-url" => {
                 provider_base_url = Some(take_value_or_usage(args, &mut index)?);
             }
@@ -1055,4 +1066,66 @@ fn default_subagent_task_id() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     format!("cli-task-{nanos}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn parse_run_request_accepts_goal_objective() {
+        let config_path = fake_config_path("goal-accepts");
+        let args = vec![
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--input".to_string(),
+            "继续推进主线".to_string(),
+            "--goal".to_string(),
+            "补齐 goal CLI 入口".to_string(),
+        ];
+
+        let request = parse_run_request(&args).expect("run request should parse");
+
+        assert_eq!(request.user_input, "继续推进主线");
+        let goal = request.goal_spec.expect("goal spec should be present");
+        assert_eq!(goal.goal_id, "mainline-mvp");
+        assert_eq!(goal.objective, "补齐 goal CLI 入口");
+    }
+
+    #[test]
+    fn parse_run_request_rejects_empty_goal() {
+        let config_path = fake_config_path("goal-empty");
+        let args = vec![
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--input".to_string(),
+            "继续推进主线".to_string(),
+            "--goal".to_string(),
+            " ".to_string(),
+        ];
+
+        let error = parse_run_request(&args).expect_err("empty goal should fail");
+
+        assert_eq!(error, "--goal requires non-empty value");
+    }
+
+    fn fake_config_path(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-args-{name}-{}",
+            default_subagent_task_id()
+        ));
+        fs::create_dir_all(&root).expect("temp root should be created");
+        let path = root.join("config.toml");
+        fs::write(
+            &path,
+            format!(
+                "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"test\"\nmodel = \"stub\"\n",
+                root.join("memory.db").display(),
+                root.join("identity").display()
+            ),
+        )
+        .expect("fake config should be written");
+        path
+    }
 }
