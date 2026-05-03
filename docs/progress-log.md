@@ -3,6 +3,8 @@
 ## 2026-05-03
 
 ### 最新进展
+- 长期记忆方案已修正为五层组合系统：新增 `docs/memory-architecture-layering.md`，明确内部记忆、历史会话、LIM 长期沉淀、wiki/GBrain 外脑知识库和自动维护闭环；以后不能再把记忆简化成三层，也不能漏掉 wiki/知识库。
+- 已记录迁移顺序：先身份与内部记忆，再历史会话召回，再 LIM extractor/provenance，之后接 wiki/GBrain 外脑，最后做 health/decay/evolver/extractor dry-run 的自动维护闭环。
 - 飞书架构终稿 `M21pw0qGki7emUkdmsUcdnfEnag` 已更新：在 `3.1 Codex → 单Agent任务闭环` 下补入 `2026-05-03 修正：Codex Rust 优先移植原则`，明确“少造轮子，多复制成熟实现”，本地执行、安全边界、审批、沙箱、验证、回传、goal-style 长任务和子代理组织方式优先审计/移植 Codex Rust。
 - 本地 handoff/goal 记录已同步：后续 Chuang 开发默认先查 Codex Rust 是否已有成熟实现，能移植/裁剪/适配就不自研；只有与记忆本体、可拔插边界或本机安全约束冲突时才新写实现。
 - Codex 新版目标驱动推进方式已固化到 `docs/goal-mode-operating-plan.md`：记录了本轮多子代理并行的 `GOAL_SPEC` 契约、分写入范围、主进程统一集成验证、阶段提交和关闭子代理流程；后续迁移到 Chuang 时只吸收组织模式，不硬编码 Codex CLI 细节。

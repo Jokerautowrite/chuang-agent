@@ -72,6 +72,7 @@
 
 - 不自动删除任何记忆。
 - 不自动压缩身份记忆。
+- 不把长期记忆误写成只有三层；wiki/GBrain 外脑和 LIM 长期沉淀是正式目标层，只是 MVP 阶段先不硬搬完整 GBrain/PGLite 内核。
 - 默认不直接操作真实 systemd 服务；真实控制必须通过显式配置的 adapter/command bridge，并经过治理审批。
 - 不直接控制 Hermes / OpenClaw 进程。
 - 不继续扩展旧 `BrowserWorker` 实验线；网页版 AI 查询能力后续改走 `Genesis Actuator` 插件线。
