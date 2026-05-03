@@ -13,6 +13,7 @@ use crate::app_server::build_runtime_for_workspace;
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
+use chuang_agent::runtime_report::runtime_observability_meta;
 use chuang_agent::tool_loop_meta::ToolLoopMeta;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -30,6 +31,7 @@ struct ChannelSimulateOutput {
     tool_protocol_errors: Vec<Value>,
     tool_events: Vec<Value>,
     provider_meta: BTreeMap<String, String>,
+    runtime_observability: BTreeMap<String, String>,
 }
 
 pub(crate) fn channel_command(args: &[String]) -> Result<(), String> {
@@ -157,6 +159,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
             .map(|goal| GoalSpec::mainline_mvp(goal.clone())),
     })?;
     let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
+    let runtime_observability = runtime_observability_meta(&result);
     let outbound = ChannelOutboundMessage {
         channel: request.inbound.channel.clone(),
         message_id: request.inbound.message_id.clone(),
@@ -177,6 +180,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_protocol_errors: tool_meta.tool_protocol_errors,
         tool_events: tool_meta.tool_events,
         provider_meta: result.response.meta.extra,
+        runtime_observability,
     };
 
     match request.output {

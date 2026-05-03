@@ -14,6 +14,7 @@ use chuang_agent::runtime_config::{
     RulesConfig, RuntimeConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
+use chuang_agent::runtime_report::runtime_observability_meta;
 use chuang_agent::tool_loop_meta::ToolLoopMeta;
 use chuang_agent::tool_runtime::{ToolExecutionRecord, ToolProtocolError};
 
@@ -313,6 +314,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let tool_events = tool_run.tool_events.clone();
     let tool_call_count = tool_calls.len();
     let tool_protocol_error_count = tool_protocol_errors.len();
+    let runtime_observability = runtime_observability_meta(&result);
     let elapsed_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let turn_id = next_turn_id(state);
     let assistant_text = result.response.body.clone();
@@ -398,6 +400,8 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                         .map(tool_protocol_error_to_json)
                         .collect::<Vec<_>>(),
                     "toolEvents": tool_events,
+                    "providerMeta": result.response.meta.extra.clone(),
+                    "runtimeObservability": runtime_observability.clone(),
                 }
             }
         }),
@@ -423,6 +427,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
             "contextEngineKind": result.context_engine_kind,
             "contextMaxTokens": context_max_tokens,
             "providerMeta": result.response.meta.extra,
+            "runtimeObservability": runtime_observability,
             "trace": result.response.trace,
             "apiCallCount": 1,
             "toolCallCount": tool_call_count,

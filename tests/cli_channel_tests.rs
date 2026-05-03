@@ -91,6 +91,16 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     assert_eq!(parsed["model_name"], "gpt-channel-test");
     assert_eq!(parsed["tool_call_count"], 0);
     assert_eq!(parsed["tool_protocol_error_count"], 0);
+    assert_eq!(
+        parsed["runtime_observability"]["model_name"],
+        "gpt-channel-test"
+    );
+    assert_eq!(parsed["runtime_observability"]["session_id"], "thread-1");
+    assert_eq!(
+        parsed["runtime_observability"]["session_memory_scope"],
+        "session"
+    );
+    assert_eq!(parsed["runtime_observability"]["tool_call_count"], "0");
     assert_eq!(parsed["tool_trace"], "");
     assert!(parsed["tool_report"].is_null());
     assert_eq!(
@@ -166,6 +176,15 @@ fn cli_channel_simulate_can_forward_goal_context() {
         "稳定完成 goal 通道接入"
     );
     assert_eq!(parsed["provider_meta"]["goal_id"], "mainline-mvp");
+    assert_eq!(parsed["runtime_observability"]["goal_id"], "mainline-mvp");
+    assert_eq!(
+        parsed["runtime_observability"]["goal_objective"],
+        "稳定完成 goal 通道接入"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["session_id"],
+        "thread-goal-1"
+    );
     assert!(parsed["outbound"]["text"]
         .as_str()
         .expect("outbound text")

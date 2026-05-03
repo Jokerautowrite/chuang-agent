@@ -114,6 +114,26 @@ transport = "stub"
         0
     );
     assert!(turn_response["result"]["turn"]["toolReport"].is_null());
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["session_id"],
+        "chuang-thread-1"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["model_name"],
+        "gpt-app-server-test"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_id"],
+        "chuang-thread-1"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_scope"],
+        "session"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_call_count"],
+        "0"
+    );
     let turn_completed = responses
         .iter()
         .find(|value| value["method"] == "turn/completed")
@@ -136,6 +156,18 @@ transport = "stub"
             .expect("event tool events should be array")
             .len(),
         0
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["providerMeta"]["session_id"],
+        "chuang-thread-1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["model_name"],
+        "gpt-app-server-test"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["session_id"],
+        "chuang-thread-1"
     );
 }
 
