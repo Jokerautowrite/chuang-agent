@@ -3,12 +3,16 @@
 ## 2026-05-03
 
 ### 最新进展
+- Control / Actuator command adapter 安全边界补回归：control apply receipt 现在额外覆盖 `change_model` 模型名不匹配，真实 control adapter 在未设置 `CHUANG_REAL_CONTROL_ENABLE=1` 时只返回 dry-run receipt，不执行 allowlisted 命令。
+- Actuator command adapter 补 timeout 回归：外部 adapter 卡住时会按 `actuator_timeout_ms` 终止本次启动的进程并返回结构化错误，不接真实桌面/浏览器。
+- `doctor` 的 command control smoke 已补只读回归：测试 adapter 的 `apply` 会写 marker，`doctor --json` 只能调用 `list`，不得触发 apply 或真实服务控制。
 - MVP readiness / doctor / smoke 验收面已对齐到当前主线能力：`scripts/chuang-mvp-smoke.sh` 现在会断言 `status --json` 里的 `execution=generic_agent_mvp`、GA 原子工具 action/report schema、goal mode、plugin registry，以及 smoke 配置只出现预期的 stub provider placeholder warning。
 - smoke 脚本的 `doctor` 步骤改为 JSON 验收，明确要求 config、identity、slots、atomic_tools、goal_mode、actuator/control smoke、isolated runtime smoke、subagent queue smoke、plugin_registry 全部存在并通过。
 - smoke 脚本新增 goal/session/channel 验收：`run --goal` 必须写入 `goal_context_injected=true`，session memory 必须暴露 isolated recall/filter/writeback meta，`channel simulate --goal` 必须把 goal objective 传到 provider meta。
 - `docs/mvp-readiness-2026-05-02.md` 和 `docs/mvp-scope.md` 已刷新“已实现 vs 目标态/插件态”边界：goal mode 只是轻量 runtime context，GA interface-only 原子工具不是现实桌面控制，plugin registry 只是 manifest/path readiness，不代表插件已启用或运行。
 - Memory/Context 会话稳定性 MVP 补了一层可诊断元数据：`run --session-id ID` 的 runtime meta 会暴露 `session_id`、`session_memory_scope`、`session_memory_recall_isolated`、`session_memory_recall_filter`、`session_memory_recall_hit_count`；`--remember-session` 写回后会额外暴露 `session_memory_write_requested`、`session_memory_summary_kind`、`session_memory_record_id`。
 - 会话记忆隔离回归已增强：同一 SQLite store 内 `alpha` 和 `beta` 都写入 session summary 后，`alpha` 查询 `beta` 的锚点必须保持 `recall_hit_count=0`，防止不同 session 串记忆。专项验证已通过 `cargo fmt --all` 和 `cargo test -q cli_runtime::tests::run_with_options_remembers_and_recalls_session_turns`。
+- 记忆面再补硬上限无变更回归：`hermes_memory` 新增 `write_memory()` 超限不落盘测试，`cli memory identity write-memory` 新增 CLI 入口超限失败不改文件测试；`memory identity show` 的 JSON 回归也补了 `user_max_chars / memory_max_chars` 可见性。
 - Goal mode 状态面已补：`status --json` 现在有 `goal_mode` 摘要，标明它是 `lightweight_runtime_context`、入口为 `run --goal TEXT`、不新增 core slot、不绕过 governance；`doctor` 增加只读 `goal_mode` 检查，确保默认 `GoalSpec` 和 context segment 可渲染。
 - Goal mode 已接到 channel/app-server 输入协议：`channel simulate --goal TEXT` 会把目标写入 app-server `turn/start.params.goal`，app-server 再转为 `RunCliRequest.goal_spec`；输出的 provider meta 可看到 `goal_id / goal_objective / goal_context_injected`。默认飞书桥不强制传 goal，能力只是作为独立通道参数预留。
 - 当前阶段结论：主进程工具口已进入收尾细化阶段，近期连续完成 action/report schema 契约、工具循环元数据统一视图、治理决策标签收口、治理拒绝路径结构化；下一步开始把注意力从工具细节转向 Memory/Context 会话稳定性、真实 subagent runner、Chuang 自身 goal mode 最小实现。

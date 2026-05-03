@@ -123,6 +123,43 @@ fn dual_file_memory_rejects_memory_append_over_hard_limit_with_existing_entries(
 }
 
 #[test]
+fn dual_file_memory_rejects_memory_write_over_hard_limit_without_mutation() {
+    let root = temp_root("memory-write-limit");
+    let mut config = DualFileMemoryConfig::new(&root);
+    config.memory_max_chars = 25;
+    let mut store = FileDualFileMemoryStore::open(config).expect("open succeeds");
+    store
+        .write_memory("## seed-1\nabc\n")
+        .expect("initial write succeeds");
+
+    let before = fs::read_to_string(root.join("MEMORY.md")).expect("memory file readable");
+    let err = store
+        .write_memory("## over-limit\n01234567890123456789\n")
+        .expect_err("over-limit write should fail");
+
+    match err {
+        DualFileMemoryError::HardLimitExceeded {
+            scope,
+            limit_chars,
+            attempted_chars,
+            existing_entries,
+        } => {
+            assert_eq!(scope, DualFileMemoryScope::Memory);
+            assert_eq!(limit_chars, 25);
+            assert!(attempted_chars > 25);
+            assert_eq!(existing_entries.len(), 1);
+            assert_eq!(existing_entries[0].id, "seed-1");
+            assert_eq!(existing_entries[0].content_preview, "abc");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(
+        fs::read_to_string(root.join("MEMORY.md")).expect("memory file readable"),
+        before
+    );
+}
+
+#[test]
 fn dual_file_memory_reports_freeform_preamble_when_append_exceeds_limit() {
     let root = temp_root("memory-preamble-limit");
     let mut config = DualFileMemoryConfig::new(&root);

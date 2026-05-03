@@ -307,6 +307,81 @@ fn command_control_plane_rejects_apply_receipt_for_wrong_action() {
 }
 
 #[test]
+fn command_control_plane_rejects_apply_receipt_for_wrong_model() {
+    let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
+            .to_string(),
+        apply_args: r#"{"unit_id":"command-agent","action":"change_model","previous_status":"Running","next_status":"Running","model_name":"gpt-4.1","message":"wrong_model"}"#
+            .to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .apply(ControlRequest {
+            unit_id: "command-agent".to_string(),
+            action: ControlAction::ChangeModel {
+                model_name: "gpt-5.4".to_string(),
+            },
+            reason: "test mismatched model".to_string(),
+        })
+        .expect_err("mismatched receipt model should fail");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("receipt action mismatch"));
+}
+
+#[test]
+fn real_control_adapter_stays_dry_run_without_enable_env() {
+    let allowlist = temp_script_path("real-control-allowlist").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "units": [{
+    "unit_id": "chuang-agent-app-server.service",
+    "display_name": "Chuang App Server",
+    "kind": "service",
+    "default_status": "Stopped",
+    "start_command": ["sh", "-c", "exit 42"],
+    "restart_command": ["sh", "-c", "exit 42"],
+    "stop_command": ["sh", "-c", "exit 42"],
+    "metadata": {"owner": "chuang"}
+  }]
+}"#,
+    )
+    .expect("allowlist should be writable");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-control-adapter.py");
+    let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: adapter_path.display().to_string(),
+        list_args: format!("list --json --allowlist {}", allowlist.display()),
+        apply_args: format!("apply --json --allowlist {}", allowlist.display()),
+        timeout_ms: 30_000,
+    });
+
+    let units = plane
+        .try_list_units()
+        .expect("real adapter list should work in dry-run");
+    assert_eq!(units[0].unit_id, "chuang-agent-app-server.service");
+    assert_eq!(
+        units[0].metadata.get("dry_run").map(String::as_str),
+        Some("true")
+    );
+
+    let receipt = plane
+        .apply(ControlRequest {
+            unit_id: "chuang-agent-app-server.service".to_string(),
+            action: ControlAction::Start,
+            reason: "dry-run safety regression".to_string(),
+        })
+        .expect("real adapter apply should stay dry without env");
+
+    assert_eq!(receipt.next_status, ManagedUnitStatus::Running);
+    assert!(receipt.message.contains("dry-run accepted"));
+}
+
+#[test]
 fn fake_control_plane_changes_model_only_for_agents() {
     let mut plane = FakeControlPlane::new(vec![
         unit("agent-1", ManagedUnitKind::Agent),

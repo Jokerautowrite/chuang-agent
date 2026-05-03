@@ -82,6 +82,8 @@ fn cli_identity_memory_show_append_and_compact_memory() {
     let parsed: Value =
         serde_json::from_str(&String::from_utf8_lossy(&shown.stdout)).expect("stdout json");
     assert_eq!(parsed["user_chars"], 0);
+    assert_eq!(parsed["user_max_chars"], 1375);
+    assert_eq!(parsed["memory_max_chars"], 2200);
     assert!(parsed["memory"]
         .as_str()
         .expect("memory string")
@@ -118,6 +120,43 @@ fn cli_identity_memory_show_append_and_compact_memory() {
 
     let memory = std::fs::read_to_string(root.join("MEMORY.md")).expect("memory file");
     assert_eq!(memory, "## compact-1\n老爸偏好简洁中文进度\n");
+}
+
+#[test]
+fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
+    let root = temp_root("write-memory-limit");
+    let config_path = write_fake_config(&root);
+    std::fs::write(root.join("MEMORY.md"), "## seed-1\nabc\n").expect("memory seed should write");
+    let before = std::fs::read_to_string(root.join("MEMORY.md")).expect("memory file");
+    let oversized_content = format!("## over-limit\n{}\n", "0".repeat(2300));
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "identity",
+            "write-memory",
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--content",
+            oversized_content.as_str(),
+            "--approve-overwrite",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("identity_memory_hard_limit_exceeded"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("MEMORY.md")).expect("memory file"),
+        before
+    );
 }
 
 #[test]

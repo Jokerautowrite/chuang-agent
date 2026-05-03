@@ -198,3 +198,81 @@ apply_args = "apply --json"
     );
     assert!(stderr.contains("status=Some(1)"), "stderr={stderr}");
 }
+
+#[test]
+fn cli_doctor_command_control_smoke_does_not_call_apply() {
+    let root = temp_root("command-control-readonly");
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let marker_path = root.join("apply-called");
+    let script_path = root.join("control-adapter.sh");
+    fs::write(
+        &script_path,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '[{{"unit_id":"chuang-readonly","display_name":"Chuang Readonly","kind":"service","status":"Running","model_name":null,"metadata":{{"adapter":"doctor-test"}}}}]'
+  exit 0
+fi
+if [ "$1" = "apply" ]; then
+  printf applied > "{}"
+  printf '{{"unit_id":"chuang-readonly","action":"restart","previous_status":"Running","next_status":"Running","model_name":null,"message":"apply should not run"}}'
+  exit 0
+fi
+exit 2
+"#,
+            marker_path.display()
+        ),
+    )
+    .expect("script should be writable");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+db_path = "{}"
+identity_memory_root = "{}"
+control = "command"
+program = "sh"
+list_args = "{} list"
+apply_args = "{} apply"
+"#,
+            root.join("memory.db").display(),
+            root.join("identity").display(),
+            script_path.display(),
+            script_path.display()
+        ),
+    )
+    .expect("config file should be writable");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "doctor",
+            "--json",
+            "--config",
+            config_path
+                .to_str()
+                .expect("config path should be valid utf-8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !marker_path.exists(),
+        "doctor control smoke must remain list-only and must not call apply"
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).expect("doctor stdout should be json");
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "control_plane_smoke" && check["ok"] == true));
+}

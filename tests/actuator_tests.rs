@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{
@@ -146,6 +147,25 @@ fn command_actuator_reports_malformed_adapter_output() {
         .expect_err("malformed output should fail");
 
     assert!(err.message.contains("actuator command output parse failed"));
+}
+
+#[test]
+fn command_actuator_times_out_stuck_adapter() {
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "sleep".to_string(),
+        args: "1".to_string(),
+        timeout_ms: 20,
+    });
+    let started = Instant::now();
+
+    let err = actuator
+        .observe(ObserveTarget::Screen)
+        .expect_err("stuck adapter should time out");
+
+    assert!(err
+        .message
+        .contains("actuator command timed out after 20ms"));
+    assert!(started.elapsed().as_millis() < 500);
 }
 
 #[test]
