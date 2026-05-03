@@ -461,6 +461,7 @@ fn run_turn_with_tools(
         remember_session: true,
         remember_identity: false,
         dispatch_subagent: false,
+        goal_spec: None,
     };
 
     let (result, _) = run_with_options(&request)?;

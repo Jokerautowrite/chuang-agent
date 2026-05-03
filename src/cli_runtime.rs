@@ -9,6 +9,7 @@ use chuang_agent::chuang_kernel::{
     DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
+use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
 use chuang_agent::memory_store::MemoryStore;
@@ -76,6 +77,7 @@ pub(crate) fn run_with_options(
             shell_risk_rules: runtime.tool_loop.shell_risk_rules.clone(),
         },
         request.user_input.clone(),
+        goal_context_segments(request.goal_spec.as_ref())?,
     )
     .map_err(|e| format!("runtime_failed: {e:?}"))
     .and_then(|turn| remember_turn_if_requested(&request.options, &mut kernel, turn, request))
@@ -131,6 +133,7 @@ fn run_governed_turn_with_tools<S, R, G>(
     max_tool_rounds: usize,
     tool_config: ToolExecutionConfig,
     original_input: String,
+    extra_context_segments: Vec<ContextSegment>,
 ) -> Result<ChuangKernelTurn, String>
 where
     S: MemoryStore,
@@ -141,7 +144,8 @@ where
     let mut protocol_errors: Vec<ToolProtocolError> = Vec::new();
     let mut tool_events: Vec<ToolLoopEvent> = Vec::new();
     let mut transcript: Vec<String> = Vec::new();
-    let tool_context = vec![tool_instruction_segment(workspace_root)];
+    let mut turn_context = extra_context_segments;
+    turn_context.push(tool_instruction_segment(workspace_root));
     let execution_slot = ExecutionSlot::generic_agent_mvp(tool_config);
     let mut current_input = original_input.clone();
 
@@ -150,7 +154,7 @@ where
             .run_governed_turn_with_extra_context(
                 current_input.clone(),
                 governance,
-                tool_context.clone(),
+                turn_context.clone(),
             )
             .map_err(|e| format!("{e:?}"))?;
         let body = turn.result.response.body.trim().to_string();
@@ -279,6 +283,16 @@ where
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+fn goal_context_segments(goal_spec: Option<&GoalSpec>) -> Result<Vec<ContextSegment>, String> {
+    goal_spec
+        .map(|goal| {
+            goal.render_context_segment()
+                .map(|segment| vec![segment])
+                .map_err(|e| format!("goal_spec_invalid: {}: {}", e.field, e.message))
+        })
+        .unwrap_or_else(|| Ok(Vec::new()))
 }
 
 fn insert_tool_metadata(
@@ -621,6 +635,7 @@ mod tests {
             remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should succeed");
@@ -679,6 +694,7 @@ mod tests {
             remember_session: true,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         };
         let (_, first_records) = run_with_options(&first).expect("first run should succeed");
         assert!(first_records
@@ -698,6 +714,7 @@ mod tests {
             remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         };
         let (same_session, _) = run_with_options(&second).expect("second run should succeed");
         assert_eq!(same_session.recall_hit_count, 1);
@@ -712,6 +729,7 @@ mod tests {
             remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
         assert_eq!(other_session.recall_hit_count, 0);
@@ -736,6 +754,7 @@ mod tests {
             remember_session: true,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         };
 
         let error = run_with_options(&request).expect_err("run should reject missing session id");
@@ -775,6 +794,7 @@ mod tests {
                 ..ToolExecutionConfig::default()
             },
             "请先写一个文件".to_string(),
+            Vec::new(),
         )
         .expect("tool loop should succeed");
 
@@ -834,6 +854,98 @@ mod tests {
     }
 
     #[test]
+    fn goal_spec_enters_extra_context_without_polluting_user_input() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-goal-context-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder =
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"目标已进入上下文\"}");
+        let captured = responder.captured.clone();
+        let mut config = test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        config.context_budget = Some(goal_context_test_budget());
+        let mut kernel = ChuangKernel::with_responder(
+            config,
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let goal = chuang_agent::goal_mode::GoalSpec::mainline_mvp("只接入 goal context");
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "保持原始输入".to_string(),
+            goal_context_segments(Some(&goal)).expect("goal context should render"),
+        )
+        .expect("goal context turn should succeed");
+
+        assert_eq!(turn.user_input, "保持原始输入");
+        assert_eq!(turn.result.response.body, "目标已进入上下文");
+        assert!(
+            turn.result.prompt.contains("GOAL_SPEC"),
+            "{}",
+            turn.result.prompt
+        );
+        assert!(turn
+            .result
+            .prompt
+            .contains("objective: 只接入 goal context"));
+        assert!(!turn.user_input.contains("GOAL_SPEC"));
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert_eq!(captured[0].user_input, "保持原始输入");
+        assert!(captured[0].prompt.contains("GOAL_SPEC"));
+    }
+
+    #[test]
+    fn missing_goal_spec_keeps_runtime_context_unchanged() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-no-goal-context-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder =
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"无目标上下文\"}");
+        let captured = responder.captured.clone();
+        let mut config = test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        config.context_budget = Some(goal_context_test_budget());
+        let mut kernel = ChuangKernel::with_responder(
+            config,
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "普通输入".to_string(),
+            Vec::new(),
+        )
+        .expect("turn without goal context should succeed");
+
+        assert_eq!(turn.user_input, "普通输入");
+        assert!(!turn.result.prompt.contains("GOAL_SPEC"));
+        assert!(!turn.result.packed_context_preview.contains("goal-spec"));
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert_eq!(captured[0].user_input, "普通输入");
+        assert!(!captured[0].prompt.contains("GOAL_SPEC"));
+    }
+
+    #[test]
     fn run_with_options_feeds_governance_rejection_back_to_model() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-tool-reject-test-{}",
@@ -860,6 +972,7 @@ mod tests {
             4,
             ToolExecutionConfig::default(),
             "读取环境文件".to_string(),
+            Vec::new(),
         )
         .expect("tool loop should continue after governance rejection");
 
@@ -915,6 +1028,7 @@ mod tests {
             4,
             ToolExecutionConfig::default(),
             "读取文件".to_string(),
+            Vec::new(),
         )
         .expect("tool loop should continue after protocol error");
 
@@ -987,6 +1101,7 @@ mod tests {
             4,
             ToolExecutionConfig::default(),
             "请先写完再按协议回答".to_string(),
+            Vec::new(),
         )
         .expect("tool loop should continue after plain text protocol error");
 
@@ -1058,6 +1173,16 @@ mod tests {
         format!("{}-{nanos}", std::process::id())
     }
 
+    fn goal_context_test_budget() -> chuang_agent::context_engine::ContextBudget {
+        chuang_agent::context_engine::ContextBudget {
+            max_tokens: 2048,
+            reserve_system_tokens: 64,
+            min_working_tokens: 1,
+            max_tool_results: 5,
+            max_memory_segments: 20,
+        }
+    }
+
     #[derive(Debug, Clone)]
     struct SequenceResponder {
         outputs: Arc<Mutex<Vec<String>>>,
@@ -1099,6 +1224,56 @@ mod tests {
                     request.user_input, request.recall_hit_count
                 ),
                 finish_reason: Some("sequence".to_string()),
+                extra_meta: std::collections::BTreeMap::new(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct CapturedResponderRequest {
+        prompt: String,
+        user_input: String,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CaptureResponder {
+        body: String,
+        captured: Arc<Mutex<Vec<CapturedResponderRequest>>>,
+    }
+
+    impl CaptureResponder {
+        fn new(body: &str) -> Self {
+            Self {
+                body: body.to_string(),
+                captured: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl chuang_agent::responder::ProviderAdapterResponder for CaptureResponder {
+        fn identity(&self) -> chuang_agent::responder::ProviderIdentity {
+            chuang_agent::responder::ProviderIdentity {
+                provider_id: "capture-responder".to_string(),
+                model_name: "capture-model".to_string(),
+            }
+        }
+
+        fn respond(
+            &self,
+            request: &chuang_agent::responder::ResponderRequest,
+        ) -> chuang_agent::responder::ProviderAdapterResponse {
+            self.captured
+                .lock()
+                .expect("capture lock should succeed")
+                .push(CapturedResponderRequest {
+                    prompt: request.prompt.clone(),
+                    user_input: request.user_input.clone(),
+                });
+
+            chuang_agent::responder::ProviderAdapterResponse {
+                body: self.body.clone(),
+                trace: "provider=capture-responder".to_string(),
+                finish_reason: Some("capture".to_string()),
                 extra_meta: std::collections::BTreeMap::new(),
             }
         }

@@ -1,3 +1,5 @@
+use crate::context_engine::{ContextSegment, SegmentSource};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalSpec {
     pub goal_id: String,
@@ -118,6 +120,26 @@ final_report_policy: validation={} next_steps={}",
             self.final_report_policy.include_next_steps
         ))
     }
+
+    pub fn render_context_segment(&self) -> Result<ContextSegment, GoalSpecError> {
+        let content = self.render_context_block()?;
+        let now = default_goal_timestamp();
+        Ok(ContextSegment {
+            id: format!("goal-spec-{}", sanitize_segment_id(&self.goal_id)),
+            source: SegmentSource::Goal,
+            tokens: Some(estimate_goal_tokens(&content)),
+            priority: 241,
+            created_at: now,
+            last_accessed: now,
+            metadata: [
+                ("kind".to_string(), "goal_spec".to_string()),
+                ("goal_id".to_string(), self.goal_id.clone()),
+            ]
+            .into_iter()
+            .collect(),
+            content,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,4 +177,26 @@ fn render_optional<T: ToString>(value: Option<T>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unset".to_string())
+}
+
+fn estimate_goal_tokens(content: &str) -> u16 {
+    content.chars().count().div_ceil(4).min(u16::MAX as usize) as u16
+}
+
+fn sanitize_segment_id(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn default_goal_timestamp() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-05-03T00:00:00Z")
+        .expect("static goal timestamp should parse")
+        .with_timezone(&chrono::Utc)
 }

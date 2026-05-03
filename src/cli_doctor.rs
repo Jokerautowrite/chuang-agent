@@ -215,6 +215,7 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
         remember_session: false,
         remember_identity: false,
         dispatch_subagent: false,
+        goal_spec: None,
     })
     .map(|_| ())
 }

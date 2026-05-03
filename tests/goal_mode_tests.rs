@@ -1,3 +1,4 @@
+use chuang_agent::context_engine::SegmentSource;
 use chuang_agent::goal_mode::GoalSpec;
 
 #[test]
@@ -59,4 +60,28 @@ fn goal_spec_renders_context_block_for_runtime_injection() {
     assert!(block.contains("allowed_slots: context,governance,execution,report,memory"));
     assert!(block.contains("max_subtasks=0"));
     assert!(block.contains("checkpoint_policy: progress_log=true handoff=true commit=true"));
+}
+
+#[test]
+fn goal_spec_renders_context_segment_for_runtime_extra_context() {
+    let goal = GoalSpec::mainline_mvp("inject goal without new slot");
+
+    let segment = goal
+        .render_context_segment()
+        .expect("context segment should render");
+
+    assert_eq!(segment.id, "goal-spec-mainline-mvp");
+    assert_eq!(segment.source, SegmentSource::Goal);
+    assert_eq!(
+        segment.metadata.get("kind").map(String::as_str),
+        Some("goal_spec")
+    );
+    assert_eq!(
+        segment.metadata.get("goal_id").map(String::as_str),
+        Some("mainline-mvp")
+    );
+    assert!(segment.content.contains("GOAL_SPEC"));
+    assert!(segment
+        .content
+        .contains("objective: inject goal without new slot"));
 }

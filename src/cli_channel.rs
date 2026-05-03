@@ -148,6 +148,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         remember_session: true,
         remember_identity: false,
         dispatch_subagent: false,
+        goal_spec: None,
     })?;
     let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
     let outbound = ChannelOutboundMessage {

@@ -317,6 +317,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         remember_session,
         remember_identity,
         dispatch_subagent,
+        goal_spec: None,
     })
 }
 

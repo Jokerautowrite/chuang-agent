@@ -115,6 +115,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
+            goal_spec: None,
         })?;
         print_runtime_result(&result);
         writeln!(stdout, "---").map_err(|e| format!("stdout_write_failed: {e}"))?;

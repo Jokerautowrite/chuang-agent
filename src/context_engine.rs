@@ -27,6 +27,7 @@ pub enum SegmentSource {
     Memory,
     Working,
     ToolResult,
+    Goal,
     System,
 }
 

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use chuang_agent::common::{AgentId, TaskId};
 use chuang_agent::control_intent::ControlIntentInput;
 use chuang_agent::genesis_actuator::GenesisAskResponse;
+use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::ChuangMvpStatus;
 use chuang_agent::runtime_config::{ConfigSummary, RuntimeConfig};
 use chuang_agent::subagent_report::SubagentReport;
@@ -26,6 +27,7 @@ pub(crate) struct RunCliRequest {
     pub(crate) remember_session: bool,
     pub(crate) remember_identity: bool,
     pub(crate) dispatch_subagent: bool,
+    pub(crate) goal_spec: Option<GoalSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
