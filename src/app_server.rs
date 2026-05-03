@@ -13,7 +13,7 @@ use chuang_agent::runtime_config::{
     RulesConfig, RuntimeConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
-use chuang_agent::tool_loop_meta::{parse_json_vec, ToolLoopMeta};
+use chuang_agent::tool_loop_meta::ToolLoopMeta;
 use chuang_agent::tool_runtime::{ToolExecutionRecord, ToolProtocolError};
 
 #[derive(Debug, Default)]
@@ -464,20 +464,16 @@ fn run_turn_with_tools(
     };
 
     let (result, _) = run_with_options(&request)?;
-    let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
-    let tool_calls =
-        parse_json_vec::<ToolExecutionRecord>(&result.response.meta.extra, "tool_calls_json")?;
-    let tool_protocol_errors = parse_json_vec::<ToolProtocolError>(
-        &result.response.meta.extra,
-        "tool_protocol_errors_json",
-    )?;
-    let tool_events = parse_json_vec::<Value>(&result.response.meta.extra, "tool_events_json")?;
+    let tool_meta =
+        ToolLoopMeta::<ToolExecutionRecord, ToolProtocolError, Value>::typed_from_extra(
+            &result.response.meta.extra,
+        )?;
 
     Ok(ToolLoopResult {
         result,
-        tool_calls,
-        tool_protocol_errors,
-        tool_events,
+        tool_calls: tool_meta.tool_calls,
+        tool_protocol_errors: tool_meta.tool_protocol_errors,
+        tool_events: tool_meta.tool_events,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
     })

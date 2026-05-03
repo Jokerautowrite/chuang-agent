@@ -4,15 +4,29 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolLoopMeta {
+pub struct ToolLoopMeta<C = Value, E = Value, V = Value> {
     pub tool_call_count: usize,
     pub tool_protocol_error_count: usize,
     pub tool_trace: String,
     pub tool_report: Option<Value>,
+    pub tool_calls: Vec<C>,
+    pub tool_protocol_errors: Vec<E>,
+    pub tool_events: Vec<V>,
 }
 
-impl ToolLoopMeta {
+impl ToolLoopMeta<Value, Value, Value> {
     pub fn from_extra(extra: &BTreeMap<String, String>) -> Result<Self, String> {
+        Self::typed_from_extra(extra)
+    }
+}
+
+impl<C, E, V> ToolLoopMeta<C, E, V>
+where
+    C: DeserializeOwned,
+    E: DeserializeOwned,
+    V: DeserializeOwned,
+{
+    pub fn typed_from_extra(extra: &BTreeMap<String, String>) -> Result<Self, String> {
         Ok(Self {
             tool_call_count: extra
                 .get("tool_call_count")
@@ -28,6 +42,9 @@ impl ToolLoopMeta {
                 .map(|value| serde_json::from_str(value))
                 .transpose()
                 .map_err(|e| format!("tool_report_json_parse_failed: {e}"))?,
+            tool_calls: parse_json_vec::<C>(extra, "tool_calls_json")?,
+            tool_protocol_errors: parse_json_vec::<E>(extra, "tool_protocol_errors_json")?,
+            tool_events: parse_json_vec::<V>(extra, "tool_events_json")?,
         })
     }
 }
@@ -67,7 +84,7 @@ pub fn parse_json_vec_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_json_vec_value, ToolLoopMeta};
+    use super::ToolLoopMeta;
     use std::collections::BTreeMap;
 
     #[test]
@@ -99,23 +116,8 @@ mod tests {
         assert_eq!(meta.tool_protocol_error_count, 1);
         assert_eq!(meta.tool_trace, "call trace");
         assert!(meta.tool_report.is_some());
-        assert_eq!(
-            parse_json_vec_value(&extra, "tool_calls_json")
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            parse_json_vec_value(&extra, "tool_protocol_errors_json")
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            parse_json_vec_value(&extra, "tool_events_json")
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(meta.tool_calls.len(), 1);
+        assert_eq!(meta.tool_protocol_errors.len(), 1);
+        assert_eq!(meta.tool_events.len(), 2);
     }
 }

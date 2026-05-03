@@ -12,7 +12,7 @@ use crate::app_server::build_runtime_for_workspace;
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
-use chuang_agent::tool_loop_meta::{parse_json_vec_value, ToolLoopMeta};
+use chuang_agent::tool_loop_meta::ToolLoopMeta;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct ChannelSimulateOutput {
@@ -150,10 +150,6 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         dispatch_subagent: false,
     })?;
     let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
-    let tool_calls = parse_json_vec_value(&result.response.meta.extra, "tool_calls_json")?;
-    let tool_protocol_errors =
-        parse_json_vec_value(&result.response.meta.extra, "tool_protocol_errors_json")?;
-    let tool_events = parse_json_vec_value(&result.response.meta.extra, "tool_events_json")?;
     let outbound = ChannelOutboundMessage {
         channel: request.inbound.channel.clone(),
         message_id: request.inbound.message_id.clone(),
@@ -170,9 +166,9 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_protocol_error_count: tool_meta.tool_protocol_error_count,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
-        tool_calls,
-        tool_protocol_errors,
-        tool_events,
+        tool_calls: tool_meta.tool_calls,
+        tool_protocol_errors: tool_meta.tool_protocol_errors,
+        tool_events: tool_meta.tool_events,
     };
 
     match request.output {
