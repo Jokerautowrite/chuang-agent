@@ -1,0 +1,418 @@
+#!/usr/bin/env node
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const readline = require("readline");
+const { spawn } = require("child_process");
+
+const dotenv = require("dotenv");
+const {
+  AppType,
+  Client,
+  Domain,
+  EventDispatcher,
+  LoggerLevel,
+  WSClient,
+} = require("@larksuiteoapi/node-sdk");
+const {
+  FeishuClientAdapter,
+  patchWsClientForCardCallbacks,
+} = require("/home/user/.codex/codex-feishu-bridge/src/infra/feishu/client-adapter");
+
+const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
+const ENV_FILE =
+  process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
+const WORKSPACE_ROOT =
+  process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT;
+const CODENODE_MODULES =
+  process.env.CHUANG_FEISHU_NODE_MODULES ||
+  "/home/user/.codex/codex-feishu-bridge/node_modules";
+const EVENT_LOG_FILE =
+  process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
+
+loadEnv();
+
+function loadEnv() {
+  const envPaths = [
+    ENV_FILE,
+    path.join(os.homedir(), ".codex-im", ".env"),
+    path.join(ROOT, ".env"),
+  ];
+  for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+    }
+  }
+  process.env.NODE_PATH = `${CODENODE_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;
+  require("module").Module._initPaths();
+}
+
+class AppServerClient {
+  constructor(rootDir) {
+    this.rootDir = rootDir;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.buffer = "";
+    this.restart();
+  }
+
+  restart() {
+    if (this.child) {
+      this.child.kill();
+    }
+    this.child = spawn("cargo", ["run", "--quiet", "--manifest-path", path.join(ROOT, "Cargo.toml"), "--", "app-server"], {
+      cwd: this.rootDir,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.child.stdout.on("data", (chunk) => this.handleStdout(chunk));
+    this.child.stderr.on("data", (chunk) => {
+      const text = chunk.toString().trimEnd();
+      if (text) {
+        console.error(`[chuang-feishu] app-server: ${text}`);
+      }
+    });
+    this.child.on("exit", (code, signal) => {
+      const error = new Error(`app-server exited: code=${code} signal=${signal || ""}`.trim());
+      for (const [, pending] of this.pending.entries()) {
+        pending.reject(error);
+      }
+      this.pending.clear();
+    });
+  }
+
+  handleStdout(chunk) {
+    this.buffer += chunk.toString();
+    let newlineIndex = this.buffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const rawLine = this.buffer.slice(0, newlineIndex).trim();
+      this.buffer = this.buffer.slice(newlineIndex + 1);
+      newlineIndex = this.buffer.indexOf("\n");
+      if (!rawLine) {
+        continue;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(rawLine);
+      } catch {
+        continue;
+      }
+      if (payload && Object.prototype.hasOwnProperty.call(payload, "id")) {
+        const pending = this.pending.get(String(payload.id));
+        if (!pending) {
+          continue;
+        }
+        this.pending.delete(String(payload.id));
+        if (payload.error) {
+          pending.reject(new Error(payload.error.message || "app-server request failed"));
+          continue;
+        }
+        pending.resolve(payload.result || {});
+      }
+    }
+  }
+
+  request(method, params) {
+    const id = String(this.nextId++);
+    const payload = JSON.stringify({ id, method, params });
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.child.stdin.write(`${payload}\n`);
+    });
+  }
+
+  async turnStart(inbound) {
+    const result = await this.request("turn/start", {
+      threadId: inbound.threadId || "",
+      workspaceRoot: inbound.workspaceRoot,
+      text: inbound.text,
+      channel: inbound.channel,
+      channelMessageId: inbound.messageId,
+      senderId: inbound.senderId,
+    });
+    const thread = result.thread || {};
+    const turn = result.turn || {};
+    const turns = Array.isArray(thread.turns) ? thread.turns : [];
+    const lastTurn = turns[turns.length - 1] || {};
+    const items = Array.isArray(lastTurn.items) ? lastTurn.items : [];
+    const assistant = items.find((item) => item && item.type === "agentMessage") || {};
+    const replyText = normalizeText(assistant.text || assistant.content?.[0]?.text || lastTurn.preview || "");
+    const footer = buildStatusFooter(turn);
+    const process = buildProcessSection(turn);
+    const parts = [replyText || "已收到。"];
+    if (footer) {
+      parts.push(footer);
+    }
+    if (process) {
+      parts.push(process);
+    }
+    const fullText = parts.join("\n\n");
+    return {
+      threadId: thread.id || inbound.threadId || inbound.messageId,
+      replyText: fullText,
+      modelName: assistant.model || result.model || "unknown",
+    };
+  }
+}
+
+class ChuangFeishuBridge {
+  constructor() {
+    this.lark = null;
+    this.client = null;
+    this.wsClient = null;
+    this.adapter = null;
+    this.queue = Promise.resolve();
+    this.appServer = new AppServerClient(WORKSPACE_ROOT);
+  }
+
+  async start() {
+    this.validateConfig();
+    this.initializeSdk();
+    this.startLongConnection();
+    console.log(`[chuang-feishu] bridge ready for app ${maskSecret(process.env.CHUANG_FEISHU_APP_ID)}`);
+  }
+
+  validateConfig() {
+    const required = [
+      "CHUANG_FEISHU_APP_ID",
+      "CHUANG_FEISHU_APP_SECRET",
+      "CHUANG_AGENT_WORKSPACE_ROOT",
+    ];
+    const missing = required.filter((name) => !String(process.env[name] || "").trim());
+    if (missing.length) {
+      throw new Error(`Missing required env: ${missing.join(",")}`);
+    }
+  }
+
+  initializeSdk() {
+    this.lark = { Client, WSClient, AppType, Domain, LoggerLevel, EventDispatcher };
+    this.client = new Client({
+      appId: process.env.CHUANG_FEISHU_APP_ID,
+      appSecret: process.env.CHUANG_FEISHU_APP_SECRET,
+      appType: AppType.SelfBuild,
+      domain: Domain.Feishu,
+      loggerLevel: LoggerLevel.info,
+    });
+    this.wsClient = new WSClient({
+      appId: process.env.CHUANG_FEISHU_APP_ID,
+      appSecret: process.env.CHUANG_FEISHU_APP_SECRET,
+      appType: AppType.SelfBuild,
+      domain: Domain.Feishu,
+      loggerLevel: LoggerLevel.info,
+      wsConfig: {
+        PingInterval: 30,
+        PingTimeout: 5,
+      },
+    });
+    this.adapter = new FeishuClientAdapter(this.client);
+    patchWsClientForCardCallbacks(this.wsClient);
+  }
+
+  startLongConnection() {
+    const dispatcher = new EventDispatcher({}).register({
+      "im.message.receive_v1": (data) => {
+        this.enqueue(() => this.handleTextEvent(data)).catch((error) => {
+          console.error(`[chuang-feishu] failed to handle message: ${error.message}`);
+        });
+      },
+    });
+    this.wsClient.start({ eventDispatcher: dispatcher });
+    console.log("[chuang-feishu] Feishu long connection started");
+  }
+
+  enqueue(task) {
+    this.queue = this.queue.then(task, task);
+    return this.queue;
+  }
+
+  async handleTextEvent(data) {
+    const inbound = normalizeFeishuTextEvent(data);
+    if (!inbound) {
+      return;
+    }
+    appendEventLog("inbound", {
+      chatId: inbound.chatId,
+      messageId: inbound.messageId,
+      threadId: inbound.threadId,
+      senderId: inbound.senderId,
+      text: truncateText(inbound.text, 240),
+    });
+
+    const turn = await this.appServer.turnStart(inbound);
+    await this.adapter.sendResourceMessage({
+      chatId: inbound.chatId,
+      msgType: "text",
+      content: JSON.stringify({ text: turn.replyText }),
+    });
+    appendEventLog("outbound", {
+      chatId: inbound.chatId,
+      messageId: inbound.messageId,
+      threadId: turn.threadId,
+      modelName: turn.modelName,
+      reply: truncateText(turn.replyText, 360),
+    });
+  }
+}
+
+function normalizeFeishuTextEvent(data) {
+  const event = data?.event || data || {};
+  const message = event?.message || {};
+  const sender = event?.sender || {};
+  if (message.message_type !== "text") {
+    return null;
+  }
+  const text = parseFeishuTextContent(message.content);
+  if (!text) {
+    return null;
+  }
+  const chatId = normalizeText(message.chat_id);
+  const messageId = normalizeText(message.message_id);
+  const senderId = normalizeText(sender?.sender_id?.open_id || sender?.sender_id?.user_id);
+  const threadId = normalizeText(message.root_id || message.thread_id || message.message_id);
+  if (!chatId || !messageId || !senderId) {
+    return null;
+  }
+  return {
+    channel: "feishu-dedicated-chuang",
+    chatId,
+    messageId,
+    senderId,
+    threadId,
+    workspaceRoot: WORKSPACE_ROOT,
+    text,
+  };
+}
+
+function parseFeishuTextContent(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    return normalizeText(parsed.text);
+  } catch {
+    return "";
+  }
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildStatusFooter(turn) {
+  if (!turn || typeof turn !== "object") {
+    return "";
+  }
+  const status = turn.status === "completed" ? "已完成" : normalizeText(turn.status) || "处理中";
+  const elapsed = formatDuration(turn.elapsedMs);
+  const model = normalizeText(turn.modelName) || "unknown";
+  const recallHits = Number.isFinite(Number(turn.recallHitCount)) ? Number(turn.recallHitCount) : 0;
+  const packedTokens = Number.isFinite(Number(turn.packedTokenCount)) ? Number(turn.packedTokenCount) : 0;
+  const contextMaxTokens = Number.isFinite(Number(turn.contextMaxTokens)) ? Number(turn.contextMaxTokens) : 0;
+  const providerMeta = turn.providerMeta && typeof turn.providerMeta === "object" ? turn.providerMeta : {};
+  const promptTokens = pickNumber(providerMeta.prompt_tokens);
+  const completionTokens = pickNumber(providerMeta.completion_tokens);
+  const apiCallCount = pickNumber(turn.apiCallCount) || 1;
+  const contextText = contextMaxTokens > 0
+    ? `上下文 ${formatThousands(packedTokens)}/${formatThousands(contextMaxTokens)}`
+    : `上下文 ${formatThousands(packedTokens)}`;
+  const tokenText = promptTokens || completionTokens
+    ? `↑ ${formatThousands(promptTokens)} · ↓ ${formatThousands(completionTokens)}`
+    : "";
+  return [status, `耗时 ${elapsed}`, model, tokenText, contextText, `回忆 ${recallHits}`, `API ${apiCallCount} 次`]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function buildProcessSection(turn) {
+  if (!turn || typeof turn !== "object") {
+    return "";
+  }
+  const trace = truncateText(normalizeText(turn.trace), 360);
+  const providerMeta = turn.providerMeta && typeof turn.providerMeta === "object" ? turn.providerMeta : {};
+  const responseKind = normalizeText(providerMeta.response_kind);
+  const finishReason = normalizeText(providerMeta.response_finish_reason);
+  const toolCallCount = pickNumber(turn.toolCallCount || providerMeta.tool_call_count);
+  const toolTrace = truncateText(normalizeText(turn.toolTrace || providerMeta.tool_trace), 240);
+  const toolState = toolCallCount > 0
+    ? "当前轮已执行本地工具"
+    : "当前轮未触发工具调用";
+  const lines = [
+    "过程摘要",
+    `- ${toolState}`,
+  ];
+  if (toolCallCount > 0) {
+    lines.push(`- 工具调用 ${toolCallCount} 次`);
+  }
+  if (responseKind || finishReason) {
+    lines.push(
+      `- provider ${responseKind || "unknown"} / finish ${finishReason || "unknown"}`
+    );
+  }
+  if (toolTrace) {
+    lines.push(`- tools ${toolTrace}`);
+  } else if (trace) {
+    lines.push(`- trace ${trace}`);
+  }
+  return lines.join("\n");
+}
+
+function formatDuration(ms) {
+  const totalMs = Number.isFinite(Number(ms)) ? Math.max(0, Number(ms)) : 0;
+  if (totalMs < 1000) {
+    return `${totalMs}ms`;
+  }
+  const seconds = (totalMs / 1000).toFixed(totalMs >= 10_000 ? 0 : 1);
+  return `${seconds}s`;
+}
+
+function formatThousands(value) {
+  const num = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return num.toLocaleString("en-US");
+}
+
+function pickNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : 0;
+}
+
+function truncateText(value, maxLen) {
+  const text = normalizeText(value);
+  if (text.length <= maxLen) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
+function appendEventLog(kind, payload) {
+  try {
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      kind,
+      ...payload,
+    });
+    fs.appendFileSync(EVENT_LOG_FILE, `${line}\n`, "utf8");
+  } catch (error) {
+    console.error(`[chuang-feishu] failed to write event log: ${error.message}`);
+  }
+}
+
+function maskSecret(value) {
+  if (!value) {
+    return "";
+  }
+  if (value.length <= 6) {
+    return "***";
+  }
+  return `${value.slice(0, 3)}***${value.slice(-3)}`;
+}
+
+async function main() {
+  const bridge = new ChuangFeishuBridge();
+  await bridge.start();
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[chuang-feishu] ${error.message}`);
+    process.exit(1);
+  });
+}

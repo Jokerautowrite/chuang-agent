@@ -3,14 +3,56 @@
 
 db_path = "./data/chuang-agent.db"
 recall_limit = 5
+tool_max_rounds = 4
+tool_shell_timeout_ms = 30000
 identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
 
-provider = "fake"
-provider_id = "fake-runtime"
-model = "stub-responder"
+# Optional shell risk overrides. Leave unset to use built-in safe defaults.
+# [tool_loop.risk]
+# delete_or_cleanup = " rm , git reset --hard"
+# service_change = " systemctl , service "
+# network_change = " curl , wget , ssh "
+# secret_access = " .env, token, secret, password"
 
-subagent = "fake"
+provider = "openai_compatible"
+provider_id = "local-openai-compatible"
+base_url = "http://127.0.0.1:8317/v1"
+model = "gpt-5.5"
+api_key_env = "CHUANG_AGENT_API_KEY"
+transport = "native"
+provider_timeout_ms = 120000
+
+# Optional explicit fallback. Leave unset if you want hard failure.
+# fallback_provider = "openai_compatible"
+# fallback_provider_id = "backup-openai-compatible"
+# fallback_base_url = "http://127.0.0.1:8318/v1"
+# fallback_model = "gpt-5.4"
+# fallback_api_key_env = "CHUANG_AGENT_FALLBACK_API_KEY"
+# fallback_transport = "native"
+# fallback_on_retryable = "true"
+# fallback_status_codes = "401,402"
+# fallback_error_classes = ""
+
+subagent = "queued_external"
 subagent_queue_root = "./data/subagent-queue"
+
+actuator = "command"
+actuator_program = "sh"
+actuator_args = "./scripts/chuang-actuator-adapter-example.sh --json"
+actuator_timeout_ms = 30000
+
+control = "command"
+program = "sh"
+list_args = "./scripts/chuang-control-adapter-example.sh list --json"
+apply_args = "./scripts/chuang-control-adapter-example.sh apply --json"
+control_timeout_ms = 30000
 
 context_engine = "deterministic_budget"
 context_max_tokens = 512
@@ -19,10 +61,9 @@ context_min_working_tokens = 1
 context_max_tool_results = 5
 context_max_memory_segments = 5
 
-# For a real OpenAI-compatible provider:
-# provider = "openai_compatible"
-# provider_id = "local-openai-compatible"
-# base_url = "http://127.0.0.1:8000/v1"
-# model = "gpt-5.5"
-# api_key_env = "CHUANG_AGENT_API_KEY"
-# transport = "stub"
+# For a command-backed control plane:
+# control = "command"
+# program = "/path/to/chuang-control-adapter"
+# list_args = "list --json"
+# apply_args = "apply --json"
+# timeout_ms = 30000

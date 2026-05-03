@@ -17,6 +17,16 @@ fn temp_root(name: &str) -> PathBuf {
 fn cli_doctor_reports_mvp_health_in_text() {
     let root = temp_root("text");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display()
+        ),
+    )
+    .expect("config should be written");
 
     let output = Command::new("cargo")
         .args([
@@ -24,14 +34,8 @@ fn cli_doctor_reports_mvp_health_in_text() {
             "--quiet",
             "--",
             "doctor",
-            "--db",
-            root.join("memory.db")
-                .to_str()
-                .expect("db path should be utf8"),
-            "--identity-memory-root",
-            root.join("identity")
-                .to_str()
-                .expect("identity path should be utf8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
         ])
         .output()
         .expect("cargo run should execute");
@@ -47,16 +51,34 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=config ok=true"));
     assert!(stdout.contains("doctor_check name=identity_memory ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
+    assert!(stdout.contains("doctor_check name=atomic_tools ok=true"));
+    assert!(stdout.contains("doctor_check name=actuator_smoke ok=true"));
+    assert!(stdout.contains("doctor_check name=control_plane_smoke ok=true"));
     assert!(stdout.contains("doctor_check name=runtime_smoke ok=true"));
     assert!(stdout.contains("doctor_check name=subagent_queue_smoke ok=true"));
+    assert!(stdout.contains("doctor_check name=plugin_registry ok=true"));
     assert!(stdout.contains("provider: fake"));
+    assert!(stdout.contains("execution: generic_agent_mvp"));
+    assert!(stdout.contains("atomic_tools_ok: true report_schema_version=6"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
+    assert!(stdout.contains("placeholder_warning: provider=fake"));
+    assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
 }
 
 #[test]
 fn cli_doctor_can_render_json_without_secret_leak() {
     let root = temp_root("json");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display()
+        ),
+    )
+    .expect("config should be written");
 
     let output = Command::new("cargo")
         .args([
@@ -65,14 +87,8 @@ fn cli_doctor_can_render_json_without_secret_leak() {
             "--",
             "doctor",
             "--json",
-            "--db",
-            root.join("memory.db")
-                .to_str()
-                .expect("db path should be utf8"),
-            "--identity-memory-root",
-            root.join("identity")
-                .to_str()
-                .expect("identity path should be utf8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--provider-base-url",
             "https://api.example.com/v1",
             "--provider-api-key",
@@ -92,11 +108,75 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 5);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 9);
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "atomic_tools"));
+    assert_eq!(parsed["status"]["atomic_tools"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["tool_report_schema_version"],
+        6
+    );
     assert_eq!(
         parsed["status"]["config"]["provider_kind"],
         "openai_compatible"
     );
     assert_eq!(parsed["status"]["config"]["api_key_state"], "<set>");
+    assert!(parsed["status"]["config"]["placeholder_warnings"]
+        .as_array()
+        .expect("placeholder warnings should be an array")
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .expect("warning should be string")
+            .contains("actuator=fake")));
     assert!(!stdout.contains("doctor-secret-key"));
+}
+
+#[test]
+fn cli_doctor_reports_command_control_list_failure() {
+    let root = temp_root("command-control-fail");
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+db_path = "{}"
+identity_memory_root = "{}"
+control = "command"
+program = "false"
+list_args = "--version"
+apply_args = "apply --json"
+"#,
+            root.join("memory.db").display(),
+            root.join("identity").display()
+        ),
+    )
+    .expect("config file should be writable");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "doctor",
+            "--config",
+            config_path
+                .to_str()
+                .expect("config path should be valid utf-8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains("doctor_control_plane_list_failed"),
+        "stderr={stderr}"
+    );
+    assert!(stderr.contains("status=Some(1)"), "stderr={stderr}");
 }

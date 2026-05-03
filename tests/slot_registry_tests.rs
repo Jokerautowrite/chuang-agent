@@ -1,3 +1,4 @@
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,16 +8,19 @@ use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecis
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::responder::{Responder, ResponderRequest};
 use chuang_agent::runtime_config::{
-    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig, SubagentQueueConfig,
+    OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
+    SubagentQueueConfig,
 };
 use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
 use chuang_agent::slot_registry::{
-    build_provider_responder, build_runtime_slots, summarize_runtime_slots, SubagentRuntimeSlot,
+    build_genesis_actuator, build_provider_responder, build_runtime_slots, summarize_runtime_slots,
+    SubagentRuntimeSlot,
 };
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentError, SubagentSpawner, SubagentToolPolicy,
 };
+use chuang_agent::tool_runtime::ToolCall;
 use chuang_agent::{common::AgentId, common::ReportId, common::TaskId, common::Timestamp};
 
 fn temp_queue_root(name: &str) -> PathBuf {
@@ -55,8 +59,15 @@ fn slot_registry_builds_all_current_runtime_slots_from_config() {
         })
         .expect("noop evolver should accept valid scope");
     let units = slots.control_plane.list_units();
+    let execution_mapping = slots
+        .execution
+        .registry()
+        .mapping_for_call(&ToolCall::ReadFile {
+            path: "README.md".to_string(),
+        });
 
     assert!(matches!(decision, RiskDecision::Allowed { .. }));
+    assert_eq!(execution_mapping.atomic_tool_name, Some("file_read"));
     assert_eq!(observation.summary, "fake observation");
     assert!(proposals.is_empty());
     assert!(units.iter().any(|unit| unit.display_name == "小策"));
@@ -131,6 +142,7 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
 
     assert_eq!(summary.provider, "fake");
     assert_eq!(summary.governance, "static_rule");
+    assert_eq!(summary.execution, "generic_agent_mvp");
     assert_eq!(summary.actuator, "fake");
     assert_eq!(summary.subagent, "fake");
     assert_eq!(summary.evolution, "noop");
@@ -159,11 +171,130 @@ fn slot_registry_builds_provider_responder_from_config() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
         }))
         .expect("openai-compatible provider should build");
     let provider = openai.provider();
     assert_eq!(provider.provider_id, "custom-openai");
     assert_eq!(provider.model_name, "gpt-4.1-mini");
+}
+
+#[test]
+fn slot_registry_provider_fallback_uses_secondary_on_primary_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    drop(listener);
+
+    let provider = build_provider_responder(&ProviderConfig::Fallback {
+        primary: Box::new(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "primary-openai".to_string(),
+            base_url: format!("http://{address}/v1"),
+            api_key: "test-key".to_string(),
+            model_name: "primary-model".to_string(),
+            transport: ProviderTransport::Http,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
+        })),
+        fallback: Box::new(ProviderConfig::Fake {
+            provider_id: "fallback-fake".to_string(),
+            model_name: "fallback-model".to_string(),
+        }),
+        policy: ProviderFallbackPolicy::default(),
+    })
+    .expect("fallback provider should build");
+
+    let output = provider.generate(&ResponderRequest {
+        prompt: "prompt".to_string(),
+        user_input: "fallback smoke".to_string(),
+        recall_hit_count: 0,
+    });
+
+    assert_eq!(output.model_name, "fallback-model");
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_from")
+            .map(String::as_str),
+        Some("primary-openai")
+    );
+}
+
+#[test]
+fn slot_registry_provider_fallback_does_not_mask_unlisted_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    drop(listener);
+
+    let provider = build_provider_responder(&ProviderConfig::Fallback {
+        primary: Box::new(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "primary-openai".to_string(),
+            base_url: format!("http://{address}/v1"),
+            api_key: "test-key".to_string(),
+            model_name: "primary-model".to_string(),
+            transport: ProviderTransport::Http,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
+        })),
+        fallback: Box::new(ProviderConfig::Fake {
+            provider_id: "fallback-fake".to_string(),
+            model_name: "fallback-model".to_string(),
+        }),
+        policy: ProviderFallbackPolicy {
+            on_retryable: false,
+            status_codes: Vec::new(),
+            error_classes: Vec::new(),
+        },
+    })
+    .expect("fallback provider should build");
+
+    let output = provider.generate(&ResponderRequest {
+        prompt: "prompt".to_string(),
+        user_input: "fallback policy smoke".to_string(),
+        recall_hit_count: 0,
+    });
+
+    assert_eq!(output.model_name, "primary-model");
+    assert_ne!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[test]
+fn slot_registry_builds_genesis_actuator_from_config() {
+    let actuator = build_genesis_actuator(chuang_agent::genesis_actuator::GenesisConfig {
+        program: "printf".to_string(),
+        profile_dir: PathBuf::from("/tmp/chuang-genesis-slot-profile"),
+        cdp_port: 9333,
+        timeout_ms: 12_345,
+    });
+
+    let primary = actuator.primary_spec("查询");
+    let fallback = actuator.fallback_spec("查询");
+
+    assert_eq!(primary.program, "printf");
+    assert_eq!(primary.channel.as_str(), "user_data_dir");
+    assert!(primary.args.contains(&"--user-data-dir".to_string()));
+    assert!(primary
+        .args
+        .contains(&"/tmp/chuang-genesis-slot-profile".to_string()));
+    assert!(primary.args.contains(&"12345".to_string()));
+    assert_eq!(fallback.channel.as_str(), "cdp");
+    assert!(fallback.args.contains(&"9333".to_string()));
 }
 
 #[test]
@@ -182,6 +313,8 @@ fn slot_registry_rejects_invalid_provider_config_before_adapter_use() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
         }))
         .expect_err("openai-compatible provider with empty base_url should be rejected");
     assert_eq!(openai_err.field, "provider.base_url");
@@ -196,6 +329,8 @@ fn slot_registry_rejects_runtime_with_invalid_provider_slot() {
         api_key: String::new(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        request_timeout_ms: None,
+        tls_ca_cert_path: None,
     });
 
     let err = build_runtime_slots(&config).expect_err("invalid provider should reject slots");

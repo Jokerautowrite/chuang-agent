@@ -1,23 +1,34 @@
 use std::env;
 use std::io::{self, BufRead, Write};
 
+mod app_server;
 mod cli_args;
+mod cli_channel;
 mod cli_config;
+mod cli_console;
 mod cli_control;
 mod cli_doctor;
+mod cli_experiment;
 mod cli_genesis;
+mod cli_memory;
 mod cli_output;
+mod cli_plugin;
 mod cli_runtime;
 mod cli_subagent;
 mod cli_types;
 
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use cli_args::*;
+use cli_channel::channel_command;
 use cli_config::config_command;
+use cli_console::console_command;
 use cli_control::control_command;
 use cli_doctor::doctor_command;
+use cli_experiment::experiment_command;
 use cli_genesis::genesis_command;
+use cli_memory::memory_command;
 use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
+use cli_plugin::plugin_command;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_subagent::subagent_command;
 use cli_types::*;
@@ -37,9 +48,15 @@ fn run_cli() -> Result<(), String> {
         Some("status") => status_command(&args[2..]),
         Some("doctor") => doctor_command(&args[2..]),
         Some("config") => config_command(&args[2..]),
+        Some("channel") => channel_command(&args[2..]),
+        Some("console") => console_command(&args[2..]),
         Some("control") => control_command(&args[2..]),
         Some("subagent") => subagent_command(&args[2..]),
         Some("genesis") => genesis_command(&args[2..]),
+        Some("memory") => memory_command(&args[2..]),
+        Some("plugin") => plugin_command(&args[2..]),
+        Some("experiment") => experiment_command(&args[2..]),
+        Some("app-server") => app_server::app_server_command(&args[2..]),
         _ => Err(usage()),
     }
 }
@@ -50,6 +67,9 @@ fn run_command(args: &[String]) -> Result<(), String> {
     print_runtime_result(&result);
     if let Some(record_id) = memory_records.sqlite_record_id {
         println!("memory_recorded: {record_id}");
+    }
+    if let Some(record_id) = memory_records.session_record_id {
+        println!("session_memory_recorded: {record_id}");
     }
     if let Some(record_id) = memory_records.identity_record_id {
         println!("identity_memory_recorded: {record_id}");
@@ -89,7 +109,10 @@ fn repl_command(args: &[String]) -> Result<(), String> {
         let (result, _) = run_with_options(&RunCliRequest {
             options: options.clone(),
             user_input: input.to_string(),
+            workspace_root: None,
             remember: false,
+            session_id: None,
+            remember_session: false,
             remember_identity: false,
             dispatch_subagent: false,
         })?;

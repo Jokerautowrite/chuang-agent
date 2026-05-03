@@ -79,5 +79,6 @@ pub trait DualFileMemoryStore {
     fn read_memory(&self) -> Result<String, DualFileMemoryError>;
     fn snapshot(&self) -> Result<DualFileMemorySnapshot, DualFileMemoryError>;
     fn write_user(&mut self, content: &str) -> Result<(), DualFileMemoryError>;
+    fn write_memory(&mut self, content: &str) -> Result<(), DualFileMemoryError>;
     fn append_memory(&mut self, entry: HotMemoryEntry) -> Result<(), DualFileMemoryError>;
 }

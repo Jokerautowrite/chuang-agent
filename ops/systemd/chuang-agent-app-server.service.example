@@ -1,0 +1,18 @@
+[Unit]
+Description=Chuang Agent app-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/projects/chuang-agent
+EnvironmentFile=/home/user/projects/chuang-agent/ops/systemd/chuang-agent-app-server.env
+ExecStart=/home/user/projects/chuang-agent/scripts/chuang-codex.sh app-server
+ExecStartPre=/home/user/projects/chuang-agent/scripts/chuang-app-server-health.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

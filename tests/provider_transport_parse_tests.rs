@@ -10,6 +10,15 @@ fn provider_transport_parses_http_variant() {
 }
 
 #[test]
+fn provider_transport_parses_native_variant() {
+    let parsed = "native"
+        .parse::<ProviderTransport>()
+        .expect("native transport should parse");
+    assert_eq!(parsed, ProviderTransport::Native);
+    assert_eq!(parsed.as_str(), "native");
+}
+
+#[test]
 fn provider_transport_parses_curl_variant() {
     let parsed = "curl"
         .parse::<ProviderTransport>()

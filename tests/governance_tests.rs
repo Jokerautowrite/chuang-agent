@@ -1,6 +1,6 @@
 use chuang_agent::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use chuang_agent::governance::{
-    ActionKind, Governance, ProposedAction, RiskDecision, StaticRuleGovernance,
+    ActionKind, Governance, MarkdownRuleSet, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
 
 fn action(kind: ActionKind, target: &str) -> ProposedAction {
@@ -79,4 +79,32 @@ fn static_governance_records_audit_entries() {
     governance.audit(record.clone()).unwrap();
 
     assert_eq!(governance.audit_records(), &[record]);
+}
+
+#[test]
+fn markdown_ruleset_rejects_empty_or_ruleless_content() {
+    assert!(MarkdownRuleSet::from_content("rules.md", String::new()).is_err());
+    assert!(MarkdownRuleSet::from_content("rules.md", "# Only a heading".to_string()).is_err());
+}
+
+#[test]
+fn static_governance_attaches_rules_fingerprint_to_decision_reason() {
+    let rules = MarkdownRuleSet::from_content(
+        "rules/core.md",
+        "1. Clarify before irreversible work\n2. Keep changes minimal\n".to_string(),
+    )
+    .expect("rules should parse");
+    let governance = StaticRuleGovernance::with_rules(rules);
+
+    let decision = governance
+        .classify(&action(ActionKind::Draft, "project-plan"))
+        .expect("governance should classify");
+
+    match decision {
+        RiskDecision::Allowed { reason } => {
+            assert!(reason.contains("read-only or draft action"));
+            assert!(reason.contains("rules="));
+        }
+        other => panic!("unexpected decision: {other:?}"),
+    }
 }

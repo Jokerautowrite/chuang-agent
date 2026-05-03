@@ -1,7 +1,20 @@
+use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use chuang_agent::actuator::{
-    Actuator, ClickTarget, FakeActuator, FocusTarget, InputTarget, ObserveTarget, OpenAppRequest,
-    ScreenshotTarget, SecretOrPlainText,
+    Actuator, ClickTarget, CommandActuator, FakeActuator, FocusTarget, InputTarget, ObserveTarget,
+    OpenAppRequest, ScreenshotTarget, SecretOrPlainText,
 };
+use chuang_agent::runtime_config::ActuatorCommandConfig;
+
+fn temp_script_path(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-actuator-{name}-{nanos}.sh"))
+}
 
 #[test]
 fn fake_actuator_records_human_level_operation_sequence() {
@@ -62,4 +75,120 @@ fn fake_actuator_does_not_record_secret_text_content() {
 
     assert_eq!(actuator.calls(), &["input_text:Focused:secret".to_string()]);
     assert!(!actuator.calls()[0].contains("verification-code"));
+}
+
+#[test]
+fn command_actuator_invokes_external_json_adapter() {
+    let script = temp_script_path("adapter");
+    fs::write(
+        &script,
+        r#"#!/bin/sh
+python3 -c '
+import json
+import sys
+request = json.load(sys.stdin)
+action = request.get("action")
+if action == "observe":
+    print(json.dumps({"observation":{"target":request["observe_target"],"summary":"screen observed","evidence_ref":{"uri":"cmd://observation"}},"app_handle":None,"evidence_ref":None,"message":"ok"}))
+elif action == "open_app":
+    app = request["open_app"]["app_name"]
+    print(json.dumps({"observation":None,"app_handle":{"app_name":app,"handle_id":"cmd://app/" + app},"evidence_ref":None,"message":"ok"}))
+elif action == "screenshot":
+    print(json.dumps({"observation":None,"app_handle":None,"evidence_ref":{"uri":"cmd://screenshot"},"message":"ok"}))
+else:
+    print(json.dumps({"observation":None,"app_handle":None,"evidence_ref":None,"message":"ok"}))
+'
+"#,
+    )
+    .expect("script should write");
+
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "sh".to_string(),
+        args: script.display().to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let observation = actuator.observe(ObserveTarget::Screen).unwrap();
+    let handle = actuator
+        .open_app(OpenAppRequest {
+            app_name: "Feishu".to_string(),
+        })
+        .unwrap();
+    actuator
+        .focus(FocusTarget::App("Feishu".to_string()))
+        .unwrap();
+    actuator
+        .click(ClickTarget::UiLabel("composer".to_string()))
+        .unwrap();
+    actuator
+        .input_text(
+            InputTarget::Focused,
+            SecretOrPlainText::Plain("hello".to_string()),
+        )
+        .unwrap();
+    let screenshot = actuator.screenshot(ScreenshotTarget::Screen).unwrap();
+
+    assert_eq!(observation.summary, "screen observed");
+    assert_eq!(handle.handle_id, "cmd://app/Feishu");
+    assert_eq!(screenshot.uri, "cmd://screenshot");
+}
+
+#[test]
+fn command_actuator_reports_malformed_adapter_output() {
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "printf".to_string(),
+        args: "not-json".to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = actuator
+        .observe(ObserveTarget::Screen)
+        .expect_err("malformed output should fail");
+
+    assert!(err.message.contains("actuator command output parse failed"));
+}
+
+#[test]
+fn real_actuator_adapter_allows_only_allowlisted_app_in_dry_run() {
+    let allowlist = temp_script_path("real-actuator-allowlist").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [{
+    "app_name": "Feishu",
+    "open_command": ["feishu"]
+  }],
+  "input_allowed": false,
+  "click_allowed": false,
+  "screenshot_allowed": false
+}"#,
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: adapter_path.display().to_string(),
+        args: format!("--json --allowlist {}", allowlist.display()),
+        timeout_ms: 30_000,
+    });
+
+    let handle = actuator
+        .open_app(OpenAppRequest {
+            app_name: "Feishu".to_string(),
+        })
+        .expect("allowlisted app should be accepted");
+    assert_eq!(handle.handle_id, "chuang-actuator://app/Feishu");
+
+    let err = actuator
+        .open_app(OpenAppRequest {
+            app_name: "Konsole".to_string(),
+        })
+        .expect_err("unallowlisted app should fail");
+    assert!(err.message.contains("app not allowlisted"));
+
+    let err = actuator
+        .click(ClickTarget::UiLabel("send".to_string()))
+        .expect_err("click should not be allowlisted");
+    assert!(err.message.contains("click not allowlisted"));
 }

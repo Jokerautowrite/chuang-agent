@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
+use std::time::Duration;
 
 use chuang_agent::provider_openai_compatible::{
     OpenAICompatibleProviderAdapter, ProviderTransport,
@@ -65,5 +66,75 @@ fn openai_compatible_curl_transport_executes_post_against_local_server() {
         response.extra_meta.get("status_code").map(String::as_str),
         Some("200")
     );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_retryable")
+            .map(String::as_str),
+        Some("false")
+    );
     assert!(response.trace.contains("transport_mode=curl"));
+}
+
+#[test]
+fn openai_compatible_curl_transport_times_out_when_process_stalls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        thread::sleep(Duration::from_millis(120));
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Curl)
+    .with_request_timeout_ms(20);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "curl timeout".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.finish_reason.as_deref(), Some("invalid-config"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("config_error_field")
+            .map(String::as_str),
+        Some("curl_wait")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("transport")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_retryable")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_ms")
+            .map(String::as_str),
+        Some("20")
+    );
+    assert!(response.body.contains("timed out after 20ms"));
 }

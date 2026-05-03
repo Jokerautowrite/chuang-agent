@@ -1,13 +1,17 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chuang_agent::actuator::{Actuator, ObserveTarget};
+use chuang_agent::atomic_tool::{ga_atomic_tool_manifests, AtomicToolKind, AtomicToolStatus};
 use chuang_agent::kernel_status::build_chuang_mvp_status;
+use chuang_agent::plugin_registry::check_plugin_registry;
 use chuang_agent::runtime_config::{ProviderConfig, RuntimeConfig};
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, QueuedSubagentSpawner, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
+use chuang_agent::tool_runtime::ToolLoopReport;
 use chuang_agent::{common::AgentId, common::TaskId};
 
 use crate::cli_args::{parse_cli_options, parse_status_output};
@@ -41,12 +45,30 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     checks.push(pass("identity_memory", "identity snapshot loaded"));
 
-    build_runtime_slots(runtime)
+    let mut slots = build_runtime_slots(runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     checks.push(pass("slots", "runtime slots build"));
 
+    run_atomic_tool_manifest_check()?;
+    checks.push(pass(
+        "atomic_tools",
+        "GenericAgent 9 atomic tool manifest is available",
+    ));
+
+    slots
+        .actuator
+        .observe(ObserveTarget::Screen)
+        .map_err(|e| format!("doctor_actuator_observe_failed: {}", e.message))?;
+    checks.push(pass("actuator_smoke", "actuator observe completed"));
+
+    slots
+        .control_plane
+        .try_list_units()
+        .map_err(|e| format!("doctor_control_plane_list_failed: {e:?}"))?;
+    checks.push(pass("control_plane_smoke", "control plane list completed"));
+
     run_isolated_runtime_smoke(runtime)?;
-    checks.push(pass("runtime_smoke", "isolated fake turn completed"));
+    checks.push(pass("runtime_smoke", "isolated runtime turn completed"));
 
     run_isolated_subagent_queue_smoke()?;
     checks.push(pass(
@@ -54,11 +76,66 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         "isolated queued dispatch completed",
     ));
 
+    run_plugin_registry_check()?;
+    checks.push(pass("plugin_registry", "plugin registry check completed"));
+
     Ok(DoctorCliOutput {
         ok: checks.iter().all(|check| check.ok),
         checks,
         status,
     })
+}
+
+fn run_atomic_tool_manifest_check() -> Result<(), String> {
+    let manifests = ga_atomic_tool_manifests();
+    if manifests.len() != 9 {
+        return Err(format!(
+            "doctor_atomic_tools_failed expected=9 actual={}",
+            manifests.len()
+        ));
+    }
+
+    let mapped = manifests
+        .iter()
+        .filter(|tool| tool.status == AtomicToolStatus::Mapped)
+        .map(|tool| tool.kind)
+        .collect::<Vec<_>>();
+    let expected_mapped = vec![
+        AtomicToolKind::FileRead,
+        AtomicToolKind::FileWrite,
+        AtomicToolKind::CodeExecute,
+    ];
+    if mapped != expected_mapped {
+        return Err(format!(
+            "doctor_atomic_tools_failed mapped={mapped:?} expected={expected_mapped:?}"
+        ));
+    }
+
+    if ToolLoopReport::schema_version() != 6
+        || !ToolLoopReport::schema_fields().contains(&"calls")
+        || !ToolLoopReport::call_schema_fields().contains(&"atomic_tool_name")
+        || !ToolLoopReport::call_schema_fields().contains(&"write_diff_preview")
+    {
+        return Err("doctor_atomic_tools_failed invalid tool report schema".to_string());
+    }
+
+    Ok(())
+}
+
+fn run_plugin_registry_check() -> Result<(), String> {
+    let path = PathBuf::from("plugins/registry.example.json");
+    if !path.exists() {
+        return Ok(());
+    }
+    let check = check_plugin_registry(&path)?;
+    if check.ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "doctor_plugin_registry_failed path={} plugin_count={}",
+            check.registry_path, check.plugin_count
+        ))
+    }
 }
 
 fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
@@ -81,7 +158,10 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
             runtime: smoke_runtime,
         },
         user_input: "doctor smoke".to_string(),
+        workspace_root: Some(root),
         remember: false,
+        session_id: None,
+        remember_session: false,
         remember_identity: false,
         dispatch_subagent: false,
     })
@@ -156,5 +236,17 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.config.context_engine_kind
     );
     println!("subagent: {}", doctor.status.config.subagent_kind);
+    println!("execution: {}", doctor.status.slots.execution);
+    println!(
+        "atomic_tools_ok: {} report_schema_version={}",
+        doctor.status.atomic_tools.ok, doctor.status.atomic_tools.tool_report_schema_version
+    );
     println!("control_plane: {}", doctor.status.slots.control_plane);
+    if doctor.status.config.placeholder_warnings.is_empty() {
+        println!("placeholder_warnings: none");
+    } else {
+        for warning in &doctor.status.config.placeholder_warnings {
+            println!("placeholder_warning: {warning}");
+        }
+    }
 }

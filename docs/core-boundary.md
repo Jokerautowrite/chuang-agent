@@ -29,6 +29,7 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - browser worker：旧浏览器外脑实验线，当前冻结，不继续作为 MVP 推进方向。
 - control plane：systemd、桌面服务、Agent 进程管理。
 - external channel：飞书、微信、HTTP、CLI、桌面 UI。
+- channel adapter：外部消息和 app-server/runtime 的薄转换层；Feishu/WeChat credential、webhook、ack、重试都属于插件，不进入 core。
 - evolver：技能提炼、SOP 固化、外脑同步。
 
 这些模块可以进仓库，但不能反向成为 core 的硬依赖。
@@ -45,13 +46,14 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `responder` 主文件保留 responder trait、provider adapter trait 和统一壳；fake/scripted 测试实现已拆到子模块。
 - `provider_openai_compatible` 承载 OpenAI-compatible 具体 adapter；调用点直接引用 provider 模块。
 - `subagent_spawner` 主文件保留协议类型、trait、slot 转发和共用校验；fake / queued 实现已拆到子模块。
-- `control_plane` 主文件保留控制面协议、治理/审计辅助函数和共用校验；fake 实现已拆到子模块。真实 systemd/桌面控制必须单独作为 adapter。
-- `actuator` 主文件保留人类级操作面协议；fake 实现已拆到子模块。真实桌面、浏览器、微信、ADB 控制必须单独作为 adapter。
+- `control_plane` 主文件保留控制面协议、治理/审计辅助函数和共用校验；fake 与 command-backed 实现已拆到子模块。真实 systemd/桌面控制必须单独作为 adapter 或外部 command bridge。
+- `actuator` 主文件保留人类级操作面协议；fake 与 command-backed 实现已拆到子模块。真实桌面、浏览器、微信、ADB 控制必须单独作为外部 command adapter，不写死进 core。
 - `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现已拆到子模块。真实技能提炼/固化必须单独作为 evolver adapter。
 - `memory_store` 主文件保留记忆记录、查询、命中、trait 和错误类型；in-memory 测试/开发实现已拆到子模块。SQLite、Hermes 双文件、未来向量/远程记忆都必须作为独立实现。
 - `hermes_memory` 主文件保留 Hermes 双文件记忆配置、快照、条目、错误和 trait；真实文件读写实现已拆到子模块。
 - `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 与 summary_compression 策略包装已拆到子模块。未来真实摘要压缩/优先级/对话树策略必须作为独立 engine。
 - `governance` 主文件保留动作、风险决策、错误类型和 trait；static-rule 实现已拆到子模块。未来策略引擎/审批通道/组织规则必须作为独立治理实现。
 - `slot_registry` 已引入 `ProviderSlot / GovernanceSlot / ActuatorSlot / EvolutionSlot / ControlPlaneSlot`，避免 `RuntimeSlots` 字段直接绑定具体实现类型。
+- `slot_registry` 也负责 `GenesisActuator` 的具体构造入口，CLI 只拿 `GenesisSlot` wrapper，不直接持有 AutoCLI 细节。
 - `browser_worker` 明确属于 adapter/plugin 能力线。旧实现当前先冻结，不作为 MVP 推进方向；MVP 主入口、runtime、kernel、slot registry 不应直接依赖它。
 - `Genesis Actuator` 是后续网页 AI 查询能力的新插件线：对核心只暴露 `ask/search` 语义，主通道 userDataDir、备用 CDP、登录态检测和修复策略都必须留在 adapter 内，并接受治理和审计约束。

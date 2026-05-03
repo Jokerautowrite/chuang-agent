@@ -1,8 +1,107 @@
 # 协作进度日志
 
+## 2026-05-03
+
+### 最新进展
+- 主进程 Execution Slot 工具回传继续硬化：`ToolLoopReport` schema 升到 v6，新增 `stderr_bytes / stderr_lines`、`write_operation`、`output_redacted / stdout_redacted / stderr_redacted`。
+- `read_file` 和 `code_execute` 对疑似密钥路径或内容返回脱敏占位，并保留原始字节数/行数统计，避免工具输出把密钥带进飞书、日志或报告。
+- `file_write` 回执新增 `write_operation=created|modified|unchanged`，上层不用再从 `write_before_bytes / write_changed` 反推写入类型。
+- `toolEvents[]` 新增 `atomic_tool_name / failure_class / duration_ms / retryable`，事件流可以直接用于控制台和通道调试，`summary` 只作为人工可读兼容字段。
+- 工具循环里的普通文本处理也收紧了：首轮可直答，但一旦进入工具往返，后续普通文本会被回灌成 `plain_text_response` 协议错误，逼模型回到 `ACTION` 或 `FINAL`。
+- 工具提示词本身也同步收紧了，明确要求首轮尽量用 `FINAL` 收口，进入工具往返后只允许 `ACTION` / `FINAL`。
+- `tool_events_json` 现在也会提升为 runtime report 的 `Log` artifact，子代理和报告面可以直接吃到结构化事件流，不只看 summary。
+- `docs/execution-slot-tool-protocol.md` 已同步 v6 字段和事件流语义。
+- 验证通过：`cargo fmt --all`、`git diff --check`、`timeout 240s cargo test -q`。
+
+## 2026-05-02
+
+### 最新进展
+- `ToolLoopReport` schema 升到 v6：工具调用记录新增 `stderr_bytes / stderr_lines`、`write_operation`、`output_redacted / stdout_redacted / stderr_redacted`，app-server `toolCalls[]` 同步输出对应 camelCase 字段。
+- `read_file` / `code_execute` 现在遇到疑似密钥路径或内容会返回脱敏占位，并保留原始字节数/行数统计，避免工具结果把密钥带进通道、日志或报告。
+- `file_write` 回执新增 `write_operation=created|modified|unchanged`，上层不用再靠 `write_before_bytes + write_changed` 反推写入语义。
+- `toolEvents[]` 新增 `atomic_tool_name / failure_class / duration_ms / retryable`，事件流不再只能靠 `summary` 判断工具身份、失败类型和重试建议。
+- 工具执行记录新增结构化定位字段：`target_path / resolved_path / cwd / command`，app-server `toolCalls[]` 同步输出 `targetPath / resolvedPath / cwd / command`，上层不必再从 `summary` 里拆路径和命令。
+- `list_dir` 新增结构化 `entries[]`，每个条目包含 `name/kind`，上层不必再解析 `output=entries[...]`。
+- `read_file` / `list_dir` / `code_execute` 新增 `output_bytes / output_lines`，上层不必再从 `summary` 或 stdout 文本计算基础规模。
+- `ToolLoopReport` schema 升到 v5，对应工具执行定位、目录条目和输出规模字段扩展。
+- 主进程 `file_write` 回执新增有界 diff 预览：`ToolExecutionRecord` 现在带 `write_diff_preview / write_diff_truncated`，app-server `toolCalls[]` 同步输出 `writeDiffPreview / writeDiffTruncated`。
+- diff 预览会对 `.env`、token、secret、password、private key 等疑似敏感路径或内容脱敏，只给审计面一个安全占位，避免把密钥写进通道或日志。
+- 工具报告协议随新增字段持续升级，当前 `ToolLoopReport` schema 为 v6，控制台/通道可用 schema version 判断字段支持范围。
+- `code_execute` 风险分类已从纯硬编码收口到 `ShellRiskRules`：默认规则保持原行为，同时配置文件可通过 `[tool_loop.risk]` 覆盖删除/清理、服务变更、网络调用、密钥访问四类模式。
+- 主进程工具循环现在会把治理拒绝结构化回灌给模型：高风险工具不再直接打断整轮对话，而是返回 `ok=false / failure_class=governance_rejected` 的工具记录，并保留 `.rejected` 审计。
+- 工具协议解析新增可恢复错误：格式错误、字段缺失、调用未开放工具的 `ACTION` / `TOOL_CALL` 会变成 `protocol_error` 回灌给模型，不再被误当普通最终回复。
+- runtime meta / app-server / channel simulate 已暴露 `tool_protocol_error_count` 和 `tool_protocol_errors_json`/`toolProtocolErrors`，协议修正过程可审计，但不强塞进飞书正文。
+- `ACTION` envelope 正式增加可选 `schema_version`，当前版本为 v1；工具提示已优先要求输出 `schema_version=1`，缺省继续兼容 v1，不支持的版本会返回 `unsupported_action_schema_version`。
+- 新增结构化 `tool_events_json` / `toolEvents`，记录每一轮 `tool_call` 与 `protocol_error` 事件；旧 `tool_trace` 保留为人工可读兼容字段。
+- GA 9 原子工具骨架已接入主线可见面：`status` / `status --json` 现在会输出 GenericAgent 来源、9 个原子工具、当前 mapped/interface_only 数量和每个工具的实现入口。
+- `doctor` 新增 `atomic_tools` 只读检查，确认当前 Execution Slot 骨架仍是 9 个 GA 原子工具，且 MVP 已映射的工具只有 `file_read / file_write / code_execute`。
+- `atomic_tool` 已补 actuator 绑定关系：`mouse -> actuator.click`、`keyboard -> actuator.input_text`、`screenshot -> actuator.screenshot`、`locate -> actuator.observe`；这只是接口层映射，不表示真实桌面控制已经完成。
+- 工具协议已开始向 GA 原子名迁移：模型现在可输出 `file_read / file_write / code_execute`，旧的 `read_file / write_file / shell_exec` 继续兼容；工具执行记录新增 `atomic_tool_name`，`list_dir` 明确仍是辅助工具。
+- `AtomicToolRegistry::generic_agent_mvp()` 已落地，工具执行记录现在通过 registry 映射 `atomic_tool_name`；接口态桌面工具仍不会被 `ACTION` 协议解析为可执行工具。
+- 工具说明文本也已改为由 `AtomicToolRegistry` 生成，避免 `tool_runtime` 继续硬编码 GA 工具名、辅助工具和 interface-only 桌面工具列表。
+- `ExecutionSlot` 已作为主进程工具骨架 wrapper 接入：它组合 `AtomicToolRegistry + ToolExecutionConfig`，`cli_runtime` 已通过它执行本地工具；`RuntimeSlotsSummary/status` 现在暴露 `execution=generic_agent_mvp`。
+- 工具审计 operation 已开始改用 GA 原子名：如 `tool.file_write / tool.file_read / tool.code_execute.rejected`，`list_dir` 继续是辅助工具审计名。
+- 治理 `ProposedAction` 也开始使用 registry 派生身份：action_id 改成 `tool:file_write / tool:code_execute` 这类 GA 原子名，summary 会标记 `atomic_tool=...` 或 `auxiliary_tool=list_dir`。
+- 顺手修复 command subagent runner 的一个稳定性问题：外部命令如果不读取 stdin 并提前退出，`BrokenPipe` 不再直接让 run-once 失败，后续仍会读取 stdout 中的协议报告。
+- 新增 `docs/execution-slot-tool-protocol.md`，固化 Execution Slot 当前工具协议、GA 原子工具映射、治理审计命名、`ToolExecutionRecord` 字段和当前不可越过的边界。
+- app-server/channel 工具回传字段已对齐协议：`turn/completed` 事件和 `turn/start` response 都输出 `toolCallCount/toolTrace/toolReport/toolCalls`；`channel simulate --json` 输出 `tool_call_count/tool_trace/tool_report/tool_calls`。
+- `ToolLoopReport` 已暴露 schema 常量和字段列表：`schema_version()`、`schema_fields()`、`call_schema_fields()`，避免协议文档和 Rust 结构悄悄漂移。
+- `console snapshot` 文本和 JSON 都能看到 `execution=generic_agent_mvp` 与 GA 原子工具数量，后续桌面控制台能直接展示主进程工具骨架状态。
+- `status/doctor/console` 的 Execution Slot 健康信息已增强：状态面暴露 `atomic_tools.ok`、tool report schema version 和字段列表；doctor 会校验 manifest 与 schema 是否仍符合当前协议。
+- app-server 的工具循环已改成复用现成治理/审计链：`slot_registry::build_governance_slot()` 先装配规则治理，再由 `tool_runtime::execute_tool_call_with_governance()` 先分类、后执行、再记审计，不再单独绕一套平行控制逻辑。
+- 工具执行回执现在会把治理决策写进 `toolTrace`，方便后续继续收口到统一报告层。
+- Chuang Feishu bridge 已去掉 `replyToMessageId/reply_in_thread` 的发送方式，当前会按 `chatId` 直发新消息，避免误进话题线程。
+- OpenAI-compatible provider 的 assistant content 提取已放宽：除标准 `choices[0].message.content` 外，也能识别 `output_text`、`output[]`、`delta.content` 和 `content[]` 这类常见兼容返回。
+- 非 2xx HTTP 响应现在不会再被误当成“内容缺失”，而是直接回 `PROVIDER_HTTP_ERROR`，并把 `status_code / provider_error_class / provider_error_message` 结构化带出来，方便触发 fallback 或排障。
+- 新增 provider content / error 路径单测，覆盖 chat completion、response `output_text`、数组内容片段拼接，以及 429 错误体透出。
+
 ## 2026-05-01
 
 ### 最新进展
+- OpenAI-compatible provider 的 `native` transport 现在通过 `hyper-rustls` 支持 `https://` 目标，不再只限明文 `http://`；`http` transport 仍保持纯明文 raw socket。
+- 新增回归覆盖 native transport 的 HTTPS scheme 接受与本地 TLS 尝试，`https` 不再直接落到 `unsupported_http_scheme`。
+- 子代理 command runner 输出读取改为限量捕获：stdout/stderr 后台持续 drain，但最多保留 64KiB 原始输出，避免真实 runner 大量输出撑爆主控内存。
+- command runner report 仍只暴露 1200 字符 preview，并在输出超过 preview 或捕获上限时设置 `truncated=true`。
+- 新增回归覆盖 command runner 大输出场景，确认 report 可写入、preview 有界、truncated 标记正确；子代理 CLI 专项测试通过。
+- OpenAI-compatible provider adapter 新增统一请求超时保护，默认 60000ms；测试/后续配置可通过 adapter 覆盖，不改变默认 stub 行为。
+- `http` transport 改用 `connect_timeout` 并设置 read/write timeout，服务端卡住时会返回结构化 `http_read/http_connect` 错误，不会无限阻塞。
+- `native` transport 的 request 和 response body collect 已加 `tokio::time::timeout`，卡住时返回 `native_http_timeout`。
+- `curl` transport 除了继续传 `--max-time`，现在还有 Chuang 自己的进程级 timeout，会终止本次启动的 curl 并返回 `curl_wait` 证据。
+- 新增回归覆盖 http/native/curl 三条真实 provider transport 的卡死超时路径，provider transport 专项测试通过。
+- `subagent run-once --runner command` 新增超时保护：使用 dispatch 自带的 `idle_timeout_ms`，真实外部 runner 卡住时会终止本次启动的进程并写入 Failed `SubagentReport`。
+- command runner 超时 report 会保留 `timed_out=true` 摘要和 `stderr_preview` 证据，主控/桌面控制台不会因为外部子代理卡住而阻塞。
+- 新增回归覆盖 command runner 超时后仍写 failed report；子代理 dispatch/list/report/collect/run-once 专项测试通过。
+- Genesis `SystemGenesisCommandRunner` 新增进程级超时兜底：即使 AutoCLI 自身没有按 `--timeout` 返回，Chuang 也会按 `GenesisCommandSpec.timeout_ms` 终止本次启动的进程并返回 command failed 证据。
+- `GenesisCommandSpec` 现在结构化暴露 `timeout_ms`，`genesis ask --dry-run` 可看到主/备通道的进程级超时。
+- 新增回归覆盖 Genesis 外部命令卡住时超时返回；Genesis/CLI/slot registry 专项测试通过。
+- command-backed 控制面新增 `timeout_ms`，默认 30000ms，配置文件可通过 `[control] timeout_ms = ...` 或扁平 `control_timeout_ms` 覆盖。
+- `CommandControlPlane` 会在 list/apply 外部命令超时后终止自己启动的命令进程，并返回清晰的超时错误，避免桌面控制台被卡死。
+- 新增回归覆盖 command list 卡死超时、配置解析默认 timeout、显式 timeout、零 timeout 拒绝。
+- command control 的 `list_args/apply_args` 新增轻量引号解析，不走 shell；token 开头的 `"agent with space"` 这类参数会作为单个 argv 传给外部脚本，同时不破坏 JSON 字符串里的字段引号。
+- 新增回归覆盖带空格的 quoted 参数，保证真实控制脚本接入时不用为标签/显示名再绕一层 shell。
+- `ConfigSummary` / `status --json` / `config show` 现在会暴露 `control_command_timeout_ms`，桌面控制台可直接展示 command 控制脚本超时配置。
+- 新增回归覆盖 status 从配置文件读取并输出 command control timeout。
+- command control 脚本类测试改为通过 `sh script ...` 启动，并使用 `try_list_units()` 暴露真实错误，避免 Linux 临时脚本偶发 `Text file busy` 被旧兼容接口吞成空列表。
+- CLI `control apply` 现在在 fallible list 解析出 unit 后，直接进入 `run_control_workflow_for_unit()`，避免 workflow 内部第二次调用旧兼容 `list_units()` 把真实 command list 故障弱化成 unknown unit。
+- 新增回归覆盖 command apply 只执行一次 list，确保后续控制台 apply 路径不会重复探测外部脚本。
+- command-backed 控制面补上显式失败路径：`CommandControlPlane::try_list_units()` 会把 list 命令非 0、坏 JSON、spawn/stdin/wait 错误作为 `ControlError` 返回，不再只表现为空列表。
+- CLI `control list --config PATH` 现在对 command 控制面走 fallible list；真实控制脚本故障会输出 `control_failed`，避免桌面控制台误判“没有服务/Agent”。
+- 新增回归覆盖 command list 非 0 和 malformed JSON 两类失败，adapter 层和 CLI 层都已验证。
+- command control apply 增加 receipt 一致性校验：外部脚本返回的 `unit_id/action/model` 必须和请求一致，防止脚本错配目标后仍被控制台当成成功。
+- 新增回归覆盖 command apply receipt 的 unit/action 错配拒绝。
+- `doctor` 新增 control plane 只读冒烟：会通过当前 slot 执行 list 检查，command 控制脚本失败时以 `doctor_control_plane_list_failed` 报出，不执行 apply。
+- `cli_doctor_tests` 已覆盖 command control list 故障路径，防止健康检查漏报控制面不可用。
+- 已运行 `cargo fmt`、`git diff --check`、`cargo test`，当前全仓测试通过。
+- 控制面新增 `CommandControlPlane` adapter：通过外部命令的 JSON stdout/stdin 完成 list/apply，可用于后续 systemd、Agent 管理脚本或桌面服务桥。
+- 配置文件新增 `control = "command"` / `[control] kind = "command"` 支持，可配置 `program / list_args / apply_args`；默认仍是 `fake_local`。
+- CLI `control list/apply` 现在会读取 `--config PATH`，已能通过配置切到 command 控制面；真实 apply 仍经过治理和 `--approve`。
+- 新增测试覆盖 command 控制面 adapter、配置解析、CLI control 经配置调用 command 控制面。
+- 新增 `docs/control-command-protocol.md`，固化外部控制脚本协议：list 输出单位数组，apply 从 stdin 接请求并输出 receipt。
+- 新增脚本级回归，确认 command control apply 会把 JSON 请求写入外部命令 stdin，外部脚本能读出 `model_name` 并回传 receipt。
+- `Genesis Actuator` 的具体构造已收口到 `slot_registry::build_genesis_actuator()`，`cli_genesis` 不再直接 new 具体实现，后续更容易替换 runner / adapter。
+- `build_genesis_actuator()` 现在返回 `GenesisSlot` wrapper，而不是裸的 `AutoCliGenesisActuator`，CLI 只看 slot 接口。
+- 新增 core boundary test，防止 `cli_genesis.rs` 重新直接持有 `AutoCliGenesisActuator` / `SystemGenesisCommandRunner`。
+- 新增 `tests/slot_registry_tests.rs` 的 Genesis 构造 contract，确认 profile dir、CDP 端口和 timeout 会完整透传到 AutoCLI 命令规格。
 - 老爸确认：`BrowserWorker` 旧实现先舍弃，不继续沿旧浏览器 worker 方案推进；后续网页 AI 查询能力改走新的 `Genesis Actuator` 插件线。
 - `Genesis Actuator` 定位已记录：核心只需要统一 `genesis_ask(prompt)` / search port，具体 AutoCLI、DeepSeek、主通道 userDataDir、备用 CDP 真人浏览器、登录态检测和修复都留在 adapter/plugin。
 - 安全边界已明确：不得用自动删除 profile 作为自愈手段；任何真实浏览器控制、登录态修复、profile 改写都必须可审计，并由治理层显式约束。
@@ -12,6 +111,7 @@
 - CLI 新增 `genesis ask --prompt TEXT --approve-exec`：可手动验证 Genesis 查询入口；缺少 `--approve-exec` 时拒绝执行外部程序。
 - 新增 `tests/cli_genesis_tests.rs`，覆盖 Genesis CLI 审批拒绝和已审批执行路径。
 - Genesis CLI 现在会先走 `StaticRuleGovernance`：外部网页 AI 查询按 `ExternalSend` 分类为 `needs_approval`，显式审批后执行，并写入审计记录；JSON 输出带 `governance_decision` 和 `audit_recorded`。
+- Genesis CLI 新增 `--dry-run`：不用 `--approve-exec`，只渲染主通道 userDataDir 和备用 CDP 的 AutoCLI 命令规格，不执行外部程序，方便排查配置。
 - MVP 主链路补上 kernel 级治理入口：`ChuangKernel::run_governed_turn()` 会先通过 `Governance` trait 分类，非允许决策会在 runtime 前阻断，允许后再执行并写 audit。
 - `ChuangKernelTurn` 现在可携带 `governance_decision`，普通 `run_turn` 保持兼容并留空；CLI `run/repl` 默认通过 slot registry 的治理 slot 走 governed turn。
 - CLI `run` 输出新增 `governance_decision: allowed:...`，让 `input -> context -> runtime -> governance -> report` 的 MVP 链路有可见证据。
@@ -162,7 +262,7 @@
 - **`OpenAICompatibleProviderAdapter::execute_stub_post_call()` 已落地：当前会在本地生成 chat.completion 风格 stub 响应，先打通“request preview -> post result -> assistant content extract”闭环**
 - **新增测试：`tests/openai_compatible_stub_post_tests.rs`，2 条已全绿，覆盖 stub post 返回 request/response body + respond 透出 stub_status_code/stub_response_kind**
 - **CLI 现在会打印 `response.meta.extra` 全部扩展字段；新增测试：`tests/cli_provider_stub_metadata_tests.rs` 已实测通过，确认 stdout 能看到 `stub_status_code: 200` 与 `stub_response_kind: chat.completion`**
-- **provider transport 开关已落地：`ProviderTransport::{Stub,Http,Curl}` + `OpenAICompatibleProviderAdapter::with_transport()` 已接上，CLI 新增 `--provider-transport stub|http|curl`**
+- **provider transport 开关已落地：`ProviderTransport::{Stub,Http,Native,Curl}` + `OpenAICompatibleProviderAdapter::with_transport()` 已接上，CLI 新增 `--provider-transport stub|http|native|curl`**
 - **`ProviderTransport` 现已实现 `FromStr/as_str/Display`，CLI 能识别 `stub/http/curl`，非法 transport 会在参数层稳定拒绝**
 - **transport 失败态会保留 request 预览证据：`respond()` 在报 `invalid-config` 时也会把 `request_url/request_method/request_message_count/transport_mode` 带出来，便于定位 provider 接线问题**
 - **新增测试：`tests/cli_provider_transport_flag_tests.rs`、`tests/cli_provider_transport_reject_tests.rs`、`tests/cli_repl_provider_transport_tests.rs`、`tests/openai_compatible_transport_mode_tests.rs`、`tests/cli_provider_default_transport_tests.rs`、`tests/cli_repl_default_transport_tests.rs`、`tests/provider_transport_parse_tests.rs`、`tests/cli_provider_http_not_implemented_tests.rs`、`tests/openai_compatible_http_transport_preview_tests.rs` 已全绿，确认 run/repl/adapter 三层 transport seam 都通了，默认回落到 `stub`**
@@ -178,6 +278,7 @@
 - **HTTP 非 200 返回的证据链也补上了：429 等状态现在会稳定保留 `status_code / response_kind / response_finish_reason`，即使没有 assistant content 也会给出 `provider_response_missing_content` 占位并带 trace 证据**
 - **新增回归测试：`openai_compatible_http_transport_preserves_non_200_status_with_structured_metadata` 与 `cli_run_http_transport_reports_invalid_port_shape`，已红转绿并纳入全量 `cargo test`**
 - **新增 curl provider transport：`--provider-transport curl` 会通过系统 `curl` 执行真实 POST，支持 HTTP/HTTPS 交给 curl 处理，默认仍是 `stub`，核心 runtime 不直接依赖 TLS/网络实现**
+- **新增 native provider transport：`--provider-transport native` 会直接用 Rust HTTP client 发真实 POST，作为真实 provider 的主实现路径，默认仍是 `stub`**
 - **新增验证：`tests/openai_compatible_curl_transport_tests.rs` 与 `cli_run_with_provider_and_curl_transport_executes_local_post`，覆盖 adapter 和 CLI 两层 curl POST 闭环**
 - **新增子代理 command runner 最小接缝：`subagent run-once --runner command --runner-command PATH --approve-exec` 会显式执行外部进程，不走 shell，把 dispatch JSON 写入 stdin，并把 stdout/stderr/exit_code 收成 `SubagentReport`**
 - **安全边界：command runner 缺少 `--approve-exec` 会拒绝执行；默认 runner 仍是 `fake`，不会自动启动真实 Agent**
@@ -702,6 +803,286 @@
   - `runtime_config_file_tests` 覆盖 fake 配置、OpenAI-compatible env key、缺失 env、非法行。
   - `cli_status_tests` 覆盖 `--config` 加载和 CLI 覆盖配置文件字段。
 - 已运行 `cargo test --test runtime_config_file_tests --test cli_status_tests --test runtime_config_tests`，当前专项测试通过。
+- provider native 继续前推到真 HTTPS：
+  - `OpenAICompatibleConfig` 新增 `tls_ca_cert_path`，`status` / `config show` / runtime config / slot registry 已同步暴露。
+  - `provider_openai_compatible` 的 `native` 传输现已支持 `https://`，可通过自定义 CA 证书路径建立本地 TLS 回归。
+  - `openai_compatible_http_live_transport_tests` 新增本地 HTTPS 握手和成功返回回归，已补全动态生成 CA + server cert 的测试链路。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q`，当前全量测试通过。
+- provider 稳定性与会话记忆继续前推：
+  - OpenAI-compatible provider 成功/失败 metadata 新增 `provider_retryable`，失败时新增 `provider_error_class` 和 `provider_timeout_ms`，用于上层判断是否重试或切 fallback。
+  - `run` 新增显式 `--session-id ID` 与 `--remember-session`；同一 session 会用 `session_id + memory_scope=session` 过滤 recall，并写入独立 session turn summary。
+  - `app-server` 已使用 thread id 作为 session id，并默认写会话记忆；这只完善本体对话能力，不接入或修改任何飞书桥。
+  - `--remember-session` 缺少 `--session-id` 会明确拒绝，避免写出无法归属的会话记忆。
+  - 已运行 `cargo check`、`cargo test -q session`、`cargo test -q openai_compatible_curl_transport`，并最终通过 `cargo test -q` 与 `git diff --check`。
+- 真实子代理 command runner 协议继续前推：
+  - `subagent run-once --runner command` 现在支持真实 runner 在 stdout 输出完整 `SubagentReport` JSON。
+  - Chuang 会校验 report 的 `schema_version / task_id / agent_id / parent_agent_id / summary`，身份一致才接纳并写入队列 report。
+  - 协议报告解析失败或身份不匹配时，会写入 Failed report，`stderr_preview` 保留拒绝原因，避免坏 runner 被误当成功。
+  - 普通 stdout/stderr 包装模式保持兼容；只有 stdout 明确像 `SubagentReport` JSON 时才走协议解析。
+  - 已运行 `cargo check`、`cargo test -q --test cli_subagent_dispatch_tests`，当前专项测试通过。
+- 子代理 worker loop MVP 已落地：
+  - CLI 新增 `subagent run-loop [--max-runs N]`，默认最多处理 10 个 pending dispatch，不做无限常驻。
+  - `run-loop` 复用 `run-once` 的 fake/command runner 和协议校验，逐个处理未生成 report 的 dispatch。
+  - 队列清空会返回 `idle=true`，达到 `max_runs` 会停，便于后续接 systemd timer 或独立 worker 服务。
+  - `--max-runs 0` 明确拒绝，避免配置错误导致不可预期行为。
+  - 已运行 `cargo check`、`cargo test -q --test cli_subagent_dispatch_tests`，当前专项测试通过。
+- 子代理队列领取锁 MVP 已落地：
+  - `FileSubagentQueue` 新增 `claims/<run_id>.json` 状态文件，用 `create_new` 原子创建完成领取，避免多个 worker 同时处理同一 dispatch。
+  - `run-once / run-loop` 会跳过已有 report 或已有 claim 的 dispatch；如果全都被领取则返回 idle。
+  - `subagent list` 新增 `is_claimed` 字段，桌面控制台可以看到任务是否已被 worker 领取。
+  - 该机制不删除 dispatch、不删除 claim、不移动文件，保持可追溯；后续再补显式过期/人工释放策略。
+  - 已运行 `cargo check`、`cargo test -q --test subagent_queue_tests --test cli_subagent_dispatch_tests`，当前专项测试通过。
+- 子代理 claim release MVP 已落地：
+  - CLI 新增 `subagent release-claim --run-id ID --reason TEXT`，会写入 `claim-releases/<run_id>.json`。
+  - release 不删除旧 claim；重新领取会覆盖 claim 文件，`is_claimed()` 按 claim/release 文件修改时间判断当前活跃状态。
+  - 已覆盖释放后重新领取、CLI release 后继续 run-once 的回归。
+  - 已运行 `cargo check`、`cargo test -q --test subagent_queue_tests --test cli_subagent_dispatch_tests`，当前专项测试通过。
+- 版本默认配置去 fake 化：
+  - 项目根 `config.toml` 已改为真实 `openai_compatible` provider + `native` transport + `queued_external` 子代理队列。
+  - `config.example.toml` 已从 fake provider / fake subagent 改为 OpenAI-compatible + queued external 模板，真实密钥仍只通过 `api_key_env` 引用。
+  - README / MVP 文档中的推荐子代理路径已从 fake runner 改为 command runner / run-loop。
+  - `cargo run --quiet -- status --config config.toml` 已确认 provider 为 `openai_compatible`、model 为 `gpt-5.5`、subagent 为 `queued_external`。
+  - 当前仍保留 `actuator=fake` 和 `control_plane=fake_local`，因为真实桌面操作面与服务控制 command adapter 尚未配置；不会伪装成已实现。
+- 运行态 fake 可见性修正：
+  - `ConfigSummary` 新增 `placeholder_warnings`，统一标出 `provider=fake`、`transport=stub`、`actuator=fake`、`subagent=fake`、`control_plane=fake_local` 等占位/测试配置。
+  - `status`、`config check/show`、`doctor` 文本输出会打印 `placeholder_warning`；JSON 输出也包含同名数组，便于后续桌面控制台和飞书插件展示。
+  - 当前项目根配置实测只剩 `actuator=fake` 与 `control_plane=fake_local` 两条 warning；对话 provider 和子代理 slot 已不是 fake。
+  - 修正 `cli_smoke_tests` 中一个测试隔离问题：仓库根存在真实 `config.toml` 后，未显式指定 `--subagent fake` 的用例会被当前配置影响。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test cli_status_tests --test cli_config_tests --test cli_doctor_tests`、`cargo test -q --test cli_smoke_tests`、`cargo test -q`，当前全量通过。
+- 最小身份启动层已落地：
+  - 新增 `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`，补上创自己的身份锚点、故事、首次醒来规则和 Agent 注册表。
+  - `config.toml` / `config.example.toml` 新增 `identity_root / soul_path / story_path / first_wake_path / agents_registry_path`，保持简单扁平格式。
+  - `RuntimeConfig` 新增 `IdentityBootstrapConfig`，配置摘要和 `status/config show` 会展示身份启动文件路径。
+  - `kernel_config_from_runtime()` 会读取身份启动文件，缺失时按空内容处理，不静默伪装、不自动创建或删除。
+  - `ChuangKernel` 会把 `FIRST_WAKE / SOUL / STORY / agents.toml` 作为 `SegmentSource::Identity` 注入本轮上下文，并在 snapshot/status 里暴露字符数。
+  - 已运行 `cargo check`、`cargo test -q --test runtime_config_file_tests --test chuang_kernel_tests --test cli_status_tests --test kernel_status_tests`，当前专项通过。
+- 项目当前情况报告已生成：
+  - 新增 `docs/chuang-project-current-report-2026-05-02.md`，整理当前状态、配置文件、目录结构、模块职责、缺口和后续规划。
+  - 已通过本机 `lark-cli docs +create --as user` 用当前已登录用户身份创建飞书云文档，文档链接：`https://www.feishu.cn/docx/ME3ddJocIolj2OxkTCGcLKWxnoh`。
+  - 已把飞书文档操作规则写入 `AGENTS.md`：后续创项目报告优先使用本机 `lark-cli docs +create --as user`，不再先绕 OAuth；仍禁止输出 token/secret。
+- Karpathy-style Markdown rules MVP 已接入治理层：
+  - 新增 `rules/core.md`，用极简 Markdown 规则固化“先澄清、最小实现、精准修改、目标可验收、身份边界、密钥保护、禁止自行删除、插件槽位、真实标注”等核心原则。
+  - `RuntimeConfig` 新增 `RulesConfig { root, core_path }`，`config.toml` / `config.example.toml` 新增 `rules_root` 和 `rules_core_path`。
+  - 新增 `MarkdownRuleSet`，会加载 `rules/core.md`，拒绝空文件或没有规则条目的文件，并计算稳定 fingerprint。
+  - `StaticRuleGovernance` 现在可持有规则集；slot 构建时加载规则，治理决策 reason 会附带 `rules=<fingerprint>`，便于追溯本轮使用的规则版本。
+  - `status` / `config show` 会显示 rules 路径。
+  - 已运行 `cargo check`、`cargo test -q --test governance_tests --test runtime_config_file_tests --test runtime_config_tests --test slot_registry_tests --test cli_status_tests --test cli_doctor_tests`。
+  - 已冒烟 `cargo run --quiet -- run --config config.toml --input ...`，确认输出 `governance_reason: ... rules=07e555f2418cc032`；本次 provider 返回 401，属于本地 provider/key 状态问题，未触碰密钥。
+- 安全自我实验 MVP 已接入：
+  - 新增 `src/self_experiment.rs`，提供 `SelfExperimentPlanner` 和 `ExperimentRequest/ExperimentReceipt`。
+  - CLI 新增 `experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json]`。
+  - 当前只生成 `experiment.md`，写入固定时间预算、目标、验收标准和安全约束；不执行外部命令、不创建分支、不回滚、不删除、不清理。
+  - 实验计划明确禁止 `git reset --hard`、删除文件、清理队列/报告/记忆/凭证、purge/uninstall/destructive rollback。
+  - 新增 `tests/self_experiment_tests.rs` 与 `tests/cli_experiment_tests.rs`，覆盖计划写入、CLI 输出和非法参数拒绝。
+  - 已运行 `cargo fmt --all`、`cargo check`、`cargo test -q --test self_experiment_tests --test cli_experiment_tests`。
+  - 已冒烟生成 `./experiments/provider-fallback-1777710884502618374/experiment.md`，仅追加计划文件。
+- 安全自我实验结果报告已接入：
+  - `SelfExperimentPlanner::complete()` 可为已有实验生成 `report.md`。
+  - CLI 新增 `experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json]`。
+  - 报告写入使用 create-new 语义，`report.md` 已存在时拒绝覆盖，保持实验结果不可被静默改写。
+  - 报告内容包含 outcome、summary、next step 和安全确认，明确没有执行 reset/delete/cleanup。
+  - 已运行 `cargo fmt --all`、`cargo check`、`cargo test -q --test self_experiment_tests --test cli_experiment_tests`。
+  - 已冒烟为 `provider-fallback-1777710884502618374` 生成 `./experiments/provider-fallback-1777710884502618374/report.md`，结果为 `inconclusive`。
+- 安全自我实验只读列表已接入：
+  - `SelfExperimentPlanner::list()` 只读扫描实验目录，返回 `planned/completed/unknown`、plan/report 路径和 presence 状态。
+  - CLI 新增 `experiment list [--root PATH] [--json]`。
+  - 已补测试覆盖库层列表和 CLI 输出。
+  - 已冒烟 `cargo run --quiet -- experiment list --root ./experiments`，当前显示 `provider-fallback-1777710884502618374` 为 completed。
+- Provider fallback MVP 已接入：
+  - `ProviderConfig` 新增显式 `Fallback { primary, fallback }`，只有配置里写 `fallback_*` 时启用，不做 silent fallback。
+  - `ProviderSlot` 新增 fallback wrapper；核心 runtime 仍只依赖 `Responder`，不认识 fallback 细节。
+  - fallback 触发条件基于结构化 meta：`provider_retryable=true` 或 `status_code >= 400`，不解析模型自然语言输出。
+  - fallback 输出会写入 `provider_fallback_used / provider_fallback_from / provider_fallback_reason`，便于飞书、桌面控制台和日志追溯。
+  - 配置解析支持维护友好的扁平字段：`fallback_provider / fallback_provider_id / fallback_base_url / fallback_model / fallback_api_key_env / fallback_transport`。
+  - `config.example.toml` 已加入注释模板；真实密钥仍只通过环境变量读取。
+  - `app-server` 的模型覆盖和路径归一化已兼容 fallback provider。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test runtime_config_file_tests`、`cargo test -q --test slot_registry_tests`，当前专项通过。
+- app-server 真实 provider 配置回归已补：
+  - 新增 `tests/app_server_tests.rs`，通过临时 workspace 的 `config.toml` 启动 `app-server`，执行 `model/list` 和 `turn/start`。
+  - 测试确认 app-server 会读取 workspace provider 配置，输出 `gpt-app-server-test` 和 OpenAI-compatible stub 响应，而不是回落到 `fake-responder`。
+  - 这条测试专门防止后续接飞书/插件入口时误接到默认 fake responder。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test app_server_tests`。
+- 安全自我实验只读详情已接入：
+  - `SelfExperimentPlanner::show()` 可按 `experiment_id` 只读返回 `experiment.md` 和可选 `report.md` 内容。
+  - CLI 新增 `experiment show --experiment-id ID [--root PATH] [--json]`，不会写入、覆盖、删除任何实验文件。
+  - README 与 MVP 边界文档已补命令说明。
+  - 已补库层和 CLI 回归测试。
+- command control 示例 adapter 已接入：
+  - 新增 `scripts/chuang-control-adapter-example.sh`，实现 `list --json` 和 `apply --json` 协议，返回确定性 JSON，不触碰真实服务或 Agent。
+  - 新增 `config.example-control.toml`，可直接用 `program = "sh"` 加脚本路径跑 command 控制面。
+  - `docs/control-command-protocol.md` 已补 checked-in example 和手动 smoke 命令。
+  - 新增 CLI 回归，确认 `control list --config config.example-control.toml --json` 能列出示例 unit，`control apply ... --approve` 能经治理和审计后返回成功。
+  - 已冒烟 `cargo run --quiet -- control list --config config.example-control.toml --json` 和 `cargo run --quiet -- control apply --config config.example-control.toml ... --json`。
+- 安全 MVP 端到端 smoke 脚本已接入：
+  - 新增 `scripts/chuang-mvp-smoke.sh`，会在临时目录生成独立配置，使用 OpenAI-compatible `stub` provider、queued subagent、示例 command control 和独立 SQLite/记忆/队列路径。
+  - 验收链包含：`status`、`doctor`、两轮 `run --remember-session`、`subagent dispatch/run-once/collect`、`control list/apply --approve`、`experiment plan/show`。
+  - 脚本不删除任何文件，不触碰真实服务，不读取真实 API key；临时 work_dir 会留存用于排查。
+  - 已实测 `sh scripts/chuang-mvp-smoke.sh` 通过，输出 `mvp_smoke_ok`。
+- MVP readiness 文档已补：
+  - 新增 `docs/mvp-readiness-2026-05-02.md`，记录当前 root 配置状态、验收命令、ready/not ready 边界和下一步构建顺序。
+  - README 已链接该文档，方便后续接飞书机器人或换会话时快速判断当前版本状态。
+- channel adapter 协议边界已接入：
+  - 新增 `src/channel_adapter.rs`，定义 `ChannelInboundMessage / ChannelOutboundMessage`，以及转换到 app-server `turn/start` JSON-RPC 的纯函数。
+  - 该模块不认识 Feishu 凭证、不启动桥服务、不复用 Codex/Hermes 通道，只做外部消息和 app-server 事件的薄转换。
+  - 新增 `docs/channel-adapter-protocol.md`，明确新飞书机器人必须使用独立 bot/channel id，不能复用 Codex/Hermes bridge。
+  - 新增 `tests/channel_adapter_tests.rs`，覆盖 turn/start 构造、空文本拒绝、app-server delta 转 outbound、忽略非消息事件。
+- 子代理 worker 能力声明和并发上限已接入：
+  - `subagent run-once/run-loop` 新增 `--capability NAME`，JSON/Text 输出会带 `worker_capabilities`，供控制台或调度层识别 runner 能力。
+  - `subagent run-loop` 新增 `--max-concurrency 1`，当前 MVP 只支持单 worker 顺序处理；传大于 1 会明确拒绝，不假装并行。
+  - `SubagentRunLoopCliOutput` 新增 `max_concurrency`，方便后续 UI/插件展示当前 worker 限制。
+  - `cli_subagent_dispatch_tests` 已扩到 23 条并通过，覆盖能力声明输出和并发拒绝。
+- 子代理 claim/release 稳定性修正：
+  - claim 和 release payload 新增 `claimed_at_unix_nanos / released_at_unix_nanos`。
+  - `is_claim_released()` 优先比较 payload 中的纳秒时间，避免释放后立刻重新领取时受文件系统 mtime 精度影响。
+  - 不删除旧 claim/release 文件；mtime 仍作为旧格式 payload 的兼容 fallback。
+  - 已运行 `cargo test -q --test subagent_queue_tests file_subagent_queue_can_release_and_reclaim_without_deleting_history` 和 `cargo test -q --test cli_subagent_dispatch_tests`。
+- 新飞书独立通道检查清单已补：
+  - 新增 `docs/feishu-dedicated-channel-checklist.md`，明确 Chuang 必须使用新 Feishu bot/app id，不复用 Codex/Hermes bridge、service、credentials、session 或队列。
+  - 清单记录了 adapter 最小形状、上线前预检命令、bot 侧要求和首次 live test 检查点。
+  - README 已链接该清单。
+- channel 本地演练命令已接入：
+  - CLI 新增 `channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--json]`。
+  - 该命令会读取 workspace `config.toml`，通过当前 runtime 跑一轮，写 session memory，并输出 `ChannelOutboundMessage`；不会连接真实飞书。
+  - 新增 `tests/cli_channel_tests.rs`，确认 channel simulate 使用 workspace provider 配置，输出不包含 `fake-responder`，并拒绝空文本。
+  - `scripts/chuang-mvp-smoke.sh` 已纳入 channel simulate。
+- channel app-server 事件批处理去重已接入：
+  - 新增 `outbounds_from_app_server_events()`，批量处理 app-server events 时优先采用最终 `item/completed`，避免通道同时发送 delta 和 completed 的重复回复。
+  - `tests/channel_adapter_tests.rs` 已覆盖 completed 优先逻辑。
+- 真实 control adapter 安全计划已补：
+  - 新增 `docs/real-control-adapter-safety-plan.md`，规定真实服务/Agent 控制必须走独立 command adapter、显式 allowlist、治理审批、receipt 一致性校验。
+  - 明确禁止 broad `systemctl` passthrough、删除/清理、隐藏重启、直接控制 Codex/Hermes。
+  - README 和 readiness 文档已链接该安全计划。
+- command actuator adapter 已接入：
+  - `ActuatorConfig` 新增 `command`，配置字段为 `actuator_program / actuator_args / actuator_timeout_ms`。
+  - 新增 `CommandActuator`，通过 stdin/stdout JSON 协议调用外部 adapter；不走 shell 拼接，不把桌面/浏览器/微信/ADB 细节写进 core。
+  - `ObserveTarget / OpenAppRequest / FocusTarget / ClickTarget / InputTarget / SecretOrPlainText / ScreenshotTarget / EvidenceRef` 已补 serde，作为 actuator command 协议的数据边界。
+  - 新增 `scripts/chuang-actuator-adapter-example.sh`，返回确定性 JSON，不执行真实桌面操作。
+  - `scripts/chuang-control-adapter-example.sh` 已扩成安全控制台 fixture，会列出小创、小承、小云、小策和 Codex 飞书桥等 unit，但 apply 仍只返回 receipt，不触碰真实服务。
+  - 根 `config.toml` 与 `config.example.toml` 已切到 `actuator=command` 和 `control=command` 的安全示例 adapter；`status` / `doctor` 当前显示 `placeholder_warnings: none`。
+  - `doctor` 已新增 `actuator_smoke`，会调用一次 `observe(Screen)` 验证当前 actuator adapter 可用。
+- Provider fallback 策略配置已接入：
+  - `ProviderConfig::Fallback` 新增 `ProviderFallbackPolicy`，只在显式配置 fallback provider 时启用。
+  - 默认策略为 `on_retryable=true` 且额外允许 `401,402`，用于余额/鉴权类主 provider 失效时切备用；普通未列出的 4xx 不再被盲目 fallback 掩盖。
+  - 配置支持 `fallback_on_retryable / fallback_status_codes / fallback_error_classes`，`status/config show` 会输出脱敏策略摘要。
+  - `slot_registry_tests` 已覆盖 retryable 主 provider 错误会切备用，以及策略关闭后不会误切。
+  - `runtime_config_file_tests` 已覆盖 fallback 策略解析和摘要输出。
+- 子代理 claim 过期重领已接入：
+  - `FileSubagentQueue` 新增 `claim_dispatch_with_timeout()` 和 `is_claim_stale()`。
+  - `subagent run-once/run-loop` 领取任务时使用 dispatch 自带 `idle_timeout_ms` 作为 claim 过期阈值；worker 崩溃且超时后，新 worker 可以重领。
+  - 不删除 dispatch、report、claim 或 release 文件；重领只覆盖 claim payload，与现有 release/reclaim 语义一致。
+  - `subagent list` 输出新增 `is_claim_stale` 字段，便于控制台看出任务是否被过期 claim 卡住。
+  - 已运行 `cargo test -q --test subagent_queue_tests` 和 `cargo test -q --test cli_subagent_dispatch_tests`。
+- 子代理能力需求匹配已接入：
+  - `subagent dispatch --requires-capability NAME` 可声明任务需要的 worker 能力，写入 dispatch metadata。
+  - `subagent run-once/run-loop --capability NAME` 只领取满足全部需求的 dispatch，避免 Python/浏览器/文件系统等不同 runner 抢错任务。
+  - capability 名会 trim、转小写、去重，并拒绝逗号，避免 metadata 逗号分隔格式产生歧义。
+  - `subagent list` 输出新增 `required_capabilities`，方便控制台展示派发需求。
+  - 新增 `docs/subagent-runner-protocol.md`，记录 dispatch metadata、worker capability 匹配、command runner stdin/stdout、claim/stale claim、report 校验和安全边界。
+  - 新增 `scripts/chuang-subagent-runner-example.sh`，安全读取 dispatch stdin 并输出标准 `SubagentReport`，不执行真实工具。
+  - `scripts/chuang-mvp-smoke.sh` 已从 fake runner 改为 command runner 示例 + capability matching。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test cli_subagent_dispatch_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo test -q`。
+- 长期记忆压缩写回操作面已接入：
+  - CLI 新增 `memory identity show`，只读展示 `USER.md / MEMORY.md` 全文、字符数和硬上限。
+  - CLI 新增 `memory identity append --id ID --content TEXT`，显式追加 `MEMORY.md` 热记忆，仍受硬上限约束。
+  - CLI 新增 `memory identity write-user|write-memory --content TEXT --approve-overwrite`，用于超限后由模型/老爸决定压缩内容，再显式覆盖写回；不自动压缩、不自动删除。
+  - `FileDualFileMemoryStore` 新增 `write_memory()`，和 `write_user()` 一样先做硬上限检查，失败时不改变原文件。
+  - `scripts/chuang-mvp-smoke.sh` 已覆盖 append -> write-memory -> show。
+- app-server 常驻化准备已接入：
+  - CLI 新增 `app-server health --workspace-root PATH --json`，只读加载并校验 workspace runtime 配置，不发起模型请求。
+  - 新增 `scripts/chuang-app-server-health.sh`，读取 `CHUANG_AGENT_ROOT / CHUANG_AGENT_WORKSPACE_ROOT` 后执行健康检查。
+  - 新增 `ops/systemd/chuang-agent-app-server.service.example` 和 `chuang-agent-app-server.env.example`，提供 Chuang-only systemd 模板、journald 日志和 `ExecStartPre` 健康检查。
+  - 模板没有自动安装或启动；app-server 仍是 stdin/stdout JSON-lines 协议，真实 Feishu 插件需要单独持有连接策略。
+  - `scripts/chuang-mvp-smoke.sh` 已覆盖 app-server health。
+- 新飞书专用通道骨架已接入：
+  - CLI 新增 `channel feishu-check --env-file PATH --json`，长连接模式下只检查 `CHUANG_FEISHU_APP_ID / APP_SECRET / CHUANG_AGENT_WORKSPACE_ROOT` 是否存在，并脱敏输出 `<set>`。
+  - `feishu-check` 会标记 `FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BOT_ID / HERMES_FEISHU_APP_ID` 等旧变量名，避免复用 Codex/Hermes 通道。
+  - 新增 `ops/systemd/chuang-feishu-bridge.env.example` 和 `chuang-feishu-bridge.service.example`，只使用 Chuang 专用变量名。
+  - 新增 `scripts/chuang-feishu-bridge.sh` / `scripts/chuang-feishu-bridge.js`：长连接 Feishu bridge 已改为真实运行，收到消息后转发到 Chuang `app-server`，再把结果回发飞书。
+  - Chuang 专用 bridge env 已放到 `~/.codex-im/chuang-feishu-bridge.env`，与 Codex/Hermes 的凭证和会话分开。
+  - 当前桥已按 websocket 模式启动并保持运行；真实回复链路依赖 workspace `config.toml`、`app-server` 和 `CODEX_LIUSU_API_KEY`。
+- 真实子代理 Codex runner 脚手架已接入：
+  - 新增 `scripts/chuang-codex-runner.py`，读取 dispatch JSON stdin，输出标准 `SubagentReport`，可被现有 `subagent run-once --runner command` 接收和校验。
+  - 默认返回 Failed 协议报告，不调用 Codex；只有 `CHUANG_CODEX_RUNNER_ENABLE=1` 时才运行 `codex exec <prompt>`。
+  - 支持 `CHUANG_CODEX_BIN` 和 `CHUANG_CODEX_RUNNER_WORKSPACE`，并使用 dispatch `idle_timeout_ms` 作为进程超时。
+  - `cli_subagent_dispatch_tests` 已覆盖该 runner 默认禁用时仍能产出可校验 report。
+- 真实 control/actuator allowlist 骨架已接入：
+  - 新增 `config/control-allowlist.example.json`，只列 Chuang-owned service 示例，不包含 Codex/Hermes 服务。
+  - 新增 `scripts/chuang-real-control-adapter.py`，实现 `list/apply --json --allowlist PATH`；默认 dry-run，只有 `CHUANG_REAL_CONTROL_ENABLE=1` 时才执行 allowlist command array，status 命令也默认不跑。
+  - 新增 `config/actuator-allowlist.example.json`，显式列可打开 app，并默认关闭 click/input/screenshot。
+  - 新增 `scripts/chuang-real-actuator-adapter.py`，默认 dry-run；`open_app` 仅接受 allowlist app，真实打开必须 `CHUANG_REAL_ACTUATOR_ENABLE=1`。
+  - `cli_control_tests` 已覆盖 control allowlist dry-run 和 unallowlisted 拒绝；`actuator_tests` 已覆盖 allowlisted app 与 click 默认拒绝。
+- 插件注册/发现 MVP 已接入：
+  - 新增 `src/plugin_registry.rs`，定义 `PluginRegistry / PluginManifest / PluginKind` 和只读 `check_plugin_registry()`。
+  - 新增 `plugins/registry.example.json`，登记 Chuang Feishu bridge、Codex runner、real control、real actuator、Genesis AutoCLI adapter。
+  - CLI 新增 `plugin list|check --registry PATH [--json]`，只读取 manifest 和检查命令/配置路径是否存在，不执行插件、不读取密钥。
+  - `status` 已暴露只读 `plugin_registry` 摘要：registry path、available、ok、plugin_count、enabled_count、issue_count，方便未来桌面控制台直接读取插件槽位健康状态。
+  - 示例注册表当前 5 个插件都已登记但默认 disabled，符合安全默认不开启真实外部能力的策略。
+  - `scripts/chuang-mvp-smoke.sh` 已加入 plugin registry check。
+  - 新增 `docs/actuator-command-protocol.md`，说明 request/response shape 和安全约束。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test plugin_registry_tests --test cli_status_tests --test kernel_status_tests`、`cargo check`、`cargo test -q --test actuator_tests`、`cargo test -q --test runtime_config_file_tests`、`cargo run --quiet -- config check --config config.toml`、`cargo run --quiet -- status --config config.toml`、`cargo run --quiet -- doctor --config config.toml`。
+- 只读控制台快照 MVP 已接入：
+  - CLI 新增 `console snapshot [--json]`，聚合当前 `status`、插件注册表摘要、control unit 列表和插件清单。
+  - 该命令只读调用 control list，不执行 `control apply`，不启动服务，不连接飞书，作为未来桌面/工具/服务控制台的数据源。
+  - `scripts/chuang-mvp-smoke.sh` 已加入 console snapshot。
+  - 新增 `tests/cli_console_tests.rs`，覆盖 JSON 输出和文本摘要。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test cli_console_tests --test cli_control_tests --test cli_status_tests`。
+- 主线工具闭环已补到 CLI runtime：
+  - `run_with_options()` 现在会识别 `TOOL_CALL`，并在本地执行 `list_dir / read_file / write_file / shell_exec` 后继续回灌给模型，直到收到 `FINAL:` 收口或达到最大工具回合数。
+  - 这条工具循环复用了现有 `tool_runtime` 和 `governance`，没有再新增一套平行执行面。
+  - 当工具回合出现时，最终 `RuntimeResult.response.meta.extra` 会附带 `tool_call_count` / `tool_trace`，方便 CLI / report 层可审计输出。
+  - 已新增回归测试，确认 `TOOL_CALL` 会真正写文件并被最终 `FINAL:` 收口。
+  - 工具协议已从 `user_input` 中移出，改为通过 ChuangKernel 的 turn-level extra context 注入，避免污染记忆检索、会话摘要和用户原始输入。
+  - 本地测试已和项目根真实 `config.toml` 解耦：CLI smoke/status/provider/subagent 等测试显式使用 fake config 或测试 env，避免本机 `CODEX_PPTOKEN_API_KEY` 缺失影响主线回归。
+  - 已运行 `cargo fmt --all` 和 `timeout 240s cargo test -q`，全量通过。
+- 主进程工具口优先级已纠偏：
+  - 当前推进顺序明确为：先补主进程最小工具集和统一 tool port，再补治理/审计/结构化回传，然后才是子代理，最后才是外部智能体。
+  - `ToolExecutionRecord` 已从字符串摘要扩展为结构化结果：`tool_name / decision / output / stdout / stderr / exit_code / changed_files / failure_class`，同时保留 `summary` 兼容旧输出。
+  - `execute_tool_call_with_governance()` 会把治理决策写入工具记录，CLI/app-server 可直接展示结构化结果，不需要只解析 `tool_trace`。
+  - 修复了不存在路径中的 `..` 词法归一化问题，避免非现存路径绕过 workspace 边界检查。
+  - app-server 不再自带第二套工具循环，改为直接复用 `run_with_options()` 主线，并从 `tool_calls_json` 取结构化工具调用结果；CLI 和 Feishu/app-server 入口工具行为保持一致。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test tool_runtime_tests`、`cargo test -q --test app_server_tests`、`cargo test -q cli_runtime::tests::run_with_options_executes_tool_calls_before_final_answer`、`timeout 240s cargo test -q`，全量通过。
+- 主进程工具口结构化回传继续加固：
+  - `ToolExecutionRecord` 新增 `duration_ms / retryable / output_truncated / stdout_truncated / stderr_truncated`，工具结果可直接被 CLI、app-server、飞书桥和后续报告面读取，不再依赖自然语言判断。
+  - `shell_exec` 非 0 退出现在会标记为 `ok=false`、`failure_class=exit_nonzero`，同时保留 `exit_code/stdout/stderr`。
+  - `write_file` 新增 `write_before_bytes / write_after_bytes / write_changed`，可区分新建、真实修改和重复写入同样内容。
+  - 新增 `ToolLoopReport`，最终响应 meta 会写入 `tool_report_json`，包含 schema version、workspace root、rounds、call count 和完整 calls；`tool_trace` 继续保留为兼容展示字段。
+  - app-server 的 `turn/completed` 和 RPC 返回会透出 `toolReport`，仍从同一条 `run_with_options()` 主线读取。
+  - shell 工具调用会先复用现有 `ActionKind` 做风险分类：删除/清理、服务变更、网络命令、疑似密钥读取分别进入 `DeleteOrCleanup / ServiceChange / NetworkChange / SecretAccess`；`NeedsApproval` 和 `DraftOnly` 不执行，只写拒绝审计。
+  - 新增 `ToolModelOutput`，把模型输出先解析成 `ToolCall / FinalAnswer / PlainText`，runtime 主线不再到处手写 `TOOL_CALL` / `FINAL` 前缀判断；后续替换成正式 action schema 会更便宜。
+  - 新增正式 `ACTION` 协议兼容入口：`ACTION: {"type":"tool_call","call":{...}}` 和 `ACTION: {"type":"final","answer":"..."}`；旧 `TOOL_CALL` / `FINAL` 继续兼容，便于平滑迁移。
+  - `RunCliRequest` 新增 `workspace_root`，app-server 和 channel simulate 会显式传入飞书/工作区根目录；CLI 交互默认仍用当前目录。工具执行工作区不再隐式绑定 app-server 进程启动目录。
+  - app-server workspace 配置路径归一化继续补齐：`identity_bootstrap` 和 `rules` 路径现在也会按 workspace 根目录解析，health JSON 会暴露 `identity_soul_path / rules_core_path` 便于检查。
+  - 工具循环最大轮次已配置化：新增 `ToolLoopConfig { max_rounds }`，配置文件支持 `tool_max_rounds` 或 `[tool_loop] max_rounds`，默认 4，校验范围 1..=32；`config/status` 输出会展示 `tool_loop_max_rounds`。
+  - `shell_exec` 超时也已配置化：`tool_shell_timeout_ms` 或 `[tool_loop] shell_timeout_ms`，默认 30000ms，校验范围 1..=600000；工具执行通过 `ToolExecutionConfig` 接收，不再把 30 秒写死在执行器里。
+  - runtime report 已正式提升工具报告：`build_runtime_report()` 会把 `tool_report_json` 转成 `SubagentReport.artifacts` 里的 `Log` artifact，summary 同步带 `tool_calls=N`，后续子代理/控制台不用再专门解析 provider meta。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test tool_runtime_tests`、`cargo test -q --test app_server_tests`、`cargo test -q cli_runtime::tests::run_with_options_executes_tool_calls_before_final_answer`、`git diff --check`、`timeout 240s cargo test -q`。
+
+### 10 分钟推进节奏
+- 当前会话内按阶段推进：每轮优先选主线阻塞点，不扩外部智能体，不先做子代理优化。
+- 第 1 轮：主进程工具口配置化和协议稳定。
+- 第 2 轮：继续把工具请求/结果收进正式 runtime/report shape。
+- 第 3 轮：补治理策略可配置性，尤其 shell/write 的 allowlist/denylist。
+- 第 4 轮：再看 app-server/飞书通道展示和健康检查是否缺主线字段。
+- 跨会话不会自动唤醒；如需真实定时提醒，后续单独做 Chuang 专用提醒插件或 systemd timer，不能复用 Codex/Hermes 通道。
+- GA 9 原子工具方向已重新对齐：
+  - 文档目标是 `Execution Slot = GenericAgent 9 原子工具 + Codex 安全管道 + OpenClaw 治理/隔离`，当前 4 个本地工具只是 MVP 映射，不是最终工具体系。
+  - 新增 `src/atomic_tool.rs`，定义 GA 9 原子工具 manifest：mouse、keyboard、screenshot、locate、file_read、file_write、code_execute、wait、human_suspend。
+  - 当前已映射：`read_file -> file_read`、`write_file -> file_write`、`shell_exec -> code_execute`；`list_dir` 明确为辅助工具 `AuxiliaryListDir`，不算 GA 9 原子之一。
+  - 桌面类工具暂为 `InterfaceOnly`，通过现有 `actuator` port 承接，不把真实鼠标/键盘/截图实现写死进核心。
+  - 防跑偏提醒：后续 Execution 主线先围绕 GA 原子工具骨架、manifest、治理和 adapter 映射推进，不继续把 4 个 MVP 工具当最终体系打磨。
+  - 已运行 `cargo fmt --all`、`cargo test -q --test atomic_tool_tests`。
+- 当前模型配置已对齐 cliproxy 的 `gpt-5.5` 路径：项目根 `config.toml` 仍使用 `openai_compatible + gpt-5.5`，密钥通过 `CODEX_LIUSU_API_KEY` 环境变量读取，不写入仓库文件；后续新飞书机器人只需要独立的 bot id 和通道配置。
+- 飞书架构终稿已补当前实现修正：
+  - 使用 `lark-cli docs +fetch/+update --as bot` 读取并追加更新老爸给的飞书 wiki 文档。
+  - 已在文档末尾明确“目标态 vs 当前仓库实现”分离，避免把最终蓝图误读为已落地能力。
+  - 已修正当前实际路径：身份启动层为 `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`；Hermes 热记忆为 `data/hermes-memory/USER.md`、`data/hermes-memory/MEMORY.md`。
+  - 已明确 `BrowserWorker` 是冻结线，后续网页 AI 查询/搜索能力走 `GenesisActuator` 和外部 adapter/plugin。
+  - 已明确 `evolution` 当前是预留槽位，不应表述为完整自进化已落地。
+- 搜索能力与外部智能体调度方案已补进飞书架构终稿：
+  - 搜索/外部 AI 分身调度不新增第十个核心 Slot，而是作为 `AgentSlot` 的实现线。
+  - `统一身份引擎` 负责登录态管理、浏览器/HTTP 会话执行、结果解析、审计和熔断；底层可接 `agent-browser`，但登录态/Cookie 不进入核心记忆。
+  - `data/skills/external_agent_dispatch_sop.md` 作为后续 Skill 目标，负责平台选择、任务翻译、追问策略、效果评估和记忆回写。
+  - 重要协作原则已确定为二级委派：`主进程 -> 子代理 -> 外部智能体`。主进程只拆解/派发/终审/汇报/归档，子代理负责调度外部智能体并做第一次审核提炼，主进程只接收整理后的 `SubagentReport`。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

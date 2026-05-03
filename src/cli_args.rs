@@ -20,13 +20,36 @@ use crate::cli_types::*;
 
 pub(crate) fn parse_control_output(args: &[String]) -> Result<ControlOutputFormat, String> {
     let mut output = ControlOutputFormat::Text;
-    for arg in args {
-        match arg.as_str() {
-            "--json" => output = ControlOutputFormat::Json,
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            flag if is_runtime_value_flag(flag) => index += 2,
+            "--unit" | "--action" | "--reason" | "--model" => index += 2,
+            "--approve" => index += 1,
             _ => return Err(usage()),
         }
     }
     Ok(output)
+}
+
+pub(crate) fn parse_control_runtime_options(args: &[String]) -> Result<CliOptions, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            "--json" | "--approve" => index += 1,
+            "--unit" | "--action" | "--reason" | "--model" => index += 2,
+            _ => return Err(usage()),
+        }
+    }
+    parse_cli_options(&runtime_args)
 }
 
 pub(crate) fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat, String> {
@@ -75,6 +98,7 @@ pub(crate) fn parse_genesis_ask(args: &[String]) -> Result<GenesisAskCliRequest,
     let mut cdp_port = 9222u16;
     let mut timeout_ms = 30_000u64;
     let mut approve_exec = false;
+    let mut dry_run = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -126,6 +150,10 @@ pub(crate) fn parse_genesis_ask(args: &[String]) -> Result<GenesisAskCliRequest,
                 approve_exec = true;
                 index += 1;
             }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
             _ => return Err(usage()),
         }
     }
@@ -137,7 +165,7 @@ pub(crate) fn parse_genesis_ask(args: &[String]) -> Result<GenesisAskCliRequest,
     if program.trim().is_empty() {
         return Err("genesis ask requires non-empty --program".to_string());
     }
-    if !approve_exec {
+    if !approve_exec && !dry_run {
         return Err("genesis_ask_requires_approve_exec: pass --approve-exec".to_string());
     }
 
@@ -149,6 +177,7 @@ pub(crate) fn parse_genesis_ask(args: &[String]) -> Result<GenesisAskCliRequest,
         cdp_port,
         timeout_ms,
         approve_exec,
+        dry_run,
     })
 }
 
@@ -163,6 +192,7 @@ pub(crate) fn parse_control_apply(args: &[String]) -> Result<ControlApplyCliRequ
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            flag if is_runtime_value_flag(flag) => index += 2,
             "--unit" => {
                 let value = args
                     .get(index + 1)
@@ -236,6 +266,8 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     let options = parse_cli_options(args)?;
     let mut user_input: Option<String> = None;
     let mut remember = false;
+    let mut session_id: Option<String> = None;
+    let mut remember_session = false;
     let mut remember_identity = false;
     let mut dispatch_subagent = false;
 
@@ -250,6 +282,18 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
             }
             "--remember" => {
                 remember = true;
+                index += 1;
+            }
+            "--session-id" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                if value.trim().is_empty() {
+                    return Err("--session-id requires non-empty value".to_string());
+                }
+                session_id = Some(value.clone());
+                index += 2;
+            }
+            "--remember-session" => {
+                remember_session = true;
                 index += 1;
             }
             "--remember-identity" => {
@@ -267,7 +311,10 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     Ok(RunCliRequest {
         options,
         user_input: user_input.ok_or_else(usage)?,
+        workspace_root: None,
         remember,
+        session_id,
+        remember_session,
         remember_identity,
         dispatch_subagent,
     })
@@ -285,6 +332,7 @@ pub(crate) fn parse_subagent_dispatch(
     let mut token_budget: Option<u16> = None;
     let mut idle_timeout_ms: Option<u64> = None;
     let mut fork_parent_tokens: Option<u16> = None;
+    let mut required_capabilities: Vec<String> = Vec::new();
 
     let mut index = 0;
     while index < args.len() {
@@ -345,6 +393,16 @@ pub(crate) fn parse_subagent_dispatch(
                 fork_parent_tokens = Some(parse_u16_flag("--fork-parent-tokens", value)?);
                 index += 2;
             }
+            "--requires-capability" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent dispatch requires value after --requires-capability".to_string()
+                })?;
+                push_unique_capability(
+                    &mut required_capabilities,
+                    normalize_capability_flag("--requires-capability", value)?,
+                );
+                index += 2;
+            }
             _ => return Err(usage()),
         }
     }
@@ -355,6 +413,14 @@ pub(crate) fn parse_subagent_dispatch(
     let context_isolation = fork_parent_tokens
         .map(|max_parent_tokens| ContextIsolation::Forked { max_parent_tokens })
         .unwrap_or(ContextIsolation::Isolated);
+    let mut metadata = BTreeMap::from([("source".to_string(), "cli".to_string())]);
+    if !required_capabilities.is_empty() {
+        metadata.insert(
+            "required_capabilities".to_string(),
+            required_capabilities.join(","),
+        );
+    }
+
     let spawn = SpawnRequest {
         task_id: task_id.clone(),
         parent_agent_id: AgentId("chuang-cli".to_string()),
@@ -365,7 +431,7 @@ pub(crate) fn parse_subagent_dispatch(
         token_budget: token_budget.unwrap_or(1024),
         idle_timeout_ms: idle_timeout_ms.unwrap_or(30_000),
         recursive_spawn: false,
-        metadata: BTreeMap::from([("source".to_string(), "cli".to_string())]),
+        metadata,
     };
 
     Ok(SubagentDispatchCliRequest {
@@ -416,6 +482,57 @@ pub(crate) fn parse_subagent_collect(args: &[String]) -> Result<SubagentReportCl
     parse_subagent_report(args)
 }
 
+pub(crate) fn parse_subagent_release_claim(
+    args: &[String],
+) -> Result<SubagentReleaseClaimCliRequest, String> {
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut run_id: Option<String> = None;
+    let mut reason: Option<String> = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            flag if is_runtime_value_flag(flag) => {
+                copy_runtime_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            "--run-id" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent release-claim requires value after --run-id".to_string()
+                })?;
+                run_id = Some(value.clone());
+                index += 2;
+            }
+            "--reason" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent release-claim requires value after --reason".to_string()
+                })?;
+                reason = Some(value.clone());
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let reason = reason.ok_or_else(|| "subagent release-claim requires --reason".to_string())?;
+    if reason.trim().is_empty() {
+        return Err("subagent release-claim requires non-empty --reason".to_string());
+    }
+
+    Ok(SubagentReleaseClaimCliRequest {
+        options: parse_cli_options(&runtime_args)?,
+        output,
+        run_id: RunId(
+            run_id.ok_or_else(|| "subagent release-claim requires --run-id".to_string())?,
+        ),
+        reason,
+    })
+}
+
 pub(crate) fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequest, String> {
     let mut runtime_args: Vec<String> = Vec::new();
     let mut output = ControlOutputFormat::Text;
@@ -443,12 +560,61 @@ pub(crate) fn parse_subagent_list(args: &[String]) -> Result<SubagentListCliRequ
 pub(crate) fn parse_subagent_run_once(
     args: &[String],
 ) -> Result<SubagentRunOnceCliRequest, String> {
+    let parsed = parse_subagent_runner_args("subagent run-once", args, false)?;
+    Ok(SubagentRunOnceCliRequest {
+        options: parsed.options,
+        output: parsed.output,
+        runner: parsed.runner,
+        runner_command: parsed.runner_command,
+        runner_args: parsed.runner_args,
+        worker_capabilities: parsed.worker_capabilities,
+        approve_exec: parsed.approve_exec,
+    })
+}
+
+pub(crate) fn parse_subagent_run_loop(
+    args: &[String],
+) -> Result<SubagentRunLoopCliRequest, String> {
+    let parsed = parse_subagent_runner_args("subagent run-loop", args, true)?;
+    Ok(SubagentRunLoopCliRequest {
+        options: parsed.options,
+        output: parsed.output,
+        runner: parsed.runner,
+        runner_command: parsed.runner_command,
+        runner_args: parsed.runner_args,
+        worker_capabilities: parsed.worker_capabilities,
+        approve_exec: parsed.approve_exec,
+        max_runs: parsed.max_runs.unwrap_or(10),
+        max_concurrency: parsed.max_concurrency.unwrap_or(1),
+    })
+}
+
+struct ParsedSubagentRunnerArgs {
+    options: CliOptions,
+    output: ControlOutputFormat,
+    runner: String,
+    runner_command: Option<String>,
+    runner_args: Vec<String>,
+    worker_capabilities: Vec<String>,
+    approve_exec: bool,
+    max_runs: Option<usize>,
+    max_concurrency: Option<usize>,
+}
+
+fn parse_subagent_runner_args(
+    command_name: &str,
+    args: &[String],
+    allow_max_runs: bool,
+) -> Result<ParsedSubagentRunnerArgs, String> {
     let mut runtime_args: Vec<String> = Vec::new();
     let mut output = ControlOutputFormat::Text;
     let mut runner: Option<String> = None;
     let mut runner_command: Option<String> = None;
     let mut runner_args: Vec<String> = Vec::new();
+    let mut worker_capabilities: Vec<String> = Vec::new();
     let mut approve_exec = false;
+    let mut max_runs: Option<usize> = None;
+    let mut max_concurrency: Option<usize> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -460,23 +626,67 @@ pub(crate) fn parse_subagent_run_once(
             "--runner" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or_else(|| "subagent run-once requires value after --runner".to_string())?;
+                    .ok_or_else(|| format!("{command_name} requires value after --runner"))?;
                 runner = Some(value.clone());
                 index += 2;
             }
             "--runner-command" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    "subagent run-once requires value after --runner-command".to_string()
+                    format!("{command_name} requires value after --runner-command")
                 })?;
                 runner_command = Some(value.clone());
                 index += 2;
             }
             "--runner-arg" => {
-                let value = args.get(index + 1).ok_or_else(|| {
-                    "subagent run-once requires value after --runner-arg".to_string()
-                })?;
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{command_name} requires value after --runner-arg"))?;
                 runner_args.push(value.clone());
                 index += 2;
+            }
+            "--capability" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{command_name} requires value after --capability"))?;
+                push_unique_capability(
+                    &mut worker_capabilities,
+                    normalize_capability_flag("--capability", value)?,
+                );
+                index += 2;
+            }
+            "--max-runs" if allow_max_runs => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("{command_name} requires value after --max-runs"))?;
+                let parsed = parse_usize_flag("--max-runs", value)?;
+                if parsed == 0 {
+                    return Err("--max-runs must be greater than zero".to_string());
+                }
+                max_runs = Some(parsed);
+                index += 2;
+            }
+            "--max-concurrency" if allow_max_runs => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    format!("{command_name} requires value after --max-concurrency")
+                })?;
+                let parsed = parse_usize_flag("--max-concurrency", value)?;
+                if parsed == 0 {
+                    return Err("--max-concurrency must be greater than zero".to_string());
+                }
+                if parsed > 1 {
+                    return Err(
+                        "--max-concurrency above 1 is not supported by the MVP worker loop"
+                            .to_string(),
+                    );
+                }
+                max_concurrency = Some(parsed);
+                index += 2;
+            }
+            "--max-concurrency" => {
+                return Err("--max-concurrency is only supported by subagent run-loop".to_string())
+            }
+            "--max-runs" => {
+                return Err("--max-runs is only supported by subagent run-loop".to_string())
             }
             "--approve-exec" => {
                 approve_exec = true;
@@ -518,14 +728,34 @@ pub(crate) fn parse_subagent_run_once(
         }
     }
 
-    Ok(SubagentRunOnceCliRequest {
+    Ok(ParsedSubagentRunnerArgs {
         options: parse_cli_options(&runtime_args)?,
         output,
         runner,
         runner_command,
         runner_args,
+        worker_capabilities,
         approve_exec,
+        max_runs,
+        max_concurrency,
     })
+}
+
+fn normalize_capability_flag(flag_name: &str, value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(format!("{flag_name} must not be empty"));
+    }
+    if normalized.contains(',') {
+        return Err(format!("{flag_name} must not contain comma"));
+    }
+    Ok(normalized)
+}
+
+fn push_unique_capability(capabilities: &mut Vec<String>, capability: String) {
+    if !capabilities.contains(&capability) {
+        capabilities.push(capability);
+    }
 }
 
 pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
@@ -558,6 +788,8 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             "--json" => index += 1,
             "--input" => index += 2,
             "--remember" => index += 1,
+            "--session-id" => index += 2,
+            "--remember-session" => index += 1,
             "--remember-identity" => index += 1,
             "--dispatch-subagent" => index += 1,
             "--provider-base-url" => {
@@ -665,6 +897,8 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 api_key,
                 model_name,
                 transport: parse_provider_transport(provider_transport.as_deref())?,
+                request_timeout_ms: None,
+                tls_ca_cert_path: None,
             })
         }
         _ => {

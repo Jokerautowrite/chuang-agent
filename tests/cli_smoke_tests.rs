@@ -2,6 +2,20 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+fn write_fake_config(root: &std::path::Path) -> PathBuf {
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display()
+        ),
+    )
+    .expect("fake config should be written");
+    config_path
+}
+
 #[test]
 fn cli_run_command_boots_and_returns_structured_response() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -11,8 +25,9 @@ fn cli_run_command_boots_and_returns_structured_response() {
         std::env::temp_dir().join(format!("chuang-agent-cli-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    fs::create_dir_all(temp_dir.join("identity")).expect("identity dir should be created");
 
-    let db_path = temp_dir.join("memory.db");
+    let config_path = write_fake_config(&temp_dir);
 
     let output = Command::new("cargo")
         .args([
@@ -20,8 +35,8 @@ fn cli_run_command_boots_and_returns_structured_response() {
             "--quiet",
             "--",
             "run",
-            "--db",
-            db_path.to_str().expect("db path should be utf-8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--input",
             "创项目现在启动试试",
         ])
@@ -61,6 +76,7 @@ fn cli_run_can_select_summary_compression_context_engine() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
 
     let output = Command::new("cargo")
@@ -69,6 +85,8 @@ fn cli_run_can_select_summary_compression_context_engine() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_path.to_str().expect("db path should be utf-8"),
             "--context-engine",
@@ -103,6 +121,7 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
     let queue_root = temp_dir.join("queue");
 
@@ -112,6 +131,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_path.to_str().expect("db path should be utf-8"),
             "--subagent",
@@ -152,6 +173,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
             "--",
             "subagent",
             "run-once",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("queue path should be utf-8"),
             "--json",
@@ -179,6 +202,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
             "--",
             "subagent",
             "report",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("queue path should be utf-8"),
             "--run-id",
@@ -205,6 +230,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
             "--",
             "subagent",
             "collect",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("queue path should be utf-8"),
             "--run-id",
@@ -238,6 +265,7 @@ fn cli_run_dispatch_subagent_requires_queued_external_slot() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
     let queue_root = temp_dir.join("queue");
 
@@ -247,10 +275,14 @@ fn cli_run_dispatch_subagent_requires_queued_external_slot() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_path.to_str().expect("db path should be utf-8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("queue path should be utf-8"),
+            "--subagent",
+            "fake",
             "--input",
             "没有选择 queued external",
             "--dispatch-subagent",
@@ -274,8 +306,9 @@ fn cli_repl_command_accepts_one_turn_and_exits() {
         std::env::temp_dir().join(format!("chuang-agent-cli-repl-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    fs::create_dir_all(temp_dir.join("identity")).expect("identity dir should be created");
 
-    let db_path = temp_dir.join("memory.db");
+    let config_path = write_fake_config(&temp_dir);
 
     let mut child = Command::new("cargo")
         .args([
@@ -283,8 +316,8 @@ fn cli_repl_command_accepts_one_turn_and_exits() {
             "--quiet",
             "--",
             "repl",
-            "--db",
-            db_path.to_str().expect("db path should be utf-8"),
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
         ])
         .current_dir(&workspace_root)
         .stdin(Stdio::piped())
@@ -326,6 +359,7 @@ fn cli_run_can_remember_turn_summary_when_requested() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
     let db_arg = db_path.to_str().expect("db path should be utf-8");
 
@@ -335,6 +369,8 @@ fn cli_run_can_remember_turn_summary_when_requested() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_arg,
             "--input",
@@ -355,7 +391,16 @@ fn cli_run_can_remember_turn_summary_when_requested() {
 
     let second = Command::new("cargo")
         .args([
-            "run", "--quiet", "--", "run", "--db", db_arg, "--input", "MVP",
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
+            "--db",
+            db_arg,
+            "--input",
+            "MVP",
         ])
         .current_dir(&workspace_root)
         .output()
@@ -383,6 +428,7 @@ fn cli_run_can_remember_identity_memory_when_requested() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
     let identity_root = temp_dir.join("identity");
 
@@ -392,6 +438,8 @@ fn cli_run_can_remember_identity_memory_when_requested() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_path.to_str().expect("db path should be utf-8"),
             "--identity-memory-root",
@@ -433,6 +481,7 @@ fn cli_run_reports_memory_write_hard_limit_clearly() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
+    let config_path = write_fake_config(&temp_dir);
     let db_path = temp_dir.join("memory.db");
     let oversized_input = "超限".repeat(1200);
 
@@ -442,6 +491,8 @@ fn cli_run_reports_memory_write_hard_limit_clearly() {
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
             "--db",
             db_path.to_str().expect("db path should be utf-8"),
             "--input",

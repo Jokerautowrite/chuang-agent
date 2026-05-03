@@ -1,18 +1,18 @@
-use chuang_agent::control_plane::{ControlPlane, ManagedUnit};
-use chuang_agent::control_surface::{
-    list_control_surface_units, run_control_surface_intent, ControlSurfaceError,
-    ControlSurfaceRequest,
+use chuang_agent::control_intent::{parse_control_intent, ControlIntentInput};
+use chuang_agent::control_plane::ManagedUnit;
+use chuang_agent::control_workflow::{
+    build_decision_view, build_unit_views, run_control_workflow_for_unit, ControlWorkflowError,
+    ControlWorkflowRequest,
 };
-use chuang_agent::control_workflow::{build_decision_view, ControlWorkflowError};
-use chuang_agent::runtime_config::RuntimeConfig;
-use chuang_agent::slot_registry::build_runtime_slots;
+use chuang_agent::slot_registry::{build_runtime_slots, ControlPlaneSlot};
 
-use crate::cli_args::{control_intent_error_to_cli, parse_control_apply, parse_control_output};
+use crate::cli_args::{
+    control_intent_error_to_cli, parse_control_apply, parse_control_output,
+    parse_control_runtime_options,
+};
 use crate::cli_output::{
     print_control_unit_view, print_control_view_with_format, print_json, usage, ControlOutputFormat,
 };
-use crate::cli_runtime::default_db_path;
-use crate::cli_types::CliOptions;
 
 pub(crate) fn control_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -24,14 +24,16 @@ pub(crate) fn control_command(args: &[String]) -> Result<(), String> {
 
 fn control_list_command(args: &[String]) -> Result<(), String> {
     let output = parse_control_output(args)?;
-
-    let options = CliOptions {
-        runtime: RuntimeConfig::new(default_db_path()),
-    };
+    let options = parse_control_runtime_options(args)?;
     let slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
-    let views = list_control_surface_units(&slots.control_plane);
+    let views = build_unit_views(
+        slots
+            .control_plane
+            .try_list_units()
+            .map_err(|err| format!("control_failed: {err:?}"))?,
+    );
     match output {
         ControlOutputFormat::Text => {
             for unit in views {
@@ -46,9 +48,7 @@ fn control_list_command(args: &[String]) -> Result<(), String> {
 
 fn control_apply_command(args: &[String]) -> Result<(), String> {
     let request = parse_control_apply(args)?;
-    let options = CliOptions {
-        runtime: RuntimeConfig::new(default_db_path()),
-    };
+    let options = parse_control_runtime_options(args)?;
     let mut slots = build_runtime_slots(&options.runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     let unit_key = request
@@ -57,30 +57,35 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
         .as_deref()
         .ok_or_else(|| "control apply requires --unit".to_string())?;
     let unit = find_control_unit(&slots.control_plane, unit_key)?;
-    let result = match run_control_surface_intent(
+    let control = parse_control_intent(ControlIntentInput {
+        unit_id: Some(unit.unit_id.clone()),
+        action: request.intent.action,
+        reason: request.intent.reason,
+        model_name: request.intent.model_name,
+    })
+    .map_err(control_intent_error_to_cli)?;
+    let result = match run_control_workflow_for_unit(
         &mut slots.control_plane,
         &mut slots.governance,
-        ControlSurfaceRequest {
-            intent: request.intent,
+        ControlWorkflowRequest {
+            control,
             approved: request.approve,
         },
+        &unit,
     ) {
         Ok(result) => result,
-        Err(ControlSurfaceError::Workflow(ControlWorkflowError::ApprovalRequired(decision))) => {
+        Err(ControlWorkflowError::ApprovalRequired(decision)) => {
             print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action requires --approve".to_string());
         }
-        Err(ControlSurfaceError::Workflow(ControlWorkflowError::NotAllowed(decision))) => {
+        Err(ControlWorkflowError::NotAllowed(decision)) => {
             print_control_view_with_format(&build_decision_view(&unit, &decision), request.output)?;
             return Err("control action was not allowed by governance".to_string());
         }
-        Err(ControlSurfaceError::Workflow(ControlWorkflowError::Control(err))) => {
-            return Err(format!("control_failed: {err:?}"))
-        }
-        Err(ControlSurfaceError::Workflow(ControlWorkflowError::Governance(err))) => {
+        Err(ControlWorkflowError::Control(err)) => return Err(format!("control_failed: {err:?}")),
+        Err(ControlWorkflowError::Governance(err)) => {
             return Err(format!("governance_failed: {}", err.message))
         }
-        Err(ControlSurfaceError::Intent(err)) => return Err(control_intent_error_to_cli(err)),
     };
 
     print_control_view_with_format(&result.view, request.output)?;
@@ -101,12 +106,13 @@ fn control_apply_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn find_control_unit<P: ControlPlane>(
-    control_plane: &P,
+fn find_control_unit(
+    control_plane: &ControlPlaneSlot,
     unit_id: &str,
 ) -> Result<ManagedUnit, String> {
     control_plane
-        .list_units()
+        .try_list_units()
+        .map_err(|err| format!("control_failed: {err:?}"))?
         .into_iter()
         .find(|unit| unit.unit_id == unit_id || unit.display_name == unit_id)
         .ok_or_else(|| format!("unknown control unit: {unit_id}"))

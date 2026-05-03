@@ -72,6 +72,27 @@ impl DualFileMemoryStore for FileDualFileMemoryStore {
         }
     }
 
+    fn write_memory(&mut self, content: &str) -> Result<(), DualFileMemoryError> {
+        let existing_entries = parse_memory_entry_views(&self.read_memory()?);
+        match TextMemoryAdmission::new(self.config.memory_max_chars)
+            .evaluate(content, existing_entries)
+        {
+            TextMemoryAdmissionDecision::Accepted => {
+                atomic_write(&self.config.memory_path(), content)
+            }
+            TextMemoryAdmissionDecision::Rejected {
+                limit_chars,
+                attempted_chars,
+                existing_entries,
+            } => Err(DualFileMemoryError::HardLimitExceeded {
+                scope: DualFileMemoryScope::Memory,
+                limit_chars,
+                attempted_chars,
+                existing_entries,
+            }),
+        }
+    }
+
     fn append_memory(&mut self, entry: HotMemoryEntry) -> Result<(), DualFileMemoryError> {
         let current = self.read_memory()?;
         let existing_entries = parse_memory_entry_views(&current);

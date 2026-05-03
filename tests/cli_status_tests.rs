@@ -13,10 +13,35 @@ fn temp_identity_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-agent-cli-{name}-{nanos}"))
 }
 
+fn write_fake_status_config(root: &std::path::Path) -> PathBuf {
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nidentity_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display(),
+            root.join("identity-bootstrap").display()
+        ),
+    )
+    .expect("config should be written");
+    config_path
+}
+
 #[test]
 fn cli_status_prints_mvp_health_summary() {
+    let root = temp_identity_root("status-text");
+    let config_path = write_fake_status_config(&root);
     let output = Command::new("cargo")
-        .args(["run", "--quiet", "--", "status"])
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+        ])
         .output()
         .expect("cargo run should execute");
 
@@ -33,24 +58,42 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("model: stub-responder"));
     assert!(stdout.contains("identity_memory: hermes_dual_file"));
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
+    assert!(stdout.contains("identity_root: "));
+    assert!(stdout.contains("rules_root: ./rules"));
+    assert!(stdout.contains(
+        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 report_schema_version=6"
+    ));
+    assert!(stdout.contains("atomic_tool name=file_read status=mapped"));
+    assert!(stdout.contains("atomic_tool name=mouse status=interface_only"));
     assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
+    assert!(stdout.contains("identity_bootstrap_chars: soul=0 story=0 first_wake=0 agents=0"));
     assert!(stdout.contains("governance: static_rule"));
+    assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
     assert!(stdout.contains(
         "context_budget: max=512 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
     ));
     assert!(stdout.contains("control_plane: fake_local"));
+    assert!(stdout.contains("plugin_registry: available=true ok=true"));
+    assert!(stdout.contains("placeholder_warning: provider=fake"));
+    assert!(stdout.contains("placeholder_warning: actuator=fake"));
+    assert!(stdout.contains("placeholder_warning: subagent=fake"));
+    assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
 }
 
 #[test]
 fn cli_status_can_render_json_without_secret_leak() {
+    let config_root = temp_identity_root("status-provider-json");
+    let config_path = write_fake_status_config(&config_root);
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--json",
             "--provider-base-url",
             "https://api.example.com/v1",
@@ -76,13 +119,34 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["config"]["provider_id"], "custom-openai");
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
+    assert_eq!(
+        parsed["config"]["identity_root"],
+        config_root.join("identity-bootstrap").display().to_string()
+    );
     assert_eq!(parsed["config"]["api_key_state"], "<set>");
+    assert_eq!(parsed["plugin_registry"]["available"], true);
+    assert_eq!(parsed["plugin_registry"]["ok"], true);
+    assert_eq!(parsed["plugin_registry"]["plugin_count"], 5);
+    assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
+    assert_eq!(parsed["atomic_tools"]["ok"], true);
+    assert_eq!(parsed["atomic_tools"]["total_count"], 9);
+    assert_eq!(parsed["atomic_tools"]["mapped_count"], 3);
+    assert_eq!(parsed["atomic_tools"]["interface_only_count"], 6);
+    assert_eq!(parsed["atomic_tools"]["tool_report_schema_version"], 6);
+    assert!(parsed["atomic_tools"]["tool_call_schema_fields"]
+        .as_array()
+        .expect("tool call schema fields")
+        .iter()
+        .any(|field| field == "atomic_tool_name"));
+    assert_eq!(parsed["atomic_tools"]["manifests"][0]["name"], "mouse");
     assert!(!stdout.contains("test-secret-key"));
 }
 
 #[test]
 fn cli_status_can_use_custom_identity_memory_root() {
     let root = temp_identity_root("identity-root");
+    let config_root = temp_identity_root("identity-root-config");
+    let config_path = write_fake_status_config(&config_root);
     fs::create_dir_all(&root).expect("root should be created");
     fs::write(root.join("USER.md"), "老爸偏好简洁中文汇报").expect("user memory should be seeded");
     fs::write(root.join("MEMORY.md"), "## mem-1\n创项目聚焦核心 MVP")
@@ -94,6 +158,8 @@ fn cli_status_can_use_custom_identity_memory_root() {
             "--quiet",
             "--",
             "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--json",
             "--identity-memory-root",
             root.to_str().expect("temp path should be utf8"),
@@ -126,12 +192,16 @@ fn cli_status_can_use_custom_identity_memory_root() {
 #[test]
 fn cli_status_can_select_queued_external_subagent_slot() {
     let queue_root = temp_identity_root("subagent-queue");
+    let config_root = temp_identity_root("subagent-queue-config");
+    let config_path = write_fake_status_config(&config_root);
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--json",
             "--subagent",
             "queued_external",
@@ -159,12 +229,16 @@ fn cli_status_can_select_queued_external_subagent_slot() {
 
 #[test]
 fn cli_status_can_override_context_budget_fields() {
+    let config_root = temp_identity_root("context-budget-config");
+    let config_path = write_fake_status_config(&config_root);
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--json",
             "--context-max-tokens",
             "256",
@@ -202,12 +276,16 @@ fn cli_status_can_override_context_budget_fields() {
 
 #[test]
 fn cli_status_can_select_summary_compression_context_engine() {
+    let config_root = temp_identity_root("context-engine-config");
+    let config_path = write_fake_status_config(&config_root);
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--context-engine",
             "summary_compression",
             "--json",
@@ -227,6 +305,48 @@ fn cli_status_can_select_summary_compression_context_engine() {
         parsed["config"]["context_engine_kind"],
         "summary_compression"
     );
+}
+
+#[test]
+fn cli_status_exposes_command_control_timeout_from_config() {
+    let root = temp_identity_root("control-timeout-status");
+    let config_path = root.join("config.toml");
+    fs::create_dir_all(&root).expect("config root should be created");
+    fs::write(
+        &config_path,
+        r#"
+control = "command"
+program = "printf"
+list_args = "[]"
+apply_args = "{}"
+control_timeout_ms = 4321
+"#,
+    )
+    .expect("config should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["config"]["control_plane_kind"], "command");
+    assert_eq!(parsed["config"]["control_command_timeout_ms"], 4321);
 }
 
 #[test]

@@ -3,8 +3,10 @@ use std::collections::BTreeMap;
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{ActionKind, ProposedAction};
 
+mod command;
 mod fake;
 
+pub use command::CommandControlPlane;
 pub use fake::FakeControlPlane;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

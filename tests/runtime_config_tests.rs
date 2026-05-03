@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
-    ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
-    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
+    ContextEngineConfig, ControlPlaneCommandConfig, ControlPlaneConfig, IdentityMemoryConfig,
+    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
 
 #[test]
@@ -21,6 +21,8 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.subagent_queue_root, "./data/subagent-queue");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
+    assert_eq!(summary.control_command_timeout_ms, None);
+    assert_eq!(summary.provider_tls_ca_cert_path, None);
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
@@ -30,7 +32,44 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.context_min_working_tokens, 1);
     assert_eq!(summary.context_max_tool_results, 5);
     assert_eq!(summary.context_max_memory_segments, 5);
+    assert_eq!(summary.tool_loop_max_rounds, 4);
+    assert_eq!(summary.tool_shell_timeout_ms, 30_000);
+    assert_eq!(
+        summary.tool_shell_risk_rule_counts,
+        "delete_or_cleanup=13,service_change=7,network_change=8,secret_access=7"
+    );
     assert_eq!(summary.api_key_state, None);
+}
+
+#[test]
+fn runtime_config_rejects_invalid_tool_loop_rounds() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.tool_loop.max_rounds = 0;
+
+    let err = config
+        .validate()
+        .expect_err("zero tool loop max rounds should fail");
+
+    assert_eq!(err.field, "tool_loop.max_rounds");
+
+    config.tool_loop.max_rounds = 33;
+    let err = config
+        .validate()
+        .expect_err("oversized tool loop max rounds should fail");
+    assert_eq!(err.field, "tool_loop.max_rounds");
+
+    config.tool_loop.max_rounds = 4;
+    config.tool_loop.shell_timeout_ms = 0;
+    let err = config
+        .validate()
+        .expect_err("zero shell timeout should fail");
+    assert_eq!(err.field, "tool_loop.shell_timeout_ms");
+
+    config.tool_loop.shell_timeout_ms = 600_001;
+    let err = config
+        .validate()
+        .expect_err("oversized shell timeout should fail");
+    assert_eq!(err.field, "tool_loop.shell_timeout_ms");
 }
 
 #[test]
@@ -87,6 +126,8 @@ fn openai_provider_config_redacts_api_key_in_summary() {
         api_key: "test-key".to_string(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        request_timeout_ms: None,
+        tls_ca_cert_path: None,
     });
 
     config
@@ -97,6 +138,7 @@ fn openai_provider_config_redacts_api_key_in_summary() {
     assert_eq!(summary.provider_kind, "openai_compatible");
     assert_eq!(summary.provider_id, "custom-openai");
     assert_eq!(summary.api_key_state, Some("<set>".to_string()));
+    assert_eq!(summary.provider_tls_ca_cert_path, None);
 }
 
 #[test]
@@ -107,6 +149,8 @@ fn openai_provider_config_rejects_missing_required_fields() {
         api_key: String::new(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        request_timeout_ms: None,
+        tls_ca_cert_path: None,
     });
 
     let err = config
@@ -129,6 +173,42 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+}
+
+#[test]
+fn runtime_config_rejects_zero_command_control_timeout() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.control_plane = ControlPlaneConfig::Command(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: "[]".to_string(),
+        apply_args: "{}".to_string(),
+        timeout_ms: 0,
+    });
+
+    let err = config
+        .validate()
+        .expect_err("zero command timeout should fail");
+
+    assert_eq!(err.field, "control.timeout_ms");
+}
+
+#[test]
+fn runtime_config_summary_exposes_command_control_timeout() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.control_plane = ControlPlaneConfig::Command(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: "[]".to_string(),
+        apply_args: "{}".to_string(),
+        timeout_ms: 12_345,
+    });
+
+    config
+        .validate()
+        .expect("command control config should be valid");
+    let summary = config.summary();
+
+    assert_eq!(summary.control_plane_kind, "command");
+    assert_eq!(summary.control_command_timeout_ms, Some(12_345));
 }
 
 #[test]

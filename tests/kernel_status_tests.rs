@@ -16,6 +16,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         context_engine_kind: None,
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -26,8 +27,19 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.config.model_name, "stub-responder");
     assert_eq!(status.slots.provider, "fake");
     assert_eq!(status.slots.governance, "static_rule");
+    assert_eq!(status.slots.execution, "generic_agent_mvp");
     assert_eq!(status.slots.subagent, "fake");
     assert_eq!(status.slots.control_plane, "fake_local");
+    assert!(status.atomic_tools.ok);
+    assert_eq!(status.atomic_tools.tool_report_schema_version, 6);
+    assert!(status
+        .atomic_tools
+        .tool_call_schema_fields
+        .iter()
+        .any(|field| field == "atomic_tool_name"));
+    assert!(status.plugin_registry.available);
+    assert!(status.plugin_registry.ok);
+    assert_eq!(status.plugin_registry.plugin_count, 5);
 }
 
 #[test]
@@ -43,6 +55,7 @@ fn kernel_status_rejects_invalid_runtime_config() {
         context_engine_kind: None,
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
     };
 
     let err = build_chuang_mvp_status(&config, &kernel).expect_err("invalid config should fail");

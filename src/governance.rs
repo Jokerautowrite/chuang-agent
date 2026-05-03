@@ -1,7 +1,9 @@
 use crate::common::AuditRecord;
 
+mod rules_markdown;
 mod static_rule;
 
+pub use rules_markdown::{MarkdownRuleSet, RuleCheck};
 pub use static_rule::StaticRuleGovernance;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

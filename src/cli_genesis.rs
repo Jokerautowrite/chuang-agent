@@ -1,14 +1,13 @@
 use chuang_agent::common::{AgentId, AuditRecord, TaskId, Timestamp};
-use chuang_agent::genesis_actuator::{
-    AutoCliGenesisActuator, GenesisActuator, GenesisAskRequest, GenesisConfig,
-};
+use chuang_agent::genesis_actuator::{GenesisActuator, GenesisAskRequest, GenesisConfig};
 use chuang_agent::governance::{
     ActionKind, Governance, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
+use chuang_agent::slot_registry::build_genesis_actuator;
 
 use crate::cli_args::parse_genesis_ask;
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
-use crate::cli_types::GenesisAskCliOutput;
+use crate::cli_types::{GenesisAskCliOutput, GenesisDryRunCliOutput};
 
 pub(crate) fn genesis_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -19,6 +18,36 @@ pub(crate) fn genesis_command(args: &[String]) -> Result<(), String> {
 
 fn genesis_ask_command(args: &[String]) -> Result<(), String> {
     let request = parse_genesis_ask(args)?;
+    let mut config = GenesisConfig::new(request.profile_dir);
+    config.program = request.program;
+    config.cdp_port = request.cdp_port;
+    config.timeout_ms = request.timeout_ms;
+
+    if request.dry_run {
+        let actuator = build_genesis_actuator(config);
+        let output = GenesisDryRunCliOutput {
+            primary: actuator.primary_spec(&request.prompt),
+            fallback: actuator.fallback_spec(&request.prompt),
+        };
+        return match request.output {
+            ControlOutputFormat::Text => {
+                println!("genesis_dry_run: true");
+                println!(
+                    "primary: {} {}",
+                    output.primary.program,
+                    output.primary.args.join(" ")
+                );
+                println!(
+                    "fallback: {} {}",
+                    output.fallback.program,
+                    output.fallback.args.join(" ")
+                );
+                Ok(())
+            }
+            ControlOutputFormat::Json => print_json(&output),
+        };
+    }
+
     if !request.approve_exec {
         return Err("genesis_ask_requires_approve_exec: pass --approve-exec".to_string());
     }
@@ -46,12 +75,7 @@ fn genesis_ask_command(args: &[String]) -> Result<(), String> {
     }
 
     let prompt = request.prompt;
-    let mut config = GenesisConfig::new(request.profile_dir);
-    config.program = request.program;
-    config.cdp_port = request.cdp_port;
-    config.timeout_ms = request.timeout_ms;
-
-    let mut actuator = AutoCliGenesisActuator::new(config);
+    let mut actuator = build_genesis_actuator(config);
     let response = actuator
         .ask(GenesisAskRequest {
             prompt: prompt.clone(),

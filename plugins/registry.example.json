@@ -1,0 +1,59 @@
+{
+  "plugins": [
+    {
+      "id": "chuang-feishu-bridge",
+      "kind": "channel",
+      "display_name": "Chuang Dedicated Feishu Bridge",
+      "command": "../scripts/chuang-feishu-bridge.sh",
+      "config_path": "../ops/systemd/chuang-feishu-bridge.env.example",
+      "capabilities": ["feishu", "channel", "text"],
+      "enabled": false,
+      "dry_run_default": true,
+      "notes": "Placeholder bridge; requires dedicated Chuang Feishu credentials."
+    },
+    {
+      "id": "chuang-codex-runner",
+      "kind": "subagent_runner",
+      "display_name": "Chuang Codex Runner",
+      "command": "../scripts/chuang-codex-runner.py",
+      "config_path": null,
+      "capabilities": ["codex", "filesystem", "rust"],
+      "enabled": false,
+      "dry_run_default": true,
+      "notes": "Disabled unless CHUANG_CODEX_RUNNER_ENABLE=1."
+    },
+    {
+      "id": "chuang-real-control",
+      "kind": "control_adapter",
+      "display_name": "Chuang Allowlisted Control Adapter",
+      "command": "../scripts/chuang-real-control-adapter.py",
+      "config_path": "../config/control-allowlist.example.json",
+      "capabilities": ["service-control", "allowlist"],
+      "enabled": false,
+      "dry_run_default": true,
+      "notes": "Dry-run unless CHUANG_REAL_CONTROL_ENABLE=1."
+    },
+    {
+      "id": "chuang-real-actuator",
+      "kind": "actuator_adapter",
+      "display_name": "Chuang Allowlisted Actuator Adapter",
+      "command": "../scripts/chuang-real-actuator-adapter.py",
+      "config_path": "../config/actuator-allowlist.example.json",
+      "capabilities": ["desktop", "allowlist"],
+      "enabled": false,
+      "dry_run_default": true,
+      "notes": "Dry-run unless CHUANG_REAL_ACTUATOR_ENABLE=1."
+    },
+    {
+      "id": "genesis-autocli",
+      "kind": "genesis_adapter",
+      "display_name": "Genesis AutoCLI Adapter",
+      "command": null,
+      "config_path": null,
+      "capabilities": ["web-ai", "autocli", "cdp"],
+      "enabled": false,
+      "dry_run_default": true,
+      "notes": "Constructed by runtime config; real profile repair remains explicit."
+    }
+  ]
+}

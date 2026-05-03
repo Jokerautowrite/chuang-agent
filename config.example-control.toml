@@ -1,0 +1,8 @@
+# Safe command control example.
+# This adapter only returns deterministic JSON and does not touch real services.
+
+control = "command"
+program = "sh"
+list_args = "./scripts/chuang-control-adapter-example.sh list --json"
+apply_args = "./scripts/chuang-control-adapter-example.sh apply --json"
+control_timeout_ms = 30000

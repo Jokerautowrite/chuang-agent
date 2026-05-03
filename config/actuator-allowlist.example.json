@@ -1,0 +1,23 @@
+{
+  "apps": [
+    {
+      "app_name": "Feishu",
+      "open_command": ["feishu"],
+      "metadata": {
+        "owner": "chuang",
+        "risk": "desktop"
+      }
+    },
+    {
+      "app_name": "Firefox",
+      "open_command": ["firefox"],
+      "metadata": {
+        "owner": "chuang",
+        "risk": "browser"
+      }
+    }
+  ],
+  "input_allowed": false,
+  "click_allowed": false,
+  "screenshot_allowed": false
+}

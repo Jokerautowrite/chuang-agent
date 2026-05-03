@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
@@ -26,6 +27,15 @@ pub struct ChuangKernelConfig {
     pub context_engine_kind: Option<ContextEngineKind>,
     pub memory_write_max_chars: Option<usize>,
     pub identity_snapshot: Option<DualFileMemorySnapshot>,
+    pub identity_bootstrap_snapshot: Option<IdentityBootstrapSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IdentityBootstrapSnapshot {
+    pub soul: String,
+    pub story: String,
+    pub first_wake: String,
+    pub agents_registry: String,
 }
 
 impl ChuangKernelConfig {
@@ -39,6 +49,7 @@ impl ChuangKernelConfig {
             context_engine_kind: None,
             memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
             identity_snapshot: None,
+            identity_bootstrap_snapshot: None,
         }
     }
 }
@@ -62,6 +73,10 @@ pub struct ChuangKernelSnapshot {
     pub memory_write_max_chars: Option<usize>,
     pub identity_user_chars: Option<usize>,
     pub identity_memory_chars: Option<usize>,
+    pub identity_soul_chars: Option<usize>,
+    pub identity_story_chars: Option<usize>,
+    pub identity_first_wake_chars: Option<usize>,
+    pub identity_agents_registry_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +137,26 @@ impl<S, R> ChuangKernel<S, R> {
                 .identity_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.memory.chars().count()),
+            identity_soul_chars: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.soul.chars().count()),
+            identity_story_chars: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.story.chars().count()),
+            identity_first_wake_chars: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.first_wake.chars().count()),
+            identity_agents_registry_chars: self
+                .config
+                .identity_bootstrap_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.agents_registry.chars().count()),
         }
     }
 }
@@ -131,6 +166,15 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         &mut self,
         user_input: impl Into<String>,
         governance: &mut G,
+    ) -> Result<ChuangKernelTurn, ChuangKernelGovernanceError> {
+        self.run_governed_turn_with_extra_context(user_input, governance, Vec::new())
+    }
+
+    pub fn run_governed_turn_with_extra_context<G: Governance>(
+        &mut self,
+        user_input: impl Into<String>,
+        governance: &mut G,
+        extra_context_segments: Vec<ContextSegment>,
     ) -> Result<ChuangKernelTurn, ChuangKernelGovernanceError> {
         let next_turn = self.turn_count + 1;
         let turn_id = format!("turn-{next_turn}");
@@ -144,7 +188,11 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         }
 
         let mut turn = self
-            .run_turn_with_id(turn_id.clone(), user_input.into())
+            .run_turn_with_id_and_extra_context(
+                turn_id.clone(),
+                user_input.into(),
+                extra_context_segments,
+            )
             .map_err(ChuangKernelGovernanceError::Runtime)?;
         turn.report.governance_decision = Some(governance_decision_summary(&action, &decision));
         turn.governance_decision = Some(decision.clone());
@@ -169,20 +217,23 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
     ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
         let next_turn = self.turn_count + 1;
         let turn_id = format!("turn-{next_turn}");
-        self.run_turn_with_id(turn_id, user_input.into())
+        self.run_turn_with_id_and_extra_context(turn_id, user_input.into(), Vec::new())
     }
 
-    fn run_turn_with_id(
+    fn run_turn_with_id_and_extra_context(
         &mut self,
         turn_id: String,
         user_input: String,
+        extra_context_segments: Vec<ContextSegment>,
     ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
+        let mut context_segments = self.identity_context_segments();
+        context_segments.extend(extra_context_segments);
         let result = self.runtime.run(&RuntimeRequest {
             user_input: user_input.clone(),
             recall_limit: self.config.recall_limit,
             metadata: self.config.metadata.clone(),
             context_budget: self.config.context_budget.clone(),
-            extra_context_segments: self.identity_context_segments(),
+            extra_context_segments: context_segments,
         })?;
         let report = build_runtime_report(
             &result,
@@ -206,7 +257,40 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         &mut self,
         turn: &ChuangKernelTurn,
     ) -> Result<String, ChuangKernelMemoryError> {
-        let record_id = format!("turn-memory-{}", turn.turn_id);
+        self.remember_turn_with_metadata(turn, BTreeMap::new(), None)
+    }
+
+    pub fn remember_session_turn(
+        &mut self,
+        turn: &ChuangKernelTurn,
+        session_id: &str,
+    ) -> Result<String, ChuangKernelMemoryError> {
+        self.remember_turn_with_metadata(
+            turn,
+            BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), session_id.to_string()),
+            ]),
+            Some(format!("session-{session_id}")),
+        )
+    }
+
+    fn remember_turn_with_metadata(
+        &mut self,
+        turn: &ChuangKernelTurn,
+        extra_metadata: BTreeMap<String, String>,
+        record_scope: Option<String>,
+    ) -> Result<String, ChuangKernelMemoryError> {
+        let record_id = record_scope
+            .map(|scope| {
+                format!(
+                    "turn-memory-{}-{}-{}",
+                    sanitize_record_id_part(&scope),
+                    turn.turn_id,
+                    unique_record_suffix()
+                )
+            })
+            .unwrap_or_else(|| format!("turn-memory-{}", turn.turn_id));
         let content = format!(
             "user={}\nresponse={}\nsummary={}",
             turn.user_input, turn.result.response.body, turn.report.summary
@@ -231,16 +315,20 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             }
         }
 
+        let mut metadata = BTreeMap::from([
+            ("kind".to_string(), "turn_summary".to_string()),
+            ("agent_id".to_string(), self.config.agent_id.clone()),
+            ("turn_id".to_string(), turn.turn_id.clone()),
+        ]);
+        metadata.extend(self.config.metadata.clone());
+        metadata.extend(extra_metadata);
+
         self.runtime
             .memory_store_mut()
             .put(MemoryRecord {
                 id: record_id.clone(),
                 content,
-                metadata: BTreeMap::from([
-                    ("kind".to_string(), "turn_summary".to_string()),
-                    ("agent_id".to_string(), self.config.agent_id.clone()),
-                    ("turn_id".to_string(), turn.turn_id.clone()),
-                ]),
+                metadata,
                 created_at: "2026-05-01T00:00:00Z".to_string(),
                 expires_at: None,
             })
@@ -272,27 +360,61 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
     }
 
     fn identity_context_segments(&self) -> Vec<ContextSegment> {
-        let Some(snapshot) = &self.config.identity_snapshot else {
-            return Vec::new();
-        };
-
         let mut segments = Vec::new();
-        if !snapshot.user.trim().is_empty() {
-            segments.push(identity_segment(
-                "identity-user",
-                "USER.md",
-                &snapshot.user,
-                245,
-            ));
+        if let Some(snapshot) = &self.config.identity_bootstrap_snapshot {
+            if !snapshot.first_wake.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-first-wake",
+                    "FIRST_WAKE.md",
+                    &snapshot.first_wake,
+                    250,
+                ));
+            }
+            if !snapshot.soul.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-soul",
+                    "SOUL.md",
+                    &snapshot.soul,
+                    248,
+                ));
+            }
+            if !snapshot.story.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-story",
+                    "STORY.md",
+                    &snapshot.story,
+                    242,
+                ));
+            }
+            if !snapshot.agents_registry.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-agents",
+                    "agents.toml",
+                    &snapshot.agents_registry,
+                    205,
+                ));
+            }
         }
-        if !snapshot.memory.trim().is_empty() {
-            segments.push(identity_segment(
-                "identity-memory",
-                "MEMORY.md",
-                &snapshot.memory,
-                210,
-            ));
+
+        if let Some(snapshot) = &self.config.identity_snapshot {
+            if !snapshot.user.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-user",
+                    "USER.md",
+                    &snapshot.user,
+                    245,
+                ));
+            }
+            if !snapshot.memory.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-memory",
+                    "MEMORY.md",
+                    &snapshot.memory,
+                    210,
+                ));
+            }
         }
+
         segments
     }
 
@@ -346,6 +468,34 @@ fn identity_segment(id: &str, source_file: &str, content: &str, priority: u8) ->
             .into_iter()
             .collect(),
     }
+}
+
+fn sanitize_record_id_part(raw: &str) -> String {
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if sanitized.is_empty() {
+        "session".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn unique_record_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("{}-{nanos}", std::process::id())
 }
 
 fn default_identity_timestamp() -> chrono::DateTime<chrono::Utc> {

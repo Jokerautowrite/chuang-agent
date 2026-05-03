@@ -1,0 +1,30 @@
+{
+  "units": [
+    {
+      "unit_id": "chuang-agent-app-server.service",
+      "display_name": "Chuang App Server",
+      "kind": "service",
+      "status_command": ["systemctl", "--user", "is-active", "chuang-agent-app-server.service"],
+      "start_command": ["systemctl", "--user", "start", "chuang-agent-app-server.service"],
+      "stop_command": ["systemctl", "--user", "stop", "chuang-agent-app-server.service"],
+      "restart_command": ["systemctl", "--user", "restart", "chuang-agent-app-server.service"],
+      "metadata": {
+        "channel": "systemd-user",
+        "owner": "chuang"
+      }
+    },
+    {
+      "unit_id": "chuang-feishu-bridge.service",
+      "display_name": "Chuang Feishu Bridge",
+      "kind": "service",
+      "status_command": ["systemctl", "--user", "is-active", "chuang-feishu-bridge.service"],
+      "start_command": ["systemctl", "--user", "start", "chuang-feishu-bridge.service"],
+      "stop_command": ["systemctl", "--user", "stop", "chuang-feishu-bridge.service"],
+      "restart_command": ["systemctl", "--user", "restart", "chuang-feishu-bridge.service"],
+      "metadata": {
+        "channel": "systemd-user",
+        "owner": "chuang"
+      }
+    }
+  ]
+}

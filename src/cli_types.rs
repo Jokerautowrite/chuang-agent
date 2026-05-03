@@ -20,7 +20,10 @@ pub(crate) struct CliOptions {
 pub(crate) struct RunCliRequest {
     pub(crate) options: CliOptions,
     pub(crate) user_input: String,
+    pub(crate) workspace_root: Option<PathBuf>,
     pub(crate) remember: bool,
+    pub(crate) session_id: Option<String>,
+    pub(crate) remember_session: bool,
     pub(crate) remember_identity: bool,
     pub(crate) dispatch_subagent: bool,
 }
@@ -28,6 +31,7 @@ pub(crate) struct RunCliRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct RememberedRecords {
     pub(crate) sqlite_record_id: Option<String>,
+    pub(crate) session_record_id: Option<String>,
     pub(crate) identity_record_id: Option<String>,
     pub(crate) runtime_report_id: Option<String>,
     pub(crate) governance_decision: Option<String>,
@@ -73,11 +77,26 @@ pub(crate) struct SubagentReportCliRequest {
     pub(crate) run_id: RunId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubagentReleaseClaimCliRequest {
+    pub(crate) options: CliOptions,
+    pub(crate) output: ControlOutputFormat,
+    pub(crate) run_id: RunId,
+    pub(crate) reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SubagentReportCliOutput {
     pub(crate) run_id: String,
     pub(crate) available: bool,
     pub(crate) report: Option<SubagentReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SubagentReleaseClaimCliOutput {
+    pub(crate) run_id: String,
+    pub(crate) released: bool,
+    pub(crate) release_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -109,6 +128,9 @@ pub(crate) struct SubagentListItem {
     pub(crate) task_id: String,
     pub(crate) agent_name: String,
     pub(crate) tool_policy: String,
+    pub(crate) required_capabilities: Vec<String>,
+    pub(crate) is_claimed: bool,
+    pub(crate) is_claim_stale: bool,
     pub(crate) has_report: bool,
 }
 
@@ -119,16 +141,43 @@ pub(crate) struct SubagentRunOnceCliRequest {
     pub(crate) runner: String,
     pub(crate) runner_command: Option<String>,
     pub(crate) runner_args: Vec<String>,
+    pub(crate) worker_capabilities: Vec<String>,
     pub(crate) approve_exec: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubagentRunLoopCliRequest {
+    pub(crate) options: CliOptions,
+    pub(crate) output: ControlOutputFormat,
+    pub(crate) runner: String,
+    pub(crate) runner_command: Option<String>,
+    pub(crate) runner_args: Vec<String>,
+    pub(crate) worker_capabilities: Vec<String>,
+    pub(crate) approve_exec: bool,
+    pub(crate) max_runs: usize,
+    pub(crate) max_concurrency: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SubagentRunOnceCliOutput {
     pub(crate) runner: String,
+    pub(crate) worker_capabilities: Vec<String>,
     pub(crate) ran: bool,
     pub(crate) run_id: Option<String>,
     pub(crate) report_path: Option<String>,
     pub(crate) summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SubagentRunLoopCliOutput {
+    pub(crate) runner: String,
+    pub(crate) worker_capabilities: Vec<String>,
+    pub(crate) max_runs: usize,
+    pub(crate) max_concurrency: usize,
+    pub(crate) ran_count: usize,
+    pub(crate) idle: bool,
+    pub(crate) run_ids: Vec<String>,
+    pub(crate) report_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -153,6 +202,7 @@ pub(crate) struct GenesisAskCliRequest {
     pub(crate) cdp_port: u16,
     pub(crate) timeout_ms: u64,
     pub(crate) approve_exec: bool,
+    pub(crate) dry_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -160,6 +210,12 @@ pub(crate) struct GenesisAskCliOutput {
     pub(crate) response: GenesisAskResponse,
     pub(crate) governance_decision: String,
     pub(crate) audit_recorded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct GenesisDryRunCliOutput {
+    pub(crate) primary: chuang_agent::genesis_actuator::GenesisCommandSpec,
+    pub(crate) fallback: chuang_agent::genesis_actuator::GenesisCommandSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

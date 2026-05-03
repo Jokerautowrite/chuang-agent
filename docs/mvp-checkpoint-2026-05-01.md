@@ -20,7 +20,7 @@ cargo run --quiet -- run --input "MVP check run" --remember
 cargo run --quiet -- run --input "MVP identity check" --remember-identity
 cargo run --quiet -- subagent dispatch --task "MVP subagent check"
 cargo run --quiet -- subagent list
-cargo run --quiet -- subagent run-once --runner fake
+cargo run --quiet -- subagent run-loop --runner command --runner-command PATH --approve-exec --max-runs 1
 cargo run --quiet -- subagent report --run-id cli-run-1
 cargo run --quiet -- subagent collect --run-id cli-run-1 --json
 cargo run --quiet -- status --json
@@ -32,14 +32,14 @@ cargo run --quiet -- doctor --json
 - `doctor`：安全健康检查，覆盖配置、身份记忆、slot 装配、隔离 fake runtime、隔离子代理队列 dispatch。
 - `run`：默认经过治理层，治理结果进入 CLI 输出、runtime meta 和 report metadata。
 - `summary_compression`：非默认轻量压缩策略，会压缩长 memory / tool result 段。
-- `subagent queued_external`：文件队列 dispatch / list / report / collect 已闭环，fake runner 可模拟外部执行，`command` runner 可在显式 `--approve-exec` 后把外部进程输出收成 report。
+- `subagent queued_external`：文件队列 dispatch / claim / run-loop / report / collect 已闭环，`command` runner 可在显式 `--approve-exec` 后把外部进程输出或标准 `SubagentReport` 收成 report。
 - `config`：支持扁平配置、检查、脱敏展示、初始化。
 
 ## 下一阶段
 
-- 真实 provider native HTTPS adapter；当前先通过 `--provider-transport curl` 显式接入系统 curl。
+- 真实 provider native adapter；当前已通过 `--provider-transport native` 接入 Rust HTTP client，并补上 `https://` 目标支持，后续再看证书策略和更强的 TLS 约束。
 - 真实子代理 runner adapter 继续增强；当前已有显式审批的 `command` runner 最小接缝。
-- 真实 control plane adapter。
+- 真实 control plane adapter：当前已有 command-backed 接缝，后续补具体 systemd/Agent 脚本。
 - 桌面/飞书控制台读取 `doctor --json` 和 `status --json`。
 
 ## 保持边界

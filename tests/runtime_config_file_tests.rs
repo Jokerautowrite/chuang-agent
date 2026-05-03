@@ -1,4 +1,10 @@
-use chuang_agent::runtime_config::{ContextEngineConfig, ProviderConfig, SubagentConfig};
+use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use chuang_agent::runtime_config::{
+    ActuatorConfig, ContextEngineConfig, ControlPlaneConfig, ProviderConfig, SubagentConfig,
+};
 use chuang_agent::runtime_config_file::{parse_runtime_config_file, RuntimeConfigFileError};
 
 #[test]
@@ -7,7 +13,16 @@ fn config_file_parses_simple_fake_runtime_config() {
         r#"
 db_path = "./tmp/chuang.db"
 recall_limit = 7
+tool_max_rounds = 6
+tool_shell_timeout_ms = 45000
 identity_memory_root = "./tmp/identity"
+identity_root = "./tmp/bootstrap"
+soul_path = "./tmp/bootstrap/SOUL.md"
+story_path = "./tmp/bootstrap/STORY.md"
+first_wake_path = "./tmp/bootstrap/FIRST_WAKE.md"
+agents_registry_path = "./tmp/bootstrap/agents.toml"
+rules_root = "./tmp/rules"
+rules_core_path = "./tmp/rules/core.md"
 subagent = "queued_external"
 subagent_queue_root = "./tmp/subagents"
 context_engine = "summary_compression"
@@ -29,6 +44,8 @@ max_memory_segments = 3
 
     assert_eq!(config.db_path.display().to_string(), "./tmp/chuang.db");
     assert_eq!(config.recall_limit, 7);
+    assert_eq!(config.tool_loop.max_rounds, 6);
+    assert_eq!(config.tool_loop.shell_timeout_ms, 45_000);
     assert_eq!(config.subagent, SubagentConfig::QueuedExternal);
     assert_eq!(
         config.context_engine,
@@ -47,6 +64,17 @@ max_memory_segments = 3
         config.summary().identity_memory_root,
         "./tmp/identity".to_string()
     );
+    assert_eq!(config.summary().identity_root, "./tmp/bootstrap");
+    assert_eq!(config.summary().soul_path, "./tmp/bootstrap/SOUL.md");
+    assert_eq!(
+        config.summary().first_wake_path,
+        "./tmp/bootstrap/FIRST_WAKE.md"
+    );
+    assert_eq!(config.summary().rules_root, "./tmp/rules");
+    assert_eq!(config.summary().rules_core_path, "./tmp/rules/core.md");
+    assert_eq!(config.summary().tool_loop_max_rounds, 6);
+    assert_eq!(config.summary().tool_shell_timeout_ms, 45_000);
+    assert_eq!(config.summary().provider_tls_ca_cert_path, None);
     assert!(matches!(
         config.provider,
         ProviderConfig::Fake {
@@ -66,6 +94,7 @@ identity_memory_root = "./tmp/identity"
 provider = "fake"
 provider_id = "flat-fake"
 model = "flat-stub"
+tls_ca_path = "./tmp/provider-ca.pem"
 subagent = "fake"
 subagent_queue_root = "./tmp/subagents"
 context_max_tokens = 300
@@ -73,6 +102,14 @@ context_reserve_system_tokens = 30
 context_min_working_tokens = 2
 context_max_tool_results = 3
 context_max_memory_segments = 4
+
+[tool_loop]
+max_rounds = 9
+shell_timeout_ms = 120000
+
+[tool_loop.risk]
+network_change = " make deploy, fly deploy"
+secret_access = " .env.local, vault token"
 "#,
     )
     .expect("flat config should parse");
@@ -83,12 +120,130 @@ context_max_memory_segments = 4
     assert_eq!(config.context_budget.min_working_tokens, 2);
     assert_eq!(config.context_budget.max_tool_results, 3);
     assert_eq!(config.context_budget.max_memory_segments, 4);
+    assert_eq!(config.tool_loop.max_rounds, 9);
+    assert_eq!(config.tool_loop.shell_timeout_ms, 120_000);
+    assert_eq!(
+        config.tool_loop.shell_risk_rules.network_change,
+        vec!["make deploy".to_string(), "fly deploy".to_string()]
+    );
+    assert_eq!(
+        config.tool_loop.shell_risk_rules.secret_access,
+        vec![".env.local".to_string(), "vault token".to_string()]
+    );
     assert!(matches!(
         config.provider,
         ProviderConfig::Fake {
             provider_id,
             model_name
         } if provider_id == "flat-fake" && model_name == "flat-stub"
+    ));
+}
+
+#[test]
+fn config_file_parses_openai_tls_ca_path() {
+    let tls_path = temp_test_path("provider-ca.pem");
+    fs::create_dir_all(tls_path.parent().expect("temp parent")).expect("temp dir should exist");
+    fs::write(&tls_path, "dummy-ca").expect("tls ca file should write");
+    std::env::set_var("CHUANG_AGENT_TLS_TEST_API_KEY", "test-key");
+
+    let config = parse_runtime_config_file(&format!(
+        r#"
+[provider]
+kind = "openai_compatible"
+id = "test-provider"
+base_url = "https://api.example.com/v1"
+model = "gpt-test"
+api_key_env = "CHUANG_AGENT_TLS_TEST_API_KEY"
+transport = "native"
+tls_ca_path = "{}"
+"#,
+        tls_path.display()
+    ))
+    .expect("config should parse");
+
+    let validated = config.clone();
+    validated.validate().expect("config should validate");
+    std::env::remove_var("CHUANG_AGENT_TLS_TEST_API_KEY");
+
+    assert!(matches!(
+        &config.provider,
+        ProviderConfig::OpenAICompatible(provider)
+            if provider.provider_id == "test-provider"
+                && provider.model_name == "gpt-test"
+                && provider.transport.as_str() == "native"
+                && provider.tls_ca_cert_path.as_ref() == Some(&tls_path)
+    ));
+    assert_eq!(
+        config.summary().provider_tls_ca_cert_path,
+        Some(tls_path.display().to_string())
+    );
+}
+
+#[test]
+fn config_file_parses_command_control_plane() {
+    let config = parse_runtime_config_file(
+        r#"
+[control]
+kind = "command"
+program = "printf"
+list_args = "[]"
+apply_args = "{}"
+timeout_ms = 1234
+"#,
+    )
+    .expect("command control config should parse");
+
+    assert!(matches!(
+        &config.control_plane,
+        ControlPlaneConfig::Command(control)
+            if control.program == "printf"
+                && control.list_args == "[]"
+                && control.apply_args == "{}"
+                && control.timeout_ms == 1234
+    ));
+    assert_eq!(config.summary().control_plane_kind, "command");
+    assert_eq!(config.summary().control_command_timeout_ms, Some(1234));
+}
+
+#[test]
+fn config_file_parses_command_actuator() {
+    let config = parse_runtime_config_file(
+        r#"
+[actuator]
+kind = "command"
+program = "sh"
+args = "./scripts/chuang-actuator-adapter-example.sh --json"
+timeout_ms = 2345
+"#,
+    )
+    .expect("command actuator config should parse");
+
+    assert!(matches!(
+        &config.actuator,
+        ActuatorConfig::Command(actuator)
+            if actuator.program == "sh"
+                && actuator.args == "./scripts/chuang-actuator-adapter-example.sh --json"
+                && actuator.timeout_ms == 2345
+    ));
+    assert_eq!(config.summary().actuator_kind, "command");
+    assert_eq!(config.summary().actuator_command_timeout_ms, Some(2345));
+}
+
+#[test]
+fn config_file_defaults_command_control_timeout() {
+    let config = parse_runtime_config_file(
+        r#"
+control = "command"
+program = "printf"
+list_args = "[]"
+apply_args = "{}"
+"#,
+    )
+    .expect("command control config should parse");
+
+    assert!(matches!(
+        &config.control_plane,
+        ControlPlaneConfig::Command(control) if control.timeout_ms == 30_000
     ));
 }
 
@@ -133,6 +288,54 @@ transport = "stub"
 }
 
 #[test]
+fn config_file_parses_explicit_provider_fallback() {
+    std::env::set_var("CHUANG_AGENT_PRIMARY_TEST_API_KEY", "primary-key");
+    let config = parse_runtime_config_file(
+        r#"
+provider = "openai_compatible"
+provider_id = "primary"
+base_url = "http://127.0.0.1:8317/v1"
+model = "gpt-primary"
+api_key_env = "CHUANG_AGENT_PRIMARY_TEST_API_KEY"
+transport = "native"
+
+fallback_provider = "fake"
+fallback_provider_id = "fallback"
+fallback_model = "gpt-fallback"
+fallback_on_retryable = "false"
+fallback_status_codes = "401,402,429"
+fallback_error_classes = "transport,tls"
+"#,
+    )
+    .expect("fallback config should parse");
+    std::env::remove_var("CHUANG_AGENT_PRIMARY_TEST_API_KEY");
+
+    assert!(matches!(
+        &config.provider,
+        ProviderConfig::Fallback {
+            primary,
+            fallback,
+            policy,
+        }
+            if matches!(primary.as_ref(), ProviderConfig::OpenAICompatible(primary_config)
+                if primary_config.provider_id == "primary"
+                    && primary_config.model_name == "gpt-primary")
+                && matches!(fallback.as_ref(), ProviderConfig::Fake { provider_id, model_name }
+                    if provider_id == "fallback" && model_name == "gpt-fallback")
+                && !policy.on_retryable
+                && policy.status_codes == vec![401, 402, 429]
+                && policy.error_classes == vec!["transport".to_string(), "tls".to_string()]
+    ));
+    assert_eq!(config.summary().provider_kind, "fallback");
+    assert_eq!(config.summary().provider_id, "primary->fallback");
+    assert_eq!(config.summary().model_name, "gpt-primary->gpt-fallback");
+    assert_eq!(
+        config.summary().provider_fallback_policy.as_deref(),
+        Some("retryable=false status_codes=401,402,429 error_classes=transport,tls")
+    );
+}
+
+#[test]
 fn config_file_rejects_missing_provider_env() {
     std::env::remove_var("CHUANG_AGENT_MISSING_API_KEY");
     let err = parse_runtime_config_file(
@@ -160,4 +363,12 @@ fn config_file_rejects_invalid_line() {
         .expect_err("invalid line should fail");
 
     assert!(matches!(err, RuntimeConfigFileError::InvalidLine { .. }));
+}
+
+fn temp_test_path(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-runtime-config-{name}-{nanos}"))
 }

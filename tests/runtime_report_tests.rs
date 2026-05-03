@@ -7,7 +7,7 @@ use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::{FakeResponder, ResponderMeta};
 use chuang_agent::runtime_report::{build_runtime_report, report_metadata};
-use chuang_agent::subagent_report::ExecutionStatus;
+use chuang_agent::subagent_report::{ArtifactKind, ExecutionStatus};
 
 fn temp_db_path(name: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
@@ -249,4 +249,113 @@ fn runtime_report_metadata_exposes_governance_decision_when_present() {
         metadata.get("governance_reason"),
         Some(&"read-only or draft action".to_string())
     );
+}
+
+#[test]
+fn runtime_report_promotes_tool_report_metadata_to_artifact() {
+    let mut extra = BTreeMap::new();
+    extra.insert("tool_call_count".to_string(), "1".to_string());
+    extra.insert("tool_protocol_error_count".to_string(), "2".to_string());
+    extra.insert(
+        "tool_report_json".to_string(),
+        r#"{"schema_version":6,"status":"completed","workspace_root":"/tmp/work","rounds":2,"call_count":1,"calls":[]}"#
+            .to_string(),
+    );
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let report = build_runtime_report(&result, "report-tool", "task-tool", "agent-tool", None);
+
+    assert!(report.summary.contains("tool_calls=1"));
+    assert!(report.summary.contains("tool_protocol_errors=2"));
+    assert_eq!(report.artifacts.len(), 1);
+    assert_eq!(report.artifacts[0].kind, ArtifactKind::Log);
+    assert_eq!(report.artifacts[0].locator, "runtime_meta.tool_report_json");
+    assert!(report.artifacts[0]
+        .description
+        .as_deref()
+        .expect("description")
+        .contains("calls=1"));
+}
+
+#[test]
+fn runtime_report_promotes_tool_events_metadata_to_artifact() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "tool_events_json".to_string(),
+        r#"[{"round":1,"kind":"tool_call","tool_name":"write_file","atomic_tool_name":"file_write","decision":"allowed:read-only or draft action","ok":true,"failure_class":null,"duration_ms":12,"retryable":false,"summary":"atomic_tool=file_write write_file path=notes/out.txt bytes=5","protocol_error_code":null,"protocol_error_message":null},{"round":2,"kind":"protocol_error","tool_name":null,"atomic_tool_name":null,"decision":null,"ok":null,"failure_class":null,"duration_ms":null,"retryable":null,"summary":null,"protocol_error_code":"plain_text_response","protocol_error_message":"tool loop requires ACTION or FINAL; plain text is not accepted"}]"#
+            .to_string(),
+    );
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let report = build_runtime_report(
+        &result,
+        "report-events",
+        "task-events",
+        "agent-events",
+        None,
+    );
+
+    assert_eq!(report.artifacts.len(), 1);
+    assert_eq!(report.artifacts[0].kind, ArtifactKind::Log);
+    assert_eq!(report.artifacts[0].locator, "runtime_meta.tool_events_json");
+    assert!(report.artifacts[0]
+        .description
+        .as_deref()
+        .expect("description")
+        .contains("tool_calls=1"));
+    assert!(report.artifacts[0]
+        .description
+        .as_deref()
+        .expect("description")
+        .contains("protocol_errors=1"));
 }

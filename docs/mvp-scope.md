@@ -23,43 +23,65 @@
 - `cargo run -- run --input TEXT`：通过内核运行一轮。
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
+- `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
+- `cargo run -- memory identity append --id ID --content TEXT`：显式追加一条 `MEMORY.md` 热记忆。
+- `cargo run -- memory identity write-user|write-memory --content TEXT --approve-overwrite`：显式覆盖写入压缩后的 `USER.md` 或 `MEMORY.md`，用于完成“超限拒绝后由模型/老爸决定保留内容”的闭环。
+- `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`：最小身份启动层，启动时作为冻结 identity context 注入。
+- `rules/core.md`：治理层 Markdown 规则；slot 构建时加载，治理决策 reason 会带规则指纹，便于追溯。
+- `--provider-transport stub|http|native|curl`：OpenAI-compatible provider 的当前接入形态；`native` 已支持 `https://` 目标。
+- 显式 provider fallback：配置 `fallback_*` 字段后，组合层可在主 provider 结构化失败时切备用 provider；未配置时不会 silent fallback。
+- `cargo run -- app-server`：JSON-RPC 式应用入口，会读取 workspace `config.toml`，并用 thread id 写会话记忆；后续新飞书机器人可接这个入口或独立 channel adapter。
+- `cargo run -- app-server health --workspace-root PATH --json`：只读健康检查 workspace runtime 配置，不发起模型请求。
+- `cargo run -- channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT`：本地演练外部消息通道，读取 workspace 配置并返回 `ChannelOutboundMessage`。
+- `cargo run -- plugin list|check --registry PATH`：读取插件注册表，统一展示 channel、runner、control、actuator、genesis adapter，不执行插件。
 - `cargo run -- status`：查看 MVP 核心状态。
-- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态。
-- `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、隔离 fake runtime smoke 和隔离子代理队列 smoke。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含只读 `plugin_registry` 摘要。
+- `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
+- `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。
 - `cargo run -- doctor --json`：输出结构化健康检查结果，给桌面控制台或插件读取。
+- `cargo run -- console snapshot --json`：只读聚合 `status`、插件注册表摘要、control unit 列表和插件清单，作为未来桌面/工具/服务控制台的数据源；不执行 control apply，不启动服务。
 - `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
 - `cargo run -- config init`：生成默认 `config.toml`；目标文件已存在时拒绝覆盖。
 - `cargo run -- config check`：只校验配置和内核快照，不执行任务；未传 `--config` 时会自动读取当前目录 `config.toml`（如果存在）。
 - `cargo run -- config show --json`：输出脱敏后的配置摘要，给桌面控制台或插件读取。
-- `cargo run -- control ...`：保留 fake 控制面协议，用于后续接真实服务/Agent。
-- `cargo run -- subagent dispatch --task TEXT`：把子代理任务写入文件队列 dispatch JSON，不启动外部 runner。
+- `cargo run -- control ...`：项目根配置走 command-backed 安全示例 adapter；默认空配置仍可走 fake 控制面并在状态里标为占位。
+- `config.example-control.toml` + `scripts/chuang-control-adapter-example.sh`：安全 command 控制面示例，只验证协议，不控制真实服务。
+- `actuator = "command"` + `scripts/chuang-actuator-adapter-example.sh`：安全 command 操作面示例，只验证协议，不控制真实桌面。
+- `cargo run -- subagent dispatch --task TEXT [--requires-capability NAME]`：把子代理任务写入文件队列 dispatch JSON，可声明所需 worker 能力，不启动外部 runner。
 - `cargo run -- subagent report --run-id ID`：只读轮询子代理 report JSON。
 - `cargo run -- subagent collect --run-id ID`：从 dispatch 恢复运行身份，经 queued slot 校验并回收 report。
-- `cargo run -- subagent list`：只读查看 dispatch 队列和 report presence；同一队列目录可连续派发多个任务。
-- `cargo run -- subagent run-once --runner fake`：用 fake runner 处理一个 pending dispatch 并写入模拟 report，不执行真实命令。
+- `cargo run -- subagent list`：只读查看 dispatch 队列、claim/stale claim 和 report presence；同一队列目录可连续派发多个任务。
 - `cargo run -- subagent run-once --runner command --runner-command PATH --approve-exec`：显式审批后执行一个外部 runner 命令，把 dispatch JSON 写到 stdin，并把进程输出收成 report。
+- `cargo run -- subagent run-loop --runner command --runner-command PATH --approve-exec --max-runs N [--capability NAME]`：按队列批量处理匹配 worker 能力的 pending dispatch，并保留 claim/report 证据；超出 dispatch `idle_timeout_ms` 的 stale claim 可被重领。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
 - `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
 - `GenesisActuator` trait + `AutoCliGenesisActuator` 最小实现：主通道 userDataDir，备用 CDP，登录态失效时 fallback，并返回需审批的修复计划，不自动删除 profile。
 - `cargo run -- genesis ask --prompt TEXT --approve-exec`：手动验证 Genesis 查询入口；真实外部程序执行必须显式审批，并输出治理决策与审计状态。
+- `cargo run -- genesis ask --prompt TEXT --dry-run`：只渲染 Genesis 主/备通道 AutoCLI 命令规格，不执行外部程序。
+- `cargo run -- experiment plan --goal TEXT --success TEXT`：生成固定时间预算的安全实验计划，只写 `experiment.md`，不执行、不删除、不回滚。
+- `cargo run -- experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT`：追加实验结果 `report.md`，已存在时拒绝覆盖。
+- `cargo run -- experiment list`：只读列出实验状态，显示是否已有计划和报告。
+- `cargo run -- experiment show --experiment-id ID`：只读查看某个实验的计划和报告内容，不修改文件。
+- `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录、stub provider 和示例 command control，不触碰真实服务。
 
 ## 当前明确不做
 
 - 不自动删除任何记忆。
 - 不自动压缩身份记忆。
-- 不直接操作真实 systemd 服务。
+- 默认不直接操作真实 systemd 服务；真实控制必须通过显式配置的 adapter/command bridge，并经过治理审批。
 - 不直接控制 Hermes / OpenClaw 进程。
 - 不继续扩展旧 `BrowserWorker` 实验线；网页版 AI 查询能力后续改走 `Genesis Actuator` 插件线。
 - 不把飞书作为核心依赖，飞书只作为未来插件入口。
 - 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
 - 不把 API key 明文写进配置文件；真实 provider 使用 `api_key_env` 引用环境变量。
+- 不把 AutoResearch 的 `git reset --hard` 模式照搬进创项目；实验模块只能追加计划/报告，不能破坏主工作区。
 
 ## 下一步优先级
 
-1. 继续完善真实子代理 runner adapter 的协议约束；当前已有显式审批的 `command` runner 接缝，默认仍保持 fake/queued，不自动执行危险命令。
+1. 继续完善真实子代理 runner adapter 的协议约束；当前已有显式审批的 `command` runner 接缝，项目根默认使用 queued external，不自动执行危险命令。
 2. 继续增强 `summary_compression` 的压缩质量，但默认仍保持 `deterministic_budget`。
-3. 把 fake control plane 替换为可插拔真实 adapter，但默认仍保持 fake。
+3. 继续增强 command control plane / command actuator 的真实脚本协议；真实脚本必须先有 allowlist 和验收。
 4. 新开 `Genesis Actuator` 插件线，先做可审计的 AutoCLI 查询 port；旧 `BrowserWorker` 先冻结。
 5. 最后再接桌面壳、飞书插件和服务控制 UI。
 
@@ -67,16 +89,26 @@
 
 - `cargo test` 全仓通过。
 - `cargo run -- status` 能显示核心状态。
-- `cargo run -- doctor` 能确认配置、slot 和隔离 runtime smoke 正常。
+- `cargo run -- doctor` 能确认配置、slot、actuator smoke、control smoke 和隔离 runtime smoke 正常。
 - `cargo run -- run --input TEXT` 能返回结构化响应。
 - `cargo run -- status --config PATH` 能加载简单配置文件，且 CLI 参数可覆盖配置。
+- `cargo run -- status --config PATH` 能显示 identity bootstrap 文件路径和字符数。
+- `cargo run -- run --config PATH --input TEXT` 的治理元数据能显示当前规则指纹。
+- `app-server` 通过 workspace `config.toml` 启动时不能回落到 `fake-responder`，必须走配置里的 provider。
+- `channel simulate` 通过 workspace `config.toml` 启动时不能回落到 `fake-responder`，必须走配置里的 provider。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
 - 同一个 `--subagent-queue-root PATH` 下连续 dispatch 多个任务不会覆盖。
 - `cargo run -- subagent list --subagent-queue-root PATH` 能列出 dispatch 数量和 report presence。
-- `cargo run -- subagent run-once --subagent-queue-root PATH` 能把一个 pending dispatch 转成 fake report。
 - `cargo run -- subagent run-once --runner command --runner-command PATH --approve-exec --subagent-queue-root PATH` 能把外部 runner 进程输出转成 report，且缺少审批时拒绝执行。
 - `cargo run -- subagent report --run-id ID --subagent-queue-root PATH` 能读取或轮询 report JSON。
 - `cargo run -- subagent collect --run-id ID --subagent-queue-root PATH` 能经 dispatch 身份校验回收 report。
+- `cargo run -- experiment plan --goal TEXT --success TEXT --root PATH` 能生成带安全约束的 `experiment.md`。
+- `cargo run -- experiment complete --experiment-id ID --outcome inconclusive --summary TEXT --next TEXT --root PATH` 能生成不可覆盖的 `report.md`。
+- `cargo run -- experiment list --root PATH` 能只读列出 planned/completed 状态。
+- `cargo run -- experiment show --experiment-id ID --root PATH` 能只读展示 `experiment.md` 和可选 `report.md`。
+- `sh scripts/chuang-mvp-smoke.sh` 能串起 status、doctor、run、session memory、channel simulate、subagent queue、command control example 和 experiment show。
 - 所有危险操作仍需显式审批或保持 fake。
+- command 控制面示例配置能 `list` 和 `apply --approve` 跑通，但不会触碰真实服务。
+- 对话 provider、子代理、actuator、control plane 的项目根配置已去 fake；安全示例 adapter 不能伪装成真实桌面/服务控制。

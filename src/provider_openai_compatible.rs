@@ -1,15 +1,30 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::{Method, Request};
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
+use rustls::{ClientConfig, RootCertStore};
+use rustls_pemfile::certs;
 use serde_json::json;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::time::timeout;
 
 use crate::responder::{
     ProviderAdapterResponder, ProviderAdapterResponse, ProviderIdentity, ResponderRequest,
 };
+
+const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfigError {
@@ -59,6 +74,7 @@ pub struct HttpCallResult {
 pub enum ProviderTransport {
     Stub,
     Http,
+    Native,
     Curl,
 }
 
@@ -67,6 +83,7 @@ impl ProviderTransport {
         match self {
             Self::Stub => "stub",
             Self::Http => "http",
+            Self::Native => "native",
             Self::Curl => "curl",
         }
     }
@@ -85,9 +102,10 @@ impl FromStr for ProviderTransport {
         match raw {
             "stub" => Ok(Self::Stub),
             "http" => Ok(Self::Http),
+            "native" => Ok(Self::Native),
             "curl" => Ok(Self::Curl),
             other => Err(format!(
-                "unsupported provider transport: {other} (supported: stub, http, curl)"
+                "unsupported provider transport: {other} (supported: stub, http, native, curl)"
             )),
         }
     }
@@ -99,6 +117,8 @@ pub struct OpenAICompatibleProviderAdapter {
     base_url: String,
     api_key: String,
     transport: ProviderTransport,
+    request_timeout_ms: u64,
+    tls_ca_cert_path: Option<PathBuf>,
 }
 
 impl OpenAICompatibleProviderAdapter {
@@ -116,11 +136,23 @@ impl OpenAICompatibleProviderAdapter {
             base_url: base_url.into(),
             api_key: api_key.into(),
             transport: ProviderTransport::Stub,
+            request_timeout_ms: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
+            tls_ca_cert_path: None,
         }
     }
 
     pub fn with_transport(mut self, transport: ProviderTransport) -> Self {
         self.transport = transport;
+        self
+    }
+
+    pub fn with_request_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.request_timeout_ms = timeout_ms.max(1);
+        self
+    }
+
+    pub fn with_tls_ca_cert_path(mut self, tls_ca_cert_path: Option<PathBuf>) -> Self {
+        self.tls_ca_cert_path = tls_ca_cert_path;
         self
     }
 
@@ -244,10 +276,36 @@ impl OpenAICompatibleProviderAdapter {
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
         let (host, port, path) = parse_http_target(&preview.url)?;
-        let mut stream =
-            TcpStream::connect((host.as_str(), port)).map_err(|error| ProviderConfigError {
+        let timeout_duration = Duration::from_millis(self.request_timeout_ms);
+        let target_addr = (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|error| ProviderConfigError {
                 field: "http_connect".to_string(),
                 message: format!("target={} error={error}", preview.url),
+            })?
+            .next()
+            .ok_or_else(|| ProviderConfigError {
+                field: "http_connect".to_string(),
+                message: format!("target={} error=no_resolved_address", preview.url),
+            })?;
+        let mut stream =
+            TcpStream::connect_timeout(&target_addr, timeout_duration).map_err(|error| {
+                ProviderConfigError {
+                    field: "http_connect".to_string(),
+                    message: format!("target={} error={error}", preview.url),
+                }
+            })?;
+        stream
+            .set_read_timeout(Some(timeout_duration))
+            .map_err(|error| ProviderConfigError {
+                field: "http_timeout".to_string(),
+                message: format!("set_read_timeout failed: {error}"),
+            })?;
+        stream
+            .set_write_timeout(Some(timeout_duration))
+            .map_err(|error| ProviderConfigError {
+                field: "http_timeout".to_string(),
+                message: format!("set_write_timeout failed: {error}"),
             })?;
 
         let request_text = format!(
@@ -296,6 +354,86 @@ impl OpenAICompatibleProviderAdapter {
         })
     }
 
+    pub fn execute_native_post_call(
+        &self,
+        request: &ResponderRequest,
+    ) -> Result<HttpCallResult, ProviderConfigError> {
+        let preview = self.build_http_request_preview(request)?;
+        let url = preview.url.clone();
+        let request_body_json = preview.body_json.clone();
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_runtime".to_string(),
+                message: error.to_string(),
+            })?;
+
+        runtime.block_on(async move {
+            let connector = self.build_native_https_connector()?;
+            let client: Client<_, Full<Bytes>> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            let authorization = preview
+                .headers
+                .get("authorization")
+                .cloned()
+                .unwrap_or_else(|| "Bearer".to_string());
+            let content_type = preview
+                .headers
+                .get("content-type")
+                .cloned()
+                .unwrap_or_else(|| "application/json".to_string());
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri(&url)
+                .header("Authorization", authorization)
+                .header("Content-Type", content_type)
+                .body(Full::new(Bytes::from(request_body_json.clone())))
+                .map_err(|error| ProviderConfigError {
+                    field: "native_http_request".to_string(),
+                    message: error.to_string(),
+                })?;
+            let response = timeout(
+                Duration::from_millis(self.request_timeout_ms),
+                client.request(req),
+            )
+            .await
+            .map_err(|_| ProviderConfigError {
+                field: "native_http_timeout".to_string(),
+                message: format!("request timed out after {}ms", self.request_timeout_ms),
+            })?
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_send".to_string(),
+                message: error.to_string(),
+            })?;
+            let status_code = response.status().as_u16();
+            let response_body_json = timeout(
+                Duration::from_millis(self.request_timeout_ms),
+                response.into_body().collect(),
+            )
+            .await
+            .map_err(|_| ProviderConfigError {
+                field: "native_http_timeout".to_string(),
+                message: format!(
+                    "response body timed out after {}ms",
+                    self.request_timeout_ms
+                ),
+            })?
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_response_body".to_string(),
+                message: error.to_string(),
+            })?
+            .to_bytes();
+
+            Ok(HttpCallResult {
+                status_code,
+                url,
+                request_body_json,
+                response_body_json: String::from_utf8_lossy(&response_body_json).to_string(),
+            })
+        })
+    }
+
     pub fn execute_curl_post_call(
         &self,
         request: &ResponderRequest,
@@ -316,7 +454,7 @@ impl OpenAICompatibleProviderAdapter {
             "--show-error".to_string(),
             "--location".to_string(),
             "--max-time".to_string(),
-            "60".to_string(),
+            curl_max_time_seconds(self.request_timeout_ms).to_string(),
             "--request".to_string(),
             "POST".to_string(),
             "--header".to_string(),
@@ -356,12 +494,12 @@ impl OpenAICompatibleProviderAdapter {
         })?;
         drop(stdin);
 
-        let output = child
-            .wait_with_output()
-            .map_err(|error| ProviderConfigError {
+        let output = wait_with_timeout(child, self.request_timeout_ms).map_err(|error| {
+            ProviderConfigError {
                 field: "curl_wait".to_string(),
                 message: error.to_string(),
-            })?;
+            }
+        })?;
         if !output.status.success() {
             return Err(ProviderConfigError {
                 field: "curl_exit".to_string(),
@@ -403,9 +541,41 @@ impl OpenAICompatibleProviderAdapter {
             ProviderTransport::Http => self
                 .execute_http_post_call(request)
                 .map(TransportCallResult::Http),
+            ProviderTransport::Native => self
+                .execute_native_post_call(request)
+                .map(TransportCallResult::Native),
             ProviderTransport::Curl => self
                 .execute_curl_post_call(request)
                 .map(TransportCallResult::Curl),
+        }
+    }
+
+    fn build_native_https_connector(
+        &self,
+    ) -> Result<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        ProviderConfigError,
+    > {
+        if let Some(path) = &self.tls_ca_cert_path {
+            let roots = load_root_store_from_pem(path)?;
+            let client_config = ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            Ok(HttpsConnectorBuilder::new()
+                .with_tls_config(client_config)
+                .https_or_http()
+                .enable_http1()
+                .build())
+        } else {
+            Ok(HttpsConnectorBuilder::new()
+                .with_native_roots()
+                .map_err(|error| ProviderConfigError {
+                    field: "native_http_tls".to_string(),
+                    message: error.to_string(),
+                })?
+                .https_or_http()
+                .enable_http1()
+                .build())
         }
     }
 }
@@ -425,6 +595,42 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
         match self.execute_transport(request) {
             Ok(call) => {
                 let response_body = call.response_body_json();
+                let status_code = call.status_code();
+                if !http_status_is_success(status_code) {
+                    let error_message = extract_provider_error_message(response_body)
+                        .unwrap_or_else(|| format!("status_code={status_code}"));
+                    return ProviderAdapterResponse {
+                        body: format!(
+                            "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",
+                            self.identity.provider_id,
+                            self.identity.model_name,
+                            call.transport().as_str(),
+                            status_code,
+                            error_message
+                        ),
+                        trace: format!(
+                            "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={} provider_http_error={}",
+                            self.identity.provider_id,
+                            self.identity.model_name,
+                            self.base_url,
+                            masked_key,
+                            request.recall_hit_count,
+                            request_message_count(call.request_body_json()),
+                            call.url(),
+                            status_code,
+                            call.transport().as_str(),
+                            error_message,
+                        ),
+                        finish_reason: Some(format!("http-error-{status_code}")),
+                        extra_meta: {
+                            let mut meta = build_success_meta(&call);
+                            meta.insert("provider_error_class".to_string(), "http_status".to_string());
+                            meta.insert("provider_error_message".to_string(), error_message);
+                            meta
+                        },
+                    };
+                }
+
                 let finish_reason = extract_finish_reason(response_body).or_else(|| {
                     Some(default_finish_reason_for_transport(call.transport()).to_string())
                 });
@@ -474,6 +680,7 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                         &error,
                         preview.as_ref(),
                         self.transport.as_str(),
+                        self.request_timeout_ms,
                     ),
                 }
             }
@@ -485,6 +692,7 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
 enum TransportCallResult {
     Stub(StubHttpCallResult),
     Http(HttpCallResult),
+    Native(HttpCallResult),
     Curl(HttpCallResult),
 }
 
@@ -493,6 +701,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(_) => ProviderTransport::Stub,
             Self::Http(_) => ProviderTransport::Http,
+            Self::Native(_) => ProviderTransport::Native,
             Self::Curl(_) => ProviderTransport::Curl,
         }
     }
@@ -501,6 +710,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => result.status_code,
             Self::Http(result) => result.status_code,
+            Self::Native(result) => result.status_code,
             Self::Curl(result) => result.status_code,
         }
     }
@@ -509,6 +719,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.url,
             Self::Http(result) => &result.url,
+            Self::Native(result) => &result.url,
             Self::Curl(result) => &result.url,
         }
     }
@@ -517,6 +728,7 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.request_body_json,
             Self::Http(result) => &result.request_body_json,
+            Self::Native(result) => &result.request_body_json,
             Self::Curl(result) => &result.request_body_json,
         }
     }
@@ -525,12 +737,14 @@ impl TransportCallResult {
         match self {
             Self::Stub(result) => &result.response_body_json,
             Self::Http(result) => &result.response_body_json,
+            Self::Native(result) => &result.response_body_json,
             Self::Curl(result) => &result.response_body_json,
         }
     }
 }
 
 fn build_success_meta(call: &TransportCallResult) -> BTreeMap<String, String> {
+    let usage_meta = extract_usage_meta(call.response_body_json());
     let response_kind_value =
         response_kind(call.response_body_json()).unwrap_or_else(|| "unknown".to_string());
     let response_finish_reason = extract_finish_reason(call.response_body_json())
@@ -549,9 +763,14 @@ fn build_success_meta(call: &TransportCallResult) -> BTreeMap<String, String> {
             request_message_count(call.request_body_json()).to_string(),
         ),
         ("status_code".to_string(), call.status_code().to_string()),
+        (
+            "provider_retryable".to_string(),
+            http_status_retryable(call.status_code()).to_string(),
+        ),
         ("response_kind".to_string(), response_kind_value.clone()),
         ("response_finish_reason".to_string(), response_finish_reason),
     ]);
+    meta.extend(usage_meta);
 
     if matches!(call.transport(), ProviderTransport::Stub) {
         meta.insert(
@@ -559,6 +778,37 @@ fn build_success_meta(call: &TransportCallResult) -> BTreeMap<String, String> {
             call.status_code().to_string(),
         );
         meta.insert("stub_response_kind".to_string(), response_kind_value);
+    }
+
+    meta
+}
+
+fn extract_usage_meta(response_body_json: &str) -> BTreeMap<String, String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response_body_json) else {
+        return BTreeMap::new();
+    };
+    let Some(usage) = value.get("usage") else {
+        return BTreeMap::new();
+    };
+
+    let mut meta = BTreeMap::new();
+    if let Some(value) = usage.get("prompt_tokens").and_then(|value| value.as_u64()) {
+        meta.insert("prompt_tokens".to_string(), value.to_string());
+    } else if let Some(value) = usage.get("input_tokens").and_then(|value| value.as_u64()) {
+        meta.insert("prompt_tokens".to_string(), value.to_string());
+    }
+
+    if let Some(value) = usage
+        .get("completion_tokens")
+        .and_then(|value| value.as_u64())
+    {
+        meta.insert("completion_tokens".to_string(), value.to_string());
+    } else if let Some(value) = usage.get("output_tokens").and_then(|value| value.as_u64()) {
+        meta.insert("completion_tokens".to_string(), value.to_string());
+    }
+
+    if let Some(value) = usage.get("total_tokens").and_then(|value| value.as_u64()) {
+        meta.insert("total_tokens".to_string(), value.to_string());
     }
 
     meta
@@ -620,11 +870,19 @@ fn build_config_error_meta(
     error: &ProviderConfigError,
     preview: Option<&HttpRequestPreview>,
     transport_mode: &str,
+    timeout_ms: u64,
 ) -> BTreeMap<String, String> {
+    let error_class = provider_error_class(error);
     let mut meta = BTreeMap::from([
         ("transport".to_string(), "openai-compatible".to_string()),
         ("transport_mode".to_string(), transport_mode.to_string()),
         ("config_error_field".to_string(), error.field.clone()),
+        ("provider_error_class".to_string(), error_class.to_string()),
+        (
+            "provider_retryable".to_string(),
+            provider_error_retryable(error, error_class).to_string(),
+        ),
+        ("provider_timeout_ms".to_string(), timeout_ms.to_string()),
     ]);
 
     if let Some(preview) = preview {
@@ -637,6 +895,110 @@ fn build_config_error_meta(
     }
 
     meta
+}
+
+fn provider_error_class(error: &ProviderConfigError) -> &'static str {
+    match error.field.as_str() {
+        "base_url" | "model_name" => "config",
+        "http_connect"
+        | "http_write"
+        | "http_flush"
+        | "http_read"
+        | "http_timeout"
+        | "native_http_timeout"
+        | "native_http_send"
+        | "native_http_response_body"
+        | "curl_spawn"
+        | "curl_stdin"
+        | "curl_write"
+        | "curl_wait"
+        | "curl_exit" => "transport",
+        "native_http_tls" => "tls",
+        "http_response" | "curl_response" | "native_http_request" | "native_http_runtime" => {
+            "protocol"
+        }
+        _ => "unknown",
+    }
+}
+
+fn provider_error_retryable(error: &ProviderConfigError, error_class: &str) -> bool {
+    if error.field == "curl_spawn" {
+        return false;
+    }
+
+    if matches!(error_class, "transport") {
+        return true;
+    }
+
+    matches!(
+        error.field.as_str(),
+        "native_http_timeout" | "http_timeout" | "curl_wait"
+    )
+}
+
+fn http_status_retryable(status_code: u16) -> bool {
+    status_code == 429 || (500..=599).contains(&status_code)
+}
+
+fn http_status_is_success(status_code: u16) -> bool {
+    (200..=299).contains(&status_code)
+}
+
+fn load_root_store_from_pem(path: &PathBuf) -> Result<RootCertStore, ProviderConfigError> {
+    let pem = fs::read(path).map_err(|error| ProviderConfigError {
+        field: "native_http_tls".to_string(),
+        message: format!(
+            "failed_to_read_tls_ca_path={} error={error}",
+            path.display()
+        ),
+    })?;
+    let mut cursor = std::io::Cursor::new(pem);
+    let cert_chain = certs(&mut cursor)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| ProviderConfigError {
+            field: "native_http_tls".to_string(),
+            message: format!(
+                "failed_to_parse_tls_ca_path={} error={error}",
+                path.display()
+            ),
+        })?;
+    if cert_chain.is_empty() {
+        return Err(ProviderConfigError {
+            field: "native_http_tls".to_string(),
+            message: format!("no_certificates_found_in_tls_ca_path={}", path.display()),
+        });
+    }
+    let mut roots = RootCertStore::empty();
+    let _ = roots.add_parsable_certificates(cert_chain);
+    Ok(roots)
+}
+
+fn curl_max_time_seconds(timeout_ms: u64) -> u64 {
+    timeout_ms.saturating_add(999).max(1) / 1000
+}
+
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout_ms: u64,
+) -> std::io::Result<std::process::Output> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output()?;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "curl command timed out after {timeout_ms}ms status={:?}",
+                    output.status.code()
+                ),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn request_message_count(body_json: &str) -> usize {
@@ -652,16 +1014,133 @@ fn request_message_count(body_json: &str) -> usize {
 }
 
 fn extract_assistant_content(response_body_json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(response_body_json)
-        .ok()
-        .and_then(|value| value.get("choices")?.as_array()?.first().cloned())
-        .and_then(|choice| {
-            choice
-                .get("message")?
-                .get("content")?
-                .as_str()
+    let value = serde_json::from_str::<serde_json::Value>(response_body_json).ok()?;
+    extract_assistant_content_from_value(&value)
+}
+
+fn extract_assistant_content_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(content) = value.get("output_text").and_then(|value| value.as_str()) {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    if let Some(output) = value.get("output").and_then(|value| value.as_array()) {
+        for item in output {
+            if let Some(text) = extract_text_field(item) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            if let Some(content) = item.get("content") {
+                if let Some(text) = extract_text_like_value(content) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(choices) = value.get("choices").and_then(|value| value.as_array()) {
+        for choice in choices {
+            if let Some(message) = choice.get("message") {
+                if let Some(text) = extract_text_field(message) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+                if let Some(content) = message.get("content") {
+                    if let Some(text) = extract_text_like_value(content) {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+
+            if let Some(delta) = choice.get("delta") {
+                if let Some(text) = extract_text_field(delta) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+                if let Some(content) = delta.get("content") {
+                    if let Some(text) = extract_text_like_value(content) {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+
+            if let Some(text) = extract_text_field(choice) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    if let Some(text) = extract_text_field(value) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    None
+}
+
+fn extract_text_field(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| value.get("content").and_then(extract_text_like_value))
+        .or_else(|| {
+            value
+                .get("value")
+                .and_then(|value| value.as_str())
                 .map(str::to_string)
         })
+}
+
+fn extract_text_like_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(items) => {
+            let parts = items
+                .iter()
+                .filter_map(extract_text_like_value)
+                .filter(|part| !part.trim().is_empty())
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(""))
+            }
+        }
+        serde_json::Value::Object(map) => map
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .or_else(|| map.get("content").and_then(extract_text_like_value))
+            .or_else(|| {
+                map.get("value")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            }),
+        _ => None,
+    }
 }
 
 fn extract_finish_reason(response_body_json: &str) -> Option<String> {
@@ -669,6 +1148,45 @@ fn extract_finish_reason(response_body_json: &str) -> Option<String> {
         .ok()
         .and_then(|value| value.get("choices")?.as_array()?.first().cloned())
         .and_then(|choice| choice.get("finish_reason")?.as_str().map(str::to_string))
+}
+
+fn extract_provider_error_message(response_body_json: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(response_body_json).ok()?;
+    if let Some(message) = value.get("error").and_then(|value| {
+        if let Some(text) = value.as_str() {
+            Some(text.to_string())
+        } else {
+            value
+                .get("message")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .or_else(|| {
+                    value
+                        .get("detail")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                })
+                .or_else(|| {
+                    value
+                        .get("code")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                })
+        }
+    }) {
+        return Some(message);
+    }
+
+    value
+        .get("message")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .get("detail")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
 }
 
 fn response_kind(response_body_json: &str) -> Option<String> {
@@ -681,6 +1199,69 @@ fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static
     match transport {
         ProviderTransport::Stub => "stubbed-openai-compatible",
         ProviderTransport::Http => "http-openai-compatible",
+        ProviderTransport::Native => "native-openai-compatible",
         ProviderTransport::Curl => "curl-openai-compatible",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_assistant_content_from_value;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_openai_chat_completion_content() {
+        let value = json!({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "  你好，老爸  "
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+
+        assert_eq!(
+            extract_assistant_content_from_value(&value).as_deref(),
+            Some("你好，老爸")
+        );
+    }
+
+    #[test]
+    fn extracts_output_text_fallback() {
+        let value = json!({
+            "id": "resp-1",
+            "object": "response",
+            "output_text": "  我在。  "
+        });
+
+        assert_eq!(
+            extract_assistant_content_from_value(&value).as_deref(),
+            Some("我在。")
+        );
+    }
+
+    #[test]
+    fn extracts_array_content_fallback() {
+        let value = json!({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            { "type": "text", "text": "创" },
+                            { "type": "text", "text": "项目" }
+                        ]
+                    }
+                }
+            ]
+        });
+
+        assert_eq!(
+            extract_assistant_content_from_value(&value).as_deref(),
+            Some("创项目")
+        );
     }
 }

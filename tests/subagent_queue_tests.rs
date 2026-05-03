@@ -103,6 +103,110 @@ fn file_subagent_queue_lists_dispatches_and_report_run_ids() {
 }
 
 #[test]
+fn file_subagent_queue_claims_dispatch_once_without_deleting_dispatch() {
+    let root = temp_root("claim");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let dispatch = sample_dispatch();
+    queue
+        .write_dispatch(&dispatch)
+        .expect("dispatch should write");
+
+    let first_claim = queue
+        .claim_dispatch(&dispatch.run_id, "worker-a")
+        .expect("first claim should succeed");
+    let second_claim = queue
+        .claim_dispatch(&dispatch.run_id, "worker-b")
+        .expect("second claim should not error");
+    let claim_run_ids = queue
+        .list_claim_run_ids()
+        .expect("claim run ids should list");
+
+    assert!(first_claim.is_some());
+    assert_eq!(second_claim, None);
+    assert_eq!(claim_run_ids, vec![dispatch.run_id.clone()]);
+    assert!(queue
+        .read_dispatch(&dispatch.run_id)
+        .expect("dispatch should read")
+        .is_some());
+    assert!(queue
+        .is_claimed(&dispatch.run_id)
+        .expect("claimed state should read"));
+    assert!(root.join("claims").join("queued-run-1.json").exists());
+    assert!(root.join("dispatch").join("queued-run-1.json").exists());
+}
+
+#[test]
+fn file_subagent_queue_can_release_and_reclaim_without_deleting_history() {
+    let root = temp_root("release-claim");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let dispatch = sample_dispatch();
+    queue
+        .write_dispatch(&dispatch)
+        .expect("dispatch should write");
+    queue
+        .claim_dispatch(&dispatch.run_id, "worker-a")
+        .expect("first claim should write")
+        .expect("first claim should exist");
+
+    let release_path = queue
+        .release_claim(&dispatch.run_id, "operator", "manual release")
+        .expect("release should write");
+    assert!(!queue
+        .is_claimed(&dispatch.run_id)
+        .expect("released claim should not be active"));
+
+    let reclaim = queue
+        .claim_dispatch(&dispatch.run_id, "worker-b")
+        .expect("reclaim should not error");
+
+    assert!(release_path.exists());
+    assert!(reclaim.is_some());
+    assert!(queue
+        .is_claimed(&dispatch.run_id)
+        .expect("reclaimed claim should be active"));
+    assert!(root.join("claims").join("queued-run-1.json").exists());
+    assert!(root
+        .join("claim-releases")
+        .join("queued-run-1.json")
+        .exists());
+    assert!(root.join("dispatch").join("queued-run-1.json").exists());
+}
+
+#[test]
+fn file_subagent_queue_can_reclaim_stale_claim_without_deleting_dispatch() {
+    let root = temp_root("stale-claim");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let dispatch = sample_dispatch();
+    queue
+        .write_dispatch(&dispatch)
+        .expect("dispatch should write");
+    queue
+        .claim_dispatch(&dispatch.run_id, "worker-a")
+        .expect("first claim should write")
+        .expect("first claim should exist");
+
+    assert!(queue
+        .is_claim_stale(&dispatch.run_id, 0)
+        .expect("stale state should read"));
+    let reclaim = queue
+        .claim_dispatch_with_timeout(&dispatch.run_id, "worker-b", Some(0))
+        .expect("stale reclaim should not error");
+    let claim_payload = std::fs::read_to_string(queue.claim_path(&dispatch.run_id))
+        .expect("claim payload should read");
+
+    assert!(reclaim.is_some());
+    assert!(claim_payload.contains("worker-b"));
+    assert!(root.join("dispatch").join("queued-run-1.json").exists());
+    assert!(!root
+        .join("claim-releases")
+        .join("queued-run-1.json")
+        .exists());
+}
+
+#[test]
 fn file_subagent_queue_list_ignores_non_json_files() {
     let root = temp_root("list-ignore");
     let queue =

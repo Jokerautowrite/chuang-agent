@@ -117,3 +117,24 @@ fn main_entrypoint_stays_thin_and_does_not_own_cli_adapters() {
         violations.join("\n")
     );
 }
+
+#[test]
+fn cli_genesis_stays_on_slot_boundary_and_does_not_own_autocli_details() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let content = fs::read_to_string(repo_root.join("src/cli_genesis.rs"))
+        .expect("cli_genesis should be readable");
+    let forbidden = ["AutoCliGenesisActuator", "SystemGenesisCommandRunner"];
+    let mut violations = Vec::new();
+
+    for token in forbidden {
+        if content.contains(token) {
+            violations.push(format!("src/cli_genesis.rs contains {token}"));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "cli_genesis should stay on the slot boundary and not own concrete Genesis adapter types:\n{}",
+        violations.join("\n")
+    );
+}

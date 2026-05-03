@@ -66,6 +66,14 @@ context_max_tokens = 333
     assert_eq!(parsed["summary"]["model_name"], "config-check-stub");
     assert_eq!(parsed["summary"]["subagent_kind"], "queued_external");
     assert_eq!(parsed["summary"]["context_max_tokens"], 333);
+    assert!(parsed["summary"]["placeholder_warnings"]
+        .as_array()
+        .expect("placeholder warnings should be an array")
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .expect("warning should be string")
+            .contains("provider=fake")));
 }
 
 #[test]
@@ -152,7 +160,8 @@ fn cli_config_init_writes_default_config_without_overwriting() {
     assert_eq!(parsed["path"], config_path.display().to_string());
 
     let content = fs::read_to_string(&config_path).expect("config should exist");
-    assert!(content.contains("provider = \"fake\""));
+    assert!(content.contains("provider = \"openai_compatible\""));
+    assert!(content.contains("subagent = \"queued_external\""));
     assert!(content.contains("api_key_env = \"CHUANG_AGENT_API_KEY\""));
 
     let second = Command::new("cargo")

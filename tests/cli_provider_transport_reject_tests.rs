@@ -1,13 +1,39 @@
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn write_fake_config() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("chuang-agent-provider-reject-{nanos}"));
+    fs::create_dir_all(&root).expect("config root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display()
+        ),
+    )
+    .expect("fake config should be written");
+    config_path
+}
 
 #[test]
 fn cli_run_http_transport_surfaces_preview_metadata() {
+    let config_path = write_fake_config();
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--input",
             "创项目继续推进 transport",
             "--provider-base-url",
@@ -43,12 +69,15 @@ fn cli_run_http_transport_surfaces_preview_metadata() {
 
 #[test]
 fn cli_run_http_transport_surfaces_invalid_port_preview_metadata() {
+    let config_path = write_fake_config();
     let output = Command::new("cargo")
         .args([
             "run",
             "--quiet",
             "--",
             "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--input",
             "创项目继续推进 invalid port",
             "--provider-base-url",

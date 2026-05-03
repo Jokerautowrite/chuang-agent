@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::agent_runtime::{ContextDebugInfo, RuntimeResult};
 use crate::subagent_report::{
-    governance_metadata, ExecutionStatus, ReportBuilder, RuntimeReportInput, SubagentReport,
-    SubagentReportBuilder,
+    governance_metadata, ArtifactKind, ArtifactRef, ExecutionStatus, ReportBuilder,
+    RuntimeReportInput, SubagentReport, SubagentReportBuilder,
 };
+use crate::tool_runtime::ToolLoopReport;
 
 pub fn build_runtime_report(
     result: &RuntimeResult,
@@ -13,7 +14,7 @@ pub fn build_runtime_report(
     agent_id: impl Into<String>,
     parent_agent_id: Option<String>,
 ) -> SubagentReport {
-    SubagentReportBuilder::from_runtime(RuntimeReportInput {
+    let mut report = SubagentReportBuilder::from_runtime(RuntimeReportInput {
         report_id: report_id.into(),
         task_id: task_id.into(),
         agent_id: agent_id.into(),
@@ -27,14 +28,82 @@ pub fn build_runtime_report(
         budget_exceeded_reasons: map_budget_exceeded_reasons(&result.context_debug),
         working_reservation: map_working_reservation(&result.context_debug),
     })
-    .build()
+    .build();
+
+    report.artifacts.extend(tool_report_artifacts(result));
+    report.artifacts.extend(tool_events_artifacts(result));
+    report
 }
 
 fn build_summary(result: &RuntimeResult) -> String {
-    format!(
+    let mut summary = format!(
         "model={} recall_hits={} packed_tokens={}",
         result.response.model_name, result.recall_hit_count, result.packed_token_count
-    )
+    );
+    if let Some(tool_call_count) = result.response.meta.extra.get("tool_call_count") {
+        summary.push_str(&format!(" tool_calls={tool_call_count}"));
+    }
+    if let Some(protocol_error_count) = result.response.meta.extra.get("tool_protocol_error_count")
+    {
+        summary.push_str(&format!(" tool_protocol_errors={protocol_error_count}"));
+    }
+    summary
+}
+
+fn tool_report_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let Some(raw_report) = result.response.meta.extra.get("tool_report_json") else {
+        return Vec::new();
+    };
+
+    let description = serde_json::from_str::<ToolLoopReport>(raw_report)
+        .map(|report| {
+            format!(
+                "tool_loop status={} calls={} rounds={} workspace={}",
+                report.status, report.call_count, report.rounds, report.workspace_root
+            )
+        })
+        .unwrap_or_else(|_| "tool_loop report present but could not be parsed".to_string());
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_meta.tool_report_json".to_string(),
+        description: Some(description),
+    }]
+}
+
+fn tool_events_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let Some(raw_events) = result.response.meta.extra.get("tool_events_json") else {
+        return Vec::new();
+    };
+
+    let description = serde_json::from_str::<Vec<serde_json::Value>>(raw_events)
+        .map(|events| {
+            let tool_call_count = events
+                .iter()
+                .filter(|event| {
+                    event.get("kind").and_then(|value| value.as_str()) == Some("tool_call")
+                })
+                .count();
+            let protocol_error_count = events
+                .iter()
+                .filter(|event| {
+                    event.get("kind").and_then(|value| value.as_str()) == Some("protocol_error")
+                })
+                .count();
+            format!(
+                "tool_events count={} tool_calls={} protocol_errors={}",
+                events.len(),
+                tool_call_count,
+                protocol_error_count
+            )
+        })
+        .unwrap_or_else(|_| "tool_events present but could not be parsed".to_string());
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_meta.tool_events_json".to_string(),
+        description: Some(description),
+    }]
 }
 
 fn map_drop_reasons(debug: &ContextDebugInfo) -> Vec<(String, String)> {

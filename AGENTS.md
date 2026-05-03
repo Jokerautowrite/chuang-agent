@@ -61,6 +61,12 @@ For implementation details, also read the relevant spec:
 - Tests are the source of truth for implementation status.
 - BrowserWorker is an ability line; it must not take priority over memory, subagents, context, governance, and pluggability unless 老爸 explicitly redirects.
 
+## Feishu Docs Rule
+
+- For Chuang project reports that need a Feishu document, use the existing local `lark-cli` user identity first: `lark-cli docs +create --as user ...`.
+- Do not reuse Hermes or Codex Feishu bridges for Chuang messaging or document creation.
+- Do not print Feishu tokens, app secrets, or encrypted credential contents.
+
 ## Rust Implementation Rules
 
 - Keep public structs and enums explicit and serializable when they cross module boundaries.

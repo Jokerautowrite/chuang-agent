@@ -1,13 +1,20 @@
 use crate::actuator::{
-    Actuator, ActuatorError, AppHandle, ClickTarget, EvidenceRef, FakeActuator, FocusTarget,
-    InputTarget, Observation, ObserveTarget, OpenAppRequest, ScreenshotTarget, SecretOrPlainText,
+    Actuator, ActuatorError, AppHandle, ClickTarget, CommandActuator, EvidenceRef, FakeActuator,
+    FocusTarget, InputTarget, Observation, ObserveTarget, OpenAppRequest, ScreenshotTarget,
+    SecretOrPlainText,
 };
 use crate::common::AuditRecord;
 use crate::control_plane::{
-    ControlError, ControlPlane, ControlReceipt, ControlRequest, FakeControlPlane, ManagedUnit,
+    CommandControlPlane, ControlError, ControlPlane, ControlReceipt, ControlRequest,
+    FakeControlPlane, ManagedUnit,
+};
+use crate::genesis_actuator::{AutoCliGenesisActuator, GenesisConfig, SystemGenesisCommandRunner};
+use crate::genesis_actuator::{
+    GenesisActuator, GenesisAskRequest, GenesisAskResponse, GenesisCommandSpec, GenesisError,
 };
 use crate::governance::{
-    Governance, GovernanceError, ProposedAction, RiskDecision, StaticRuleGovernance,
+    Governance, GovernanceError, MarkdownRuleSet, ProposedAction, RiskDecision,
+    StaticRuleGovernance,
 };
 use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use crate::responder::{
@@ -15,7 +22,7 @@ use crate::responder::{
 };
 use crate::runtime_config::{
     ActuatorConfig, ConfigError, ControlPlaneConfig, EvolutionConfig, GovernanceConfig,
-    ProviderConfig, RuntimeConfig, SubagentConfig,
+    ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::{
     EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver, RuntimeEvent, SkillEvolver,
@@ -26,12 +33,14 @@ use crate::subagent_spawner::{
     FakeSubagentSpawner, KillReason, QueuedSubagentSpawner, RunId, SpawnReceipt, SpawnRequest,
     SubagentError, SubagentSpawner,
 };
+use crate::tool_runtime::{ExecutionSlot, ToolExecutionConfig};
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSlots {
     pub provider: ProviderSlot,
     pub governance: GovernanceSlot,
+    pub execution: ExecutionSlot,
     pub actuator: ActuatorSlot,
     pub subagent: SubagentRuntimeSlot,
     pub evolution: EvolutionSlot,
@@ -42,6 +51,11 @@ pub struct RuntimeSlots {
 pub enum ProviderSlot {
     Fake(FakeResponder),
     OpenAICompatible(OpenAICompatibleProviderAdapter),
+    Fallback {
+        primary: Box<ProviderSlot>,
+        fallback: Box<ProviderSlot>,
+        policy: ProviderFallbackPolicy,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +66,7 @@ pub enum GovernanceSlot {
 #[derive(Debug, Clone)]
 pub enum ActuatorSlot {
     Fake(FakeActuator),
+    Command(CommandActuator),
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +77,12 @@ pub enum EvolutionSlot {
 #[derive(Debug, Clone)]
 pub enum ControlPlaneSlot {
     FakeLocal(FakeControlPlane),
+    Command(CommandControlPlane),
+}
+
+#[derive(Debug, Clone)]
+pub struct GenesisSlot {
+    actuator: AutoCliGenesisActuator<SystemGenesisCommandRunner>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +98,7 @@ pub enum SubagentRuntimeSlot {
 pub struct RuntimeSlotsSummary {
     pub provider: String,
     pub governance: String,
+    pub execution: String,
     pub actuator: String,
     pub subagent: String,
     pub evolution: String,
@@ -88,7 +110,8 @@ pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, Confi
 
     Ok(RuntimeSlots {
         provider: build_provider_responder(&config.provider)?,
-        governance: build_governance(&config.governance)?,
+        governance: build_governance(config)?,
+        execution: build_execution(config),
         actuator: build_actuator(&config.actuator)?,
         subagent: build_subagent(config)?,
         evolution: build_evolution(&config.evolution)?,
@@ -109,8 +132,19 @@ pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot,
                 config.api_key.clone(),
                 config.model_name.clone(),
             )
-            .with_transport(config.transport.clone()),
+            .with_transport(config.transport.clone())
+            .with_request_timeout_ms(config.request_timeout_ms.unwrap_or(60_000))
+            .with_tls_ca_cert_path(config.tls_ca_cert_path.clone()),
         )),
+        ProviderConfig::Fallback {
+            primary,
+            fallback,
+            policy,
+        } => Ok(ProviderSlot::Fallback {
+            primary: Box::new(build_provider_responder(primary)?),
+            fallback: Box::new(build_provider_responder(fallback)?),
+            policy: policy.clone(),
+        }),
     }
 }
 
@@ -118,6 +152,7 @@ pub fn summarize_runtime_slots(config: &RuntimeConfig) -> RuntimeSlotsSummary {
     RuntimeSlotsSummary {
         provider: config.provider.kind().to_string(),
         governance: config.governance.kind().to_string(),
+        execution: "generic_agent_mvp".to_string(),
         actuator: config.actuator.kind().to_string(),
         subagent: config.subagent.kind().to_string(),
         evolution: config.evolution.kind().to_string(),
@@ -125,15 +160,38 @@ pub fn summarize_runtime_slots(config: &RuntimeConfig) -> RuntimeSlotsSummary {
     }
 }
 
-fn build_governance(config: &GovernanceConfig) -> Result<GovernanceSlot, ConfigError> {
-    match config {
-        GovernanceConfig::StaticRule => Ok(GovernanceSlot::StaticRule(StaticRuleGovernance::new())),
+pub fn build_governance_slot(config: &RuntimeConfig) -> Result<GovernanceSlot, ConfigError> {
+    match config.governance {
+        GovernanceConfig::StaticRule => {
+            let rules =
+                MarkdownRuleSet::load(&config.rules.core_path).map_err(|message| ConfigError {
+                    field: "rules.core_path".to_string(),
+                    message,
+                })?;
+            Ok(GovernanceSlot::StaticRule(
+                StaticRuleGovernance::with_rules(rules),
+            ))
+        }
     }
+}
+
+fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
+    ExecutionSlot::generic_agent_mvp(ToolExecutionConfig {
+        shell_timeout_ms: config.tool_loop.shell_timeout_ms,
+        shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
+    })
+}
+
+fn build_governance(config: &RuntimeConfig) -> Result<GovernanceSlot, ConfigError> {
+    build_governance_slot(config)
 }
 
 fn build_actuator(config: &ActuatorConfig) -> Result<ActuatorSlot, ConfigError> {
     match config {
         ActuatorConfig::Fake => Ok(ActuatorSlot::Fake(FakeActuator::new())),
+        ActuatorConfig::Command(config) => {
+            Ok(ActuatorSlot::Command(CommandActuator::new(config.clone())))
+        }
     }
 }
 
@@ -165,6 +223,9 @@ fn build_control_plane(config: &ControlPlaneConfig) -> Result<ControlPlaneSlot, 
         ControlPlaneConfig::FakeLocal => Ok(ControlPlaneSlot::FakeLocal(
             FakeControlPlane::default_local_agents(),
         )),
+        ControlPlaneConfig::Command(config) => Ok(ControlPlaneSlot::Command(
+            CommandControlPlane::new(config.clone()),
+        )),
     }
 }
 
@@ -193,11 +254,75 @@ impl Governance for GovernanceSlot {
     }
 }
 
+pub fn build_genesis_actuator(config: GenesisConfig) -> GenesisSlot {
+    GenesisSlot {
+        actuator: AutoCliGenesisActuator::new(config),
+    }
+}
+
+impl GenesisSlot {
+    pub fn primary_spec(&self, prompt: &str) -> GenesisCommandSpec {
+        self.actuator.primary_spec(prompt)
+    }
+
+    pub fn fallback_spec(&self, prompt: &str) -> GenesisCommandSpec {
+        self.actuator.fallback_spec(prompt)
+    }
+}
+
+impl GenesisActuator for GenesisSlot {
+    fn ask(&mut self, request: GenesisAskRequest) -> Result<GenesisAskResponse, GenesisError> {
+        self.actuator.ask(request)
+    }
+}
+
+impl ControlPlaneSlot {
+    pub fn try_list_units(&self) -> Result<Vec<ManagedUnit>, ControlError> {
+        match self {
+            Self::FakeLocal(control_plane) => Ok(control_plane.list_units()),
+            Self::Command(control_plane) => control_plane.try_list_units(),
+        }
+    }
+}
+
 impl Responder for ProviderSlot {
     fn generate(&self, request: &ResponderRequest) -> ResponderOutput {
         match self {
             Self::Fake(responder) => responder.generate(request),
             Self::OpenAICompatible(responder) => responder.generate(request),
+            Self::Fallback {
+                primary,
+                fallback,
+                policy,
+            } => {
+                let primary_output = primary.generate(request);
+                if !provider_output_should_fallback(&primary_output, policy) {
+                    return primary_output;
+                }
+
+                let mut fallback_output = fallback.generate(request);
+                fallback_output
+                    .meta
+                    .extra
+                    .insert("provider_fallback_used".to_string(), "true".to_string());
+                fallback_output.meta.extra.insert(
+                    "provider_fallback_from".to_string(),
+                    primary_output
+                        .meta
+                        .provider
+                        .clone()
+                        .unwrap_or_else(|| primary_output.model_name.clone()),
+                );
+                fallback_output.meta.extra.insert(
+                    "provider_fallback_reason".to_string(),
+                    provider_fallback_reason(&primary_output),
+                );
+                fallback_output.trace = format!(
+                    "{} fallback_from_trace=({})",
+                    fallback_output.trace, primary_output.trace
+                );
+                fallback_output
+            }
         }
     }
 
@@ -205,8 +330,64 @@ impl Responder for ProviderSlot {
         match self {
             Self::Fake(responder) => responder.provider(),
             Self::OpenAICompatible(responder) => responder.provider(),
+            Self::Fallback {
+                primary, fallback, ..
+            } => {
+                let primary = primary.provider();
+                let fallback = fallback.provider();
+                ResponderProvider {
+                    provider_id: format!("{}->{}", primary.provider_id, fallback.provider_id),
+                    model_name: format!("{}->{}", primary.model_name, fallback.model_name),
+                }
+            }
         }
     }
+}
+
+fn provider_output_should_fallback(
+    output: &ResponderOutput,
+    policy: &ProviderFallbackPolicy,
+) -> bool {
+    if policy.on_retryable
+        && output
+            .meta
+            .extra
+            .get("provider_retryable")
+            .map(String::as_str)
+            == Some("true")
+    {
+        return true;
+    }
+
+    if output
+        .meta
+        .extra
+        .get("status_code")
+        .and_then(|status| status.parse::<u16>().ok())
+        .is_some_and(|status| policy.status_codes.contains(&status))
+    {
+        return true;
+    }
+
+    output
+        .meta
+        .extra
+        .get("provider_error_class")
+        .is_some_and(|class| policy.error_classes.iter().any(|allowed| allowed == class))
+}
+
+fn provider_fallback_reason(output: &ResponderOutput) -> String {
+    if let Some(status) = output.meta.extra.get("status_code") {
+        return format!("status_code={status}");
+    }
+    if let Some(class) = output.meta.extra.get("provider_error_class") {
+        return format!("provider_error_class={class}");
+    }
+    output
+        .meta
+        .finish_reason
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 impl SubagentSpawner for SubagentRuntimeSlot {
@@ -267,24 +448,28 @@ impl Actuator for ActuatorSlot {
     fn observe(&mut self, target: ObserveTarget) -> Result<Observation, ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.observe(target),
+            Self::Command(actuator) => actuator.observe(target),
         }
     }
 
     fn open_app(&mut self, request: OpenAppRequest) -> Result<AppHandle, ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.open_app(request),
+            Self::Command(actuator) => actuator.open_app(request),
         }
     }
 
     fn focus(&mut self, target: FocusTarget) -> Result<(), ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.focus(target),
+            Self::Command(actuator) => actuator.focus(target),
         }
     }
 
     fn click(&mut self, target: ClickTarget) -> Result<(), ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.click(target),
+            Self::Command(actuator) => actuator.click(target),
         }
     }
 
@@ -295,12 +480,14 @@ impl Actuator for ActuatorSlot {
     ) -> Result<(), ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.input_text(target, text),
+            Self::Command(actuator) => actuator.input_text(target, text),
         }
     }
 
     fn screenshot(&mut self, target: ScreenshotTarget) -> Result<EvidenceRef, ActuatorError> {
         match self {
             Self::Fake(actuator) => actuator.screenshot(target),
+            Self::Command(actuator) => actuator.screenshot(target),
         }
     }
 }
@@ -335,12 +522,14 @@ impl ControlPlane for ControlPlaneSlot {
     fn list_units(&self) -> Vec<ManagedUnit> {
         match self {
             Self::FakeLocal(control_plane) => control_plane.list_units(),
+            Self::Command(control_plane) => control_plane.list_units(),
         }
     }
 
     fn apply(&mut self, request: ControlRequest) -> Result<ControlReceipt, ControlError> {
         match self {
             Self::FakeLocal(control_plane) => control_plane.apply(request),
+            Self::Command(control_plane) => control_plane.apply(request),
         }
     }
 }

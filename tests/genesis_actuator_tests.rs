@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use chuang_agent::genesis_actuator::{
     AutoCliGenesisActuator, FakeGenesisActuator, GenesisActuator, GenesisAskRequest,
     GenesisChannel, GenesisCommandOutput, GenesisCommandRunner, GenesisCommandSpec, GenesisConfig,
-    GenesisError,
+    GenesisError, SystemGenesisCommandRunner,
 };
 
 #[derive(Debug, Default)]
@@ -55,6 +56,7 @@ fn autocli_genesis_builds_primary_and_fallback_command_shapes() {
     let primary = actuator.primary_spec("测试");
     assert_eq!(primary.program, "autocli");
     assert_eq!(primary.channel, GenesisChannel::UserDataDir);
+    assert_eq!(primary.timeout_ms, 30_000);
     assert_eq!(
         primary.args,
         vec![
@@ -71,6 +73,7 @@ fn autocli_genesis_builds_primary_and_fallback_command_shapes() {
 
     let fallback = actuator.fallback_spec("测试");
     assert_eq!(fallback.channel, GenesisChannel::Cdp);
+    assert_eq!(fallback.timeout_ms, 30_000);
     assert_eq!(
         fallback.args,
         vec![
@@ -83,6 +86,26 @@ fn autocli_genesis_builds_primary_and_fallback_command_shapes() {
             "30000"
         ]
     );
+}
+
+#[test]
+fn system_genesis_runner_times_out_stuck_command() {
+    let mut runner = SystemGenesisCommandRunner;
+    let spec = GenesisCommandSpec {
+        program: "sleep".to_string(),
+        args: vec!["1".to_string()],
+        channel: GenesisChannel::UserDataDir,
+        timeout_ms: 20,
+    };
+    let started = Instant::now();
+
+    let output = runner
+        .run(&spec)
+        .expect("runner should return timeout output");
+
+    assert!(started.elapsed().as_millis() < 500);
+    assert_ne!(output.status_code, Some(0));
+    assert!(output.stderr.contains("timed out after 20ms"));
 }
 
 #[test]

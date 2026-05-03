@@ -67,6 +67,19 @@ where
                 request.control.unit_id.clone(),
             ))
         })?;
+    run_control_workflow_for_unit(control_plane, governance, request, unit)
+}
+
+pub fn run_control_workflow_for_unit<P, G>(
+    control_plane: &mut P,
+    governance: &mut G,
+    request: ControlWorkflowRequest,
+    unit: &ManagedUnit,
+) -> Result<ControlWorkflowResult, ControlWorkflowError>
+where
+    P: ControlPlane,
+    G: Governance,
+{
     let proposed = proposed_action_for_control(unit, &request.control)
         .map_err(ControlWorkflowError::Control)?;
     let decision = governance

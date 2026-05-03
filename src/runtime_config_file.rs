@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use crate::hermes_memory::{DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS};
 use crate::provider_openai_compatible::ProviderTransport;
 use crate::runtime_config::{
-    ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
-    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
+    ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
+    ControlPlaneConfig, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
+    ProviderConfig, ProviderFallbackPolicy, RulesConfig, RuntimeConfig, SubagentConfig,
+    SubagentQueueConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,55 @@ pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, Runtime
     if let Some(value) = values.get("recall_limit") {
         config.recall_limit = parse_usize("recall_limit", value)?;
     }
+    if let Some(value) = get_any(&values, &["tool_loop.max_rounds", "tool_max_rounds"]) {
+        config.tool_loop.max_rounds = parse_usize("tool_loop.max_rounds", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &["tool_loop.shell_timeout_ms", "tool_shell_timeout_ms"],
+    ) {
+        config.tool_loop.shell_timeout_ms = parse_u64("tool_loop.shell_timeout_ms", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "tool_loop.risk.delete_or_cleanup",
+            "tool_shell_risk_delete_or_cleanup",
+        ],
+    ) {
+        config.tool_loop.shell_risk_rules.delete_or_cleanup =
+            parse_pattern_list("tool_loop.risk.delete_or_cleanup", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "tool_loop.risk.service_change",
+            "tool_shell_risk_service_change",
+        ],
+    ) {
+        config.tool_loop.shell_risk_rules.service_change =
+            parse_pattern_list("tool_loop.risk.service_change", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "tool_loop.risk.network_change",
+            "tool_shell_risk_network_change",
+        ],
+    ) {
+        config.tool_loop.shell_risk_rules.network_change =
+            parse_pattern_list("tool_loop.risk.network_change", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "tool_loop.risk.secret_access",
+            "tool_shell_risk_secret_access",
+        ],
+    ) {
+        config.tool_loop.shell_risk_rules.secret_access =
+            parse_pattern_list("tool_loop.risk.secret_access", value)?;
+    }
     if let Some(value) = values.get("identity_memory_root") {
         config.identity_memory = IdentityMemoryConfig::HermesDualFile {
             root: PathBuf::from(value),
@@ -46,13 +97,43 @@ pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, Runtime
             memory_max_chars: DEFAULT_HOT_MEMORY_MAX_CHARS,
         };
     }
+    if let Some(value) = get_any(&values, &["identity.root", "identity_root"]) {
+        config.identity_bootstrap = IdentityBootstrapConfig::new(value);
+    }
+    if let Some(value) = get_any(&values, &["identity.soul_path", "soul_path"]) {
+        config.identity_bootstrap.soul_path = PathBuf::from(value);
+    }
+    if let Some(value) = get_any(&values, &["identity.story_path", "story_path"]) {
+        config.identity_bootstrap.story_path = PathBuf::from(value);
+    }
+    if let Some(value) = get_any(&values, &["identity.first_wake_path", "first_wake_path"]) {
+        config.identity_bootstrap.first_wake_path = PathBuf::from(value);
+    }
+    if let Some(value) = get_any(
+        &values,
+        &["identity.agents_registry_path", "agents_registry_path"],
+    ) {
+        config.identity_bootstrap.agents_registry_path = PathBuf::from(value);
+    }
+    if let Some(value) = get_any(&values, &["rules.root", "rules_root"]) {
+        config.rules = RulesConfig::new(value);
+    }
+    if let Some(value) = get_any(&values, &["rules.core_path", "rules_core_path"]) {
+        config.rules.core_path = PathBuf::from(value);
+    }
     if let Some(value) = values.get("subagent") {
         config.subagent = parse_subagent(value)?;
+    }
+    if values.contains_key("actuator.kind") || values.contains_key("actuator") {
+        config.actuator = parse_actuator(&values)?;
     }
     if let Some(value) = values.get("subagent_queue_root") {
         config.subagent_queue = SubagentQueueConfig {
             root: PathBuf::from(value),
         };
+    }
+    if values.contains_key("control.kind") || values.contains_key("control") {
+        config.control_plane = parse_control_plane(&values)?;
     }
     if let Some(value) = get_any(&values, &["context.engine", "context_engine"]) {
         config.context_engine = parse_context_engine(value)?;
@@ -154,7 +235,40 @@ fn parse_value(raw: &str) -> String {
     trimmed.to_string()
 }
 
+fn parse_pattern_list(key: &str, value: &str) -> Result<Vec<String>, RuntimeConfigFileError> {
+    let patterns = value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        return Err(RuntimeConfigFileError::InvalidValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        });
+    }
+    Ok(patterns)
+}
+
 fn parse_provider(
+    values: &BTreeMap<String, String>,
+) -> Result<ProviderConfig, RuntimeConfigFileError> {
+    let primary = parse_primary_provider(values)?;
+    if values.contains_key("fallback_provider") || values.contains_key("fallback.provider.kind") {
+        let fallback = parse_fallback_provider(values)?;
+        let policy = parse_fallback_policy(values)?;
+        return Ok(ProviderConfig::Fallback {
+            primary: Box::new(primary),
+            fallback: Box::new(fallback),
+            policy,
+        });
+    }
+
+    Ok(primary)
+}
+
+fn parse_primary_provider(
     values: &BTreeMap<String, String>,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
     let kind = get_any(values, &["provider.kind", "provider"])
@@ -190,6 +304,14 @@ fn parse_provider(
                             .unwrap_or_default(),
                     })?
                     .unwrap_or(ProviderTransport::Stub),
+                request_timeout_ms: get_any(
+                    values,
+                    &["provider.request_timeout_ms", "provider_timeout_ms"],
+                )
+                .map(|value| parse_u64("provider.request_timeout_ms", value))
+                .transpose()?,
+                tls_ca_cert_path: get_any(values, &["provider.tls_ca_path", "tls_ca_path"])
+                    .map(PathBuf::from),
             }))
         }
         other => Err(RuntimeConfigFileError::InvalidValue {
@@ -197,6 +319,116 @@ fn parse_provider(
             value: other.to_string(),
         }),
     }
+}
+
+fn parse_fallback_provider(
+    values: &BTreeMap<String, String>,
+) -> Result<ProviderConfig, RuntimeConfigFileError> {
+    let kind = get_any(values, &["fallback.provider.kind", "fallback_provider"])
+        .map(String::as_str)
+        .unwrap_or("fake");
+    match kind {
+        "fake" => Ok(ProviderConfig::Fake {
+            provider_id: get_any(values, &["fallback.provider.id", "fallback_provider_id"])
+                .cloned()
+                .unwrap_or_else(|| "fallback-fake-runtime".to_string()),
+            model_name: get_any(values, &["fallback.provider.model", "fallback_model"])
+                .cloned()
+                .unwrap_or_else(|| "fallback-stub-responder".to_string()),
+        }),
+        "openai_compatible" => {
+            let api_key_env = required_any(
+                values,
+                &["fallback.provider.api_key_env", "fallback_api_key_env"],
+            )?;
+            let api_key = std::env::var(&api_key_env)
+                .map_err(|_| RuntimeConfigFileError::MissingEnv { name: api_key_env })?;
+            Ok(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+                provider_id: get_any(values, &["fallback.provider.id", "fallback_provider_id"])
+                    .cloned()
+                    .unwrap_or_else(|| "fallback-openai-compatible".to_string()),
+                base_url: required_any(
+                    values,
+                    &["fallback.provider.base_url", "fallback_base_url"],
+                )?,
+                api_key,
+                model_name: required_any(values, &["fallback.provider.model", "fallback_model"])?,
+                transport: get_any(
+                    values,
+                    &["fallback.provider.transport", "fallback_transport"],
+                )
+                .map(|value| value.parse::<ProviderTransport>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: "fallback.provider.transport".to_string(),
+                    value: get_any(
+                        values,
+                        &["fallback.provider.transport", "fallback_transport"],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?
+                .unwrap_or(ProviderTransport::Stub),
+                request_timeout_ms: get_any(
+                    values,
+                    &[
+                        "fallback.provider.request_timeout_ms",
+                        "fallback_provider_timeout_ms",
+                    ],
+                )
+                .map(|value| parse_u64("fallback.provider.request_timeout_ms", value))
+                .transpose()?,
+                tls_ca_cert_path: get_any(
+                    values,
+                    &["fallback.provider.tls_ca_path", "fallback_tls_ca_path"],
+                )
+                .map(PathBuf::from),
+            }))
+        }
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: "fallback.provider.kind".to_string(),
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn parse_fallback_policy(
+    values: &BTreeMap<String, String>,
+) -> Result<ProviderFallbackPolicy, RuntimeConfigFileError> {
+    Ok(ProviderFallbackPolicy {
+        on_retryable: get_any(
+            values,
+            &[
+                "fallback.on_retryable",
+                "fallback_on_retryable",
+                "provider.fallback_on_retryable",
+            ],
+        )
+        .map(|value| parse_bool("fallback.on_retryable", value))
+        .transpose()?
+        .unwrap_or(true),
+        status_codes: get_any(
+            values,
+            &[
+                "fallback.status_codes",
+                "fallback_status_codes",
+                "provider.fallback_status_codes",
+            ],
+        )
+        .map(|value| parse_status_codes("fallback.status_codes", value))
+        .transpose()?
+        .unwrap_or_else(|| vec![401, 402]),
+        error_classes: get_any(
+            values,
+            &[
+                "fallback.error_classes",
+                "fallback_error_classes",
+                "provider.fallback_error_classes",
+            ],
+        )
+        .map(|value| parse_csv_strings(value))
+        .unwrap_or_default(),
+    })
 }
 
 fn get_any<'a>(values: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a String> {
@@ -227,6 +459,53 @@ fn parse_subagent(raw: &str) -> Result<SubagentConfig, RuntimeConfigFileError> {
     }
 }
 
+fn parse_actuator(
+    values: &BTreeMap<String, String>,
+) -> Result<ActuatorConfig, RuntimeConfigFileError> {
+    let kind = get_any(values, &["actuator.kind", "actuator"])
+        .map(String::as_str)
+        .unwrap_or("fake");
+    match kind {
+        "fake" => Ok(ActuatorConfig::Fake),
+        "command" => Ok(ActuatorConfig::Command(ActuatorCommandConfig {
+            program: required_any(values, &["actuator.program", "actuator_program"])?,
+            args: required_any(values, &["actuator.args", "actuator_args"])?,
+            timeout_ms: get_any(values, &["actuator.timeout_ms", "actuator_timeout_ms"])
+                .map(|value| parse_u64("actuator.timeout_ms", value))
+                .transpose()?
+                .unwrap_or(30_000),
+        })),
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: "actuator.kind".to_string(),
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn parse_control_plane(
+    values: &BTreeMap<String, String>,
+) -> Result<ControlPlaneConfig, RuntimeConfigFileError> {
+    let kind = get_any(values, &["control.kind", "control"])
+        .map(String::as_str)
+        .unwrap_or("fake_local");
+    match kind {
+        "fake_local" => Ok(ControlPlaneConfig::FakeLocal),
+        "command" => Ok(ControlPlaneConfig::Command(ControlPlaneCommandConfig {
+            program: required_any(values, &["control.program", "program"])?,
+            list_args: required_any(values, &["control.list_args", "list_args"])?,
+            apply_args: required_any(values, &["control.apply_args", "apply_args"])?,
+            timeout_ms: get_any(values, &["control.timeout_ms", "control_timeout_ms"])
+                .map(|value| parse_u64("control.timeout_ms", value))
+                .transpose()?
+                .unwrap_or(30_000),
+        })),
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: "control.kind".to_string(),
+            value: other.to_string(),
+        }),
+    }
+}
+
 fn parse_context_engine(raw: &str) -> Result<ContextEngineConfig, RuntimeConfigFileError> {
     match raw {
         "deterministic_budget" => Ok(ContextEngineConfig::DeterministicBudget),
@@ -252,4 +531,55 @@ fn parse_usize(key: &str, raw: &str) -> Result<usize, RuntimeConfigFileError> {
             key: key.to_string(),
             value: raw.to_string(),
         })
+}
+
+fn parse_u64(key: &str, raw: &str) -> Result<u64, RuntimeConfigFileError> {
+    raw.parse::<u64>()
+        .map_err(|_| RuntimeConfigFileError::InvalidValue {
+            key: key.to_string(),
+            value: raw.to_string(),
+        })
+}
+
+fn parse_bool(key: &str, raw: &str) -> Result<bool, RuntimeConfigFileError> {
+    match raw {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: key.to_string(),
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn parse_status_codes(key: &str, raw: &str) -> Result<Vec<u16>, RuntimeConfigFileError> {
+    let mut codes = Vec::new();
+    for token in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        let code = token
+            .parse::<u16>()
+            .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                key: key.to_string(),
+                value: token.to_string(),
+            })?;
+        if !(100..=599).contains(&code) {
+            return Err(RuntimeConfigFileError::InvalidValue {
+                key: key.to_string(),
+                value: token.to_string(),
+            });
+        }
+        codes.push(code);
+    }
+    Ok(codes)
+}
+
+fn parse_csv_strings(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }

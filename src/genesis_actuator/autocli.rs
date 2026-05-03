@@ -1,15 +1,19 @@
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 use crate::genesis_actuator::{
     session_expired_marker, GenesisActuator, GenesisAskRequest, GenesisAskResponse, GenesisChannel,
     GenesisConfig, GenesisError, GenesisRepairPlan,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GenesisCommandSpec {
     pub program: String,
     pub args: Vec<String>,
     pub channel: GenesisChannel,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,16 +32,15 @@ pub struct SystemGenesisCommandRunner;
 
 impl GenesisCommandRunner for SystemGenesisCommandRunner {
     fn run(&mut self, spec: &GenesisCommandSpec) -> Result<GenesisCommandOutput, GenesisError> {
-        let output = Command::new(&spec.program)
+        let child = Command::new(&spec.program)
             .args(&spec.args)
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|error| GenesisError::CommandNotFound(error.to_string()))?;
 
-        Ok(GenesisCommandOutput {
-            status_code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        })
+        wait_with_timeout(child, spec.timeout_ms)
+            .map_err(|error| GenesisError::CommandNotFound(error.to_string()))
     }
 }
 
@@ -72,6 +75,7 @@ impl<R> AutoCliGenesisActuator<R> {
                 self.config.timeout_ms.to_string(),
             ],
             channel: GenesisChannel::UserDataDir,
+            timeout_ms: self.config.timeout_ms,
         }
     }
 
@@ -88,6 +92,7 @@ impl<R> AutoCliGenesisActuator<R> {
                 self.config.timeout_ms.to_string(),
             ],
             channel: GenesisChannel::Cdp,
+            timeout_ms: self.config.timeout_ms,
         }
     }
 }
@@ -153,4 +158,46 @@ impl<R: GenesisCommandRunner> GenesisActuator for AutoCliGenesisActuator<R> {
 
 fn preview(value: &str) -> String {
     value.trim().chars().take(600).collect()
+}
+
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout_ms: u64,
+) -> std::io::Result<GenesisCommandOutput> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        if child.try_wait()?.is_some() {
+            let output = child.wait_with_output()?;
+            return Ok(output_to_genesis(output, None));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output()?;
+            return Ok(output_to_genesis(
+                output,
+                Some(format!("genesis command timed out after {timeout_ms}ms")),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn output_to_genesis(
+    output: std::process::Output,
+    timeout_message: Option<String>,
+) -> GenesisCommandOutput {
+    let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if let Some(timeout_message) = timeout_message {
+        if stderr.trim().is_empty() {
+            stderr = timeout_message;
+        } else {
+            stderr = format!("{timeout_message}\n{stderr}");
+        }
+    }
+
+    GenesisCommandOutput {
+        status_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr,
+    }
 }

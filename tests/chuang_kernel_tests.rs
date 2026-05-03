@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, ChuangKernelGovernanceError, ChuangKernelMemoryError,
-    DEFAULT_MEMORY_WRITE_MAX_CHARS,
+    IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextBudget, ContextEngineKind};
 use chuang_agent::governance::{
@@ -36,6 +36,7 @@ fn kernel_config() -> ChuangKernelConfig {
         context_engine_kind: None,
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
     }
 }
 
@@ -186,6 +187,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
         context_engine_kind: None,
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
     };
     let kernel = kernel(config, InMemoryMemoryStore::new());
 
@@ -228,6 +230,38 @@ fn chuang_kernel_injects_identity_snapshot_into_runtime_context() {
     assert_eq!(
         snapshot.identity_memory_chars,
         Some("## mem-1\n创项目 MVP 当前聚焦核心记忆层".chars().count())
+    );
+}
+
+#[test]
+fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
+    let config = ChuangKernelConfig {
+        identity_bootstrap_snapshot: Some(IdentityBootstrapSnapshot {
+            soul: "创的核心锚点：记忆是本体，runtime 是壳。".to_string(),
+            story: "创从小创、小承、OpenClaw 和 Codex 的经验里诞生。".to_string(),
+            first_wake: "第一次醒来先确认身份、边界和老爸的禁令。".to_string(),
+            agents_registry: "agent_id = \"chuang\"".to_string(),
+        }),
+        ..kernel_config()
+    };
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
+
+    let turn = kernel
+        .run_turn("读取 first wake")
+        .expect("kernel turn should run");
+    let snapshot = kernel.snapshot();
+
+    assert!(turn.result.prompt.contains("identity-first-wake"));
+    assert!(turn.result.prompt.contains("第一次醒来先确认身份"));
+    assert!(turn.result.prompt.contains("identity-soul"));
+    assert!(turn.result.prompt.contains("identity-agents"));
+    assert_eq!(
+        snapshot.identity_first_wake_chars,
+        Some("第一次醒来先确认身份、边界和老爸的禁令。".chars().count())
+    );
+    assert_eq!(
+        snapshot.identity_soul_chars,
+        Some("创的核心锚点：记忆是本体，runtime 是壳。".chars().count())
     );
 }
 

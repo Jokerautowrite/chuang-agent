@@ -1,11 +1,118 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::path::PathBuf;
+use std::process::Command;
 use std::thread;
+use std::time::Duration;
+use std::{fs, io::Cursor, sync::Arc};
 
 use chuang_agent::provider_openai_compatible::{
     OpenAICompatibleProviderAdapter, ProviderTransport,
 };
 use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use rustls_pemfile::{certs, private_key};
+
+fn generate_tls_materials() -> (PathBuf, PathBuf, PathBuf) {
+    let root = std::env::temp_dir().join(format!(
+        "chuang-agent-native-tls-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic enough")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("tls temp dir should create");
+
+    let ca_key = root.join("ca.key");
+    let ca_crt = root.join("ca.crt");
+    let server_key = root.join("server.key");
+    let server_csr = root.join("server.csr");
+    let server_crt = root.join("server.crt");
+    let server_ext = root.join("server.ext");
+
+    fs::write(
+        &server_ext,
+        "[v3_req]\nsubjectAltName = IP:127.0.0.1,DNS:localhost\nbasicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature, keyEncipherment\nextendedKeyUsage = serverAuth\n",
+    )
+    .expect("server ext file should write");
+
+    run_openssl(&[
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-days",
+        "1",
+        "-subj",
+        "/CN=chuang-agent-test-ca",
+        "-addext",
+        "basicConstraints=critical,CA:TRUE",
+        "-addext",
+        "keyUsage=critical,keyCertSign,cRLSign",
+        "-keyout",
+        ca_key.to_str().expect("ca key path should be utf-8"),
+        "-out",
+        ca_crt.to_str().expect("ca crt path should be utf-8"),
+    ]);
+    run_openssl(&[
+        "req",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=127.0.0.1",
+        "-keyout",
+        server_key
+            .to_str()
+            .expect("server key path should be utf-8"),
+        "-out",
+        server_csr
+            .to_str()
+            .expect("server csr path should be utf-8"),
+    ]);
+    run_openssl(&[
+        "x509",
+        "-req",
+        "-in",
+        server_csr
+            .to_str()
+            .expect("server csr path should be utf-8"),
+        "-CA",
+        ca_crt.to_str().expect("ca crt path should be utf-8"),
+        "-CAkey",
+        ca_key.to_str().expect("ca key path should be utf-8"),
+        "-CAcreateserial",
+        "-out",
+        server_crt
+            .to_str()
+            .expect("server crt path should be utf-8"),
+        "-days",
+        "1",
+        "-extfile",
+        server_ext
+            .to_str()
+            .expect("server ext path should be utf-8"),
+        "-extensions",
+        "v3_req",
+    ]);
+
+    (ca_crt, server_crt, server_key)
+}
+
+fn run_openssl(args: &[&str]) {
+    let output = Command::new("openssl")
+        .args(args)
+        .output()
+        .expect("openssl should execute");
+    assert!(
+        output.status.success(),
+        "openssl failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
 #[test]
 fn openai_compatible_http_transport_surfaces_response_parse_error_when_status_line_missing() {
@@ -176,6 +283,90 @@ fn openai_compatible_http_transport_returns_structured_error_when_server_unreach
 }
 
 #[test]
+fn openai_compatible_http_transport_times_out_when_server_stalls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        thread::sleep(Duration::from_millis(120));
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Http)
+    .with_request_timeout_ms(20);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "http timeout".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.finish_reason.as_deref(), Some("invalid-config"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("config_error_field")
+            .map(String::as_str),
+        Some("http_read")
+    );
+    assert!(response.body.contains("field=http_read"));
+}
+
+#[test]
+fn openai_compatible_native_transport_times_out_when_server_stalls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        thread::sleep(Duration::from_millis(120));
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Native)
+    .with_request_timeout_ms(20);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "native timeout".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.finish_reason.as_deref(), Some("invalid-config"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("config_error_field")
+            .map(String::as_str),
+        Some("native_http_timeout")
+    );
+    assert!(response.body.contains("timed out after 20ms"));
+}
+
+#[test]
 fn openai_compatible_http_transport_surfaces_success_metadata_when_server_reachable() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
@@ -315,10 +506,121 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
             .map(String::as_str),
         Some("http-openai-compatible")
     );
+    assert_eq!(response.finish_reason.as_deref(), Some("http-error-429"));
+    assert!(response.body.contains("PROVIDER_HTTP_ERROR"));
+    assert!(response.body.contains("status_code=429"));
+    assert!(response.trace.contains("provider_http_error"));
     assert_eq!(
-        response.finish_reason.as_deref(),
-        Some("http-openai-compatible")
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("http_status")
     );
-    assert!(response.body.contains("provider_response_missing_content"));
-    assert!(response.trace.contains("status_code=429"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_message")
+            .map(String::as_str),
+        Some("rate limit hit")
+    );
+}
+
+#[test]
+fn openai_compatible_native_transport_accepts_https_scheme_and_attempts_tls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let (ca_path, server_cert_path, server_key_path) = generate_tls_materials();
+    let cert_chain = certs(&mut Cursor::new(
+        fs::read(&server_cert_path).expect("server cert should read"),
+    ))
+    .collect::<Result<Vec<_>, _>>()
+    .expect("certificate chain should parse");
+    let private_key = private_key(&mut Cursor::new(
+        fs::read(&server_key_path).expect("server key should read"),
+    ))
+    .expect("private key parser should read")
+    .expect("private key should exist");
+    let server_config = Arc::new(
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, private_key)
+            .expect("server config should build"),
+    );
+
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("connection should be accepted");
+        let conn = ServerConnection::new(server_config).expect("server connection should build");
+        let mut tls_stream = StreamOwned::new(conn, stream);
+        let mut request_bytes = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let bytes = tls_stream
+                .read(&mut buffer)
+                .expect("tls request bytes should be readable");
+            if bytes == 0 {
+                break;
+            }
+            request_bytes.extend_from_slice(&buffer[..bytes]);
+            if request_bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request_text = String::from_utf8_lossy(&request_bytes).to_string();
+        let request_lower = request_text.to_lowercase();
+
+        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_lower.contains("authorization: bearer test-key"));
+        assert!(request_lower.contains("content-type: application/json"));
+        assert!(request_text.contains("https tls attempt"));
+
+        let body = r#"{"id":"chatcmpl-local-tls-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_https_ok"},"finish_reason":"stop"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        tls_stream
+            .write_all(response.as_bytes())
+            .expect("tls response should be writable");
+        tls_stream.flush().expect("tls stream should flush");
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("https://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Native)
+    .with_tls_ca_cert_path(Some(ca_path))
+    .with_request_timeout_ms(20);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "https tls attempt".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("transport_mode")
+            .map(String::as_str),
+        Some("native")
+    );
+    assert_eq!(
+        response.extra_meta.get("status_code").map(String::as_str),
+        Some("200")
+    );
+    let expected_url = format!("https://{address}/v1/chat/completions");
+    assert_eq!(
+        response.extra_meta.get("request_url").map(String::as_str),
+        Some(expected_url.as_str())
+    );
+    assert_eq!(response.body, "real_https_ok");
+    assert!(response.trace.contains("status_code=200"));
 }
