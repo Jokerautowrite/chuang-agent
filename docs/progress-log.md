@@ -8,6 +8,7 @@
 - `memory identity append-experience --id ID --content TEXT` 已补手动入口，用于人工或上层治理确认后写入经验层；`run` 完成后会输出 `experience_memory_recorded: ID`，方便通道和报告关联。
 - 已补回归：Hermes 双文件 store 可追加带来源经验；CLI 可手动追加 experience；`run_with_options()` 可通过 `--remember-experience` 生成带 provenance 的经验条目。
 - 历史会话层补上只读 `session_search` 入口：`memory session search --query TEXT [--session-id ID] [--limit N] [--json]` 直接复用现有 SQLite `turn_summary` 记忆，默认按 `kind=turn_summary` 检索，传 `--session-id` 时额外按 `memory_scope=session,session_id=...` 隔离过滤，不新增存储、不写入、不删除。
+- LIM 长期沉淀层补上 dry-run 候选入口：`memory lim extract --query TEXT [--session-id ID] [--limit N] [--json]` 从历史 `turn_summary` 生成 `experiences` 候选，输出 `candidate_id / source_record_id / confidence / proposed_scope / content / metadata`，只读不写回，为后续人工确认和自动维护闭环预留。
 
 ## 2026-05-03
 

@@ -260,6 +260,71 @@ fn cli_memory_session_search_filters_by_session_id() {
 }
 
 #[test]
+fn cli_memory_lim_extract_returns_dry_run_candidates() {
+    let root = temp_root("lim-extract");
+    let config_path = write_fake_config(&root);
+
+    let run = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--input",
+            "LIM候选经验：命令超时需要看 timeout_ms",
+            "--session-id",
+            "alpha",
+            "--remember-session",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        run.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let extract = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "lim",
+            "extract",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--query",
+            "timeout_ms",
+            "--session-id",
+            "alpha",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        extract.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&extract.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&extract.stdout)).expect("stdout json");
+    assert_eq!(parsed["dry_run"], true);
+    assert_eq!(parsed["candidate_count"], 1);
+    assert!(parsed["candidates"][0]["candidate_id"]
+        .as_str()
+        .expect("candidate id string")
+        .starts_with("lim-candidate-turn-memory-session-alpha-turn-1-"));
+    assert_eq!(parsed["candidates"][0]["proposed_scope"], "experiences");
+    assert!(parsed["candidates"][0]["content"]
+        .as_str()
+        .expect("content should be string")
+        .contains("source=lim_dry_run"));
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);

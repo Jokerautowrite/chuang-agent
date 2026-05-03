@@ -112,6 +112,12 @@ Chuang 迁移策略：
 不要第一步硬搬完整 Honcho/GBrain/PGLite 内核
 ```
 
+Chuang 当前已实现：
+
+```text
+memory lim extract --query TEXT [--session-id ID]：只读 dry-run 候选，输出 provenance，不自动写回
+```
+
 ### 4. 外脑知识库层
 
 用于承载大块资料、SOP、研究文档、项目知识。外脑不是提示词记忆，必须通过检索和导入进入当前任务。

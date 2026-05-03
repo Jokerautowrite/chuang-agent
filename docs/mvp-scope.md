@@ -25,6 +25,7 @@
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
 - `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- memory session search --query TEXT [--session-id ID] [--limit N]`：只读检索历史 `turn_summary`；带 `--session-id` 时按会话隔离过滤。
+- `cargo run -- memory lim extract --query TEXT [--session-id ID] [--limit N]`：只读生成 LIM 候选经验，带 provenance，不自动写回。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- run --input TEXT --remember-experience`：显式把本轮结果按 provenance 写入 `experiences.md`，用于内部经验层沉淀；默认运行不自动写经验。
 - `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
@@ -108,6 +109,7 @@
 - `channel simulate` 通过 workspace `config.toml` 启动时不能回落到 `fake-responder`，必须走配置里的 provider。
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- memory session search --query TEXT --session-id ID` 能只读检索指定会话，不跨 session 返回。
+- `cargo run -- memory lim extract --query TEXT --session-id ID` 能生成 dry-run 候选，不修改 `experiences.md`。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - `cargo run -- run --input TEXT --remember-experience --identity-memory-root PATH` 能显式追加带 provenance 的经验层记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。

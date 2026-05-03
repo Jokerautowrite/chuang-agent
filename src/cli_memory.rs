@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chuang_agent::hermes_memory::{
     DualFileMemoryError, DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry,
 };
-use chuang_agent::memory_store::{MemoryQuery, MemoryStore};
+use chuang_agent::memory_store::{MemoryQuery, MemoryStore, SearchHit};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use serde::Serialize;
 
@@ -14,6 +14,7 @@ pub(crate) fn memory_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("identity") => identity_memory_command(&args[1..]),
         Some("session") => session_memory_command(&args[1..]),
+        Some("lim") => lim_memory_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -40,23 +41,80 @@ fn session_memory_command(args: &[String]) -> Result<(), String> {
     }
 }
 
+fn lim_memory_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("extract") => lim_memory_extract_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn lim_memory_extract_command(args: &[String]) -> Result<(), String> {
+    let request = parse_lim_memory_extract(args)?;
+    let hits = search_turn_summaries(
+        &request.runtime_args,
+        &request.query,
+        request.session_id.as_deref(),
+        request.limit,
+    )?;
+    let candidates = hits
+        .into_iter()
+        .map(|hit| {
+            let source_record_id = hit.record.id;
+            let created_at = hit.record.created_at;
+            let lesson = first_non_empty_line(&hit.record.content);
+            let metadata = hit.record.metadata;
+            LimExtractionCandidateOutput {
+                candidate_id: format!("lim-candidate-{}", sanitize_candidate_id(&source_record_id)),
+                source_record_id: source_record_id.clone(),
+                confidence: if hit.score > 0 { "medium" } else { "low" }.to_string(),
+                proposed_scope: "experiences".to_string(),
+                content: format!(
+                    "source=lim_dry_run\nsource_record_id={}\ncreated_at={}\nlesson={}",
+                    source_record_id, created_at, lesson
+                ),
+                metadata,
+            }
+        })
+        .collect::<Vec<_>>();
+    let output = LimExtractionOutput {
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+        dry_run: true,
+        candidate_count: candidates.len(),
+        candidates,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "lim_extract dry_run=true query={} session_id={} candidates={}",
+                output.query,
+                output.session_id.as_deref().unwrap_or("any"),
+                output.candidate_count
+            );
+            for candidate in &output.candidates {
+                println!(
+                    "candidate id={} source_record_id={} confidence={}",
+                    candidate.candidate_id, candidate.source_record_id, candidate.confidence
+                );
+                println!("{}", candidate.content);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
 fn session_memory_search_command(args: &[String]) -> Result<(), String> {
     let request = parse_session_memory_search(args)?;
-    let options = parse_cli_options(&request.runtime_args)?;
-    let store = SqliteMemoryStore::open(&options.runtime.db_path)
-        .map_err(|e| format!("session_memory_open_failed: {e:?}"))?;
-    let mut metadata = BTreeMap::from([("kind".to_string(), "turn_summary".to_string())]);
-    if let Some(session_id) = &request.session_id {
-        metadata.insert("memory_scope".to_string(), "session".to_string());
-        metadata.insert("session_id".to_string(), session_id.clone());
-    }
-    let hits = store
-        .search(&MemoryQuery {
-            text: Some(request.query.clone()),
-            metadata,
-            limit: request.limit,
-        })
-        .map_err(|e| format!("session_memory_search_failed: {e:?}"))?;
+    let hits = search_turn_summaries(
+        &request.runtime_args,
+        &request.query,
+        request.session_id.as_deref(),
+        request.limit,
+    )?;
     let output = SessionMemorySearchOutput {
         query: request.query,
         session_id: request.session_id,
@@ -94,6 +152,29 @@ fn session_memory_search_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn search_turn_summaries(
+    runtime_args: &[String],
+    query: &str,
+    session_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<SearchHit>, String> {
+    let options = parse_cli_options(runtime_args)?;
+    let store = SqliteMemoryStore::open(&options.runtime.db_path)
+        .map_err(|e| format!("session_memory_open_failed: {e:?}"))?;
+    let mut metadata = BTreeMap::from([("kind".to_string(), "turn_summary".to_string())]);
+    if let Some(session_id) = session_id {
+        metadata.insert("memory_scope".to_string(), "session".to_string());
+        metadata.insert("session_id".to_string(), session_id.to_string());
+    }
+    store
+        .search(&MemoryQuery {
+            text: Some(query.to_string()),
+            metadata,
+            limit,
+        })
+        .map_err(|e| format!("session_memory_search_failed: {e:?}"))
 }
 
 fn identity_memory_show_command(args: &[String]) -> Result<(), String> {
@@ -321,6 +402,17 @@ fn parse_session_memory_search(args: &[String]) -> Result<SessionMemorySearchReq
     })
 }
 
+fn parse_lim_memory_extract(args: &[String]) -> Result<LimExtractionRequest, String> {
+    let request = parse_session_memory_search(args)?;
+    Ok(LimExtractionRequest {
+        runtime_args: request.runtime_args,
+        output: request.output,
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+    })
+}
+
 fn parse_identity_memory_append(args: &[String]) -> Result<IdentityMemoryAppendRequest, String> {
     let mut runtime_args = Vec::new();
     let mut output = ControlOutputFormat::Text;
@@ -524,6 +616,63 @@ struct SessionMemorySearchHitOutput {
     content: String,
     metadata: BTreeMap<String, String>,
     created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LimExtractionRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct LimExtractionOutput {
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+    dry_run: bool,
+    candidate_count: usize,
+    candidates: Vec<LimExtractionCandidateOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct LimExtractionCandidateOutput {
+    candidate_id: String,
+    source_record_id: String,
+    confidence: String,
+    proposed_scope: String,
+    content: String,
+    metadata: BTreeMap<String, String>,
+}
+
+fn first_non_empty_line(content: &str) -> String {
+    content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().chars().take(180).collect())
+        .unwrap_or_else(|| "empty_turn_summary".to_string())
+}
+
+fn sanitize_candidate_id(raw: &str) -> String {
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if sanitized.is_empty() {
+        "record".to_string()
+    } else {
+        sanitized
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
