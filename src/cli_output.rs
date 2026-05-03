@@ -95,12 +95,13 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.config.tool_shell_risk_rule_counts
     );
     println!(
-        "atomic_tools: source={} ok={} total={} mapped={} interface_only={} report_schema_version={}",
+        "atomic_tools: source={} ok={} total={} mapped={} interface_only={} action_schema_version={} report_schema_version={}",
         status.atomic_tools.source,
         status.atomic_tools.ok,
         status.atomic_tools.total_count,
         status.atomic_tools.mapped_count,
         status.atomic_tools.interface_only_count,
+        status.atomic_tools.tool_action_schema_version,
         status.atomic_tools.tool_report_schema_version
     );
     for tool in &status.atomic_tools.manifests {

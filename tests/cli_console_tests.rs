@@ -73,6 +73,10 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         parsed["status"]["atomic_tools"]["tool_report_schema_version"],
         6
     );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["tool_action_schema_version"],
+        1
+    );
     assert_eq!(parsed["status"]["plugin_registry"]["plugin_count"], 5);
     assert_eq!(
         parsed["plugins"]
@@ -117,7 +121,7 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("provider: fake"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains(
-        "atomic_tools: ok=true total=9 mapped=3 interface_only=6 report_schema_version=6"
+        "atomic_tools: ok=true total=9 mapped=3 interface_only=6 action_schema_version=1 report_schema_version=6"
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));

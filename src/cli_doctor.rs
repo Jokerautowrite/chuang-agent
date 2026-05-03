@@ -11,7 +11,7 @@ use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use chuang_agent::subagent_spawner::{
     ContextIsolation, QueuedSubagentSpawner, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
-use chuang_agent::tool_runtime::ToolLoopReport;
+use chuang_agent::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use chuang_agent::{common::AgentId, common::TaskId};
 
 use crate::cli_args::{parse_cli_options, parse_status_output};
@@ -109,6 +109,13 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
         return Err(format!(
             "doctor_atomic_tools_failed mapped={mapped:?} expected={expected_mapped:?}"
         ));
+    }
+
+    if ToolActionEnvelope::schema_version() != 1
+        || !ToolActionEnvelope::schema_fields().contains(&"type")
+        || !ToolActionEnvelope::call_schema_fields().contains(&"tool")
+    {
+        return Err("doctor_atomic_tools_failed invalid tool action schema".to_string());
     }
 
     if ToolLoopReport::schema_version() != 6
@@ -238,8 +245,10 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     println!("subagent: {}", doctor.status.config.subagent_kind);
     println!("execution: {}", doctor.status.slots.execution);
     println!(
-        "atomic_tools_ok: {} report_schema_version={}",
-        doctor.status.atomic_tools.ok, doctor.status.atomic_tools.tool_report_schema_version
+        "atomic_tools_ok: {} action_schema_version={} report_schema_version={}",
+        doctor.status.atomic_tools.ok,
+        doctor.status.atomic_tools.tool_action_schema_version,
+        doctor.status.atomic_tools.tool_report_schema_version
     );
     println!("control_plane: {}", doctor.status.slots.control_plane);
     if doctor.status.config.placeholder_warnings.is_empty() {

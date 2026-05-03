@@ -59,7 +59,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=plugin_registry ok=true"));
     assert!(stdout.contains("provider: fake"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
-    assert!(stdout.contains("atomic_tools_ok: true report_schema_version=6"));
+    assert!(
+        stdout.contains("atomic_tools_ok: true action_schema_version=1 report_schema_version=6")
+    );
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
@@ -118,6 +120,10 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(
         parsed["status"]["atomic_tools"]["tool_report_schema_version"],
         6
+    );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["tool_action_schema_version"],
+        1
     );
     assert_eq!(
         parsed["status"]["config"]["provider_kind"],

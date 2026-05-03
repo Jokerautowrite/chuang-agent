@@ -3,7 +3,7 @@ use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
 use crate::runtime_config::{ConfigError, ConfigSummary, RuntimeConfig};
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
-use crate::tool_runtime::ToolLoopReport;
+use crate::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use serde::Serialize;
 use std::path::Path;
 
@@ -23,6 +23,9 @@ pub struct AtomicToolSurfaceStatus {
     pub total_count: usize,
     pub mapped_count: usize,
     pub interface_only_count: usize,
+    pub tool_action_schema_version: u16,
+    pub tool_action_schema_fields: Vec<String>,
+    pub tool_action_call_schema_fields: Vec<String>,
     pub tool_report_schema_version: u16,
     pub tool_report_schema_fields: Vec<String>,
     pub tool_call_schema_fields: Vec<String>,
@@ -90,6 +93,15 @@ pub fn build_chuang_mvp_status(
             total_count: atomic_manifests.len(),
             mapped_count,
             interface_only_count,
+            tool_action_schema_version: ToolActionEnvelope::schema_version(),
+            tool_action_schema_fields: ToolActionEnvelope::schema_fields()
+                .iter()
+                .map(|field| field.to_string())
+                .collect(),
+            tool_action_call_schema_fields: ToolActionEnvelope::call_schema_fields()
+                .iter()
+                .map(|field| field.to_string())
+                .collect(),
             tool_report_schema_version: ToolLoopReport::schema_version(),
             tool_report_schema_fields: ToolLoopReport::schema_fields()
                 .iter()

@@ -55,11 +55,12 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     println!("model: {}", snapshot.status.config.model_name);
     println!("execution: {}", snapshot.status.slots.execution);
     println!(
-        "atomic_tools: ok={} total={} mapped={} interface_only={} report_schema_version={}",
+        "atomic_tools: ok={} total={} mapped={} interface_only={} action_schema_version={} report_schema_version={}",
         snapshot.status.atomic_tools.ok,
         snapshot.status.atomic_tools.total_count,
         snapshot.status.atomic_tools.mapped_count,
         snapshot.status.atomic_tools.interface_only_count,
+        snapshot.status.atomic_tools.tool_action_schema_version,
         snapshot.status.atomic_tools.tool_report_schema_version
     );
     println!("subagent: {}", snapshot.status.config.subagent_kind);

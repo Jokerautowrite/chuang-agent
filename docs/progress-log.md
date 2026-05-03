@@ -7,6 +7,7 @@
 - goal mode 当前不新增核心 slot，不改变主链；未来目标态是 `GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory` 的长期任务外壳。
 - `ACTION` 协议也开始暴露 schema 契约：`ToolActionEnvelope::schema_version()`、`schema_fields()`、`call_schema_fields()` 已补齐，和 `ToolLoopReport` 一样可被测试和文档引用。
 - `parse_tool_action_envelope_result()` 已补结构化错误返回，`ACTION` 前缀缺失和 JSON 错误不再只能被旧 `Option` 入口吞掉；旧 `parse_tool_action_envelope()` 继续保留兼容。
+- `status / doctor / console snapshot` 现在会暴露 `tool_action_schema_version=1`，并在 JSON 状态里输出 action schema 字段，控制台可以同时确认 action schema 和 report schema。
 - 主进程工具元数据继续收口：`tool_loop_meta` 已抽成共享解析层，`app_server` 和 `cli_channel` 不再各自重复解析 `tool_*_json`。
 - `tool_report_json` 已正式提升为 runtime report 的 `Log` artifact，工具事件不只停留在 meta/trace 里。
 - `write_operation` 已从字符串收紧为枚举，`created / modified / unchanged` 现在是结构化结果。

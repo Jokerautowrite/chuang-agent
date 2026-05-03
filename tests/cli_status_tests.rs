@@ -61,7 +61,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("identity_root: "));
     assert!(stdout.contains("rules_root: ./rules"));
     assert!(stdout.contains(
-        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 report_schema_version=6"
+        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 action_schema_version=1 report_schema_version=6"
     ));
     assert!(stdout.contains("atomic_tool name=file_read status=mapped"));
     assert!(stdout.contains("atomic_tool name=mouse status=interface_only"));
@@ -132,6 +132,12 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 3);
     assert_eq!(parsed["atomic_tools"]["interface_only_count"], 6);
+    assert_eq!(parsed["atomic_tools"]["tool_action_schema_version"], 1);
+    assert!(parsed["atomic_tools"]["tool_action_call_schema_fields"]
+        .as_array()
+        .expect("tool action call schema fields")
+        .iter()
+        .any(|field| field == "tool"));
     assert_eq!(parsed["atomic_tools"]["tool_report_schema_version"], 6);
     assert!(parsed["atomic_tools"]["tool_call_schema_fields"]
         .as_array()
