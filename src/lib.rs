@@ -36,4 +36,5 @@ pub mod slot_registry;
 pub mod subagent_queue;
 pub mod subagent_report;
 pub mod subagent_spawner;
+pub mod tool_loop_meta;
 pub mod tool_runtime;

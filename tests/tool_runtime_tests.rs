@@ -7,7 +7,7 @@ use chuang_agent::tool_runtime::{
     execute_tool_call, execute_tool_call_with_governance, parse_final_answer,
     parse_tool_action_envelope, parse_tool_call, parse_tool_model_output,
     proposed_action_for_tool_call, ExecutionSlot, ShellRiskRules, ToolActionEnvelope, ToolCall,
-    ToolExecutionConfig, ToolLoopReport, ToolModelOutput,
+    ToolExecutionConfig, ToolLoopReport, ToolModelOutput, WriteOperation,
 };
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -179,6 +179,20 @@ fn tool_loop_report_exposes_schema_contract_fields() {
 }
 
 #[test]
+fn tool_action_envelope_exposes_schema_contract_fields() {
+    assert_eq!(ToolActionEnvelope::schema_version(), 1);
+    assert_eq!(
+        ToolActionEnvelope::schema_fields(),
+        &["schema_version", "type", "call", "answer"]
+    );
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"tool"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"path"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"content"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"command"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"cwd"));
+}
+
+#[test]
 fn tool_runtime_can_read_write_list_and_shell_exec() {
     let root = temp_workspace("basic");
     fs::create_dir_all(&root).expect("workspace root should be created");
@@ -203,7 +217,7 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(write.write_before_bytes, None);
     assert_eq!(write.write_after_bytes, Some(5));
     assert_eq!(write.write_changed, Some(true));
-    assert_eq!(write.write_operation.as_deref(), Some("created"));
+    assert_eq!(write.write_operation, Some(WriteOperation::Created));
     assert_eq!(write.target_path.as_deref(), Some("nested/output.txt"));
     assert_eq!(
         write.resolved_path.as_deref(),
@@ -231,7 +245,7 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(rewrite.write_before_bytes, Some(5));
     assert_eq!(rewrite.write_after_bytes, Some(5));
     assert_eq!(rewrite.write_changed, Some(false));
-    assert_eq!(rewrite.write_operation.as_deref(), Some("unchanged"));
+    assert_eq!(rewrite.write_operation, Some(WriteOperation::Unchanged));
     assert_eq!(rewrite.write_diff_preview.as_deref(), Some("unchanged"));
 
     let list = execute_tool_call(
@@ -319,7 +333,7 @@ fn write_file_diff_preview_redacts_secret_like_changes() {
         record.write_diff_preview.as_deref(),
         Some("[redacted: secret-like path or content]")
     );
-    assert_eq!(record.write_operation.as_deref(), Some("created"));
+    assert_eq!(record.write_operation, Some(WriteOperation::Created));
     assert!(record.output_redacted);
     assert!(!record.write_diff_truncated);
 }

@@ -12,6 +12,7 @@ use crate::app_server::build_runtime_for_workspace;
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
+use chuang_agent::tool_loop_meta::{parse_json_vec_value, ToolLoopMeta};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct ChannelSimulateOutput {
@@ -148,7 +149,11 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         remember_identity: false,
         dispatch_subagent: false,
     })?;
-    let tool_meta = channel_tool_meta(&result.response.meta.extra)?;
+    let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
+    let tool_calls = parse_json_vec_value(&result.response.meta.extra, "tool_calls_json")?;
+    let tool_protocol_errors =
+        parse_json_vec_value(&result.response.meta.extra, "tool_protocol_errors_json")?;
+    let tool_events = parse_json_vec_value(&result.response.meta.extra, "tool_events_json")?;
     let outbound = ChannelOutboundMessage {
         channel: request.inbound.channel.clone(),
         message_id: request.inbound.message_id.clone(),
@@ -165,9 +170,9 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_protocol_error_count: tool_meta.tool_protocol_error_count,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
-        tool_calls: tool_meta.tool_calls,
-        tool_protocol_errors: tool_meta.tool_protocol_errors,
-        tool_events: tool_meta.tool_events,
+        tool_calls,
+        tool_protocol_errors,
+        tool_events,
     };
 
     match request.output {
@@ -193,62 +198,6 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ChannelToolMeta {
-    tool_call_count: usize,
-    tool_protocol_error_count: usize,
-    tool_trace: String,
-    tool_report: Option<Value>,
-    tool_calls: Vec<Value>,
-    tool_protocol_errors: Vec<Value>,
-    tool_events: Vec<Value>,
-}
-
-fn channel_tool_meta(extra: &BTreeMap<String, String>) -> Result<ChannelToolMeta, String> {
-    let tool_call_count = extra
-        .get("tool_call_count")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let tool_trace = extra.get("tool_trace").cloned().unwrap_or_default();
-    let tool_protocol_error_count = extra
-        .get("tool_protocol_error_count")
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let tool_report = extra
-        .get("tool_report_json")
-        .map(|value| serde_json::from_str(value))
-        .transpose()
-        .map_err(|e| format!("channel_tool_report_json_parse_failed: {e}"))?;
-    let tool_calls = extra
-        .get("tool_calls_json")
-        .map(|value| serde_json::from_str(value))
-        .transpose()
-        .map_err(|e| format!("channel_tool_calls_json_parse_failed: {e}"))?
-        .unwrap_or_default();
-    let tool_protocol_errors = extra
-        .get("tool_protocol_errors_json")
-        .map(|value| serde_json::from_str(value))
-        .transpose()
-        .map_err(|e| format!("channel_tool_protocol_errors_json_parse_failed: {e}"))?
-        .unwrap_or_default();
-    let tool_events = extra
-        .get("tool_events_json")
-        .map(|value| serde_json::from_str(value))
-        .transpose()
-        .map_err(|e| format!("channel_tool_events_json_parse_failed: {e}"))?
-        .unwrap_or_default();
-
-    Ok(ChannelToolMeta {
-        tool_call_count,
-        tool_protocol_error_count,
-        tool_trace,
-        tool_report,
-        tool_calls,
-        tool_protocol_errors,
-        tool_events,
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

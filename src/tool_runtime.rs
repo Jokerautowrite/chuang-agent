@@ -105,7 +105,7 @@ pub struct ToolExecutionRecord {
     pub write_before_bytes: Option<usize>,
     pub write_after_bytes: Option<usize>,
     pub write_changed: Option<bool>,
-    pub write_operation: Option<String>,
+    pub write_operation: Option<WriteOperation>,
     pub write_diff_preview: Option<String>,
     pub write_diff_truncated: bool,
     pub failure_class: Option<String>,
@@ -121,6 +121,14 @@ pub struct ToolExecutionRecord {
 pub struct ToolDirectoryEntry {
     pub name: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteOperation {
+    Created,
+    Modified,
+    Unchanged,
 }
 
 pub const TOOL_EXECUTION_RECORD_SCHEMA_FIELDS: &[&str] = &[
@@ -172,6 +180,10 @@ pub const TOOL_LOOP_REPORT_SCHEMA_FIELDS: &[&str] = &[
     "call_count",
     "calls",
 ];
+
+pub const TOOL_ACTION_SCHEMA_FIELDS: &[&str] = &["schema_version", "type", "call", "answer"];
+
+pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &["tool", "path", "content", "command", "cwd"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GovernedToolExecutionRecord {
@@ -355,6 +367,14 @@ impl ToolLoopReport {
 impl ToolActionEnvelope {
     pub fn schema_version() -> u16 {
         TOOL_ACTION_SCHEMA_VERSION
+    }
+
+    pub fn schema_fields() -> &'static [&'static str] {
+        TOOL_ACTION_SCHEMA_FIELDS
+    }
+
+    pub fn call_schema_fields() -> &'static [&'static str] {
+        TOOL_ACTION_CALL_FIELDS
     }
 }
 
@@ -905,14 +925,11 @@ fn execute_write_file(
     record.write_before_bytes = previous_content.as_ref().map(|value| value.len());
     record.write_after_bytes = Some(content.len());
     record.write_changed = Some(previous_content.as_deref() != Some(content));
-    record.write_operation = Some(
-        match previous_content.as_deref() {
-            None => "created",
-            Some(previous) if previous == content => "unchanged",
-            Some(_) => "modified",
-        }
-        .to_string(),
-    );
+    record.write_operation = Some(match previous_content.as_deref() {
+        None => WriteOperation::Created,
+        Some(previous) if previous == content => WriteOperation::Unchanged,
+        Some(_) => WriteOperation::Modified,
+    });
     let diff_preview = build_write_diff_preview(path, previous_content.as_deref(), content);
     record.write_diff_preview = diff_preview.text;
     record.write_diff_truncated = diff_preview.truncated;

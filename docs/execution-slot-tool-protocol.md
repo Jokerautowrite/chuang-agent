@@ -63,6 +63,14 @@ ACTION: {"schema_version":1,"type":"final","answer":"最终答复"}
 
 `schema_version` 当前为 1；缺省时按 v1 兼容处理，高于当前支持版本会返回 `unsupported_action_schema_version` 协议错误。
 
+当前代码中的 action schema 常量：
+
+```text
+ToolActionEnvelope::schema_version() = 1
+ToolActionEnvelope::schema_fields()
+ToolActionEnvelope::call_schema_fields()
+```
+
 兼容旧工具名：
 
 ```text
@@ -147,7 +155,7 @@ output/stdout/stderr
 exit_code
 changed_files
 write_before_bytes/write_after_bytes/write_changed
-write_operation
+write_operation (enum: created/modified/unchanged)
 write_diff_preview/write_diff_truncated
 failure_class
 output_redacted/stdout_redacted/stderr_redacted

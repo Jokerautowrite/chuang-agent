@@ -3,22 +3,30 @@
 ## 2026-05-03
 
 ### 最新进展
+- 已新增 `docs/goal-mode-operating-plan.md`，把当前 Codex 侧的目标驱动推进方式固化为协作流程：每轮固定 Goal / Acceptance / Budget / Checkpoint，先用于推进 Chuang 主线，后续再迁移成 Chuang 自己的轻量 goal 能力。
+- goal mode 当前不新增核心 slot，不改变主链；未来目标态是 `GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory` 的长期任务外壳。
+- `ACTION` 协议也开始暴露 schema 契约：`ToolActionEnvelope::schema_version()`、`schema_fields()`、`call_schema_fields()` 已补齐，和 `ToolLoopReport` 一样可被测试和文档引用。
+- 主进程工具元数据继续收口：`tool_loop_meta` 已抽成共享解析层，`app_server` 和 `cli_channel` 不再各自重复解析 `tool_*_json`。
+- `tool_report_json` 已正式提升为 runtime report 的 `Log` artifact，工具事件不只停留在 meta/trace 里。
+- `write_operation` 已从字符串收紧为枚举，`created / modified / unchanged` 现在是结构化结果。
+- 当前验证仍保持通过：`cargo fmt --all`、`git diff --check`、`cargo test -q --test tool_runtime_tests`、`timeout 240s cargo test -q`。
 - 主进程 Execution Slot 工具回传继续硬化：`ToolLoopReport` schema 升到 v6，新增 `stderr_bytes / stderr_lines`、`write_operation`、`output_redacted / stdout_redacted / stderr_redacted`。
 - `read_file` 和 `code_execute` 对疑似密钥路径或内容返回脱敏占位，并保留原始字节数/行数统计，避免工具输出把密钥带进飞书、日志或报告。
-- `file_write` 回执新增 `write_operation=created|modified|unchanged`，上层不用再从 `write_before_bytes / write_changed` 反推写入类型。
+- `file_write` 回执新增 `write_operation` 枚举（`created|modified|unchanged`），上层不用再从 `write_before_bytes / write_changed` 反推写入类型。
 - `toolEvents[]` 新增 `atomic_tool_name / failure_class / duration_ms / retryable`，事件流可以直接用于控制台和通道调试，`summary` 只作为人工可读兼容字段。
 - 工具循环里的普通文本处理也收紧了：首轮可直答，但一旦进入工具往返，后续普通文本会被回灌成 `plain_text_response` 协议错误，逼模型回到 `ACTION` 或 `FINAL`。
 - 工具提示词本身也同步收紧了，明确要求首轮尽量用 `FINAL` 收口，进入工具往返后只允许 `ACTION` / `FINAL`。
 - `tool_events_json` 现在也会提升为 runtime report 的 `Log` artifact，子代理和报告面可以直接吃到结构化事件流，不只看 summary。
+- `app_server` 和 `cli_channel` 的 `tool_*_json` 解析已收口到共享 `ToolLoopMeta` / JSON helper，少一套重复解析逻辑。
 - `docs/execution-slot-tool-protocol.md` 已同步 v6 字段和事件流语义。
 - 验证通过：`cargo fmt --all`、`git diff --check`、`timeout 240s cargo test -q`。
 
 ## 2026-05-02
 
 ### 最新进展
-- `ToolLoopReport` schema 升到 v6：工具调用记录新增 `stderr_bytes / stderr_lines`、`write_operation`、`output_redacted / stdout_redacted / stderr_redacted`，app-server `toolCalls[]` 同步输出对应 camelCase 字段。
+- `ToolLoopReport` schema 升到 v6：工具调用记录新增 `stderr_bytes / stderr_lines`、`write_operation` 枚举、`output_redacted / stdout_redacted / stderr_redacted`，app-server `toolCalls[]` 同步输出对应 camelCase 字段。
 - `read_file` / `code_execute` 现在遇到疑似密钥路径或内容会返回脱敏占位，并保留原始字节数/行数统计，避免工具结果把密钥带进通道、日志或报告。
-- `file_write` 回执新增 `write_operation=created|modified|unchanged`，上层不用再靠 `write_before_bytes + write_changed` 反推写入语义。
+- `file_write` 回执新增 `write_operation` 枚举，上层不用再靠 `write_before_bytes + write_changed` 反推写入语义。
 - `toolEvents[]` 新增 `atomic_tool_name / failure_class / duration_ms / retryable`，事件流不再只能靠 `summary` 判断工具身份、失败类型和重试建议。
 - 工具执行记录新增结构化定位字段：`target_path / resolved_path / cwd / command`，app-server `toolCalls[]` 同步输出 `targetPath / resolvedPath / cwd / command`，上层不必再从 `summary` 里拆路径和命令。
 - `list_dir` 新增结构化 `entries[]`，每个条目包含 `name/kind`，上层不必再解析 `output=entries[...]`。
