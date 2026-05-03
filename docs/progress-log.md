@@ -3,12 +3,15 @@
 ## 2026-05-03
 
 ### 最新进展
+- 真实子代理 command runner 的协议报告入口再收紧：stdout 返回完整 `SubagentReport` JSON 时，现在先跑 `SubagentReportValidator` required-field / status / timestamp 校验，再做 task/agent/parent 身份校验；缺 `truncated` 等必填字段会写 Failed report，不会被当成功报告吸收。
+- `SubagentReportValidator` 改为按 JSON 结构读取字段，接受标准 RFC3339 秒级或毫秒级时间，避免外部 runner pretty JSON 或无小数秒时间被字符串匹配误伤。
 - 长期记忆方案已修正为五层组合系统：新增 `docs/memory-architecture-layering.md`，明确内部记忆、历史会话、LIM 长期沉淀、wiki/GBrain 外脑知识库和自动维护闭环；以后不能再把记忆简化成三层，也不能漏掉 wiki/知识库。
 - 已记录迁移顺序：先身份与内部记忆，再历史会话召回，再 LIM extractor/provenance，之后接 wiki/GBrain 外脑，最后做 health/decay/evolver/extractor dry-run 的自动维护闭环。
 - 飞书架构终稿 `M21pw0qGki7emUkdmsUcdnfEnag` 已更新：在 `3.1 Codex → 单Agent任务闭环` 下补入 `2026-05-03 修正：Codex Rust 优先移植原则`，明确“少造轮子，多复制成熟实现”，本地执行、安全边界、审批、沙箱、验证、回传、goal-style 长任务和子代理组织方式优先审计/移植 Codex Rust。
 - 本地 handoff/goal 记录已同步：后续 Chuang 开发默认先查 Codex Rust 是否已有成熟实现，能移植/裁剪/适配就不自研；只有与记忆本体、可拔插边界或本机安全约束冲突时才新写实现。
 - Codex 新版目标驱动推进方式已固化到 `docs/goal-mode-operating-plan.md`：记录了本轮多子代理并行的 `GOAL_SPEC` 契约、分写入范围、主进程统一集成验证、阶段提交和关闭子代理流程；后续迁移到 Chuang 时只吸收组织模式，不硬编码 Codex CLI 细节。
 - Control / Actuator command adapter 的输出契约再收紧一层：control list/apply 和 actuator response 现在拒绝未知顶层字段，control receipt 对 `change_model` 会报显式 `model_name` mismatch，非换模型动作夹带 `model_name` 也会拒绝。协议文档已同步，避免外部 adapter 静默漂移。
+- `status` / `doctor` 现在会把 GA 9 原子工具拆成 `mapped_atomic_tool_names` 和 `interface_only_atomic_tool_names` 两组名单，文本和 JSON 都能直接看出当前可执行映射与仅接口登记的桌面能力；doctor 也补了精确名单校验。
 - `channel simulate` 的结构化输出补了一处薄桥锚点：现在 JSON / 文本输出都会暴露 `runtime_report_id`，方便未来飞书插件把通道消息和本轮报告稳定关联起来，同时继续保留 `runtimeObservability` 和工具循环元数据。
 - `runtime_config` 的配置摘要补齐了 `provider_request_timeout_ms`：`status` / `config show` 现在能直接暴露 provider 端请求超时，CLI 也支持 `--provider-request-timeout-ms` 覆盖，便于在不触碰密钥的前提下排查 provider 卡死或长尾请求。
 - runtime report identity 的结构化输出补齐：`run_with_options()` 现在会把 `runtime_report_id / runtime_report_task_id / runtime_report_agent_id / runtime_report_status` 写入 runtime meta，`runtime_observability_meta()` 同步提升，app-server `turn/start` response 和 `turn/completed` event 直接输出 `runtimeReportId`，上层不必从 CLI 文本旁路推断报告身份。
@@ -1104,6 +1107,11 @@
   - 已运行 `cargo fmt --all`、`cargo test -q --test tool_runtime_tests`、`cargo test -q --test app_server_tests`、`cargo test -q cli_runtime::tests::run_with_options_executes_tool_calls_before_final_answer`、`git diff --check`、`timeout 240s cargo test -q`。
 
 ### 10 分钟推进节奏
+- 长期记忆 experiences.md MVP 入口已补：
+  - `DualFileMemoryConfig` 新增默认 `experiences.md` contract，`FileDualFileMemoryStore::open()` 会保证该文件存在；只建空文件，不自动写经验、不删除、不迁移旧内容。
+  - `DualFileMemorySnapshot` / `memory identity show` 可只读展示 experiences 内容和字符数；当前 runtime prompt 仍只注入 USER/MEMORY，不把 experiences 直接塞进上下文。
+  - `ConfigSummary`、`status`、`config show` 暴露 `identity_experiences_path`，`doctor` 新增 `identity_experiences` 检查，便于后续桌面/维护器诊断内部经验层是否有入口。
+  - `docs/memory-architecture-layering.md` 和 `docs/mvp-scope.md` 已记录当前边界：入口/状态面已做，写入策略、admission、provenance 和 LIM/session 自动抽取仍待补。
 - 当前会话内按阶段推进：每轮优先选主线阻塞点，不扩外部智能体，不先做子代理优化。
 - 第 1 轮：主进程工具口配置化和协议稳定。
 - 第 2 轮：继续把工具请求/结果收进正式 runtime/report shape。

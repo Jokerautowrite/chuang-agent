@@ -6,7 +6,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
 use chuang_agent::slot_registry::SubagentRuntimeSlot;
 use chuang_agent::subagent_queue::FileSubagentQueue;
-use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
+use chuang_agent::subagent_report::{
+    ExecutionStatus, ReportValidator, ResourceUsage, SubagentReport, SubagentReportValidator,
+};
 use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId, SubagentSpawner};
 
 use crate::cli_args::{
@@ -702,8 +704,13 @@ fn try_build_protocol_report(
     }
 
     Some(
-        serde_json::from_str::<SubagentReport>(trimmed)
-            .map_err(|e| format!("command_runner_report_decode_failed: {e}"))
+        SubagentReportValidator::default()
+            .validate(trimmed.as_bytes())
+            .map_err(|e| format!("report_validation_failed:{e:?}"))
+            .and_then(|_| {
+                serde_json::from_str::<SubagentReport>(trimmed)
+                    .map_err(|e| format!("command_runner_report_decode_failed: {e}"))
+            })
             .and_then(|mut report| {
                 validate_protocol_report_identity(dispatch, &report)?;
                 apply_protocol_report_bounds(&mut report);

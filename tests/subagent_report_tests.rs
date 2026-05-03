@@ -134,6 +134,28 @@ fn validator_accepts_valid_report_bytes() {
 }
 
 #[test]
+fn validator_accepts_pretty_report_with_rfc3339_seconds() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version": "1.0.0",
+        "report_id": "report-1",
+        "task_id": "task-1",
+        "agent_id": "agent-1",
+        "status": "Success",
+        "started_at": "2026-04-30T10:30:00Z",
+        "finished_at": "2026-04-30T10:31:00Z",
+        "summary": "ok",
+        "resource_usage": {},
+        "artifacts": [],
+        "truncated": false
+    }"#;
+
+    let result = validator.validate(raw);
+
+    assert!(result.is_ok());
+}
+
+#[test]
 fn subagent_report_can_roundtrip_as_json() {
     let report = sample_report();
 

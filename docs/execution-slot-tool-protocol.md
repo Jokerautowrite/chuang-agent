@@ -49,6 +49,13 @@ human_suspend -> not executable yet
 
 `list_dir` 是辅助工具，不属于 GA 9 原子工具。
 
+状态面和 doctor 现在会把原子工具拆成两组名单：
+
+- `mapped_atomic_tool_names`: `file_read`, `file_write`, `code_execute`
+- `interface_only_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `wait`, `human_suspend`
+
+这样可以直接区分“当前可执行映射”与“仅接口登记”的桌面能力，不再只靠 `status` 字段人工判断。
+
 ## 模型调用协议
 
 模型优先输出 `ACTION`：

@@ -50,6 +50,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_ok: true"));
     assert!(stdout.contains("doctor_check name=config ok=true"));
     assert!(stdout.contains("doctor_check name=identity_memory ok=true"));
+    assert!(stdout.contains("doctor_check name=identity_experiences ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
     assert!(stdout.contains("doctor_check name=atomic_tools ok=true"));
     assert!(stdout.contains("doctor_check name=goal_mode ok=true"));
@@ -62,6 +63,10 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains(
         "atomic_tools_ok: true manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
+    ));
+    assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
+    assert!(stdout.contains(
+        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
     ));
     assert!(stdout.contains("goal_mode_ok: true entrypoint=run --goal TEXT"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
@@ -112,7 +117,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 10);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 11);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -123,6 +128,18 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .expect("checks array")
         .iter()
         .any(|check| check["name"] == "goal_mode"));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "identity_experiences"));
+    assert_eq!(
+        parsed["status"]["config"]["identity_experiences_path"],
+        root.join("identity")
+            .join("experiences.md")
+            .display()
+            .to_string()
+    );
     assert_eq!(parsed["status"]["atomic_tools"]["ok"], true);
     assert_eq!(parsed["status"]["goal_mode"]["ok"], true);
     assert_eq!(
@@ -140,6 +157,21 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(
         parsed["status"]["atomic_tools"]["tool_action_schema_version"],
         1
+    );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
+        serde_json::json!(["file_read", "file_write", "code_execute"])
+    );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["interface_only_atomic_tool_names"],
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "wait",
+            "human_suspend"
+        ])
     );
     assert_eq!(
         parsed["status"]["config"]["provider_kind"],

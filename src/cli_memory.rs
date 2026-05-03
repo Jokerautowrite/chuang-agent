@@ -38,12 +38,15 @@ fn identity_memory_show_command(args: &[String]) -> Result<(), String> {
         root: config.root.display().to_string(),
         user_file: config.user_file,
         memory_file: config.memory_file,
+        experiences_file: config.experiences_file,
         user_max_chars: config.user_max_chars,
         memory_max_chars: config.memory_max_chars,
         user_chars: snapshot.user.chars().count(),
         memory_chars: snapshot.memory.chars().count(),
+        experiences_chars: snapshot.experiences.chars().count(),
         user: snapshot.user,
         memory: snapshot.memory,
+        experiences: snapshot.experiences,
     };
 
     match request.output {
@@ -61,6 +64,8 @@ fn identity_memory_show_command(args: &[String]) -> Result<(), String> {
             println!("{}", output.user);
             println!("--- MEMORY.md ---");
             println!("{}", output.memory);
+            println!("--- experiences.md ---");
+            println!("{}", output.experiences);
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -347,12 +352,15 @@ struct IdentityMemoryShowOutput {
     root: String,
     user_file: String,
     memory_file: String,
+    experiences_file: String,
     user_max_chars: usize,
     memory_max_chars: usize,
     user_chars: usize,
     memory_chars: usize,
+    experiences_chars: usize,
     user: String,
     memory: String,
+    experiences: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

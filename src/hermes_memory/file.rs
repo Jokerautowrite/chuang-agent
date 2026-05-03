@@ -22,6 +22,7 @@ impl FileDualFileMemoryStore {
         })?;
         ensure_file(&config.user_path())?;
         ensure_file(&config.memory_path())?;
+        ensure_file(&config.experiences_path())?;
         Ok(Self { config })
     }
 
@@ -39,10 +40,15 @@ impl DualFileMemoryStore for FileDualFileMemoryStore {
         read_to_string(&self.config.memory_path())
     }
 
+    fn read_experiences(&self) -> Result<String, DualFileMemoryError> {
+        read_to_string(&self.config.experiences_path())
+    }
+
     fn snapshot(&self) -> Result<DualFileMemorySnapshot, DualFileMemoryError> {
         Ok(DualFileMemorySnapshot {
             user: self.read_user()?,
             memory: self.read_memory()?,
+            experiences: self.read_experiences()?,
         })
     }
 

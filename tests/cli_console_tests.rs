@@ -70,6 +70,21 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     assert_eq!(parsed["status"]["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["status"]["atomic_tools"]["mapped_count"], 3);
     assert_eq!(
+        parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
+        serde_json::json!(["file_read", "file_write", "code_execute"])
+    );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["interface_only_atomic_tool_names"],
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "wait",
+            "human_suspend"
+        ])
+    );
+    assert_eq!(
         parsed["status"]["atomic_tools"]["manifest_schema_version"],
         1
     );
@@ -126,6 +141,10 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains(
         "atomic_tools: ok=true total=9 mapped=3 interface_only=6 action_schema_version=1 report_schema_version=6"
+    ));
+    assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
+    assert!(stdout.contains(
+        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));

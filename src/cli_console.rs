@@ -63,6 +63,19 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.atomic_tools.tool_action_schema_version,
         snapshot.status.atomic_tools.tool_report_schema_version
     );
+    println!(
+        "atomic_tools_mapped: {}",
+        format_name_list(&snapshot.status.atomic_tools.mapped_atomic_tool_names)
+    );
+    println!(
+        "atomic_tools_interface_only: {}",
+        format_name_list(
+            &snapshot
+                .status
+                .atomic_tools
+                .interface_only_atomic_tool_names
+        )
+    );
     println!("subagent: {}", snapshot.status.config.subagent_kind);
     println!("control_units: {}", snapshot.control_units.len());
     println!("plugins: {}", snapshot.plugins.len());
@@ -92,6 +105,14 @@ struct PluginOverview {
     display_name: String,
     enabled: bool,
     capabilities: Vec<String>,
+}
+
+fn format_name_list(names: &[String]) -> String {
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(",")
+    }
 }
 
 fn load_console_plugins() -> Result<Vec<PluginOverview>, String> {

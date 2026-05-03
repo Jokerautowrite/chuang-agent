@@ -64,6 +64,10 @@ max_memory_segments = 3
         config.summary().identity_memory_root,
         "./tmp/identity".to_string()
     );
+    assert_eq!(
+        config.summary().identity_experiences_path,
+        "./tmp/identity/experiences.md".to_string()
+    );
     assert_eq!(config.summary().identity_root, "./tmp/bootstrap");
     assert_eq!(config.summary().soul_path, "./tmp/bootstrap/SOUL.md");
     assert_eq!(

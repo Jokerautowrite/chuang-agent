@@ -210,6 +210,7 @@ fn chuang_kernel_injects_identity_snapshot_into_runtime_context() {
         identity_snapshot: Some(DualFileMemorySnapshot {
             user: "老爸偏好简洁中文状态汇报".to_string(),
             memory: "## mem-1\n创项目 MVP 当前聚焦核心记忆层".to_string(),
+            experiences: "踩坑经验暂不注入 runtime prompt".to_string(),
         }),
         ..kernel_config()
     };

@@ -25,6 +25,10 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.provider_tls_ca_cert_path, None);
     assert_eq!(summary.provider_request_timeout_ms, None);
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+    assert_eq!(
+        summary.identity_experiences_path,
+        "./data/hermes-memory/experiences.md"
+    );
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
     assert_eq!(summary.context_engine_kind, "deterministic_budget");

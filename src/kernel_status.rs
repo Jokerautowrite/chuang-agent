@@ -25,6 +25,8 @@ pub struct AtomicToolSurfaceStatus {
     pub total_count: usize,
     pub mapped_count: usize,
     pub interface_only_count: usize,
+    pub mapped_atomic_tool_names: Vec<String>,
+    pub interface_only_atomic_tool_names: Vec<String>,
     pub manifest_schema_version: u16,
     pub manifest_schema_fields: Vec<String>,
     pub tool_action_schema_version: u16,
@@ -125,6 +127,16 @@ pub fn build_chuang_mvp_status(
             total_count: atomic_manifests.len(),
             mapped_count,
             interface_only_count,
+            mapped_atomic_tool_names: atomic_manifests
+                .iter()
+                .filter(|tool| tool.status == AtomicToolStatus::Mapped)
+                .map(|tool| tool.name.to_string())
+                .collect(),
+            interface_only_atomic_tool_names: atomic_manifests
+                .iter()
+                .filter(|tool| tool.status == AtomicToolStatus::InterfaceOnly)
+                .map(|tool| tool.name.to_string())
+                .collect(),
             manifest_schema_version: AtomicToolManifest::schema_version(),
             manifest_schema_fields: AtomicToolManifest::schema_fields()
                 .iter()

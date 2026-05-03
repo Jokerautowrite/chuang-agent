@@ -75,6 +75,10 @@ pub fn print_status(status: &ChuangMvpStatus) {
         "identity_memory_root: {}",
         status.config.identity_memory_root
     );
+    println!(
+        "identity_experiences_path: {}",
+        status.config.identity_experiences_path
+    );
     println!("identity_root: {}", status.config.identity_root);
     println!("soul_path: {}", status.config.soul_path);
     println!("story_path: {}", status.config.story_path);
@@ -107,6 +111,14 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.atomic_tools.manifest_schema_version,
         status.atomic_tools.tool_action_schema_version,
         status.atomic_tools.tool_report_schema_version
+    );
+    println!(
+        "atomic_tools_mapped: {}",
+        format_name_list(&status.atomic_tools.mapped_atomic_tool_names)
+    );
+    println!(
+        "atomic_tools_interface_only: {}",
+        format_name_list(&status.atomic_tools.interface_only_atomic_tool_names)
     );
     for tool in &status.atomic_tools.manifests {
         println!(
@@ -232,6 +244,10 @@ pub fn print_config_summary(ok: bool, source: &str, summary: &ConfigSummary) {
     }
     println!("memory_db: {}", summary.db_path);
     println!("identity_memory_root: {}", summary.identity_memory_root);
+    println!(
+        "identity_experiences_path: {}",
+        summary.identity_experiences_path
+    );
     println!("identity_root: {}", summary.identity_root);
     println!("soul_path: {}", summary.soul_path);
     println!("story_path: {}", summary.story_path);
@@ -267,6 +283,14 @@ pub fn print_config_summary(ok: bool, source: &str, summary: &ConfigSummary) {
         println!("api_key: {api_key_state}");
     }
     print_placeholder_warnings(&summary.placeholder_warnings);
+}
+
+fn format_name_list(names: &[String]) -> String {
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(",")
+    }
 }
 
 pub fn print_runtime_result(result: &RuntimeResult) {

@@ -26,6 +26,7 @@
 - `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
+- `data/hermes-memory/experiences.md`：内部经验层的 MVP contract；`status/config show/doctor/memory identity show` 可诊断它的路径和存在性，但当前不自动写入、不注入 prompt。
 - `cargo run -- memory identity append --id ID --content TEXT`：显式追加一条 `MEMORY.md` 热记忆。
 - `cargo run -- memory identity write-user|write-memory --content TEXT --approve-overwrite`：显式覆盖写入压缩后的 `USER.md` 或 `MEMORY.md`，用于完成“超限拒绝后由模型/老爸决定保留内容”的闭环。
 - `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`：最小身份启动层，启动时作为冻结 identity context 注入。

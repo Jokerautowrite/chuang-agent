@@ -57,11 +57,16 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("provider_slot: fake"));
     assert!(stdout.contains("model: stub-responder"));
     assert!(stdout.contains("identity_memory: hermes_dual_file"));
+    assert!(stdout.contains("identity_experiences_path: "));
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
     assert!(stdout.contains("identity_root: "));
     assert!(stdout.contains("rules_root: ./rules"));
     assert!(stdout.contains(
         "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
+    ));
+    assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
+    assert!(stdout.contains(
+        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
     ));
     assert!(stdout.contains("atomic_tool name=file_read status=mapped"));
     assert!(stdout.contains("atomic_tool name=mouse status=interface_only"));
@@ -128,6 +133,14 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["config"]["provider_request_timeout_ms"], Value::Null);
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
     assert_eq!(
+        parsed["config"]["identity_experiences_path"],
+        config_root
+            .join("identity")
+            .join("experiences.md")
+            .display()
+            .to_string()
+    );
+    assert_eq!(
         parsed["config"]["identity_root"],
         config_root.join("identity-bootstrap").display().to_string()
     );
@@ -140,6 +153,21 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 3);
     assert_eq!(parsed["atomic_tools"]["interface_only_count"], 6);
+    assert_eq!(
+        parsed["atomic_tools"]["mapped_atomic_tool_names"],
+        serde_json::json!(["file_read", "file_write", "code_execute"])
+    );
+    assert_eq!(
+        parsed["atomic_tools"]["interface_only_atomic_tool_names"],
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "wait",
+            "human_suspend"
+        ])
+    );
     assert_eq!(parsed["atomic_tools"]["manifest_schema_version"], 1);
     assert_eq!(
         parsed["atomic_tools"]["manifest_schema_fields"],
@@ -204,6 +232,10 @@ fn cli_status_can_use_custom_identity_memory_root() {
     assert_eq!(
         parsed["config"]["identity_memory_root"],
         root.display().to_string()
+    );
+    assert_eq!(
+        parsed["config"]["identity_experiences_path"],
+        root.join("experiences.md").display().to_string()
     );
     assert_eq!(
         parsed["kernel"]["identity_user_chars"].as_u64(),

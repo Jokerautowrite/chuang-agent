@@ -47,6 +47,11 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     let status = build_chuang_mvp_status(runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     checks.push(pass("identity_memory", "identity snapshot loaded"));
+    run_identity_experiences_check(runtime)?;
+    checks.push(pass(
+        "identity_experiences",
+        "experiences.md entrypoint is available",
+    ));
 
     let mut slots = build_runtime_slots(runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -117,6 +122,25 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
     if mapped != expected_mapped {
         return Err(format!(
             "doctor_atomic_tools_failed mapped={mapped:?} expected={expected_mapped:?}"
+        ));
+    }
+
+    let interface_only = manifests
+        .iter()
+        .filter(|tool| tool.status == AtomicToolStatus::InterfaceOnly)
+        .map(|tool| tool.kind)
+        .collect::<Vec<_>>();
+    let expected_interface_only = vec![
+        AtomicToolKind::Mouse,
+        AtomicToolKind::Keyboard,
+        AtomicToolKind::Screenshot,
+        AtomicToolKind::Locate,
+        AtomicToolKind::Wait,
+        AtomicToolKind::HumanSuspend,
+    ];
+    if interface_only != expected_interface_only {
+        return Err(format!(
+            "doctor_atomic_tools_failed interface_only={interface_only:?} expected={expected_interface_only:?}"
         ));
     }
 
@@ -235,6 +259,29 @@ fn run_goal_mode_check() -> Result<(), String> {
     }
 }
 
+fn run_identity_experiences_check(runtime: &RuntimeConfig) -> Result<(), String> {
+    let config = runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let store = chuang_agent::hermes_memory::FileDualFileMemoryStore::open(config)
+        .map_err(|e| format!("doctor_identity_experiences_failed: {e:?}"))?;
+    let experiences_path = store.config().experiences_path();
+    if experiences_path.file_name().and_then(|name| name.to_str()) != Some("experiences.md") {
+        return Err(format!(
+            "doctor_identity_experiences_failed unexpected_path={}",
+            experiences_path.display()
+        ));
+    }
+    if !experiences_path.exists() {
+        return Err(format!(
+            "doctor_identity_experiences_failed missing_path={}",
+            experiences_path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
     let mut smoke_runtime = runtime.clone();
     let root = unique_doctor_root()?;
@@ -343,6 +390,14 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.atomic_tools.tool_report_schema_version
     );
     println!(
+        "atomic_tools_mapped: {}",
+        format_name_list(&doctor.status.atomic_tools.mapped_atomic_tool_names)
+    );
+    println!(
+        "atomic_tools_interface_only: {}",
+        format_name_list(&doctor.status.atomic_tools.interface_only_atomic_tool_names)
+    );
+    println!(
         "goal_mode_ok: {} entrypoint={} kind={}",
         doctor.status.goal_mode.ok,
         doctor.status.goal_mode.cli_entrypoint,
@@ -382,5 +437,13 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         for warning in &doctor.status.config.placeholder_warnings {
             println!("placeholder_warning: {warning}");
         }
+    }
+}
+
+fn format_name_list(names: &[String]) -> String {
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(",")
     }
 }

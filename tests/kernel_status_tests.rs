@@ -45,6 +45,25 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             "description",
         ]
     );
+    assert_eq!(
+        status.atomic_tools.mapped_atomic_tool_names,
+        vec![
+            "file_read".to_string(),
+            "file_write".to_string(),
+            "code_execute".to_string(),
+        ]
+    );
+    assert_eq!(
+        status.atomic_tools.interface_only_atomic_tool_names,
+        vec![
+            "mouse".to_string(),
+            "keyboard".to_string(),
+            "screenshot".to_string(),
+            "locate".to_string(),
+            "wait".to_string(),
+            "human_suspend".to_string(),
+        ]
+    );
     assert_eq!(status.atomic_tools.tool_action_schema_version, 1);
     assert!(status
         .atomic_tools

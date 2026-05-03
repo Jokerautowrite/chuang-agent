@@ -80,11 +80,12 @@ The runner may return either:
 
 When a full report is returned, Chuang validates identity before accepting it:
 
+- the JSON must satisfy the `SubagentReport` v1 required-field contract;
 - `task_id` must match the dispatch;
 - `agent_id` must match the dispatch;
 - `parent_agent_id` must match the dispatch parent.
 
-Invalid protocol reports are stored as failed reports. They are not treated as success.
+Invalid protocol reports, including reports with missing required fields, bad status values, invalid timestamps, or identity mismatches, are stored as failed reports. They are not treated as success.
 
 A safe checked-in example is available at:
 

@@ -24,8 +24,10 @@ fn dual_file_memory_creates_user_and_memory_files() {
 
     assert_eq!(store.read_user().expect("user readable"), "");
     assert_eq!(store.read_memory().expect("memory readable"), "");
+    assert_eq!(store.read_experiences().expect("experiences readable"), "");
     assert!(root.join("USER.md").exists());
     assert!(root.join("MEMORY.md").exists());
+    assert!(root.join("experiences.md").exists());
 }
 
 #[test]
@@ -43,12 +45,14 @@ fn dual_file_memory_snapshot_freezes_user_and_memory_text() {
             content: "MVP 先做核心，不把飞书放主线".to_string(),
         })
         .expect("memory append succeeds");
+    fs::write(root.join("experiences.md"), "命令失败先看 stderr").expect("experiences seed");
 
     let snapshot = store.snapshot().expect("snapshot succeeds");
 
     assert_eq!(snapshot.user, "老爸偏好中文简洁汇报");
     assert!(snapshot.memory.contains("## mem-1"));
     assert!(snapshot.memory.contains("MVP 先做核心"));
+    assert_eq!(snapshot.experiences, "命令失败先看 stderr");
 }
 
 #[test]

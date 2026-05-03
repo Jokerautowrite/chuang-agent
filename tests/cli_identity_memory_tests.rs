@@ -84,10 +84,14 @@ fn cli_identity_memory_show_append_and_compact_memory() {
     assert_eq!(parsed["user_chars"], 0);
     assert_eq!(parsed["user_max_chars"], 1375);
     assert_eq!(parsed["memory_max_chars"], 2200);
+    assert_eq!(parsed["experiences_file"], "experiences.md");
+    assert_eq!(parsed["experiences_chars"], 0);
+    assert_eq!(parsed["experiences"], "");
     assert!(parsed["memory"]
         .as_str()
         .expect("memory string")
         .contains("## mem-1"));
+    assert!(root.join("experiences.md").exists());
 
     let compact = Command::new("cargo")
         .args([

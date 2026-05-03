@@ -48,14 +48,22 @@ identity/FIRST_WAKE.md
 identity/agents.toml
 data/hermes-memory/USER.md
 data/hermes-memory/MEMORY.md
+data/hermes-memory/experiences.md 入口 / config / status / doctor 可诊断
 ```
 
 待补：
 
 ```text
-experiences.md 正式入口
-内部记忆健康检查
+experiences.md 写入策略 / admission / provenance
+内部记忆健康检查的内容质量规则
 内部记忆流转规则
+```
+
+当前 `experiences.md` 的 MVP 边界：
+
+```text
+已做：默认文件 contract、只读打开、status/config show 路径、doctor 存在性检查、memory identity show 展示
+未做：自动写经验、注入 runtime prompt、从 LIM/session 自动抽取经验
 ```
 
 ### 2. 历史会话层
@@ -160,4 +168,3 @@ Chuang 迁移策略：
 - 不能把 LIM 和 MEMORY.md 混为一谈；LIM 负责沉淀，MEMORY.md 只保留骨架。
 - 不能为了“长期记忆强大”把所有内容塞进 prompt。
 - 不能第一步硬搬完整旧 GBrain/PGLite 内核。
-

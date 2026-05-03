@@ -165,6 +165,7 @@ pub struct ConfigSummary {
     pub actuator_command_timeout_ms: Option<u64>,
     pub identity_memory_kind: String,
     pub identity_memory_root: String,
+    pub identity_experiences_path: String,
     pub identity_user_max_chars: usize,
     pub identity_memory_max_chars: usize,
     pub identity_root: String,
@@ -285,6 +286,7 @@ impl RuntimeConfig {
             actuator_command_timeout_ms: self.actuator.command_timeout_ms(),
             identity_memory_kind: identity_memory.kind,
             identity_memory_root: identity_memory.root,
+            identity_experiences_path: identity_memory.experiences_path,
             identity_user_max_chars: identity_memory.user_max_chars,
             identity_memory_max_chars: identity_memory.memory_max_chars,
             identity_root: self.identity_bootstrap.root.display().to_string(),
@@ -651,6 +653,10 @@ impl IdentityMemoryConfig {
             } => IdentityMemorySummaryParts {
                 kind: self.kind().to_string(),
                 root: root.display().to_string(),
+                experiences_path: root
+                    .join(crate::hermes_memory::DEFAULT_EXPERIENCES_MEMORY_FILE)
+                    .display()
+                    .to_string(),
                 user_max_chars: *user_max_chars,
                 memory_max_chars: *memory_max_chars,
             },
@@ -817,6 +823,7 @@ struct ProviderSummaryParts {
 struct IdentityMemorySummaryParts {
     kind: String,
     root: String,
+    experiences_path: String,
     user_max_chars: usize,
     memory_max_chars: usize,
 }

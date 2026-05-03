@@ -73,41 +73,52 @@ impl SubagentReportValidator {
         Self { max_bytes }
     }
 
-    fn extract_string(raw: &str, field: &'static str) -> Result<String, ReportRejectReason> {
-        let needle = format!("\"{}\":\"", field);
-        let start = raw
-            .find(&needle)
-            .ok_or(ReportRejectReason::MissingRequiredField { field })?
-            + needle.len();
-        let tail = &raw[start..];
-        let end = tail
-            .find('"')
-            .ok_or(ReportRejectReason::MissingRequiredField { field })?;
-        Ok(tail[..end].to_string())
+    fn extract_string(
+        value: &serde_json::Value,
+        field: &'static str,
+    ) -> Result<String, ReportRejectReason> {
+        value
+            .get(field)
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+            .ok_or(ReportRejectReason::MissingRequiredField { field })
     }
 
-    fn contains_bool(raw: &str, field: &'static str) -> Result<(), ReportRejectReason> {
-        let true_needle = format!("\"{}\":true", field);
-        let false_needle = format!("\"{}\":false", field);
-        if raw.contains(&true_needle) || raw.contains(&false_needle) {
+    fn contains_bool(
+        value: &serde_json::Value,
+        field: &'static str,
+    ) -> Result<(), ReportRejectReason> {
+        if value.get(field).and_then(|value| value.as_bool()).is_some() {
             Ok(())
         } else {
             Err(ReportRejectReason::MissingRequiredField { field })
         }
     }
 
-    fn contains_object(raw: &str, field: &'static str) -> Result<(), ReportRejectReason> {
-        let needle = format!("\"{}\":{{", field);
-        if raw.contains(&needle) {
+    fn contains_object(
+        value: &serde_json::Value,
+        field: &'static str,
+    ) -> Result<(), ReportRejectReason> {
+        if value
+            .get(field)
+            .and_then(|value| value.as_object())
+            .is_some()
+        {
             Ok(())
         } else {
             Err(ReportRejectReason::MissingRequiredField { field })
         }
     }
 
-    fn contains_array(raw: &str, field: &'static str) -> Result<(), ReportRejectReason> {
-        let needle = format!("\"{}\":[", field);
-        if raw.contains(&needle) {
+    fn contains_array(
+        value: &serde_json::Value,
+        field: &'static str,
+    ) -> Result<(), ReportRejectReason> {
+        if value
+            .get(field)
+            .and_then(|value| value.as_array())
+            .is_some()
+        {
             Ok(())
         } else {
             Err(ReportRejectReason::MissingRequiredField { field })
@@ -115,12 +126,7 @@ impl SubagentReportValidator {
     }
 
     fn validate_timestamp(field: &'static str, value: &str) -> Result<(), ReportRejectReason> {
-        let valid = value.len() >= 24
-            && value.contains('T')
-            && value.ends_with('Z')
-            && value.matches(':').count() >= 2
-            && value.contains('.');
-        if valid {
+        if chrono::DateTime::parse_from_rfc3339(value).is_ok() {
             Ok(())
         } else {
             Err(ReportRejectReason::InvalidTimestampFormat {
@@ -146,7 +152,10 @@ impl ReportValidator for SubagentReportValidator {
         let text = std::str::from_utf8(raw)
             .map_err(|_| ReportRejectReason::MissingRequiredField { field: "raw_utf8" })?;
 
-        let schema_version = Self::extract_string(text, "schema_version")?;
+        let value: serde_json::Value = serde_json::from_str(text)
+            .map_err(|_| ReportRejectReason::MissingRequiredField { field: "json" })?;
+
+        let schema_version = Self::extract_string(&value, "schema_version")?;
         let major = schema_version
             .split('.')
             .next()
@@ -159,10 +168,10 @@ impl ReportValidator for SubagentReportValidator {
             });
         }
 
-        Self::extract_string(text, "report_id")?;
-        Self::extract_string(text, "task_id")?;
-        Self::extract_string(text, "agent_id")?;
-        let status = Self::extract_string(text, "status")?;
+        Self::extract_string(&value, "report_id")?;
+        Self::extract_string(&value, "task_id")?;
+        Self::extract_string(&value, "agent_id")?;
+        let status = Self::extract_string(&value, "status")?;
         if ExecutionStatus::from_str(&status).is_none() {
             return Err(ReportRejectReason::InvalidEnumFormat {
                 field: "status",
@@ -170,14 +179,14 @@ impl ReportValidator for SubagentReportValidator {
             });
         }
 
-        let started_at = Self::extract_string(text, "started_at")?;
+        let started_at = Self::extract_string(&value, "started_at")?;
         Self::validate_timestamp("started_at", &started_at)?;
-        let finished_at = Self::extract_string(text, "finished_at")?;
+        let finished_at = Self::extract_string(&value, "finished_at")?;
         Self::validate_timestamp("finished_at", &finished_at)?;
-        Self::extract_string(text, "summary")?;
-        Self::contains_object(text, "resource_usage")?;
-        Self::contains_array(text, "artifacts")?;
-        Self::contains_bool(text, "truncated")?;
+        Self::extract_string(&value, "summary")?;
+        Self::contains_object(&value, "resource_usage")?;
+        Self::contains_array(&value, "artifacts")?;
+        Self::contains_bool(&value, "truncated")?;
 
         Ok(())
     }
