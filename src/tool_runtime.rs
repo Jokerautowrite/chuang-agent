@@ -610,7 +610,7 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
         .classify(&proposed)
         .map_err(|e| format!("tool_governance_failed: {}", e.message))?;
 
-    if matches!(decision, RiskDecision::Blocked { .. }) {
+    if is_rejected_tool_decision(&decision) {
         audit_tool_rejection(
             governance,
             registry,
@@ -619,39 +619,31 @@ fn execute_tool_call_with_registry_and_governance<G: Governance>(
             task_id.clone(),
             &decision,
         )?;
-        return Err(format!("tool_blocked: {}", risk_decision_reason(&decision)));
+        return Err(tool_rejection_error(&decision));
     }
 
-    if matches!(decision, RiskDecision::DraftOnly { .. }) {
-        audit_tool_rejection(
-            governance,
-            registry,
-            call,
-            agent_id.clone(),
-            task_id.clone(),
-            &decision,
-        )?;
-        return Err(format!(
-            "tool_draft_only: {}",
-            risk_decision_reason(&decision)
-        ));
-    }
+    execute_allowed_tool_call_with_audit(
+        workspace_root,
+        governance,
+        registry,
+        call,
+        agent_id,
+        task_id,
+        config,
+        decision,
+    )
+}
 
-    if matches!(decision, RiskDecision::NeedsApproval { .. }) {
-        audit_tool_rejection(
-            governance,
-            registry,
-            call,
-            agent_id.clone(),
-            task_id.clone(),
-            &decision,
-        )?;
-        return Err(format!(
-            "tool_needs_approval: {}",
-            risk_decision_reason(&decision)
-        ));
-    }
-
+fn execute_allowed_tool_call_with_audit<G: Governance>(
+    workspace_root: &Path,
+    governance: &mut G,
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    agent_id: String,
+    task_id: String,
+    config: &ToolExecutionConfig,
+    decision: RiskDecision,
+) -> Result<GovernedToolExecutionRecord, String> {
     let mut record =
         execute_tool_call_with_registry_and_config(workspace_root, registry, call, config);
     record.decision = Some(risk_decision_label(&decision));
@@ -685,7 +677,25 @@ fn execute_tool_call_or_reject_with_registry_and_governance<G: Governance>(
     task_id: impl Into<String>,
     config: &ToolExecutionConfig,
 ) -> Result<GovernedToolExecutionRecord, String> {
-    match execute_tool_call_with_registry_and_governance(
+    let agent_id = agent_id.into();
+    let task_id = task_id.into();
+    let proposed = proposed_action_for_tool_call_with_registry(
+        workspace_root,
+        registry,
+        call,
+        &config.shell_risk_rules,
+    );
+    let decision = governance
+        .classify(&proposed)
+        .map_err(|e| format!("tool_governance_failed: {}", e.message))?;
+
+    if is_rejected_tool_decision(&decision) {
+        audit_tool_rejection(governance, registry, call, agent_id, task_id, &decision)?;
+        let record = governance_rejected_record(registry, call, &decision);
+        return Ok(GovernedToolExecutionRecord { decision, record });
+    }
+
+    execute_allowed_tool_call_with_audit(
         workspace_root,
         governance,
         registry,
@@ -693,19 +703,8 @@ fn execute_tool_call_or_reject_with_registry_and_governance<G: Governance>(
         agent_id,
         task_id,
         config,
-    ) {
-        Ok(outcome) => Ok(outcome),
-        Err(error)
-            if error.starts_with("tool_blocked:")
-                || error.starts_with("tool_draft_only:")
-                || error.starts_with("tool_needs_approval:") =>
-        {
-            let decision = decision_from_governance_error(&error);
-            let record = governance_rejected_record(registry, call, &decision, error);
-            Ok(GovernedToolExecutionRecord { decision, record })
-        }
-        Err(error) => Err(error),
-    }
+        decision,
+    )
 }
 
 fn audit_tool_rejection<G: Governance>(
@@ -1164,13 +1163,31 @@ fn governance_rejected_record(
     registry: &AtomicToolRegistry,
     call: &ToolCall,
     decision: &RiskDecision,
-    summary: String,
 ) -> ToolExecutionRecord {
-    let mut record = failed_record(registry, call, summary);
+    let mut record = failed_record(registry, call, tool_rejection_error(decision));
     record.failure_class = Some("governance_rejected".to_string());
     record.decision = Some(risk_decision_label(decision));
     record.retryable = false;
     record
+}
+
+fn is_rejected_tool_decision(decision: &RiskDecision) -> bool {
+    matches!(
+        decision,
+        RiskDecision::Blocked { .. }
+            | RiskDecision::DraftOnly { .. }
+            | RiskDecision::NeedsApproval { .. }
+    )
+}
+
+fn tool_rejection_error(decision: &RiskDecision) -> String {
+    let prefix = match decision {
+        RiskDecision::Blocked { .. } => "tool_blocked",
+        RiskDecision::DraftOnly { .. } => "tool_draft_only",
+        RiskDecision::NeedsApproval { .. } => "tool_needs_approval",
+        RiskDecision::Allowed { .. } => "tool_not_rejected",
+    };
+    format!("{prefix}: {}", risk_decision_reason(decision))
 }
 
 fn classify_tool_failure(summary: &str) -> &'static str {
@@ -1296,26 +1313,6 @@ fn count_lines(value: &str) -> usize {
         0
     } else {
         value.lines().count()
-    }
-}
-
-fn decision_from_governance_error(error: &str) -> RiskDecision {
-    if let Some(reason) = error.strip_prefix("tool_blocked:") {
-        RiskDecision::Blocked {
-            reason: reason.trim().to_string(),
-        }
-    } else if let Some(reason) = error.strip_prefix("tool_draft_only:") {
-        RiskDecision::DraftOnly {
-            reason: reason.trim().to_string(),
-        }
-    } else if let Some(reason) = error.strip_prefix("tool_needs_approval:") {
-        RiskDecision::NeedsApproval {
-            reason: reason.trim().to_string(),
-        }
-    } else {
-        RiskDecision::Blocked {
-            reason: error.to_string(),
-        }
     }
 }
 

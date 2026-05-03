@@ -11,6 +11,7 @@
 - `doctor` 的工具协议检查已从抽样字段升级为完整字段契约匹配：action schema、report schema、call schema 字段顺序和内容漂移都会被发现。
 - `ToolLoopMeta` 已从只解析 count/trace/report 扩展为完整工具循环视图，统一承载 calls / protocol_errors / events；`app_server` 和 `cli_channel` 进一步减少各自手写解析。
 - 治理决策标签格式已收口到 `governance::risk_decision_label / risk_decision_reason / risk_decision_parts`，替换了 kernel、tool runtime、control workflow、Genesis、CLI runtime 里的重复格式化逻辑。
+- `execute_or_reject` 的治理拒绝路径已改为直接复用 `RiskDecision` 生成结构化失败记录，不再从 `tool_needs_approval:` 这类错误字符串反解析；严格执行接口的外部错误字符串保持兼容。
 - 主进程工具元数据继续收口：`tool_loop_meta` 已抽成共享解析层，`app_server` 和 `cli_channel` 不再各自重复解析 `tool_*_json`。
 - `tool_report_json` 已正式提升为 runtime report 的 `Log` artifact，工具事件不只停留在 meta/trace 里。
 - `write_operation` 已从字符串收紧为枚举，`created / modified / unchanged` 现在是结构化结果。
