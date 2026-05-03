@@ -52,6 +52,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=identity_memory ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
     assert!(stdout.contains("doctor_check name=atomic_tools ok=true"));
+    assert!(stdout.contains("doctor_check name=goal_mode ok=true"));
     assert!(stdout.contains("doctor_check name=actuator_smoke ok=true"));
     assert!(stdout.contains("doctor_check name=control_plane_smoke ok=true"));
     assert!(stdout.contains("doctor_check name=runtime_smoke ok=true"));
@@ -62,6 +63,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(
         stdout.contains("atomic_tools_ok: true action_schema_version=1 report_schema_version=6")
     );
+    assert!(stdout.contains("goal_mode_ok: true entrypoint=run --goal TEXT"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
@@ -110,13 +112,23 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 9);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 10);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
         .iter()
         .any(|check| check["name"] == "atomic_tools"));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "goal_mode"));
     assert_eq!(parsed["status"]["atomic_tools"]["ok"], true);
+    assert_eq!(parsed["status"]["goal_mode"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["goal_mode"]["cli_entrypoint"],
+        "run --goal TEXT"
+    );
     assert_eq!(
         parsed["status"]["atomic_tools"]["tool_report_schema_version"],
         6

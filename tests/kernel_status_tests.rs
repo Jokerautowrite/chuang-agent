@@ -51,6 +51,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.plugin_registry.available);
     assert!(status.plugin_registry.ok);
     assert_eq!(status.plugin_registry.plugin_count, 5);
+    assert!(status.goal_mode.ok);
+    assert_eq!(status.goal_mode.cli_entrypoint, "run --goal TEXT");
+    assert_eq!(status.goal_mode.default_goal_id, "mainline-mvp");
+    assert!(!status.goal_mode.bypasses_governance);
+    assert!(!status.goal_mode.adds_core_slot);
 }
 
 #[test]

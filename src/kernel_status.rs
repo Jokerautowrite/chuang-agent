@@ -1,5 +1,6 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
+use crate::goal_mode::GoalSpec;
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
 use crate::runtime_config::{ConfigError, ConfigSummary, RuntimeConfig};
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
@@ -14,6 +15,7 @@ pub struct ChuangMvpStatus {
     pub kernel: ChuangKernelSnapshot,
     pub plugin_registry: PluginRegistrySummary,
     pub atomic_tools: AtomicToolSurfaceStatus,
+    pub goal_mode: GoalModeStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -30,6 +32,18 @@ pub struct AtomicToolSurfaceStatus {
     pub tool_report_schema_fields: Vec<String>,
     pub tool_call_schema_fields: Vec<String>,
     pub manifests: Vec<AtomicToolManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GoalModeStatus {
+    pub ok: bool,
+    pub kind: String,
+    pub cli_entrypoint: String,
+    pub context_source: String,
+    pub default_goal_id: String,
+    pub default_allowed_slots: Vec<String>,
+    pub bypasses_governance: bool,
+    pub adds_core_slot: bool,
 }
 
 pub fn build_chuang_mvp_status(
@@ -113,5 +127,20 @@ pub fn build_chuang_mvp_status(
                 .collect(),
             manifests: atomic_manifests,
         },
+        goal_mode: goal_mode_status(),
     })
+}
+
+fn goal_mode_status() -> GoalModeStatus {
+    let default_goal = GoalSpec::mainline_mvp("status probe");
+    GoalModeStatus {
+        ok: default_goal.validate().is_ok(),
+        kind: "lightweight_runtime_context".to_string(),
+        cli_entrypoint: "run --goal TEXT".to_string(),
+        context_source: "goal".to_string(),
+        default_goal_id: default_goal.goal_id,
+        default_allowed_slots: default_goal.allowed_slots,
+        bypasses_governance: false,
+        adds_core_slot: false,
+    }
 }

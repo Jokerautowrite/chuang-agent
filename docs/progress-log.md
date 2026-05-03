@@ -5,6 +5,7 @@
 ### 最新进展
 - Memory/Context 会话稳定性 MVP 补了一层可诊断元数据：`run --session-id ID` 的 runtime meta 会暴露 `session_id`、`session_memory_scope`、`session_memory_recall_isolated`、`session_memory_recall_filter`、`session_memory_recall_hit_count`；`--remember-session` 写回后会额外暴露 `session_memory_write_requested`、`session_memory_summary_kind`、`session_memory_record_id`。
 - 会话记忆隔离回归已增强：同一 SQLite store 内 `alpha` 和 `beta` 都写入 session summary 后，`alpha` 查询 `beta` 的锚点必须保持 `recall_hit_count=0`，防止不同 session 串记忆。专项验证已通过 `cargo fmt --all` 和 `cargo test -q cli_runtime::tests::run_with_options_remembers_and_recalls_session_turns`。
+- Goal mode 状态面已补：`status --json` 现在有 `goal_mode` 摘要，标明它是 `lightweight_runtime_context`、入口为 `run --goal TEXT`、不新增 core slot、不绕过 governance；`doctor` 增加只读 `goal_mode` 检查，确保默认 `GoalSpec` 和 context segment 可渲染。
 - 当前阶段结论：主进程工具口已进入收尾细化阶段，近期连续完成 action/report schema 契约、工具循环元数据统一视图、治理决策标签收口、治理拒绝路径结构化；下一步开始把注意力从工具细节转向 Memory/Context 会话稳定性、真实 subagent runner、Chuang 自身 goal mode 最小实现。
 - GoalSpec CLI 入口已补最小版：`run --goal TEXT` 会生成 `GoalSpec::mainline_mvp(TEXT)` 并注入 runtime extra context；runtime meta 会输出 `goal_id / goal_objective / goal_context_injected`，方便通道和控制台确认目标上下文已生效，同时不改变原始 `user_input`。
 - GoalSpec -> Runtime extra context 最小接入已完成：`GoalSpec::render_context_segment()` 会把目标 spec 渲染为 `ContextSegment`，CLI runtime 的 `RunCliRequest.goal_spec` 可选注入该 segment，并继续复用 `run_governed_turn_with_extra_context()`；未传 goal 时默认空上下文，用户输入不被污染，不新增 slot、不绕过 governance。

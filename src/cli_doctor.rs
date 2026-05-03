@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
 use chuang_agent::atomic_tool::{ga_atomic_tool_manifests, AtomicToolKind, AtomicToolStatus};
+use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::plugin_registry::check_plugin_registry;
 use chuang_agent::runtime_config::{ProviderConfig, RuntimeConfig};
@@ -53,6 +54,12 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "atomic_tools",
         "GenericAgent 9 atomic tool manifest is available",
+    ));
+
+    run_goal_mode_check()?;
+    checks.push(pass(
+        "goal_mode",
+        "lightweight goal context wrapper is available",
     ));
 
     slots
@@ -189,6 +196,29 @@ fn run_plugin_registry_check() -> Result<(), String> {
     }
 }
 
+fn run_goal_mode_check() -> Result<(), String> {
+    let goal = GoalSpec::mainline_mvp("doctor goal probe");
+    goal.validate().map_err(|e| {
+        format!(
+            "doctor_goal_mode_failed field={} message={}",
+            e.field, e.message
+        )
+    })?;
+    let segment = goal.render_context_segment().map_err(|e| {
+        format!(
+            "doctor_goal_mode_failed field={} message={}",
+            e.field, e.message
+        )
+    })?;
+    if segment.content.contains("GOAL_SPEC")
+        && segment.metadata.get("kind").map(String::as_str) == Some("goal_spec")
+    {
+        Ok(())
+    } else {
+        Err("doctor_goal_mode_failed invalid context segment".to_string())
+    }
+}
+
 fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
     let mut smoke_runtime = runtime.clone();
     let root = unique_doctor_root()?;
@@ -294,6 +324,12 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.atomic_tools.ok,
         doctor.status.atomic_tools.tool_action_schema_version,
         doctor.status.atomic_tools.tool_report_schema_version
+    );
+    println!(
+        "goal_mode_ok: {} entrypoint={} kind={}",
+        doctor.status.goal_mode.ok,
+        doctor.status.goal_mode.cli_entrypoint,
+        doctor.status.goal_mode.kind
     );
     println!("control_plane: {}", doctor.status.slots.control_plane);
     if doctor.status.config.placeholder_warnings.is_empty() {
