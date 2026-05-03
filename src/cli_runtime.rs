@@ -392,6 +392,7 @@ where
 {
     let mut records = RememberedRecords::default();
     records.runtime_report_id = Some(turn.report.report_id.0.clone());
+    insert_runtime_report_metadata(&mut turn);
 
     if let Some(decision) = &turn.report.governance_decision {
         turn.result
@@ -456,6 +457,32 @@ where
     }
 
     Ok((turn.result, records))
+}
+
+fn insert_runtime_report_metadata(turn: &mut chuang_agent::chuang_kernel::ChuangKernelTurn) {
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert(
+        "runtime_report_id".to_string(),
+        turn.report.report_id.0.clone(),
+    );
+    extra.insert(
+        "runtime_report_task_id".to_string(),
+        turn.report.task_id.0.clone(),
+    );
+    extra.insert(
+        "runtime_report_agent_id".to_string(),
+        turn.report.agent_id.0.clone(),
+    );
+    extra.insert(
+        "runtime_report_status".to_string(),
+        match turn.report.status {
+            chuang_agent::subagent_report::ExecutionStatus::Success => "Success",
+            chuang_agent::subagent_report::ExecutionStatus::Failed => "Failed",
+            chuang_agent::subagent_report::ExecutionStatus::TimedOut => "TimedOut",
+            chuang_agent::subagent_report::ExecutionStatus::Cancelled => "Cancelled",
+        }
+        .to_string(),
+    );
 }
 
 fn insert_session_memory_metadata(
@@ -749,6 +776,34 @@ mod tests {
                 .get("governance_action_id")
                 .map(String::as_str),
             Some("run-turn-1")
+        );
+        assert_eq!(records.runtime_report_id.as_deref(), Some("report-turn-1"));
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("runtime_report_id")
+                .map(String::as_str),
+            Some("report-turn-1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("runtime_report_task_id")
+                .map(String::as_str),
+            Some("turn-1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("runtime_report_status")
+                .map(String::as_str),
+            Some("Success")
         );
     }
 

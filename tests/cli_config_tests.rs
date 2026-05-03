@@ -93,6 +93,7 @@ base_url = "http://127.0.0.1:8000/v1"
 model = "gpt-test"
 api_key_env = "CHUANG_AGENT_CLI_CONFIG_TEST_KEY"
 transport = "stub"
+provider_timeout_ms = 12345
 "#,
             db = root.join("chuang.db").display(),
             identity = root.join("identity").display()
@@ -126,6 +127,7 @@ transport = "stub"
 
     assert_eq!(parsed["summary"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["summary"]["api_key_state"], "<set>");
+    assert_eq!(parsed["summary"]["provider_request_timeout_ms"], 12_345);
     assert!(!stdout.contains("test-secret-key"));
 }
 

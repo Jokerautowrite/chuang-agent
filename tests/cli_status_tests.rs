@@ -125,6 +125,7 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["kernel"]["identity_agents_registry_exists"], false);
     assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["config"]["provider_id"], "custom-openai");
+    assert_eq!(parsed["config"]["provider_request_timeout_ms"], Value::Null);
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
     assert_eq!(
         parsed["config"]["identity_root"],
@@ -250,6 +251,86 @@ fn cli_status_can_select_queued_external_subagent_slot() {
         queue_root.display().to_string()
     );
     assert_eq!(parsed["slots"]["subagent"], "queued_external");
+}
+
+#[test]
+fn cli_status_exposes_provider_request_timeout_from_cli_override() {
+    let config_root = temp_identity_root("provider-timeout-config");
+    let config_path = write_fake_status_config(&config_root);
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+            "--provider-base-url",
+            "https://api.example.com/v1",
+            "--provider-api-key",
+            "test-secret-key",
+            "--provider-model",
+            "gpt-5.5",
+            "--provider-id",
+            "custom-openai",
+            "--provider-transport",
+            "native",
+            "--provider-request-timeout-ms",
+            "12345",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["config"]["provider_request_timeout_ms"], 12_345);
+    assert!(!stdout.contains("test-secret-key"));
+}
+
+#[test]
+fn cli_status_prints_provider_request_timeout_in_text() {
+    let config_root = temp_identity_root("provider-timeout-text");
+    let config_path = write_fake_status_config(&config_root);
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--provider-base-url",
+            "https://api.example.com/v1",
+            "--provider-api-key",
+            "test-secret-key",
+            "--provider-model",
+            "gpt-5.5",
+            "--provider-id",
+            "custom-openai",
+            "--provider-transport",
+            "native",
+            "--provider-request-timeout-ms",
+            "12345",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("provider_request_timeout_ms: 12345"));
+    assert!(!stdout.contains("test-secret-key"));
 }
 
 #[test]

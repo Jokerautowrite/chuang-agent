@@ -23,6 +23,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.control_command_timeout_ms, None);
     assert_eq!(summary.provider_tls_ca_cert_path, None);
+    assert_eq!(summary.provider_request_timeout_ms, None);
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
@@ -139,6 +140,28 @@ fn openai_provider_config_redacts_api_key_in_summary() {
     assert_eq!(summary.provider_id, "custom-openai");
     assert_eq!(summary.api_key_state, Some("<set>".to_string()));
     assert_eq!(summary.provider_tls_ca_cert_path, None);
+    assert_eq!(summary.provider_request_timeout_ms, None);
+}
+
+#[test]
+fn openai_provider_config_exposes_request_timeout_in_summary() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.provider = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+        provider_id: "custom-openai".to_string(),
+        base_url: "https://api.example.com/v1".to_string(),
+        api_key: "test-key".to_string(),
+        model_name: "gpt-4.1-mini".to_string(),
+        transport: ProviderTransport::Stub,
+        request_timeout_ms: Some(12_345),
+        tls_ca_cert_path: None,
+    });
+
+    config
+        .validate()
+        .expect("complete provider config should pass");
+    let summary = config.summary();
+
+    assert_eq!(summary.provider_request_timeout_ms, Some(12_345));
 }
 
 #[test]

@@ -29,6 +29,7 @@ As of 2026-05-03, the MVP readiness surface also expects:
 - mapped executable MVP tools: `file_read`, `file_write`, `code_execute`
 - auxiliary MVP tool: `list_dir`
 - interface-only tools: desktop/browser style atomic tools remain adapter/plugin boundaries
+- provider timeout: `provider_request_timeout_ms` is visible in `status` / `config show` and can be overridden from the CLI without leaking secrets
 - goal mode: lightweight `run --goal TEXT` context wrapper, not a new core slot and not a governance bypass
 - session memory diagnostics: `session_id`, recall isolation/filter/hit count, and writeback record metadata in runtime provider meta
 - channel goal input: `channel simulate --goal TEXT` can pass goal context through app-server input, but the real Feishu bridge is still a dedicated channel adapter concern

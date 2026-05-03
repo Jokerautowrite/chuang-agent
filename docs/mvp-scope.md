@@ -38,7 +38,7 @@
 - `cargo run -- channel simulate ... --goal TEXT`：本地演练通道目标上下文注入；真实飞书桥是否传 goal 仍由独立 channel adapter 决定。
 - `cargo run -- plugin list|check --registry PATH`：读取插件注册表，统一展示 channel、runner、control、actuator、genesis adapter，不执行插件。
 - `cargo run -- status`：查看 MVP 核心状态。
-- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、goal mode、只读 `plugin_registry` 摘要。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、goal mode、provider request timeout、只读 `plugin_registry` 摘要。
 - `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。
 - `cargo run -- doctor --json`：输出结构化健康检查结果，包含 atomic tools、goal mode、plugin registry 等只读验收项，给桌面控制台或插件读取。

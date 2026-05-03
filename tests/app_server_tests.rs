@@ -100,6 +100,18 @@ transport = "stub"
         .find(|value| value["id"] == 2)
         .expect("turn/start response should be present");
     assert_eq!(turn_response["result"]["turn"]["toolCallCount"], 0);
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeReportId"],
+        "report-turn-1"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["runtime_report_id"],
+        "report-turn-1"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["runtime_report_id"],
+        "report-turn-1"
+    );
     assert_eq!(turn_response["result"]["turn"]["toolProtocolErrorCount"], 0);
     assert_eq!(
         turn_response["result"]["turn"]["toolCalls"]
@@ -157,6 +169,14 @@ transport = "stub"
         .find(|value| value["method"] == "turn/completed")
         .expect("turn completed event should be present");
     assert_eq!(turn_completed["params"]["turn"]["toolCallCount"], 0);
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeReportId"],
+        "report-turn-1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["runtime_report_id"],
+        "report-turn-1"
+    );
     assert_eq!(
         turn_completed["params"]["turn"]["toolProtocolErrorCount"],
         0

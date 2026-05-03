@@ -777,6 +777,7 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     let mut provider_api_key: Option<String> = None;
     let mut provider_model: Option<String> = None;
     let mut provider_transport: Option<String> = None;
+    let mut provider_request_timeout_ms: Option<u64> = None;
     let mut identity_memory_root: Option<PathBuf> = None;
     let mut subagent_kind: Option<String> = None;
     let mut subagent_queue_root: Option<PathBuf> = None;
@@ -815,6 +816,11 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
             }
             "--provider-transport" => {
                 provider_transport = Some(take_value_or_usage(args, &mut index)?);
+            }
+            "--provider-request-timeout-ms" => {
+                let value = take_value_or_usage(args, &mut index)?;
+                provider_request_timeout_ms =
+                    Some(parse_u64_flag("--provider-request-timeout-ms", &value)?);
             }
             "--provider-id" => {
                 provider_id = Some(take_value_or_usage(args, &mut index)?);
@@ -909,7 +915,7 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
                 api_key,
                 model_name,
                 transport: parse_provider_transport(provider_transport.as_deref())?,
-                request_timeout_ms: None,
+                request_timeout_ms: provider_request_timeout_ms,
                 tls_ca_cert_path: None,
             })
         }
@@ -940,6 +946,7 @@ fn is_runtime_value_flag(flag: &str) -> bool {
             | "--provider-model"
             | "--provider-id"
             | "--provider-transport"
+            | "--provider-request-timeout-ms"
             | "--identity-memory-root"
             | "--subagent"
             | "--subagent-queue-root"

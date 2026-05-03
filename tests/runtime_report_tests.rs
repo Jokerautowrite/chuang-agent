@@ -259,6 +259,13 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     extra.insert("transport".to_string(), "openai-compatible".to_string());
     extra.insert("transport_mode".to_string(), "native".to_string());
     extra.insert("status_code".to_string(), "200".to_string());
+    extra.insert("runtime_report_id".to_string(), "report-turn-1".to_string());
+    extra.insert("runtime_report_task_id".to_string(), "turn-1".to_string());
+    extra.insert(
+        "runtime_report_agent_id".to_string(),
+        "chuang-cli".to_string(),
+    );
+    extra.insert("runtime_report_status".to_string(), "Success".to_string());
     extra.insert("governance_action_id".to_string(), "run-turn".to_string());
     extra.insert(
         "governance_decision".to_string(),
@@ -327,6 +334,22 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert_eq!(
         observability.get("governance_action_id"),
         Some(&"run-turn".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_report_id"),
+        Some(&"report-turn-1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_report_task_id"),
+        Some(&"turn-1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_report_agent_id"),
+        Some(&"chuang-cli".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_report_status"),
+        Some(&"Success".to_string())
     );
     assert_eq!(
         observability.get("governance_decision"),

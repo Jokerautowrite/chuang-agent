@@ -153,6 +153,7 @@ pub struct ConfigSummary {
     pub provider_id: String,
     pub model_name: String,
     pub provider_tls_ca_cert_path: Option<String>,
+    pub provider_request_timeout_ms: Option<u64>,
     pub provider_fallback_policy: Option<String>,
     pub governance_kind: String,
     pub actuator_kind: String,
@@ -272,6 +273,7 @@ impl RuntimeConfig {
             provider_id: provider.provider_id,
             model_name: provider.model_name,
             provider_tls_ca_cert_path: provider.tls_ca_cert_path,
+            provider_request_timeout_ms: provider.request_timeout_ms,
             provider_fallback_policy: provider.fallback_policy,
             governance_kind: self.governance.kind().to_string(),
             actuator_kind: self.actuator.kind().to_string(),
@@ -807,8 +809,8 @@ struct ProviderSummaryParts {
     provider_id: String,
     model_name: String,
     tls_ca_cert_path: Option<String>,
-    api_key_state: Option<String>,
     request_timeout_ms: Option<u64>,
+    api_key_state: Option<String>,
     fallback_policy: Option<String>,
 }
 

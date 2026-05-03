@@ -387,6 +387,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 "turn": {
                     "id": turn_id,
                     "status": "completed",
+                    "runtimeReportId": tool_run.runtime_report_id.clone(),
                     "toolCallCount": tool_call_count,
                     "toolProtocolErrorCount": tool_protocol_error_count,
                     "toolTrace": tool_trace.clone(),
@@ -414,6 +415,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         "turn": {
             "id": thread_turn_id(state, &thread_id).unwrap_or_default(),
             "status": "completed",
+            "runtimeReportId": tool_run.runtime_report_id,
             "modelName": model_name,
             "finishReason": result
                 .response
@@ -455,6 +457,7 @@ struct ToolLoopResult {
     tool_events: Vec<Value>,
     tool_trace: String,
     tool_report: Option<Value>,
+    runtime_report_id: Option<String>,
 }
 
 fn run_turn_with_tools(
@@ -478,7 +481,7 @@ fn run_turn_with_tools(
         goal_spec,
     };
 
-    let (result, _) = run_with_options(&request)?;
+    let (result, records) = run_with_options(&request)?;
     let tool_meta =
         ToolLoopMeta::<ToolExecutionRecord, ToolProtocolError, Value>::typed_from_extra(
             &result.response.meta.extra,
@@ -491,6 +494,7 @@ fn run_turn_with_tools(
         tool_events: tool_meta.tool_events,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
+        runtime_report_id: records.runtime_report_id,
     })
 }
 
