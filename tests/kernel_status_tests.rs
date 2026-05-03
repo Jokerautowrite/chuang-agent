@@ -31,6 +31,18 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.slots.subagent, "fake");
     assert_eq!(status.slots.control_plane, "fake_local");
     assert!(status.atomic_tools.ok);
+    assert_eq!(status.atomic_tools.manifest_schema_version, 1);
+    assert_eq!(
+        status.atomic_tools.manifest_schema_fields,
+        vec![
+            "kind",
+            "name",
+            "source",
+            "status",
+            "implementation",
+            "description",
+        ]
+    );
     assert_eq!(status.atomic_tools.tool_action_schema_version, 1);
     assert!(status
         .atomic_tools

@@ -1,7 +1,7 @@
 use chuang_agent::atomic_tool::{
     actuator_atomic_bindings, actuator_method_for_atomic_tool, ga_atomic_tool_manifests,
-    tool_call_atomic_kind, AtomicToolKind, AtomicToolRegistry, AtomicToolStatus,
-    ToolCallAtomicKind,
+    tool_call_atomic_kind, AtomicToolKind, AtomicToolManifest, AtomicToolRegistry,
+    AtomicToolStatus, ToolCallAtomicKind,
 };
 use chuang_agent::tool_runtime::ToolCall;
 
@@ -25,6 +25,22 @@ fn ga_atomic_tool_manifest_lists_the_nine_core_tools() {
         ]
     );
     assert!(manifests.iter().all(|tool| tool.source == "GenericAgent"));
+}
+
+#[test]
+fn atomic_tool_manifest_exposes_schema_contract_fields() {
+    assert_eq!(AtomicToolManifest::schema_version(), 1);
+    assert_eq!(
+        AtomicToolManifest::schema_fields(),
+        &[
+            "kind",
+            "name",
+            "source",
+            "status",
+            "implementation",
+            "description",
+        ]
+    );
 }
 
 #[test]

@@ -3,6 +3,9 @@
 ## 2026-05-03
 
 ### 最新进展
+- GA 9 原子工具 manifest 契约补齐：`AtomicToolManifest` 现在暴露 `schema_version=1` 和字段列表，`status --json` / `doctor` 会同步校验并回传 manifest schema，smoke 与状态测试也锁住该契约。
+- 主线治理回传补齐一处输出面缺口：`runtime_observability_meta()` 现在会提升 `governance_action_id / governance_decision / governance_reason`，app-server `turn/start` response 和 `turn/completed` event 的 `runtimeObservability` 可直接读取治理决策，不必从 provider meta 间接解析。
+- 已补 runtime report 和 app-server 回归，锁定治理字段会随结构化观测面回传。
 - Control / Actuator command adapter 安全边界补回归：control apply receipt 现在额外覆盖 `change_model` 模型名不匹配，真实 control adapter 在未设置 `CHUANG_REAL_CONTROL_ENABLE=1` 时只返回 dry-run receipt，不执行 allowlisted 命令。
 - Actuator command adapter 补 timeout 回归：外部 adapter 卡住时会按 `actuator_timeout_ms` 终止本次启动的进程并返回结构化错误，不接真实桌面/浏览器。
 - `doctor` 的 command control smoke 已补只读回归：测试 adapter 的 `apply` 会写 marker，`doctor --json` 只能调用 `list`，不得触发 apply 或真实服务控制。

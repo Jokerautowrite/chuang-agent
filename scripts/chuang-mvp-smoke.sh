@@ -51,6 +51,7 @@ import json, sys
 data = json.load(sys.stdin)
 assert data["slots"]["execution"] == "generic_agent_mvp"
 assert data["atomic_tools"]["ok"] is True
+assert data["atomic_tools"]["manifest_schema_version"] == 1
 assert data["atomic_tools"]["tool_action_schema_version"] == 1
 assert data["atomic_tools"]["tool_report_schema_version"] == 6
 assert data["goal_mode"]["ok"] is True

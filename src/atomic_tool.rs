@@ -43,6 +43,27 @@ pub struct AtomicToolManifest {
     pub description: &'static str,
 }
 
+pub const ATOMIC_TOOL_MANIFEST_SCHEMA_VERSION: u16 = 1;
+
+pub const ATOMIC_TOOL_MANIFEST_SCHEMA_FIELDS: &[&str] = &[
+    "kind",
+    "name",
+    "source",
+    "status",
+    "implementation",
+    "description",
+];
+
+impl AtomicToolManifest {
+    pub fn schema_version() -> u16 {
+        ATOMIC_TOOL_MANIFEST_SCHEMA_VERSION
+    }
+
+    pub fn schema_fields() -> &'static [&'static str] {
+        ATOMIC_TOOL_MANIFEST_SCHEMA_FIELDS
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActuatorAtomicBinding {
     pub kind: AtomicToolKind,

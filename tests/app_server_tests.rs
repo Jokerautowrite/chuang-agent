@@ -127,6 +127,22 @@ transport = "stub"
         "chuang-thread-1"
     );
     assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["governance_action_id"],
+        "run-turn-1"
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["governance_decision"]
+            .as_str()
+            .expect("governance decision should be string")
+            .starts_with("allowed:")
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["governance_reason"]
+            .as_str()
+            .expect("governance reason should be string")
+            .contains("read-only or draft action")
+    );
+    assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["session_memory_scope"],
         "session"
     );
@@ -168,6 +184,16 @@ transport = "stub"
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]["session_id"],
         "chuang-thread-1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["governance_action_id"],
+        "run-turn-1"
+    );
+    assert!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["governance_decision"]
+            .as_str()
+            .expect("event governance decision should be string")
+            .starts_with("allowed:")
     );
 }
 

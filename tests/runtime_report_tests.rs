@@ -259,6 +259,15 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     extra.insert("transport".to_string(), "openai-compatible".to_string());
     extra.insert("transport_mode".to_string(), "native".to_string());
     extra.insert("status_code".to_string(), "200".to_string());
+    extra.insert("governance_action_id".to_string(), "run-turn".to_string());
+    extra.insert(
+        "governance_decision".to_string(),
+        "allowed:read-only or draft action".to_string(),
+    );
+    extra.insert(
+        "governance_reason".to_string(),
+        "read-only or draft action".to_string(),
+    );
     extra.insert("goal_id".to_string(), "mainline-mvp".to_string());
     extra.insert("goal_objective".to_string(), "收尾可观测性".to_string());
     extra.insert("goal_context_injected".to_string(), "true".to_string());
@@ -314,6 +323,18 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert_eq!(
         observability.get("goal_id"),
         Some(&"mainline-mvp".to_string())
+    );
+    assert_eq!(
+        observability.get("governance_action_id"),
+        Some(&"run-turn".to_string())
+    );
+    assert_eq!(
+        observability.get("governance_decision"),
+        Some(&"allowed:read-only or draft action".to_string())
+    );
+    assert_eq!(
+        observability.get("governance_reason"),
+        Some(&"read-only or draft action".to_string())
     );
     assert_eq!(
         observability.get("session_id"),

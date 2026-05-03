@@ -70,6 +70,10 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     assert_eq!(parsed["status"]["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["status"]["atomic_tools"]["mapped_count"], 3);
     assert_eq!(
+        parsed["status"]["atomic_tools"]["manifest_schema_version"],
+        1
+    );
+    assert_eq!(
         parsed["status"]["atomic_tools"]["tool_report_schema_version"],
         6
     );

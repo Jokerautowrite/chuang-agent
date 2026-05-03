@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
-use chuang_agent::atomic_tool::{ga_atomic_tool_manifests, AtomicToolKind, AtomicToolStatus};
+use chuang_agent::atomic_tool::{
+    ga_atomic_tool_manifests, AtomicToolKind, AtomicToolManifest, AtomicToolStatus,
+};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::plugin_registry::check_plugin_registry;
@@ -116,6 +118,20 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
         return Err(format!(
             "doctor_atomic_tools_failed mapped={mapped:?} expected={expected_mapped:?}"
         ));
+    }
+
+    if AtomicToolManifest::schema_version() != 1
+        || AtomicToolManifest::schema_fields()
+            != [
+                "kind",
+                "name",
+                "source",
+                "status",
+                "implementation",
+                "description",
+            ]
+    {
+        return Err("doctor_atomic_tools_failed invalid manifest schema".to_string());
     }
 
     if ToolActionEnvelope::schema_version() != 1
@@ -320,8 +336,9 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     println!("subagent: {}", doctor.status.config.subagent_kind);
     println!("execution: {}", doctor.status.slots.execution);
     println!(
-        "atomic_tools_ok: {} action_schema_version={} report_schema_version={}",
+        "atomic_tools_ok: {} manifest_schema_version={} action_schema_version={} report_schema_version={}",
         doctor.status.atomic_tools.ok,
+        doctor.status.atomic_tools.manifest_schema_version,
         doctor.status.atomic_tools.tool_action_schema_version,
         doctor.status.atomic_tools.tool_report_schema_version
     );
