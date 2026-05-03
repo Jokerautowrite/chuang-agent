@@ -21,6 +21,7 @@ struct ChannelSimulateOutput {
     inbound: ChannelInboundMessage,
     app_server_request: Value,
     outbound: ChannelOutboundMessage,
+    runtime_report_id: Option<String>,
     model_name: String,
     finish_reason: Option<String>,
     tool_call_count: usize,
@@ -143,7 +144,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         .thread_id
         .clone()
         .unwrap_or_else(|| format!("channel-{}", request.inbound.message_id));
-    let (result, _) = run_with_options(&RunCliRequest {
+    let (result, records) = run_with_options(&RunCliRequest {
         options: CliOptions { runtime },
         user_input: request.inbound.text.clone(),
         workspace_root: Some(PathBuf::from(&request.inbound.workspace_root)),
@@ -176,6 +177,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_protocol_error_count: tool_meta.tool_protocol_error_count,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
+        runtime_report_id: records.runtime_report_id,
         tool_calls: tool_meta.tool_calls,
         tool_protocol_errors: tool_meta.tool_protocol_errors,
         tool_events: tool_meta.tool_events,
@@ -190,6 +192,10 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
             println!(
                 "thread_id: {}",
                 output.outbound.thread_id.as_deref().unwrap_or("none")
+            );
+            println!(
+                "runtime_report_id: {}",
+                output.runtime_report_id.as_deref().unwrap_or("none")
             );
             println!("model: {}", output.model_name);
             if let Some(reason) = &output.finish_reason {

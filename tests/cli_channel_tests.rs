@@ -88,6 +88,7 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     assert_eq!(parsed["app_server_request"]["method"], "turn/start");
     assert_eq!(parsed["app_server_request"]["params"]["text"], "还在吗？");
     assert_eq!(parsed["outbound"]["thread_id"], "thread-1");
+    assert_eq!(parsed["runtime_report_id"], "report-turn-1");
     assert_eq!(parsed["model_name"], "gpt-channel-test");
     assert_eq!(parsed["tool_call_count"], 0);
     assert_eq!(parsed["tool_protocol_error_count"], 0);
@@ -171,6 +172,7 @@ fn cli_channel_simulate_can_forward_goal_context() {
         "稳定完成 goal 通道接入"
     );
     assert_eq!(parsed["provider_meta"]["goal_context_injected"], "true");
+    assert_eq!(parsed["runtime_report_id"], "report-turn-1");
     assert_eq!(
         parsed["provider_meta"]["goal_objective"],
         "稳定完成 goal 通道接入"

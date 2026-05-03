@@ -70,6 +70,8 @@ The current pure protocol helpers live in `src/channel_adapter.rs`.
 
 For a batch of app-server events, use `outbounds_from_app_server_events()`. It prefers final `item/completed` messages over streaming `item/agentMessage/delta` messages, so a channel such as Feishu does not send duplicate partial and final replies by default.
 
+`channel simulate` also exposes the current `runtime_report_id` and runtime observability snapshot in its JSON output. That keeps the local protocol aligned with the thin-bridge contract: the adapter can correlate a channel turn to a structured report without guessing from free-form text.
+
 ## Feishu Rule
 
 Chuang must use a new dedicated Feishu bot and channel id. Do not reuse Codex or Hermes Feishu bridges, credentials, sessions, or services.

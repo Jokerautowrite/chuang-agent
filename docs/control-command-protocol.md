@@ -39,6 +39,9 @@ Supported `kind`: `service`, `agent`.
 
 Supported `status`: `Running`, `Stopped`, `Failed`, `Unknown`.
 
+Unknown top-level fields on each unit record are rejected. Put adapter-specific details under
+`metadata`.
+
 ## Apply Input
 
 The apply command receives:
@@ -72,6 +75,9 @@ The apply command must print one JSON receipt:
 ```
 
 Chuang still applies governance before calling `apply`. Dangerous changes require explicit approval at the CLI/control surface layer.
+The receipt is accepted only when `unit_id`, `action`, and the `change_model` `model_name`
+match the approved request. For non-`change_model` actions, `model_name` must be `null`.
+Unknown top-level receipt fields are rejected.
 
 ## Checked-In Example
 

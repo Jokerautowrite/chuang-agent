@@ -19,6 +19,7 @@ pub struct ControlPlaneCommandResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ControlPlaneUnitRecord {
     unit_id: String,
     display_name: String,
@@ -30,6 +31,7 @@ struct ControlPlaneUnitRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ControlPlaneReceiptRecord {
     unit_id: String,
     action: String,
@@ -309,12 +311,46 @@ fn validate_receipt_matches_request(
             request.unit_id, receipt.unit_id
         )));
     }
-    if receipt.action != request.action {
-        return Err(ControlError::InvalidRequest(format!(
-            "control apply receipt action mismatch: expected={} actual={}",
-            request.action.as_str(),
-            receipt.action.as_str()
-        )));
+    match (&request.action, &receipt.action) {
+        (
+            ControlAction::ChangeModel {
+                model_name: expected,
+            },
+            ControlAction::ChangeModel { model_name: actual },
+        ) if expected == actual => {}
+        (
+            ControlAction::ChangeModel {
+                model_name: expected,
+            },
+            ControlAction::ChangeModel { model_name: actual },
+        ) if expected != actual => {
+            return Err(ControlError::InvalidRequest(format!(
+                "control apply receipt model_name mismatch: expected={expected} actual={actual}"
+            )));
+        }
+        (ControlAction::ChangeModel { .. }, _) | (_, ControlAction::ChangeModel { .. }) => {
+            return Err(ControlError::InvalidRequest(format!(
+                "control apply receipt action mismatch: expected={} actual={}",
+                request.action.as_str(),
+                receipt.action.as_str()
+            )));
+        }
+        _ if receipt.action != request.action => {
+            return Err(ControlError::InvalidRequest(format!(
+                "control apply receipt action mismatch: expected={} actual={}",
+                request.action.as_str(),
+                receipt.action.as_str()
+            )));
+        }
+        _ => {}
+    }
+
+    if !matches!(request.action, ControlAction::ChangeModel { .. }) && receipt.model_name.is_some()
+    {
+        return Err(ControlError::InvalidRequest(
+            "control apply receipt model_name must be null unless action is change_model"
+                .to_string(),
+        ));
     }
     Ok(())
 }

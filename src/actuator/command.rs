@@ -28,6 +28,7 @@ struct ActuatorCommandRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ActuatorCommandResponse {
     observation: Option<Observation>,
     app_handle: Option<AppHandle>,

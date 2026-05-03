@@ -3,6 +3,8 @@
 ## 2026-05-03
 
 ### 最新进展
+- Control / Actuator command adapter 的输出契约再收紧一层：control list/apply 和 actuator response 现在拒绝未知顶层字段，control receipt 对 `change_model` 会报显式 `model_name` mismatch，非换模型动作夹带 `model_name` 也会拒绝。协议文档已同步，避免外部 adapter 静默漂移。
+- `channel simulate` 的结构化输出补了一处薄桥锚点：现在 JSON / 文本输出都会暴露 `runtime_report_id`，方便未来飞书插件把通道消息和本轮报告稳定关联起来，同时继续保留 `runtimeObservability` 和工具循环元数据。
 - `runtime_config` 的配置摘要补齐了 `provider_request_timeout_ms`：`status` / `config show` 现在能直接暴露 provider 端请求超时，CLI 也支持 `--provider-request-timeout-ms` 覆盖，便于在不触碰密钥的前提下排查 provider 卡死或长尾请求。
 - runtime report identity 的结构化输出补齐：`run_with_options()` 现在会把 `runtime_report_id / runtime_report_task_id / runtime_report_agent_id / runtime_report_status` 写入 runtime meta，`runtime_observability_meta()` 同步提升，app-server `turn/start` response 和 `turn/completed` event 直接输出 `runtimeReportId`，上层不必从 CLI 文本旁路推断报告身份。
 - provider fallback 的只读诊断面补齐：`runtime_observability_meta()` 现在会提升 `provider_fallback_primary_retryable / provider_fallback_primary_status_code / provider_fallback_primary_error_class`，app-server 的 `turn/start` response 和 `turn/completed` 事件不再只依赖原始 `providerMeta` 才能看懂 fallback 根因。

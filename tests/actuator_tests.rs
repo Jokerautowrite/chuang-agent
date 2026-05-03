@@ -150,6 +150,21 @@ fn command_actuator_reports_malformed_adapter_output() {
 }
 
 #[test]
+fn command_actuator_rejects_unknown_response_fields() {
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "printf".to_string(),
+        args: r#"{"observation":{"target":"Screen","summary":"screen_observed","evidence_ref":null},"app_handle":null,"evidence_ref":null,"message":"ok","unexpected":"ignored-before"}"#.to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = actuator
+        .observe(ObserveTarget::Screen)
+        .expect_err("unknown top-level response field should fail");
+
+    assert!(err.message.contains("unknown field"));
+}
+
+#[test]
 fn command_actuator_times_out_stuck_adapter() {
     let mut actuator = CommandActuator::new(ActuatorCommandConfig {
         program: "sleep".to_string(),

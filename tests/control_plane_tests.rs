@@ -242,6 +242,24 @@ fn command_control_plane_reports_malformed_list_json() {
 }
 
 #[test]
+fn command_control_plane_rejects_unknown_list_output_fields() {
+    let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":null,"metadata":{},"unexpected":"ignored-before"}]"#
+            .to_string(),
+        apply_args: String::new(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .try_list_units()
+        .expect_err("unknown top-level unit field should be rejected");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("unknown field"));
+}
+
+#[test]
 fn command_control_plane_times_out_stuck_list_command() {
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "sleep".to_string(),
@@ -328,7 +346,53 @@ fn command_control_plane_rejects_apply_receipt_for_wrong_model() {
         .expect_err("mismatched receipt model should fail");
 
     assert!(matches!(err, ControlError::InvalidRequest(_)));
-    assert!(format!("{err:?}").contains("receipt action mismatch"));
+    assert!(format!("{err:?}").contains("receipt model_name mismatch"));
+}
+
+#[test]
+fn command_control_plane_rejects_non_model_receipt_with_model_name() {
+    let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
+            .to_string(),
+        apply_args: r#"{"unit_id":"command-agent","action":"restart","previous_status":"Running","next_status":"Running","model_name":"gpt-5.4","message":"wrong_model_field"}"#
+            .to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .apply(ControlRequest {
+            unit_id: "command-agent".to_string(),
+            action: ControlAction::Restart,
+            reason: "test extra model field".to_string(),
+        })
+        .expect_err("non change_model receipt should not carry model_name");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("model_name must be null"));
+}
+
+#[test]
+fn command_control_plane_rejects_unknown_receipt_output_fields() {
+    let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
+            .to_string(),
+        apply_args: r#"{"unit_id":"command-agent","action":"restart","previous_status":"Running","next_status":"Running","model_name":null,"message":"ok","unexpected":"ignored-before"}"#
+            .to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .apply(ControlRequest {
+            unit_id: "command-agent".to_string(),
+            action: ControlAction::Restart,
+            reason: "test unknown receipt field".to_string(),
+        })
+        .expect_err("unknown top-level receipt field should be rejected");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("unknown field"));
 }
 
 #[test]

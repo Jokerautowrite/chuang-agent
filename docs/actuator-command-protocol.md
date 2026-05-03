@@ -39,6 +39,9 @@ Response shape:
 }
 ```
 
+Unknown top-level response fields are rejected. Adapter-specific detail should go in
+`message` or in the typed result object for the requested action.
+
 Rules:
 
 - Do not put secrets in logs or response text. `SecretOrPlainText::Secret` carries only a label.
