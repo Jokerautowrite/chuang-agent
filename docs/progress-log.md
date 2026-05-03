@@ -6,10 +6,11 @@
 - 已新增 `docs/goal-mode-operating-plan.md`，把当前 Codex 侧的目标驱动推进方式固化为协作流程：每轮固定 Goal / Acceptance / Budget / Checkpoint，先用于推进 Chuang 主线，后续再迁移成 Chuang 自己的轻量 goal 能力。
 - goal mode 当前不新增核心 slot，不改变主链；未来目标态是 `GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory` 的长期任务外壳。
 - `ACTION` 协议也开始暴露 schema 契约：`ToolActionEnvelope::schema_version()`、`schema_fields()`、`call_schema_fields()` 已补齐，和 `ToolLoopReport` 一样可被测试和文档引用。
+- `parse_tool_action_envelope_result()` 已补结构化错误返回，`ACTION` 前缀缺失和 JSON 错误不再只能被旧 `Option` 入口吞掉；旧 `parse_tool_action_envelope()` 继续保留兼容。
 - 主进程工具元数据继续收口：`tool_loop_meta` 已抽成共享解析层，`app_server` 和 `cli_channel` 不再各自重复解析 `tool_*_json`。
 - `tool_report_json` 已正式提升为 runtime report 的 `Log` artifact，工具事件不只停留在 meta/trace 里。
 - `write_operation` 已从字符串收紧为枚举，`created / modified / unchanged` 现在是结构化结果。
-- 当前验证仍保持通过：`cargo fmt --all`、`git diff --check`、`cargo test -q --test tool_runtime_tests`、`timeout 240s cargo test -q`。
+- 当前验证仍保持通过：`cargo fmt --all`、`git diff --check`、`cargo test -q --test tool_runtime_tests`、`timeout 240s cargo test -q`；`tool_runtime_tests` 当前 22 条通过。
 - 主进程 Execution Slot 工具回传继续硬化：`ToolLoopReport` schema 升到 v6，新增 `stderr_bytes / stderr_lines`、`write_operation`、`output_redacted / stdout_redacted / stderr_redacted`。
 - `read_file` 和 `code_execute` 对疑似密钥路径或内容返回脱敏占位，并保留原始字节数/行数统计，避免工具输出把密钥带进飞书、日志或报告。
 - `file_write` 回执新增 `write_operation` 枚举（`created|modified|unchanged`），上层不用再从 `write_before_bytes / write_changed` 反推写入类型。

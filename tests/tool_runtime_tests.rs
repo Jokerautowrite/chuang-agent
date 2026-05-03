@@ -5,9 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::governance::{RiskDecision, StaticRuleGovernance};
 use chuang_agent::tool_runtime::{
     execute_tool_call, execute_tool_call_with_governance, parse_final_answer,
-    parse_tool_action_envelope, parse_tool_call, parse_tool_model_output,
-    proposed_action_for_tool_call, ExecutionSlot, ShellRiskRules, ToolActionEnvelope, ToolCall,
-    ToolExecutionConfig, ToolLoopReport, ToolModelOutput, WriteOperation,
+    parse_tool_action_envelope, parse_tool_action_envelope_result, parse_tool_call,
+    parse_tool_model_output, proposed_action_for_tool_call, ExecutionSlot, ShellRiskRules,
+    ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport, ToolModelOutput,
+    WriteOperation,
 };
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -71,6 +72,18 @@ fn parse_structured_action_protocol_roundtrip() {
         ),
         ToolModelOutput::ToolCall(ToolCall::ListDir { .. })
     ));
+}
+
+#[test]
+fn parse_structured_action_result_reports_errors() {
+    let missing_prefix = parse_tool_action_envelope_result(r#"{"type":"final","answer":"完成"}"#)
+        .expect_err("missing ACTION prefix should be structured error");
+    assert_eq!(missing_prefix.code, "missing_action_prefix");
+
+    let invalid_json = parse_tool_action_envelope_result(r#"ACTION: {"type":"final""#)
+        .expect_err("bad ACTION json should be structured error");
+    assert_eq!(invalid_json.code, "invalid_action_json");
+    assert!(invalid_json.message.contains("ACTION payload is invalid"));
 }
 
 #[test]

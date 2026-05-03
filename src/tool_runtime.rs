@@ -383,9 +383,27 @@ pub fn tool_instruction_block(workspace_root: &Path) -> String {
 }
 
 pub fn parse_tool_action_envelope(body: &str) -> Option<ToolActionEnvelope> {
+    parse_tool_action_envelope_result(body).ok()
+}
+
+pub fn parse_tool_action_envelope_result(
+    body: &str,
+) -> Result<ToolActionEnvelope, ToolProtocolError> {
     let trimmed = body.trim();
-    let json_text = trimmed.strip_prefix("ACTION:").map(str::trim)?;
-    serde_json::from_str(json_text).ok()
+    let Some(json_text) = trimmed.strip_prefix("ACTION:").map(str::trim) else {
+        return Err(protocol_error(
+            "missing_action_prefix",
+            "ACTION payload must start with ACTION:",
+            trimmed,
+        ));
+    };
+    serde_json::from_str(json_text).map_err(|error| {
+        protocol_error(
+            "invalid_action_json",
+            &format!("ACTION payload is invalid or unsupported: {error}"),
+            trimmed,
+        )
+    })
 }
 
 pub fn parse_tool_call(body: &str) -> Option<ToolCall> {
@@ -406,8 +424,8 @@ pub fn parse_final_answer(body: &str) -> Option<String> {
 
 pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
     let trimmed = body.trim();
-    if let Some(json_text) = trimmed.strip_prefix("ACTION:").map(str::trim) {
-        return match serde_json::from_str::<ToolActionEnvelope>(json_text) {
+    if trimmed.starts_with("ACTION:") {
+        return match parse_tool_action_envelope_result(trimmed) {
             Ok(ToolActionEnvelope::ToolCall {
                 schema_version,
                 call,
@@ -432,11 +450,7 @@ pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
                 "ACTION final answer is empty",
                 trimmed,
             )),
-            Err(error) => ToolModelOutput::ProtocolError(protocol_error(
-                "invalid_action_json",
-                &format!("ACTION payload is invalid or unsupported: {error}"),
-                trimmed,
-            )),
+            Err(error) => ToolModelOutput::ProtocolError(error),
         };
     }
 
