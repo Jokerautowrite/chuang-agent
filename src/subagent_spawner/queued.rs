@@ -85,7 +85,10 @@ impl QueuedSubagentSpawner {
             return Err(SubagentError::NotRunning(run_id.clone()));
         }
 
-        if report.task_id != run.request.task_id || report.agent_id != run.receipt.agent_id {
+        if report.task_id != run.request.task_id
+            || report.agent_id != run.receipt.agent_id
+            || report.parent_agent_id.as_ref() != Some(&run.request.parent_agent_id)
+        {
             return Err(SubagentError::InvalidRequest(
                 "report identity does not match queued run".to_string(),
             ));

@@ -102,27 +102,23 @@ fn subagent_list_command(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|run_id| run_id.0.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let claim_run_ids = queue
-        .list_claim_run_ids()
-        .map_err(|e| format!("subagent_claim_list_failed: {e:?}"))?;
-    let claim_lookup = claim_run_ids
-        .iter()
-        .map(|run_id| run_id.0.clone())
-        .collect::<std::collections::BTreeSet<_>>();
     let items = dispatches
         .into_iter()
-        .map(|dispatch| SubagentListItem {
-            required_capabilities: dispatch_required_capabilities(&dispatch),
-            is_claim_stale: queue
-                .is_claim_stale(&dispatch.run_id, dispatch.idle_timeout_ms)
-                .unwrap_or(false),
-            run_id: dispatch.run_id.0.clone(),
-            agent_id: dispatch.agent_id.0,
-            task_id: dispatch.task_id.0,
-            agent_name: dispatch.agent_name,
-            tool_policy: format!("{:?}", dispatch.tool_policy),
-            is_claimed: claim_lookup.contains(&dispatch.run_id.0),
-            has_report: report_lookup.contains(&dispatch.run_id.0),
+        .map(|dispatch| {
+            let is_claimed = queue.is_claimed(&dispatch.run_id).unwrap_or(false);
+            SubagentListItem {
+                required_capabilities: dispatch_required_capabilities(&dispatch),
+                is_claim_stale: queue
+                    .is_claim_stale(&dispatch.run_id, dispatch.idle_timeout_ms)
+                    .unwrap_or(false),
+                run_id: dispatch.run_id.0.clone(),
+                agent_id: dispatch.agent_id.0,
+                task_id: dispatch.task_id.0,
+                agent_name: dispatch.agent_name,
+                tool_policy: format!("{:?}", dispatch.tool_policy),
+                is_claimed,
+                has_report: report_lookup.contains(&dispatch.run_id.0),
+            }
         })
         .collect::<Vec<_>>();
     let output = SubagentListCliOutput {

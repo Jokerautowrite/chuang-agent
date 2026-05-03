@@ -114,6 +114,8 @@ Before execution, Chuang creates a claim file:
 
 If a command runner exceeds `idle_timeout_ms`, Chuang terminates that child process and writes a failed report. Existing dispatch, claim, release, and report files are not deleted.
 
+Claim release is append-only: `release-claim` writes a release marker and does not remove the old claim file. `subagent list` reports `is_claimed=false` when a release marker is newer than the claim payload.
+
 ## Collection
 
 Read a report directly:
@@ -129,6 +131,8 @@ cargo run -- subagent collect --run-id <run_id>
 ```
 
 Collection restores the dispatch identity and verifies the report through the queued subagent slot.
+
+Collected reports must match the restored dispatch `task_id`, `agent_id`, and `parent_agent_id`. A mismatched report fails collection instead of being returned to the caller.
 
 ## Safety Rules
 

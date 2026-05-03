@@ -384,6 +384,56 @@ fn cli_subagent_run_once_skips_claimed_dispatch_and_lists_claim_state() {
 }
 
 #[test]
+fn cli_subagent_run_once_reclaims_stale_claim() {
+    let queue_root = temp_queue_root("run-once-stale-claim");
+    let first = dispatch_task_with_args(
+        &queue_root,
+        "task-cli-stale-reclaim",
+        "过期领取后重试任务",
+        &["--idle-timeout-ms", "0"],
+    );
+    let first_run = first["run_id"].as_str().expect("first run id");
+    std::fs::create_dir_all(queue_root.join("claims")).expect("claims dir should exist");
+    std::fs::write(
+        queue_root.join("claims").join(format!("{first_run}.json")),
+        format!(r#"{{"run_id":"{first_run}","owner":"stale-worker","claimed_at_unix_nanos":0}}"#),
+    )
+    .expect("stale claim should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let claim_payload =
+        std::fs::read_to_string(queue_root.join("claims").join(format!("{first_run}.json")))
+            .expect("claim payload should read");
+
+    assert_eq!(parsed["run_id"], first_run);
+    assert!(claim_payload.contains("cli-worker-"));
+    assert!(queue_root
+        .join("reports")
+        .join(format!("{first_run}.json"))
+        .exists());
+}
+
+#[test]
 fn cli_subagent_release_claim_allows_dispatch_to_run_again() {
     let queue_root = temp_queue_root("release-claim");
     let first = dispatch_task(&queue_root, "task-cli-release-1", "释放后运行任务");
@@ -454,6 +504,56 @@ fn cli_subagent_release_claim_allows_dispatch_to_run_again() {
         .join("claims")
         .join(format!("{first_run}.json"))
         .exists());
+}
+
+#[test]
+fn cli_subagent_list_marks_released_claim_as_not_claimed() {
+    let queue_root = temp_queue_root("list-released-claim");
+    let first = dispatch_task(&queue_root, "task-cli-released-list", "释放后列表状态");
+    let first_run = first["run_id"].as_str().expect("first run id");
+    std::fs::create_dir_all(queue_root.join("claims")).expect("claims dir should exist");
+    std::fs::write(
+        queue_root.join("claims").join(format!("{first_run}.json")),
+        format!(r#"{{"run_id":"{first_run}","owner":"old-worker","claimed_at_unix_nanos":1}}"#),
+    )
+    .expect("claim should write");
+    std::fs::create_dir_all(queue_root.join("claim-releases"))
+        .expect("claim release dir should exist");
+    std::fs::write(
+        queue_root
+            .join("claim-releases")
+            .join(format!("{first_run}.json")),
+        format!(r#"{{"run_id":"{first_run}","owner":"operator","reason":"retry","released_at_unix_nanos":2}}"#),
+    )
+    .expect("release should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "list",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert!(parsed["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .any(|item| item["run_id"] == first_run && item["is_claimed"] == false));
 }
 
 #[test]
@@ -1214,6 +1314,49 @@ fn cli_subagent_collect_rejects_mismatched_report_identity() {
 }
 
 #[test]
+fn cli_subagent_collect_rejects_mismatched_parent_identity() {
+    let queue_root = temp_queue_root("collect-parent-mismatch");
+    let dispatch_output = dispatch_task(
+        &queue_root,
+        "task-cli-parent-mismatch",
+        "收集 parent 错误报告",
+    );
+    let run_id = dispatch_output["run_id"].as_str().expect("run id");
+    let agent_id = dispatch_agent_id(&queue_root, run_id);
+
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root.join("reports").join(format!("{run_id}.json")),
+        report_json_with_parent(
+            "task-cli-parent-mismatch",
+            &agent_id,
+            "wrong parent identity report",
+            "wrong-parent",
+        ),
+    )
+    .expect("report should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            run_id,
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("subagent_collect_failed"));
+}
+
+#[test]
 fn cli_subagent_collect_marks_missing_dispatch_without_error() {
     let queue_root = temp_queue_root("collect-missing-dispatch");
     let output = cargo_command()
@@ -1251,13 +1394,22 @@ fn sample_report_json(summary: &str) -> String {
 }
 
 fn report_json(task_id: &str, agent_id: &str, summary: &str) -> String {
+    report_json_with_parent(task_id, agent_id, summary, "chuang-cli")
+}
+
+fn report_json_with_parent(
+    task_id: &str,
+    agent_id: &str,
+    summary: &str,
+    parent_id: &str,
+) -> String {
     format!(
         r#"{{
   "schema_version": "1.0",
   "report_id": "report-queued-run-1",
   "task_id": "{task_id}",
   "agent_id": "{agent_id}",
-  "parent_agent_id": "chuang-cli",
+  "parent_agent_id": "{parent_id}",
   "status": "Success",
   "started_at": "2026-05-01T00:00:00Z",
   "finished_at": "2026-05-01T00:00:01Z",
