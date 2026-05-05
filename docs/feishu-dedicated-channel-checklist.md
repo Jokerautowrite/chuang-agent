@@ -54,13 +54,23 @@ Expected root status:
 - placeholder warnings: `none`
 - Feishu connection mode: `websocket`
 
+Expected `feishu-check` fields:
+
+- `env_file_is_chuang_scoped=true`
+- `env_file_scope_warnings=[]`
+- `workspace_root_exists=true`
+- `workspace_config_exists=true`
+- `connection_mode_ok=true`
+- `has_legacy_names=false`
+- `legacy_var_names=[]`
+
 ## Bot-Side Requirements
 
-- Ignore non-text interactive messages or convert them explicitly before calling Chuang.
+- Ignore non-text inbound interactive messages or convert them explicitly before calling Chuang.
 - Preserve Feishu message id as `message_id`.
 - Preserve Feishu sender id as `sender_id`.
 - Use a stable per-chat or per-topic thread id.
-- Forward only plain text to Chuang until rich-message support is explicitly added.
+- Forward plain text inbound content to Chuang; outbound replies may render as interactive cards and must fall back to text if card send fails.
 - Return errors as short operational messages without secrets.
 
 ## Local Templates

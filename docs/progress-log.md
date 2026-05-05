@@ -1,8 +1,93 @@
 # 协作进度日志
 
+## 2026-05-05 补充 checkpoint
+- 当前 repo-root 状态已收口：`status --json` 报 `project_readiness=ready`、`release_readiness=second_test_version_ready`、`channel_readiness=ready`、`subagent_readiness=ready`、`memory_readiness=ready`。
+- 最新 `goal checkpoint` 已写入 `checkpoint-second-test-version-ready-20260505`，`goal_run_diagnostics.checkpoint_log_complete=true`。
+- 子代理本地多 worker 缺口已补：`subagent run-loop --max-concurrency 1..8` 现在会启动 bounded worker batch，通过文件队列 claim/report admission 收口；`command_runner` 和 `multi_worker` readiness 在 queued_external 配置下升为 `ready`，第二测试版 `subagent_protocol_acceptance` 也升为 `ready`。
+- MVP smoke 已新增并发子代理验收：连续 dispatch 两个 smoke task 后用 `run-loop --max-concurrency 2 --max-runs 2` 执行并 collect 两个 report；局部验证已通过 `cargo fmt --all --check`、`cargo test -q --test cli_subagent_dispatch_tests`、`cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test cli_console_tests`。
+- 完整门禁已重新通过并写入 `checkpoint-subagent-bounded-multi-worker-20260505`：`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`。
+- 记忆五层本地验收状态已从 partial 推到 ready：LIM 支持 provenance candidate + 显式 `maintenance apply --approve-writeback` 写入 experiences，external knowledge 支持本地只读 provenance search，maintenance loop 保持 dry-run report + 显式 apply，不连接真实 wiki/GBrain、不自动写长期记忆。
+- 完整门禁已重新通过并写入 `checkpoint-memory-layered-local-ready-20260505`：`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`。
+- 第二测试版本当前仍保持可交付状态：`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh` 全部通过。
+- 当前接续点保持不变：继续盯 `goal/run`、`subagent protocol`、`readiness`、`memory`、`channel`、`control` 的边界收口，以及真实 runner / adapter 的后置风险。
+- 这轮只做了验证与接续整理，没有新增外部服务接入，也没有碰 Hermes 或真实飞书桥。
+- `cargo check -q` 在独立 `CARGO_TARGET_DIR` 下通过；`cargo clippy --all-targets --all-features -- -D warnings` 仍在当前环境里报 `E0786 invalid metadata files`，更像本机 build artifact / toolchain 问题而不是代码回归。
+- 最新 `goal checkpoint` 已写入记忆五层本地 ready 验证，`goal show --json` 里的 `goal_run_diagnostics.checkpoint_log_complete=true`，`last_checkpoint_id=checkpoint-memory-layered-local-ready-20260505`。
+- `docs/goal-mode-operating-plan.md` 现在明确：checkpoint 最好带验证备注，否则 `goal_run` 诊断会把它视为不完整。
+- 子代理报告校验现在会拒绝 `finished_at` 早于 `started_at` 的时间倒挂报告；`control_plane_tests` 里的 command adapter 用例也改成串行，避免并发干扰导致的偶发失败。
+- 子代理报告时间校验再收紧一层：现在直接比较解析后的时间，避免同一字段重复解析；最新 checkpoint 是 `checkpoint-subagent-report-order-and-control-test-serial-20260505`。
+- 子代理报告时间错误现在保留原始输入字符串，便于排错，同时仍只解析一次时间；最新 checkpoint 是 `checkpoint-subagent-report-time-compare-20260505`。
+- control plane receipt 验证现在复用共享的 action mismatch helper，减少重复错误格式化但不改变协议行为；最新 checkpoint 是 `checkpoint-control-action-mismatch-helper-20260505`。
+- `ReportAdmission` 已补回归锁定 `invalid_timestamp_order` 作为时间倒挂报告的稳定 `reason_code`，`docs/subagent-runner-protocol.md` 也列出该错误码；最新 checkpoint 是 `checkpoint-subagent-timestamp-order-admission-code-20260505`。
+- `ReportAdmission` 的 accepted 路径不再在轻量合同校验后强反序列化完整 `SubagentReport`，避免合同有效但完整结构字段不足的最小 report 触发 panic；最新 checkpoint 是 `checkpoint-report-admission-no-full-deserialize-20260505`。
+- `ReportAdmission` 继续补稳：`invalid_utf8` 现在也有稳定 `reason_code` 回归，`docs/subagent-runner-protocol.md` 与实现对齐；最新 checkpoint 是 `checkpoint-report-admission-invalid-utf8-code-20260505`。
+- 本轮协议硬化已重新跑完整验收并写入 checkpoint：`checkpoint-report-admission-validation-pass-20260505`；验证项为 `cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`。
+- `ReportAdmission` 剩余 validator reject 稳定码已补回归：`unsupported_schema_version`、`empty_required_field`、`invalid_enum_format`、`invalid_timestamp_format`、`size_limit_exceeded`；协议文档同步列全示例 reason_code。最新 checkpoint 是 `checkpoint-report-admission-reason-codes-20260505`。
+- command runner 协议候选判断已收紧：stdout 只要像 `SubagentReport` JSON（带 `schema_version` 和任一报告身份字段），就会进入 admission；缺 `status` 这类不完整报告现在会被拒绝并写失败审计，不再被当普通成功输出。最新 checkpoint 是 `checkpoint-command-runner-protocol-candidate-20260505`。
+- 上面这两项改动之后，`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh` 又完整重跑一次并通过。
+- `subagent run-loop --json` 的 `report_admissions` 现在有回归覆盖，批量执行多个 dispatch 时每条 report admission 都会保留 `Accepted/report_validated` 状态，不只覆盖 `run-once`。最新 checkpoint 是 `checkpoint-run-loop-admission-coverage-20260505`。
+- 第二测试版本专用 smoke wrapper 的契约已加回归：测试同时锁定 wrapper 设置 `CHUANG_SMOKE_NAME=second_test`、复用安全 MVP smoke，以及底层 smoke 用环境名生成最终 marker；本轮已实跑 `sh scripts/chuang-second-test-smoke.sh` 并输出 `second_test_smoke_ok`。最新 checkpoint 是 `checkpoint-second-test-smoke-wrapper-20260505`。
+- `docs/subagent-runner-protocol.md` 已同步 command runner 协议候选规则：带 `schema_version` 和任一报告身份字段的 JSON stdout 会进入 admission，缺字段也会拒绝，不会落到普通 stdout 成功包装。随后完整重跑 `cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh` 并通过。最新 checkpoint 是 `checkpoint-protocol-doc-full-validation-20260505`。
+- `GoalRun` 多 worker 写入范围继续收紧：同一个 `write_scope_id` 现在只能归一个 worker，避免 set 诊断误把重复归属当成 scope complete；已补 `goal_run_tests` 回归并复验 `cli_goal_tests`。最新 checkpoint 是 `checkpoint-goal-run-scope-owner-20260505`。
+- GoalRun 单一 scope owner 收紧后，第二测试版本完整门禁已重跑通过：`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`。最新 checkpoint 是 `checkpoint-goal-run-scope-owner-full-validation-20260505`。
+- `GoalRun` checkpoint 现在必须声明至少一个 `completed_worker_id`，避免“无完成者”的 checkpoint 被误当成可恢复进度；MVP smoke 的 checkpoint 验收也改为写入 `main-process` 和 validation note，并断言 `checkpoint_log_complete=true`。最新 checkpoint 是 `checkpoint-goal-checkpoint-worker-required-20260505`。
+- GoalRun checkpoint 完成者校验后，完整门禁已再次通过：`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`。最新 checkpoint 是 `checkpoint-goal-checkpoint-worker-required-full-validation-20260505`。
+- `GoalRun` checkpoint 现在也必须带 `validation_note`，避免没有验证证据的 checkpoint 落盘；`docs/goal-mode-operating-plan.md` 和 `docs/mvp-scope.md` 已同步 CLI 用法，局部测试和 MVP smoke 通过。最新 checkpoint 是 `checkpoint-goal-checkpoint-validation-note-required-20260505`。
+- checkpoint validation note 硬要求后，`cargo test -q` 已完整重跑并通过；随后补了 external-ai dispatch dry-run checkpoint，最新 id 是 `checkpoint-external-ai-dispatch-dry-run-20260505`。
+
+## 2026-05-05
+
+### 最新进展
+- 第二测试版本 readiness 已建立顶层状态名：`status` / `doctor` / `app-server health --diagnostic` / `console snapshot` 现在将 `release_readiness.release_name` 报为 `second_test_version`，整体状态为 `second_test_version_ready`；含义是 readiness、smoke、goal/run 续接和 subagent protocol 已成为当前验收面，但不误报成真实外部服务已接通。
+- `scripts/chuang-mvp-smoke.sh` 和 status/doctor/app-server/console 回归断言已同步第二测试版本状态名，继续把 smoke 作为端到端门禁。
+- `status` / `doctor` / `console snapshot` / `app-server health` 的文本输出也补上 `release_acceptance` 摘要，直接显示 `connects_real_external_services=false / verifies_real_external_services=false / uses_stub_or_local_fixtures=true`，不用只看 JSON 才能确认第二测试版本没有接真实外部服务。
+- 新增 `scripts/chuang-second-test-smoke.sh` 作为第二测试版本专用验收入口；它设置 `CHUANG_SMOKE_NAME=second_test` 后复用安全 `chuang-mvp-smoke.sh`，最终输出 `second_test_smoke_ok`，方便后续区分第二版验收和旧 MVP 入口。该 wrapper 不连接真实服务、不做系统控制。
+- 外脑知识库层从只读 status 往前推进一格：新增 `memory knowledge search --root PATH --query TEXT [--limit N] [--json]`，只扫描本地 markdown/text 根目录并输出 `source/path/line/score/preview` provenance hit；仍显式 `dry_run=true / read_only=true / connects_real_service=false / writes_automatically=false / runtime_retrieval_wired=false`，不连接真实 wiki/GBrain、不写核心记忆、不注入 runtime。
+- 本地外脑检索会跳过隐藏路径和疑似 secret/token/password/private/credential 文件；`cli_identity_memory_tests` 增加本地知识检索只读回归，MVP smoke 也加入 `memory knowledge search` 验收。
+- 外脑知识库层补上只读 contract CLI：`memory knowledge status [--json]` 会输出 `external_knowledge` adapter 的当前边界，明确 `dry_run=true / read_only=true / connects_real_service=false / writes_automatically=false / runtime_retrieval_wired=false`，并列出 `wiki`、`gbrain` 仍为 `documented_only`。该入口不连接真实 wiki/GBrain、不做检索、不写核心记忆。
+- 已补 `cli_identity_memory_tests` 回归，锁定外脑 contract 输出必须保持只读、非自动写回、非真实服务连接，避免外脑 readiness 被误报成已接通运行时能力。
+- 子代理 command runner 报告补上 controller 侧治理证据：通过 `--approve-exec` 启动的外部 runner 会在 `SubagentReport.governance_decision` 中记录 `action_id=subagent-command-runner:<run_id>`、`decision=needs_approval`、`reason=approved_by_cli_flag: --approve-exec`；如果 worker 自己返回了治理字段则保留 worker 值。该字段只说明主控允许启动 runner，不代表 worker 内部动作自动获批。
+- `docs/subagent-runner-protocol.md` 已同步 command runner 治理证据语义，`cli_subagent_dispatch_tests` 覆盖 plain wrapper report、完整 protocol report 和 protocol reject report 三条路径。
+- Chuang 专用飞书预检继续补强：`channel feishu-check` 现在会输出 `env_file_is_chuang_scoped` 和 `env_file_scope_warnings`，仅按 env 文件路径判断是否像 Chuang 专用配置；明确的 `.codex-im/.env`、`codex-feishu`、`hermes-gateway`、`hermes-feishu` 路径会产生 warning 并让 `ok=false`，但不会读取服务状态、不会连接飞书、不会输出 secret 值。
+- `docs/feishu-dedicated-channel-checklist.md` 已补 expected fields，`cli_channel_tests` 覆盖正常 Chuang env 和旧 `.codex-im/.env` 路径误用两条路径。
+- MVP smoke 已把 Chuang 专用飞书预检纳入端到端门禁：临时生成 `chuang-feishu.env`，断言 `env_file_is_chuang_scoped=true`、workspace/config/mode 均通过、legacy 变量为空，并确认 secret 值不会出现在 JSON 输出中；该步骤仍不连接真实飞书、不修改服务。
+- `memory knowledge status` 已纳入 MVP smoke 的只读验收，固定检查外脑 contract 不连接真实服务、不自动写回、不接 runtime retrieval；`memory_readiness.external_knowledge` 文案同步为“已有只读 contract CLI，但运行时检索仍未接入”。
+- 阶段 checkpoint：第二测试版本主线继续保持可跑，当前新增能力集中在“只读诊断”、“记忆维护 dry-run”、“goal/run 续接诊断”和“subagent protocol acceptance”，没有接入新的真实外部服务，没有自动写长期记忆，没有动 Codex/Hermes 飞书桥。
+- 记忆维护闭环补上最小 dry-run 入口：`memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json]` 会复用 identity memory snapshot、session summary search 和 LIM candidate extraction，输出 `identity_health`、`lim_candidates`、`recommendations`；它显式 `dry_run=true / writes_automatically=false`，不自动写 `MEMORY.md` 或 `experiences.md`。
+- MVP smoke 已增加 `memory maintenance report` 验收，确认维护报告能在临时目录里只读生成，并固定 `experiences.md` 仍只是人工确认后的写回目标。
+- `app-server health` 新增只读 `--diagnostic` 模式：默认健康检查仍严格要求 provider env，诊断模式允许缺失 `api_key_env` 时继续输出 `api_key_state`、`placeholder_warnings`、`project_readiness`、`release_readiness`、channel/subagent/external-AI readiness，便于飞书桥和控制台排障，不连接 provider、不触碰真实服务。
+- `scripts/chuang-mvp-smoke.sh` 已对齐当前测试版 readiness：新增 `release_readiness` 断言，固定检查测试版本 readiness 状态；同时把 `memory_readiness.external_knowledge / maintenance_loop` 和 `subagent_readiness.multi_worker / external_ai_downstream` 的 `partial` 状态纳入 smoke，避免状态面和端到端门禁漂移。
+- 本轮第二测试版本门禁重新跑通：`cargo fmt --all`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh` 全部通过。smoke 最终输出 `mvp_smoke_ok`，使用临时目录和 stub provider，不连接真实飞书、不触碰真实服务、不读取真实密钥。
+- 当前结论保持不变：Chuang 已达到当前测试版本 `ready_with_partial_modules` 状态，可以继续试跑主链；后续重点从“主链是否能跑”转为 adapter/plugin 边界硬化、真实 provider/工具 UX、记忆维护闭环和子代理执行层增强。
+
 ## 2026-05-04
 
 ### 最新进展
+- `status` / `console snapshot` / `config show` 现在支持缺 provider env 的只读诊断模式：遇到 `api_key_env` 未设置时会继续输出状态，并在 `api_key_state` 和 `placeholder_warnings` 里点名缺失的 env；`doctor` 仍保持严格失败，继续当健康门禁。
+- `status` / `doctor` 新增顶层 `release_readiness`：当时显示为第一测试版 ready-with-partial-modules，表示第一版测试交付已经到位，后续继续以 adapter/plugin 方式补边界，不再以“主链未通”为前提。
+- 子代理后置边界也补成正式文档：新增 `docs/multi-worker-orchestration.md` 和 `docs/external-ai-downstream.md`，把多 worker 计划与外部智能体下游 contract 从“待补”推进到“已定义边界、仍不自动执行”。
+- `status` / `doctor` 的 `subagent_readiness` 同步更新：`multi_worker` 和 `external_ai_downstream` 现在都显示为 `partial`，把子代理计划层和外部智能体下游层从 deferred 往前挪一格。
+- 记忆层的后置边界补成正式文档：新增 `docs/external-knowledge-adapter.md` 和 `docs/memory-maintenance-loop.md`，把 wiki/GBrain 外脑与 dry-run 维护闭环从“待补”推进到“已定义边界、仍未接入运行时”。
+- `status` / `doctor` 的 `memory_readiness` 同步更新：`lim_long_term`、`external_knowledge`、`maintenance_loop` 在本地第二测试版边界内显示为 `ready`，并继续在文本状态里带出各自路径；真实 wiki/GBrain 和自动调度仍留在 live adapter / scheduler 后续边界。
+- `console snapshot` 文本摘要补上 `project_readiness / channel_readiness / subagent_readiness / external_ai_readiness`，未来桌面/服务控制台不需要只读 JSON 才能看到关键模块状态。
+- Chuang 专用飞书通道预检继续收紧：`channel feishu-check` 现在会只读检查 `workspace_root_exists`、`workspace_config_exists`、`connection_mode_ok` 和 `legacy_var_names`，避免通道环境看起来有 app id/secret 但实际没绑定到可运行 workspace，或误混 Codex/Hermes 的旧变量名。
+- 子代理 command runner 的受理面补齐：`subagent run-once/run-loop/report/collect` 现在会在 JSON 输出里显式带上 `ReportAdmission`，让控制面能直接看到 `Accepted / Rejected`，不必只从 report 文本倒推控制器状态。
+- `docs/subagent-runner-protocol.md` 已补 `ReportAdmission` 说明，明确 worker execution status 与 controller admission status 是两层不同状态。
+- 外部 AI 分身调度 SOP 已落成 `data/skills/external_agent_dispatch_sop.md`：明确 `主进程 -> 子代理 -> 外部智能体` 的二级委派链、平台选择表、任务翻译模板、质量评级、追问上限、记忆写回边界和审计禁区。它只是 Skill/contract，不接真实浏览器、不新增第十个 Slot。
+- `external_ai_readiness.dispatch_sop` 已从 `deferred` 调整为 `partial`：表示调度策略骨架已存在，但统一身份引擎和真实 browser/HTTP adapter 仍未接入。
+- 统一身份引擎 adapter contract 已落成 `data/skills/unified_identity_engine_adapter.md`：定义平台/任务/context/session_hint 的输入契约、结构化输出、失败类、审计边界和后续可替换实现。它仍不直接执行真实浏览器或外脑，只是 lower adapter contract。
+- `external_ai_readiness.unified_identity_engine` 已从 `deferred` 调整为 `partial`：表示统一身份引擎的契约已存在，但真实登录态/session adapter 仍后置。
+- `status` / `doctor` 新增 `subagent_readiness`：按 dispatch 队列、report collect、command runner、multi_worker、external AI downstream 拆分子代理状态；在 `queued_external` 配置下当前子代理层为 `ready`，默认 fake 配置仍会因队列层 deferred 保持 partial。
+- `status` / `doctor` 新增 `channel_readiness`：按 `app_server / channel_simulate / dedicated_feishu_bridge / codex_hermes_isolation / rich_messages` 拆分通道状态，明确 Chuang 的飞书桥是独立 adapter，当前只检查仓库本地脚本和协议边界，不触碰 Codex/Hermes 服务。
+- `status` / `doctor` 新增 `memory_readiness`：按内部记忆、历史会话、LIM 长期沉淀、外脑知识库、自动维护闭环五层给出 ready/partial/deferred/blocked，和项目级 `project_readiness` 一起把主链与记忆骨架分开诊断。
+- `status` / `doctor` 新增项目级 `project_readiness` 汇总：按 `main_chain / identity / memory / context / governance / execution_tools / reporting / channel / subagent / goal / plugins / external_ai` 12 个模块给出 `ready / partial / deferred / blocked`、当前实现、下一步动作和核心边界，避免只盯零散字段而看不清整项目状态。
+- `doctor` 已把 `project_readiness` 纳入健康检查：只要出现 blocked 模块就会明确失败；当前目标态为 `ready`，表示主链可跑，live adapter 继续按边界后置。
+- `scripts/chuang-mvp-smoke.sh` 已增加项目级 readiness 断言，固定检查 `main_chain=ready`、`execution_tools=ready`、`channel=ready`、`external_ai=ready`，后续改 live adapter 状态必须同步解释原因。
+- docs/smoke 主线验收顺序已补清楚：当前固定先读 `status --json` readiness，再跑 `doctor --json` 安全健康检查，最后由 `scripts/chuang-mvp-smoke.sh` 串起临时目录端到端冒烟；该流程不接真实飞书、不碰真实服务、不读取真实密钥。
+- smoke 的 status/doctor JSON 断言已覆盖新 readiness 字段：GA mapped/interface-only 原子工具名单、identity bootstrap presence、provider request timeout、`goal_run` readiness、plugin registry 和预期 stub provider placeholder warning。
+- `GoalRun` 已从纯内存结构推进到本地可恢复记录：新增 `goal plan/show/checkpoint` CLI，默认写入已忽略的 `./context/goal-runs/<goal_id>.json`，支持创建目标计划、读取当前计划、追加 checkpoint；当前仍只记录计划和续跑状态，不执行命令、不新增 core slot、不绕过治理。
+- Chuang 专用 Feishu bridge 已独立以 `chuang-feishu-bot.service` 运行：user unit 指向仓库本地 `scripts/chuang-feishu-bridge.sh`，预检通过后已成功拉起长连接进程，桥日志显示 `Feishu long connection started`，不再复用 Codex 的 `codex-feishu-bot.service` 作为主入口。
+- Chuang 专用 Feishu bridge 已从 Codex 桥内部依赖里剥离：`scripts/chuang-feishu-bridge.js` 改为只引用仓库本地的 `scripts/chuang-feishu-client-adapter.js`，并移除了 `.codex-im/.env` 兜底加载；桥现在只认 `CHUANG_*` 专用环境变量，文本消息仍直发 `app-server`，不再借用 Codex/Hermes 的桥脚本。
 - 长期记忆内部经验层补上第一条真实写入路径：`DualFileMemoryStore` 新增 `append_experience()`，`FileDualFileMemoryStore` 会把带 `## id` 的经验条目追加到 `experiences.md`，复用 Hermes 风格硬上限 admission、重复 id 拒绝和无变更失败语义。
 - CLI 新增显式经验沉淀入口：`run --remember-experience` 会把本轮 `runtime_turn` 按 provenance 写入 `experiences.md`，内容包含 `turn_id / report_id / agent_id / governance / user / summary / lesson`；普通运行不自动写，避免主进程乱写长期记忆。
 - `memory identity append-experience --id ID --content TEXT` 已补手动入口，用于人工或上层治理确认后写入经验层；`run` 完成后会输出 `experience_memory_recorded: ID`，方便通道和报告关联。
@@ -48,6 +133,7 @@
 - Codex 自身升级已完成：本机 Codex CLI 来源确认为全局 npm 包 `@openai/codex`，已从 `0.125.0` 升级到 `0.128.0`；验证命令 `/home/user/.npm-global/bin/codex --version` 返回 `codex-cli 0.128.0`。飞书桥通过该路径启动 Codex app-server，重启 `codex-feishu-bot.service` 后会加载新版；升级过程只处理 Codex，不碰 Hermes，不提交私有 `config.toml`。
 - Codex 0.128.0 的 `goals` feature 已低风险验证：`codex --enable goals features list` 会显示 `goals ... true`，但当前没有新增显式 `goal` 子命令；因此暂不默认开启到飞书主通道。
 - Chuang 自身 goal mode 最小骨架已开始落地：新增 `src/goal_mode.rs` 和 `tests/goal_mode_tests.rs`，只定义 `GoalSpec`、校验和 runtime context block 渲染，不执行命令、不绕过治理、不新增 slot。
+- `GoalRun` 规划原语已明确：它把 `goal_spec / worker_plan / validation_plan / checkpoint_log` 组织成可恢复的目标计划，当前 continuation model 是 checkpoint-first，尽量靠恢复 checkpoint 续接，而不是反复让操作员输入 `continue`。
 - 已新增 `docs/goal-mode-operating-plan.md`，把当前 Codex 侧的目标驱动推进方式固化为协作流程：每轮固定 Goal / Acceptance / Budget / Checkpoint，先用于推进 Chuang 主线，后续再迁移成 Chuang 自己的轻量 goal 能力。
 - goal mode 当前不新增核心 slot，不改变主链；未来目标态是 `GoalSpec -> Governance -> Context -> Execution Slot -> Report -> Memory` 的长期任务外壳。
 - `ACTION` 协议也开始暴露 schema 契约：`ToolActionEnvelope::schema_version()`、`schema_fields()`、`call_schema_fields()` 已补齐，和 `ToolLoopReport` 一样可被测试和文档引用。
@@ -1147,6 +1233,34 @@
   - `统一身份引擎` 负责登录态管理、浏览器/HTTP 会话执行、结果解析、审计和熔断；底层可接 `agent-browser`，但登录态/Cookie 不进入核心记忆。
   - `data/skills/external_agent_dispatch_sop.md` 作为后续 Skill 目标，负责平台选择、任务翻译、追问策略、效果评估和记忆回写。
   - 重要协作原则已确定为二级委派：`主进程 -> 子代理 -> 外部智能体`。主进程只拆解/派发/终审/汇报/归档，子代理负责调度外部智能体并做第一次审核提炼，主进程只接收整理后的 `SubagentReport`。
+- GoalRun / tool surface / readiness 本轮收尾已整合：
+  - `GoalRun` 已从单纯 runtime goal context 扩展为 checkpoint-first 本地计划记录：`goal plan/show/checkpoint` 会读写 `./context/goal-runs/<goal_id>.json`，该目录被 git 忽略，只用于恢复开发目标状态。
+  - `GoalRun` 仍不是后台执行器，不自动续跑、不调度 worker、不绕过治理；当前能力是让下一轮优先从 checkpoint 恢复，减少反复口头说 `continue`。
+  - app-server / channel simulate 即使本轮工具调用数为 0，也会透出 `toolSurface`，包含 `available=true`、`governed=true`、GA MVP 可调用工具、schema version 和来源，避免飞书侧误以为创“没有工具”。
+  - `runtime_observability` / provider meta 已带出 tool surface 摘要，thread 快照也保留该字段，恢复会话时不会丢工具面信息。
+  - `status` / `doctor` 新增只读 `goal_run` readiness，默认检查 `mainline-mvp` 计划是否存在、checkpoint 数量、worker 数量、validation command 数量和最后 checkpoint id；只读取 JSON，不执行 goal。
+  - `scripts/chuang-mvp-smoke.sh` 已加入 `goal plan -> goal checkpoint -> goal show` JSON 验收，明确验证 checkpoint-first 记录闭环。
+  - 本轮 checkpoint 已写入 `context/goal-runs/mainline-mvp.json`：`checkpoint-tool-surface-goal-status`。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test goal_run_tests`、`cargo test -q --test app_server_tests`、`cargo test -q --test cli_channel_tests`、`cargo test -q --test cli_doctor_tests`、`cargo test -q --test kernel_status_tests`、`cargo test -q --test cli_status_tests`、`cargo test -q --test tool_runtime_tests`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`，全部通过。
+- 主线继续补齐本轮完成：
+  - `goal plan` 现在支持显式 `--scope scope_id=path[,path...]` 和 `--worker worker_id|scope_id[,scope_id...]|objective`，可以记录多个 worker 与不重叠写入范围；它仍只写 GoalRun JSON，不自动执行、不调度 worker。
+  - `goal plan` 的默认 worker 现在会跟随已声明的 scope：如果用户显式声明了多个 scope 但没有传 `--worker`，默认 worker 会绑定这些 scope，而不是强行只认 `mainline`。
+  - 新增 `tests/cli_goal_tests.rs`，覆盖多 worker 计划落盘和重叠 scope 拒绝，防止 goal 计划边界失控。
+  - `memory_recall` 已作为受治理只读辅助工具接入主进程工具面：它不属于 GA 9 原子工具，`atomic_tool_name=null`，只复用 SQLite + `MemoryRecallPipeline`。
+  - `memory_recall` 强制过滤 `memory_scope=session, session_id=<当前会话>`；未配置 memory/session、DB 不存在、跨会话请求都会返回结构化失败记录，不接外部知识库，不写入记忆，不碰 Hermes/Feishu/密钥。
+  - CLI runtime 会把已有 `db_path` 与当前 `session_id` 注入 `MemoryToolContext`；app-server/channel 因本来带 thread session id，会继承同一条主线工具能力。
+  - `status` / `doctor` 新增 governance readiness：展示 `rules_loaded`、规则数量/指纹、`tool_surface_governed=true`、read-only allowed、危险 write/shell needs_approval、secret shell draft_only、`goal_run_executes=false`。
+  - `scripts/chuang-mvp-smoke.sh` 已增强 status/doctor JSON 断言，覆盖 GA 工具名单、identity bootstrap presence、provider timeout、GoalRun readiness、plugin registry 和 placeholder warning。
+  - 本轮 checkpoint 已写入 `context/goal-runs/mainline-mvp.json`：`checkpoint-memory-governance-readiness`。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test cli_goal_tests`、`cargo test -q --test tool_runtime_tests`、`cargo test -q --test kernel_status_tests`、`cargo test -q --test cli_doctor_tests`、`cargo test -q --test cli_status_tests`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`，全部通过。
+- 子代理报告受理状态本轮已补：
+  - 新增 `ReportAdmissionStatus::{Accepted, Rejected}` 和独立 `ReportAdmission`，用于表达主控是否接受子代理提交的报告。
+  - `SubagentReport` 继续保持不可变执行快照，只记录 worker 声称的执行状态；主控受理状态不写回报告本体，避免把“执行结果”和“受理结果”混在一起。
+  - `SubagentReportValidator::admit_raw()` 会对原始 stdout report 生成 admission：合法报告得到 `Accepted`，缺字段、schema 不支持、时间错误、体积过大等得到 `Rejected`，并尽量保留 report/task/agent id 方便审计。
+  - command runner 协议入口已接入 admission：stdout 看起来是完整 `SubagentReport` 时，先生成主控受理判断，受理通过后再 decode 和做 task/agent/parent 身份校验。
+  - `docs/subagent-runner-protocol.md` 已补明确定义：`SubagentReport.status` 是 worker 执行状态，`ReportAdmission.status` 是 controller 受理状态；即使 worker 声称 Success，主控也可以因协议或身份问题拒绝。
+  - 本轮 checkpoint 已写入 `context/goal-runs/mainline-mvp.json`：`checkpoint-subagent-report-admission`。
+  - 已运行 `cargo fmt --all`、`git diff --check`、`cargo test -q --test subagent_report_tests`、`cargo test -q --test subagent_queue_tests`、`cargo test -q --test cli_subagent_dispatch_tests`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`，全部通过。
 
 ### 约束
 - 进度必须持续写入本文件，避免 new 后丢失上下文

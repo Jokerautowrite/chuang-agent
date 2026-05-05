@@ -676,6 +676,29 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
     assert_eq!(parsed["idle"], false);
     assert_eq!(parsed["worker_capabilities"][0], "rust");
     assert_eq!(parsed["worker_capabilities"][1], "filesystem");
+    assert_eq!(
+        parsed["report_admissions"]
+            .as_array()
+            .expect("report admissions array")
+            .len(),
+        2
+    );
+    assert_eq!(
+        parsed["report_admissions"][0]["status"],
+        Value::String("Accepted".to_string())
+    );
+    assert_eq!(
+        parsed["report_admissions"][0]["reason_code"],
+        "report_validated"
+    );
+    assert_eq!(
+        parsed["report_admissions"][1]["status"],
+        Value::String("Accepted".to_string())
+    );
+    assert_eq!(
+        parsed["report_admissions"][1]["reason_code"],
+        "report_validated"
+    );
     assert!(queue_root
         .join("reports")
         .join(format!("{first_run}.json"))
@@ -691,8 +714,13 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
 }
 
 #[test]
-fn cli_subagent_run_loop_rejects_parallel_concurrency_until_supported() {
+fn cli_subagent_run_loop_runs_bounded_parallel_workers() {
     let queue_root = temp_queue_root("run-loop-concurrency");
+    let first = dispatch_task(&queue_root, "task-cli-concurrency-1", "并发任务一");
+    let second = dispatch_task(&queue_root, "task-cli-concurrency-2", "并发任务二");
+    let first_run = first["run_id"].as_str().expect("first run id");
+    let second_run = second["run_id"].as_str().expect("second run id");
+
     let output = cargo_command()
         .args([
             "run",
@@ -704,13 +732,62 @@ fn cli_subagent_run_loop_rejects_parallel_concurrency_until_supported() {
             queue_root.to_str().expect("temp path should be utf8"),
             "--max-concurrency",
             "2",
+            "--max-runs",
+            "2",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["max_concurrency"], 2);
+    assert_eq!(parsed["ran_count"], 2);
+    let run_ids = parsed["run_ids"]
+        .as_array()
+        .expect("run_ids should be array")
+        .iter()
+        .map(|value| value.as_str().expect("run id string"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(run_ids.contains(first_run));
+    assert!(run_ids.contains(second_run));
+    assert!(queue_root
+        .join("reports")
+        .join(format!("{first_run}.json"))
+        .exists());
+    assert!(queue_root
+        .join("reports")
+        .join(format!("{second_run}.json"))
+        .exists());
+}
+
+#[test]
+fn cli_subagent_run_loop_rejects_unbounded_parallel_concurrency() {
+    let queue_root = temp_queue_root("run-loop-concurrency-limit");
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-loop",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--max-concurrency",
+            "9",
         ])
         .output()
         .expect("cargo run should execute");
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("--max-concurrency above 1 is not supported"));
+        .contains("--max-concurrency above 8 is not supported"));
 }
 
 #[test]
@@ -855,6 +932,15 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
         report["replay_ref"],
         format!("queued-subagent-command://{run_id}")
     );
+    assert_eq!(
+        report["governance_decision"]["action_id"],
+        format!("subagent-command-runner:{run_id}")
+    );
+    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(
+        report["governance_decision"]["reason"],
+        "approved_by_cli_flag: --approve-exec"
+    );
 }
 
 #[test]
@@ -895,6 +981,16 @@ fn cli_subagent_run_once_command_runner_accepts_protocol_report_json() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(
+        parsed["report_admission"]["status"],
+        Value::String("Accepted".to_string())
+    );
+    assert_eq!(
+        parsed["report_admission"]["reason_code"],
+        "report_validated"
+    );
 
     let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
     let report: Value = serde_json::from_str(
@@ -905,6 +1001,15 @@ fn cli_subagent_run_once_command_runner_accepts_protocol_report_json() {
     assert_eq!(report["summary"], "real runner protocol report accepted");
     assert_eq!(report["agent_id"], agent_id);
     assert_eq!(report["stdout_preview"], "ok");
+    assert_eq!(
+        report["governance_decision"]["action_id"],
+        format!("subagent-command-runner:{run_id}")
+    );
+    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(
+        report["governance_decision"]["reason"],
+        "approved_by_cli_flag: --approve-exec"
+    );
 }
 
 #[test]
@@ -948,6 +1053,16 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(
+        parsed["report_admission"]["status"],
+        Value::String("Rejected".to_string())
+    );
+    assert_eq!(
+        parsed["report_admission"]["reason_code"],
+        "command_protocol_report_rejected"
+    );
 
     let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
     let report: Value = serde_json::from_str(
@@ -963,6 +1078,11 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
         .as_str()
         .expect("stderr preview")
         .contains("agent_id_mismatch"));
+    assert_eq!(
+        report["governance_decision"]["action_id"],
+        format!("subagent-command-runner:{run_id}")
+    );
+    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
 }
 
 #[test]
@@ -1026,6 +1146,107 @@ fn cli_subagent_run_once_command_runner_rejects_incomplete_protocol_report() {
         .as_str()
         .expect("stderr preview")
         .contains("truncated"));
+
+    let report_output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "report",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            run_id,
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        report_output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&report_output.stderr)
+    );
+    let report_parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&report_output.stdout))
+            .expect("report stdout json");
+    assert_eq!(
+        report_parsed["report_admission"]["status"],
+        Value::String("Rejected".to_string())
+    );
+    assert_eq!(
+        report_parsed["report_admission"]["reason_code"],
+        "command_protocol_report_rejected"
+    );
+}
+
+#[test]
+fn cli_subagent_run_once_command_runner_rejects_protocol_report_missing_status() {
+    let queue_root = temp_queue_root("command-runner-protocol-missing-status");
+    let dispatch = dispatch_task(
+        &queue_root,
+        "task-cli-protocol-missing-status",
+        "命令 runner 缺 status 报告",
+    );
+    let run_id = dispatch["run_id"].as_str().expect("run id");
+    let agent_id = dispatch_agent_id(&queue_root, run_id);
+    let protocol_report = report_json_without_status(
+        "task-cli-protocol-missing-status",
+        &agent_id,
+        "missing status",
+    );
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "printf",
+            "--runner-arg",
+            &protocol_report,
+            "--approve-exec",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(
+        parsed["report_admission"]["status"],
+        Value::String("Rejected".to_string())
+    );
+    assert_eq!(
+        parsed["report_admission"]["reason_code"],
+        "command_protocol_report_rejected"
+    );
+
+    let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
+    let report: Value = serde_json::from_str(
+        &std::fs::read_to_string(report_path).expect("report file should exist"),
+    )
+    .expect("report should be json");
+    assert_eq!(report["status"], "Failed");
+    assert!(report["stderr_preview"]
+        .as_str()
+        .expect("stderr preview")
+        .contains("MissingRequiredField"));
+    assert!(report["stderr_preview"]
+        .as_str()
+        .expect("stderr preview")
+        .contains("status"));
 }
 
 #[test]
@@ -1520,6 +1741,35 @@ fn report_json_without_truncated(task_id: &str, agent_id: &str, summary: &str) -
   "artifacts": [],
   "replay_ref": "queued-subagent://queued-run-1",
   "context_debug": null
+}}"#
+    )
+}
+
+fn report_json_without_status(task_id: &str, agent_id: &str, summary: &str) -> String {
+    format!(
+        r#"{{
+  "schema_version": "1.0",
+  "report_id": "report-queued-run-1",
+  "task_id": "{task_id}",
+  "agent_id": "{agent_id}",
+  "parent_agent_id": "chuang-cli",
+  "started_at": "2026-05-01T00:00:00Z",
+  "finished_at": "2026-05-01T00:00:01Z",
+  "summary": "{summary}",
+  "exit_code": 0,
+  "stdout_preview": "ok",
+  "stderr_preview": null,
+  "resource_usage": {{
+    "wall_time_ms": 1000,
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "cpu_time_ms": 0,
+    "peak_memory_bytes": 0
+  }},
+  "artifacts": [],
+  "replay_ref": "queued-subagent://queued-run-1",
+  "context_debug": null,
+  "truncated": false
 }}"#
     )
 }

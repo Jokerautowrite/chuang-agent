@@ -329,18 +329,10 @@ fn validate_receipt_matches_request(
             )));
         }
         (ControlAction::ChangeModel { .. }, _) | (_, ControlAction::ChangeModel { .. }) => {
-            return Err(ControlError::InvalidRequest(format!(
-                "control apply receipt action mismatch: expected={} actual={}",
-                request.action.as_str(),
-                receipt.action.as_str()
-            )));
+            return Err(action_mismatch_error(&request.action, &receipt.action));
         }
         _ if receipt.action != request.action => {
-            return Err(ControlError::InvalidRequest(format!(
-                "control apply receipt action mismatch: expected={} actual={}",
-                request.action.as_str(),
-                receipt.action.as_str()
-            )));
+            return Err(action_mismatch_error(&request.action, &receipt.action));
         }
         _ => {}
     }
@@ -353,4 +345,12 @@ fn validate_receipt_matches_request(
         ));
     }
     Ok(())
+}
+
+fn action_mismatch_error(expected: &ControlAction, actual: &ControlAction) -> ControlError {
+    ControlError::InvalidRequest(format!(
+        "control apply receipt action mismatch: expected={} actual={}",
+        expected.as_str(),
+        actual.as_str()
+    ))
 }

@@ -15,6 +15,8 @@ pub(crate) fn memory_command(args: &[String]) -> Result<(), String> {
         Some("identity") => identity_memory_command(&args[1..]),
         Some("session") => session_memory_command(&args[1..]),
         Some("lim") => lim_memory_command(&args[1..]),
+        Some("maintenance") => maintenance_memory_command(&args[1..]),
+        Some("knowledge") => knowledge_memory_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -48,6 +50,258 @@ fn lim_memory_command(args: &[String]) -> Result<(), String> {
     }
 }
 
+fn maintenance_memory_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("report") => memory_maintenance_report_command(&args[1..]),
+        Some("apply") => memory_maintenance_apply_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn knowledge_memory_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("status") => memory_knowledge_status_command(&args[1..]),
+        Some("search") => memory_knowledge_search_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn memory_knowledge_search_command(args: &[String]) -> Result<(), String> {
+    let request = parse_memory_knowledge_search(args)?;
+    let hits = search_local_knowledge_root(&request.root, &request.query, request.limit)?;
+    let output = MemoryKnowledgeSearchOutput {
+        adapter: "local_external_knowledge".to_string(),
+        dry_run: true,
+        read_only: true,
+        connects_real_service: false,
+        writes_automatically: false,
+        runtime_retrieval_wired: false,
+        root: request.root.display().to_string(),
+        query: request.query,
+        limit: request.limit,
+        hit_count: hits.len(),
+        hits,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_knowledge_search adapter={} dry_run=true read_only=true root={} query={} hits={}",
+                output.adapter, output.root, output.query, output.hit_count
+            );
+            println!(
+                "connects_real_service=false writes_automatically=false runtime_retrieval_wired=false"
+            );
+            for hit in &output.hits {
+                println!(
+                    "hit path={} line={} score={} source={}",
+                    hit.path, hit.line, hit.score, hit.source
+                );
+                println!("{}", hit.preview);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
+    let output = parse_memory_knowledge_status(args)?;
+    let status = MemoryKnowledgeStatusOutput {
+        adapter: "external_knowledge".to_string(),
+        dry_run: true,
+        read_only: true,
+        connects_real_service: false,
+        writes_automatically: false,
+        runtime_retrieval_wired: false,
+        doc: "docs/external-knowledge-adapter.md".to_string(),
+        sources: vec![
+            MemoryKnowledgeSourceOutput {
+                name: "wiki".to_string(),
+                state: "documented_only".to_string(),
+                current: "external-brain source is documented but no live adapter is configured"
+                    .to_string(),
+            },
+            MemoryKnowledgeSourceOutput {
+                name: "gbrain".to_string(),
+                state: "documented_only".to_string(),
+                current: "knowledge base boundary is documented; runtime retrieval stays deferred"
+                    .to_string(),
+            },
+        ],
+        next_actions: vec![
+            "add a read-only local knowledge adapter contract".to_string(),
+            "add provenance-bearing search before runtime injection".to_string(),
+            "keep automatic sync and memory writeback disabled".to_string(),
+        ],
+    };
+
+    match output {
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_knowledge_status adapter={} dry_run={} read_only={} connects_real_service={} writes_automatically={}",
+                status.adapter,
+                status.dry_run,
+                status.read_only,
+                status.connects_real_service,
+                status.writes_automatically
+            );
+            println!(
+                "runtime_retrieval_wired: {} doc: {}",
+                status.runtime_retrieval_wired, status.doc
+            );
+            for source in &status.sources {
+                println!(
+                    "source name={} state={} current={}",
+                    source.name, source.state, source.current
+                );
+            }
+            for next_action in &status.next_actions {
+                println!("next_action: {next_action}");
+            }
+        }
+        ControlOutputFormat::Json => print_json(&status)?,
+    }
+
+    Ok(())
+}
+
+fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
+    let request = parse_memory_maintenance_report(args)?;
+    let context = build_memory_maintenance_context(
+        &request.runtime_args,
+        &request.query,
+        request.session_id.as_deref(),
+        request.limit,
+    )?;
+    let output = MemoryMaintenanceReportOutput {
+        dry_run: true,
+        writes_automatically: false,
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+        identity_health: context.identity_health,
+        lim_candidate_count: context.lim_candidates.len(),
+        lim_candidates: context.lim_candidates,
+        recommendations: context.recommendations,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_maintenance_report dry_run=true writes_automatically=false query={} session_id={} candidates={}",
+                output.query,
+                output.session_id.as_deref().unwrap_or("any"),
+                output.lim_candidate_count
+            );
+            println!(
+                "identity_health root={} user={}/{} memory={}/{} experiences_chars={}",
+                output.identity_health.root,
+                output.identity_health.user_chars,
+                output.identity_health.user_max_chars,
+                output.identity_health.memory_chars,
+                output.identity_health.memory_max_chars,
+                output.identity_health.experiences_chars
+            );
+            for recommendation in &output.recommendations {
+                println!("recommendation: {recommendation}");
+            }
+            for candidate in &output.lim_candidates {
+                println!(
+                    "candidate id={} source_record_id={} confidence={}",
+                    candidate.candidate_id, candidate.source_record_id, candidate.confidence
+                );
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
+    let request = parse_memory_maintenance_apply(args)?;
+    if !request.approve_writeback {
+        return Err("memory_maintenance_apply_requires_approve_writeback".to_string());
+    }
+
+    let context = build_memory_maintenance_context(
+        &request.runtime_args,
+        &request.query,
+        request.session_id.as_deref(),
+        request.limit,
+    )?;
+    let selected_candidate_ids = if request.candidate_ids.is_empty() {
+        context
+            .lim_candidates
+            .iter()
+            .map(|candidate| candidate.candidate_id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        request.candidate_ids.clone()
+    };
+
+    let mut store = open_identity_memory_store(&request.runtime_args)?;
+    let mut applied_candidate_ids = Vec::new();
+    let mut skipped_candidate_ids = Vec::new();
+    for candidate_id in &selected_candidate_ids {
+        let candidate = context
+            .lim_candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == *candidate_id)
+            .ok_or_else(|| {
+                format!("memory_maintenance_apply_unknown_candidate_id: {candidate_id}")
+            })?;
+        match store.append_experience(HotMemoryEntry {
+            id: candidate.candidate_id.clone(),
+            content: candidate.content.clone(),
+        }) {
+            Ok(()) => applied_candidate_ids.push(candidate.candidate_id.clone()),
+            Err(DualFileMemoryError::DuplicateEntry { .. }) => {
+                skipped_candidate_ids.push(candidate.candidate_id.clone());
+            }
+            Err(err) => return Err(format_identity_memory_error(err)),
+        }
+    }
+
+    let output = MemoryMaintenanceApplyOutput {
+        dry_run: false,
+        writes_automatically: false,
+        approved_writeback: true,
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+        identity_health: context.identity_health,
+        lim_candidate_count: context.lim_candidates.len(),
+        selected_candidate_ids,
+        applied_candidate_ids,
+        skipped_candidate_ids,
+        recommendations: context.recommendations,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_maintenance_apply dry_run=false writes_automatically=false approved_writeback=true query={} session_id={} applied={} skipped={}",
+                output.query,
+                output.session_id.as_deref().unwrap_or("any"),
+                output.applied_candidate_ids.len(),
+                output.skipped_candidate_ids.len()
+            );
+            for candidate_id in &output.applied_candidate_ids {
+                println!("applied_candidate_id: {candidate_id}");
+            }
+            for candidate_id in &output.skipped_candidate_ids {
+                println!("skipped_candidate_id: {candidate_id}");
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
 fn lim_memory_extract_command(args: &[String]) -> Result<(), String> {
     let request = parse_lim_memory_extract(args)?;
     let hits = search_turn_summaries(
@@ -56,26 +310,7 @@ fn lim_memory_extract_command(args: &[String]) -> Result<(), String> {
         request.session_id.as_deref(),
         request.limit,
     )?;
-    let candidates = hits
-        .into_iter()
-        .map(|hit| {
-            let source_record_id = hit.record.id;
-            let created_at = hit.record.created_at;
-            let lesson = first_non_empty_line(&hit.record.content);
-            let metadata = hit.record.metadata;
-            LimExtractionCandidateOutput {
-                candidate_id: format!("lim-candidate-{}", sanitize_candidate_id(&source_record_id)),
-                source_record_id: source_record_id.clone(),
-                confidence: if hit.score > 0 { "medium" } else { "low" }.to_string(),
-                proposed_scope: "experiences".to_string(),
-                content: format!(
-                    "source=lim_dry_run\nsource_record_id={}\ncreated_at={}\nlesson={}",
-                    source_record_id, created_at, lesson
-                ),
-                metadata,
-            }
-        })
-        .collect::<Vec<_>>();
+    let candidates = build_lim_candidates(hits);
     let output = LimExtractionOutput {
         query: request.query,
         session_id: request.session_id,
@@ -105,6 +340,51 @@ fn lim_memory_extract_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn build_lim_candidates(hits: Vec<SearchHit>) -> Vec<LimExtractionCandidateOutput> {
+    hits.into_iter()
+        .map(|hit| {
+            let source_record_id = hit.record.id;
+            let created_at = hit.record.created_at;
+            let lesson = first_non_empty_line(&hit.record.content);
+            let metadata = hit.record.metadata;
+            LimExtractionCandidateOutput {
+                candidate_id: format!("lim-candidate-{}", sanitize_candidate_id(&source_record_id)),
+                source_record_id: source_record_id.clone(),
+                confidence: if hit.score > 0 { "medium" } else { "low" }.to_string(),
+                proposed_scope: "experiences".to_string(),
+                content: format!(
+                    "source=lim_dry_run\nsource_record_id={}\ncreated_at={}\nlesson={}",
+                    source_record_id, created_at, lesson
+                ),
+                metadata,
+            }
+        })
+        .collect()
+}
+
+fn build_maintenance_recommendations(
+    health: &IdentityMaintenanceHealthOutput,
+    lim_candidates: &[LimExtractionCandidateOutput],
+) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    if health.memory_chars > health.memory_max_chars.saturating_mul(8) / 10 {
+        recommendations.push("review MEMORY.md before appending more hot memory".to_string());
+    }
+    if health.user_chars > health.user_max_chars.saturating_mul(8) / 10 {
+        recommendations
+            .push("review USER.md fixed facts before adding more user memory".to_string());
+    }
+    if lim_candidates.is_empty() {
+        recommendations.push("no LIM candidates found for this query/session".to_string());
+    } else {
+        recommendations.push(
+            "review LIM candidates manually before append-experience or write-memory".to_string(),
+        );
+    }
+    recommendations.push("do not run automatic rewrite from maintenance report".to_string());
+    recommendations
 }
 
 fn session_memory_search_command(args: &[String]) -> Result<(), String> {
@@ -413,6 +693,306 @@ fn parse_lim_memory_extract(args: &[String]) -> Result<LimExtractionRequest, Str
     })
 }
 
+fn parse_memory_maintenance_report(
+    args: &[String],
+) -> Result<MemoryMaintenanceReportRequest, String> {
+    let request = parse_session_memory_search(args)?;
+    Ok(MemoryMaintenanceReportRequest {
+        runtime_args: request.runtime_args,
+        output: request.output,
+        query: request.query,
+        session_id: request.session_id,
+        limit: request.limit,
+    })
+}
+
+fn parse_memory_maintenance_apply(
+    args: &[String],
+) -> Result<MemoryMaintenanceApplyRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut query = None;
+    let mut session_id = None;
+    let mut limit = 5usize;
+    let mut candidate_ids = Vec::new();
+    let mut approve_writeback = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--query" => {
+                query = Some(take_local_value(args, &mut index, "--query")?);
+            }
+            "--session-id" => {
+                let value = take_local_value(args, &mut index, "--session-id")?;
+                if value.trim().is_empty() {
+                    return Err(
+                        "memory maintenance apply requires non-empty --session-id".to_string()
+                    );
+                }
+                session_id = Some(value);
+            }
+            "--limit" => {
+                let value = take_local_value(args, &mut index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| "memory maintenance apply requires numeric --limit".to_string())?;
+                if limit == 0 {
+                    return Err("memory maintenance apply requires --limit > 0".to_string());
+                }
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            "--candidate-id" => {
+                let value = take_local_value(args, &mut index, "--candidate-id")?;
+                if value.trim().is_empty() {
+                    return Err(
+                        "memory maintenance apply requires non-empty --candidate-id".to_string()
+                    );
+                }
+                candidate_ids.push(value);
+            }
+            "--approve-writeback" => {
+                approve_writeback = true;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(MemoryMaintenanceApplyRequest {
+        runtime_args,
+        output,
+        query: {
+            let query =
+                query.ok_or_else(|| "memory maintenance apply requires --query".to_string())?;
+            if query.trim().is_empty() {
+                return Err("memory maintenance apply requires non-empty --query".to_string());
+            }
+            query
+        },
+        session_id,
+        limit,
+        candidate_ids,
+        approve_writeback,
+    })
+}
+
+fn build_memory_maintenance_context(
+    runtime_args: &[String],
+    query: &str,
+    session_id: Option<&str>,
+    limit: usize,
+) -> Result<MemoryMaintenanceContext, String> {
+    let store = open_identity_memory_store(runtime_args)?;
+    let config = store.config().clone();
+    let snapshot = store
+        .snapshot()
+        .map_err(|e| format!("identity_memory_snapshot_failed: {e:?}"))?;
+    let hits = search_turn_summaries(runtime_args, query, session_id, limit)?;
+    let lim_candidates = build_lim_candidates(hits);
+    let identity_health = IdentityMaintenanceHealthOutput {
+        root: config.root.display().to_string(),
+        user_chars: snapshot.user.chars().count(),
+        user_max_chars: config.user_max_chars,
+        memory_chars: snapshot.memory.chars().count(),
+        memory_max_chars: config.memory_max_chars,
+        experiences_chars: snapshot.experiences.chars().count(),
+        experiences_file: config.experiences_file,
+    };
+    let recommendations = build_maintenance_recommendations(&identity_health, &lim_candidates);
+    Ok(MemoryMaintenanceContext {
+        identity_health,
+        lim_candidates,
+        recommendations,
+    })
+}
+
+fn parse_memory_knowledge_status(args: &[String]) -> Result<ControlOutputFormat, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+    Ok(output)
+}
+
+fn parse_memory_knowledge_search(args: &[String]) -> Result<MemoryKnowledgeSearchRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut root = None;
+    let mut query = None;
+    let mut limit = 5usize;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--root" => {
+                root = Some(std::path::PathBuf::from(take_local_value(
+                    args, &mut index, "--root",
+                )?));
+            }
+            "--query" => {
+                query = Some(take_local_value(args, &mut index, "--query")?);
+            }
+            "--limit" => {
+                let value = take_local_value(args, &mut index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| "memory knowledge search requires numeric --limit".to_string())?;
+                if limit == 0 {
+                    return Err("memory knowledge search requires --limit > 0".to_string());
+                }
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let root = root.ok_or_else(|| "memory knowledge search requires --root".to_string())?;
+    let query = query.ok_or_else(|| "memory knowledge search requires --query".to_string())?;
+    if query.trim().is_empty() {
+        return Err("memory knowledge search requires non-empty --query".to_string());
+    }
+
+    Ok(MemoryKnowledgeSearchRequest {
+        output,
+        root,
+        query,
+        limit,
+    })
+}
+
+fn search_local_knowledge_root(
+    root: &std::path::Path,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<MemoryKnowledgeSearchHitOutput>, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("memory_knowledge_root_unavailable: {e}"))?;
+    if !root.is_dir() {
+        return Err("memory_knowledge_root_must_be_directory".to_string());
+    }
+
+    let needle = query.to_lowercase();
+    let mut files = Vec::new();
+    collect_knowledge_files(&root, &root, &mut files)?;
+    let mut hits = Vec::new();
+    for file in files {
+        let content = std::fs::read_to_string(&file)
+            .map_err(|e| format!("memory_knowledge_read_failed path={}: {e}", file.display()))?;
+        for (line_index, line) in content.lines().enumerate() {
+            let line_lower = line.to_lowercase();
+            if line_lower.contains(&needle) {
+                let relative = file
+                    .strip_prefix(&root)
+                    .unwrap_or(file.as_path())
+                    .display()
+                    .to_string();
+                hits.push(MemoryKnowledgeSearchHitOutput {
+                    source: "local_file".to_string(),
+                    path: relative,
+                    line: line_index + 1,
+                    score: score_knowledge_line(&line_lower, &needle),
+                    preview: line.trim().chars().take(240).collect(),
+                });
+            }
+        }
+    }
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+fn collect_knowledge_files(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    files: &mut Vec<std::path::PathBuf>,
+) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(dir)
+        .map_err(|e| {
+            format!(
+                "memory_knowledge_read_dir_failed path={}: {e}",
+                dir.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("memory_knowledge_read_dir_entry_failed: {e}"))?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || is_sensitive_knowledge_path(&path) {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(|e| {
+            format!(
+                "memory_knowledge_file_type_failed path={}: {e}",
+                path.display()
+            )
+        })?;
+        if file_type.is_dir() {
+            let canonical = path.canonicalize().map_err(|e| {
+                format!(
+                    "memory_knowledge_canonicalize_failed path={}: {e}",
+                    path.display()
+                )
+            })?;
+            if canonical.starts_with(root) {
+                collect_knowledge_files(root, &path, files)?;
+            }
+        } else if file_type.is_file() && is_supported_knowledge_file(&path) {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn is_supported_knowledge_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt"))
+        .unwrap_or(false)
+}
+
+fn is_sensitive_knowledge_path(path: &std::path::Path) -> bool {
+    let path_text = path.display().to_string().to_ascii_lowercase();
+    [
+        "secret",
+        "token",
+        "password",
+        "private",
+        ".env",
+        "credential",
+    ]
+    .iter()
+    .any(|marker| path_text.contains(marker))
+}
+
+fn score_knowledge_line(line_lower: &str, needle: &str) -> u32 {
+    let occurrences = line_lower.matches(needle).count() as u32;
+    10 + occurrences.saturating_mul(5)
+}
+
 fn parse_identity_memory_append(args: &[String]) -> Result<IdentityMemoryAppendRequest, String> {
     let mut runtime_args = Vec::new();
     let mut output = ControlOutputFormat::Text;
@@ -627,6 +1207,26 @@ struct LimExtractionRequest {
     limit: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MemoryMaintenanceReportRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MemoryMaintenanceApplyRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+    candidate_ids: Vec<String>,
+    approve_writeback: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct LimExtractionOutput {
     query: String,
@@ -645,6 +1245,104 @@ struct LimExtractionCandidateOutput {
     proposed_scope: String,
     content: String,
     metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryMaintenanceReportOutput {
+    dry_run: bool,
+    writes_automatically: bool,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+    identity_health: IdentityMaintenanceHealthOutput,
+    lim_candidate_count: usize,
+    lim_candidates: Vec<LimExtractionCandidateOutput>,
+    recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryMaintenanceApplyOutput {
+    dry_run: bool,
+    writes_automatically: bool,
+    approved_writeback: bool,
+    query: String,
+    session_id: Option<String>,
+    limit: usize,
+    identity_health: IdentityMaintenanceHealthOutput,
+    lim_candidate_count: usize,
+    selected_candidate_ids: Vec<String>,
+    applied_candidate_ids: Vec<String>,
+    skipped_candidate_ids: Vec<String>,
+    recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeStatusOutput {
+    adapter: String,
+    dry_run: bool,
+    read_only: bool,
+    connects_real_service: bool,
+    writes_automatically: bool,
+    runtime_retrieval_wired: bool,
+    doc: String,
+    sources: Vec<MemoryKnowledgeSourceOutput>,
+    next_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSourceOutput {
+    name: String,
+    state: String,
+    current: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MemoryKnowledgeSearchRequest {
+    output: ControlOutputFormat,
+    root: std::path::PathBuf,
+    query: String,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSearchOutput {
+    adapter: String,
+    dry_run: bool,
+    read_only: bool,
+    connects_real_service: bool,
+    writes_automatically: bool,
+    runtime_retrieval_wired: bool,
+    root: String,
+    query: String,
+    limit: usize,
+    hit_count: usize,
+    hits: Vec<MemoryKnowledgeSearchHitOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSearchHitOutput {
+    source: String,
+    path: String,
+    line: usize,
+    score: u32,
+    preview: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct IdentityMaintenanceHealthOutput {
+    root: String,
+    user_chars: usize,
+    user_max_chars: usize,
+    memory_chars: usize,
+    memory_max_chars: usize,
+    experiences_chars: usize,
+    experiences_file: String,
+}
+
+struct MemoryMaintenanceContext {
+    identity_health: IdentityMaintenanceHealthOutput,
+    lim_candidates: Vec<LimExtractionCandidateOutput>,
+    recommendations: Vec<String>,
 }
 
 fn first_non_empty_line(content: &str) -> String {

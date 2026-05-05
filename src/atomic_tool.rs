@@ -89,6 +89,7 @@ pub struct AtomicToolRegistry {
 pub enum ToolCallAtomicKind {
     Atomic(AtomicToolKind),
     AuxiliaryListDir,
+    AuxiliaryMemoryRecall,
 }
 
 pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
@@ -203,6 +204,13 @@ impl AtomicToolRegistry {
                 audit_operation: "tool.list_dir",
                 callable_now: true,
             },
+            ToolCallAtomicKind::AuxiliaryMemoryRecall => AtomicToolCallMapping {
+                protocol_tool_name: "memory_recall",
+                kind: ToolCallAtomicKind::AuxiliaryMemoryRecall,
+                atomic_tool_name: None,
+                audit_operation: "tool.memory_recall",
+                callable_now: true,
+            },
         }
     }
 
@@ -282,6 +290,7 @@ pub fn tool_call_atomic_kind(call: &ToolCall) -> ToolCallAtomicKind {
         ToolCall::ReadFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileRead),
         ToolCall::WriteFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileWrite),
         ToolCall::ShellExec { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::CodeExecute),
+        ToolCall::MemoryRecall { .. } => ToolCallAtomicKind::AuxiliaryMemoryRecall,
     }
 }
 
@@ -291,6 +300,7 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
         ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }
 

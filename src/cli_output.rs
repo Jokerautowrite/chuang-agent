@@ -203,6 +203,27 @@ pub fn print_status(status: &ChuangMvpStatus) {
             .unwrap_or_else(|| "none".to_string())
     );
     println!("governance: {}", status.slots.governance);
+    println!(
+        "governance_readiness: ok={} kind={} rules_loaded={} tool_surface_governed={} goal_run_executes={}",
+        status.governance.ok,
+        status.governance.kind,
+        status.governance.rules_loaded,
+        status.governance.tool_surface_governed,
+        status.governance.goal_run_executes
+    );
+    println!(
+        "governance_rules: path={} rule_count={} fingerprint={}",
+        status.governance.rules_core_path,
+        status.governance.rule_count,
+        status.governance.rules_fingerprint
+    );
+    println!(
+        "governance_decisions: read_only={} dangerous_write={} dangerous_shell={} secret_shell={}",
+        status.governance.read_only_decision,
+        status.governance.dangerous_write_decision,
+        status.governance.dangerous_shell_decision,
+        status.governance.secret_shell_decision
+    );
     println!("execution: {}", status.slots.execution);
     println!("actuator: {}", status.slots.actuator);
     if let Some(timeout_ms) = status.config.actuator_command_timeout_ms {
@@ -216,6 +237,22 @@ pub fn print_status(status: &ChuangMvpStatus) {
         println!("control_command_timeout_ms: {timeout_ms}");
     }
     println!(
+        "goal_run: ok={} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} path={}",
+        status.goal_run.ok,
+        status.goal_run.plan_exists,
+        status.goal_run.goal_id,
+        status.goal_run.checkpoint_count,
+        status.goal_run.worker_count,
+        status.goal_run.validation_command_count,
+        status.goal_run.path
+    );
+    if let Some(last_checkpoint_id) = &status.goal_run.last_checkpoint_id {
+        println!("goal_run_last_checkpoint: {last_checkpoint_id}");
+    }
+    if let Some(read_error) = &status.goal_run.read_error {
+        println!("goal_run_read_error: {read_error}");
+    }
+    println!(
         "plugin_registry: available={} ok={} path={} plugin_count={} enabled_count={} issue_count={}",
         status.plugin_registry.available,
         status.plugin_registry.ok,
@@ -224,6 +261,124 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.plugin_registry.enabled_count,
         status.plugin_registry.issue_count
     );
+    println!(
+        "project_readiness: ok={} state={} ready={} partial={} deferred={} blocked={}",
+        status.project_readiness.ok,
+        status.project_readiness.overall_state,
+        status.project_readiness.ready_count,
+        status.project_readiness.partial_count,
+        status.project_readiness.deferred_count,
+        status.project_readiness.blocked_count
+    );
+    for module in &status.project_readiness.modules {
+        println!(
+            "project_module name={} state={} boundary={} next={}",
+            module.name, module.state, module.core_boundary, module.next_action
+        );
+    }
+    println!(
+        "memory_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        status.memory_readiness.ok,
+        status.memory_readiness.overall_state,
+        status.memory_readiness.layer_count,
+        status.memory_readiness.ready_count,
+        status.memory_readiness.partial_count,
+        status.memory_readiness.deferred_count,
+        status.memory_readiness.blocked_count
+    );
+    for layer in &status.memory_readiness.layers {
+        println!(
+            "memory_layer name={} state={} storage={} writes_automatically={} next={}",
+            layer.name, layer.state, layer.storage, layer.writes_automatically, layer.next_action
+        );
+    }
+    println!(
+        "channel_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        status.channel_readiness.ok,
+        status.channel_readiness.overall_state,
+        status.channel_readiness.layer_count,
+        status.channel_readiness.ready_count,
+        status.channel_readiness.partial_count,
+        status.channel_readiness.deferred_count,
+        status.channel_readiness.blocked_count
+    );
+    for layer in &status.channel_readiness.layers {
+        println!(
+            "channel_layer name={} state={} boundary={} next={}",
+            layer.name, layer.state, layer.boundary, layer.next_action
+        );
+    }
+    println!(
+        "subagent_readiness: ok={} state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+        status.subagent_readiness.ok,
+        status.subagent_readiness.overall_state,
+        status.subagent_readiness.mode,
+        status.subagent_readiness.layer_count,
+        status.subagent_readiness.ready_count,
+        status.subagent_readiness.partial_count,
+        status.subagent_readiness.deferred_count,
+        status.subagent_readiness.blocked_count
+    );
+    for layer in &status.subagent_readiness.layers {
+        println!(
+            "subagent_layer name={} state={} boundary={} next={}",
+            layer.name, layer.state, layer.boundary, layer.next_action
+        );
+    }
+    println!(
+        "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        status.external_ai_readiness.ok,
+        status.external_ai_readiness.overall_state,
+        status.external_ai_readiness.layer_count,
+        status.external_ai_readiness.ready_count,
+        status.external_ai_readiness.partial_count,
+        status.external_ai_readiness.deferred_count,
+        status.external_ai_readiness.blocked_count
+    );
+    println!(
+        "release_readiness: ok={} name={} state={} ready={} partial={} deferred={} blocked={}",
+        status.release_readiness.ok,
+        status.release_readiness.release_name,
+        status.release_readiness.overall_state,
+        status.release_readiness.ready_count,
+        status.release_readiness.partial_count,
+        status.release_readiness.deferred_count,
+        status.release_readiness.blocked_count
+    );
+    println!(
+        "release_acceptance: count={} ready={} partial={} deferred={} connects_real_external_services={} verifies_real_external_services={} uses_stub_or_local_fixtures={} writes_repo_files={}",
+        status.release_readiness.acceptance_count,
+        status.release_readiness.acceptance_ready_count,
+        status.release_readiness.acceptance_partial_count,
+        status.release_readiness.acceptance_deferred_count,
+        status.release_readiness.connects_real_external_services,
+        status.release_readiness.verifies_real_external_services,
+        status.release_readiness.uses_stub_or_local_fixtures,
+        status.release_readiness.writes_repo_files
+    );
+    for item in &status.release_readiness.acceptance {
+        println!(
+            "release_acceptance_item name={} state={} boundary={} read_only={} connects_real_service={} writes_repo_files={}",
+            item.name,
+            item.state,
+            item.boundary,
+            item.read_only,
+            item.connects_real_service,
+            item.writes_repo_files
+        );
+    }
+    if !status.config.placeholder_warnings.is_empty() {
+        println!(
+            "placeholder_warnings: {}",
+            format_name_list(&status.config.placeholder_warnings)
+        );
+    }
+    for layer in &status.external_ai_readiness.layers {
+        println!(
+            "external_ai_layer name={} state={} boundary={} next={}",
+            layer.name, layer.state, layer.boundary, layer.next_action
+        );
+    }
     print_placeholder_warnings(&status.config.placeholder_warnings);
 }
 
@@ -332,7 +487,7 @@ pub fn print_runtime_result(result: &RuntimeResult) {
 }
 
 pub fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|experiment|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | plugin list|check [--registry PATH] [--json] | app-server health [--workspace-root PATH] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|experiment|external-ai|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..8] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | plugin list|check [--registry PATH] [--json] | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
 }
 
 fn format_drop_reasons(reasons: &[DropReason]) -> String {

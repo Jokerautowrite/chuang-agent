@@ -16,17 +16,19 @@ const {
   WSClient,
 } = require("@larksuiteoapi/node-sdk");
 const {
-  FeishuClientAdapter,
+  ChuangFeishuClientAdapter,
+  buildChuangReplyPayload,
+  buildChuangTextPayload,
   patchWsClientForCardCallbacks,
-} = require("/home/user/.codex/codex-feishu-bridge/src/infra/feishu/client-adapter");
+} = require("./chuang-feishu-client-adapter");
 
 const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
 const ENV_FILE =
   process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
 const WORKSPACE_ROOT =
   process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT;
-const CODENODE_MODULES =
-  process.env.CHUANG_FEISHU_NODE_MODULES ||
+const FEISHU_SDK_MODULES =
+  process.env.CHUANG_FEISHU_SDK_NODE_MODULES ||
   "/home/user/.codex/codex-feishu-bridge/node_modules";
 const EVENT_LOG_FILE =
   process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
@@ -36,7 +38,6 @@ loadEnv();
 function loadEnv() {
   const envPaths = [
     ENV_FILE,
-    path.join(os.homedir(), ".codex-im", ".env"),
     path.join(ROOT, ".env"),
   ];
   for (const envPath of envPaths) {
@@ -44,7 +45,7 @@ function loadEnv() {
       dotenv.config({ path: envPath });
     }
   }
-  process.env.NODE_PATH = `${CODENODE_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;
+  process.env.NODE_PATH = `${FEISHU_SDK_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;
   require("module").Module._initPaths();
 }
 
@@ -205,7 +206,7 @@ class ChuangFeishuBridge {
         PingTimeout: 5,
       },
     });
-    this.adapter = new FeishuClientAdapter(this.client);
+    this.adapter = new ChuangFeishuClientAdapter(this.client);
     patchWsClientForCardCallbacks(this.wsClient);
   }
 
@@ -240,17 +241,48 @@ class ChuangFeishuBridge {
     });
 
     const turn = await this.appServer.turnStart(inbound);
-    await this.adapter.sendResourceMessage({
-      chatId: inbound.chatId,
-      msgType: "text",
-      content: JSON.stringify({ text: turn.replyText }),
-    });
+    await this.sendReply(inbound, turn);
     appendEventLog("outbound", {
       chatId: inbound.chatId,
       messageId: inbound.messageId,
       threadId: turn.threadId,
       modelName: turn.modelName,
       reply: truncateText(turn.replyText, 360),
+    });
+  }
+
+  async sendReply(inbound, turn) {
+    const richPayload = buildChuangReplyPayload({
+      replyText: turn.replyText,
+      modelName: turn.modelName,
+      threadId: turn.threadId,
+    });
+    try {
+      await this.adapter.sendResourceMessage({
+        chatId: inbound.chatId,
+        msgType: richPayload.msgType,
+        content: richPayload.content,
+      });
+      appendEventLog("outbound_format", {
+        chatId: inbound.chatId,
+        messageId: inbound.messageId,
+        msgType: richPayload.msgType,
+      });
+      return;
+    } catch (error) {
+      console.error(`[chuang-feishu] rich reply failed, falling back to text: ${error.message}`);
+      appendEventLog("outbound_fallback", {
+        chatId: inbound.chatId,
+        messageId: inbound.messageId,
+        reason: truncateText(error.message, 180),
+      });
+    }
+
+    const textPayload = buildChuangTextPayload(turn.replyText);
+    await this.adapter.sendResourceMessage({
+      chatId: inbound.chatId,
+      msgType: textPayload.msgType,
+      content: textPayload.content,
     });
   }
 }

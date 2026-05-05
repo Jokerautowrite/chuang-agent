@@ -9,7 +9,9 @@ mod cli_console;
 mod cli_control;
 mod cli_doctor;
 mod cli_experiment;
+mod cli_external_ai;
 mod cli_genesis;
+mod cli_goal;
 mod cli_memory;
 mod cli_output;
 mod cli_plugin;
@@ -25,7 +27,9 @@ use cli_console::console_command;
 use cli_control::control_command;
 use cli_doctor::doctor_command;
 use cli_experiment::experiment_command;
+use cli_external_ai::external_ai_command;
 use cli_genesis::genesis_command;
+use cli_goal::goal_command;
 use cli_memory::memory_command;
 use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
 use cli_plugin::plugin_command;
@@ -53,9 +57,11 @@ fn run_cli() -> Result<(), String> {
         Some("control") => control_command(&args[2..]),
         Some("subagent") => subagent_command(&args[2..]),
         Some("genesis") => genesis_command(&args[2..]),
+        Some("goal") => goal_command(&args[2..]),
         Some("memory") => memory_command(&args[2..]),
         Some("plugin") => plugin_command(&args[2..]),
         Some("experiment") => experiment_command(&args[2..]),
+        Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),
         _ => Err(usage()),
     }
@@ -133,7 +139,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
 
 fn status_command(args: &[String]) -> Result<(), String> {
     let output = parse_status_output(args)?;
-    let options = parse_cli_options(args)?;
+    let options = parse_status_cli_options(args)?;
     let kernel = kernel_config_from_runtime(&options.runtime)?;
     let status = build_chuang_mvp_status(&options.runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;

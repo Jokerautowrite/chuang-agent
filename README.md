@@ -39,6 +39,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `cargo run -- console snapshot --json`：给未来桌面/工具/服务控制台读取只读状态、插件摘要、control unit 列表和插件清单。
 - `cargo run -- plugin list|check --registry plugins/registry.example.json`：查看和校验插件/adapter 注册表，不执行插件。
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录和 stub provider，不触碰真实服务。
+- `sh scripts/chuang-second-test-smoke.sh`：第二测试版本验收入口，复用同一安全 smoke，但输出 `second_test_smoke_ok`。
 - `GenesisActuator`：新版网页 AI 查询插件线，旧 `BrowserWorker` 暂停推进。
 - `cargo test`：全量回归。
 

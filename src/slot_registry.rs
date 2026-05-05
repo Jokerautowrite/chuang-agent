@@ -179,6 +179,7 @@ fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
     ExecutionSlot::generic_agent_mvp(ToolExecutionConfig {
         shell_timeout_ms: config.tool_loop.shell_timeout_ms,
         shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
+        memory: None,
     })
 }
 

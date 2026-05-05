@@ -21,8 +21,9 @@ use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
 use chuang_agent::tool_runtime::{
-    parse_tool_model_output, ExecutionSlot, ToolCall, ToolExecutionConfig, ToolExecutionRecord,
-    ToolLoopEvent, ToolLoopReport, ToolModelOutput, ToolProtocolError,
+    parse_tool_model_output, ExecutionSlot, MemoryToolContext, ToolCall, ToolExecutionConfig,
+    ToolExecutionRecord, ToolLoopEvent, ToolLoopReport, ToolModelOutput, ToolProtocolError,
+    ToolSurfaceStatus,
 };
 use chuang_agent::{common::AgentId, common::TaskId};
 
@@ -75,6 +76,12 @@ pub(crate) fn run_with_options(
         ToolExecutionConfig {
             shell_timeout_ms: runtime.tool_loop.shell_timeout_ms,
             shell_risk_rules: runtime.tool_loop.shell_risk_rules.clone(),
+            memory: Some(MemoryToolContext {
+                db_path: runtime.db_path.clone(),
+                session_id: request.session_id.clone(),
+                default_limit: runtime.recall_limit.max(1).min(5),
+                max_limit: runtime.recall_limit.max(1).max(10),
+            }),
         },
         request.user_input.clone(),
         goal_context_segments(request.goal_spec.as_ref())?,
@@ -167,6 +174,7 @@ where
             ToolModelOutput::FinalAnswer(final_answer) => {
                 turn.result.response.body = final_answer;
                 turn.user_input = original_input.clone();
+                insert_tool_surface_metadata(&mut turn, workspace_root)?;
                 if !tool_calls.is_empty() || !protocol_errors.is_empty() {
                     insert_tool_metadata(
                         &mut turn,
@@ -248,6 +256,7 @@ where
             }
             ToolModelOutput::PlainText(_) => {
                 if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
+                    insert_tool_surface_metadata(&mut turn, workspace_root)?;
                     return Ok(turn);
                 }
                 let raw = body.clone();
@@ -340,6 +349,55 @@ fn insert_tool_metadata(
         "tool_report_json".to_string(),
         serde_json::to_string(&report).map_err(|e| format!("tool_report_json_failed: {e}"))?,
     );
+    Ok(())
+}
+
+fn insert_tool_surface_metadata(
+    turn: &mut ChuangKernelTurn,
+    workspace_root: &Path,
+) -> Result<(), String> {
+    let surface = ToolSurfaceStatus::generic_agent_mvp(workspace_root);
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert("tool_surface_available".to_string(), "true".to_string());
+    extra.insert("tool_surface_governed".to_string(), "true".to_string());
+    extra.insert("tool_surface_source".to_string(), surface.source.clone());
+    extra.insert(
+        "tool_surface_callable_tools".to_string(),
+        surface.callable_tools.join(","),
+    );
+    extra.insert(
+        "tool_surface_mapped_atomic_tools".to_string(),
+        surface.mapped_atomic_tools.join(","),
+    );
+    extra.insert(
+        "tool_surface_interface_only_atomic_tools".to_string(),
+        surface.interface_only_atomic_tools.join(","),
+    );
+    extra.insert(
+        "tool_action_schema_version".to_string(),
+        surface.action_schema_version.to_string(),
+    );
+    extra.insert(
+        "tool_report_schema_version".to_string(),
+        surface.report_schema_version.to_string(),
+    );
+    extra.insert(
+        "tool_instruction_context_injected".to_string(),
+        surface.instruction_context_injected.to_string(),
+    );
+    extra.insert(
+        "tool_surface_json".to_string(),
+        serde_json::to_string(&surface).map_err(|e| format!("tool_surface_json_failed: {e}"))?,
+    );
+    extra
+        .entry("tool_call_count".to_string())
+        .or_insert_with(|| "0".to_string());
+    extra
+        .entry("tool_protocol_error_count".to_string())
+        .or_insert_with(|| "0".to_string());
+    extra
+        .entry("tool_trace".to_string())
+        .or_insert_with(String::new);
     Ok(())
 }
 
@@ -744,6 +802,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
         ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }
 
@@ -1322,6 +1381,44 @@ mod tests {
         assert_eq!(turn.user_input, "普通输入");
         assert!(!turn.result.prompt.contains("GOAL_SPEC"));
         assert!(!turn.result.packed_context_preview.contains("goal-spec"));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_surface_available")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_surface_governed")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("0")
+        );
+        let tool_surface_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_surface_json")
+            .expect("tool surface json should exist without tool calls");
+        assert!(tool_surface_json.contains("\"available\":true"));
+        assert!(tool_surface_json.contains("\"governed\":true"));
+        assert!(tool_surface_json.contains("\"file_read\""));
+        assert!(tool_surface_json.contains("\"list_dir\""));
         let captured = captured.lock().expect("capture lock should succeed");
         assert_eq!(captured[0].user_input, "普通输入");
         assert!(!captured[0].prompt.contains("GOAL_SPEC"));

@@ -6,7 +6,8 @@ mod validation;
 
 pub use schema::{
     ArtifactKind, ArtifactRef, ContextDebugSummary, ContextDropReasonSummary, ExecutionStatus,
-    GovernanceDecisionSummary, ResourceUsage, SubagentReport, WorkingReservationDebug,
+    GovernanceDecisionSummary, ReportAdmission, ReportAdmissionStatus, ResourceUsage,
+    SubagentReport, WorkingReservationDebug,
 };
 pub use size_limit::{ReportSizeLimit, DEFAULT_REPORT_SIZE_LIMIT_BYTES};
 pub use validation::{

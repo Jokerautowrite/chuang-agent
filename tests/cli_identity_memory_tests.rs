@@ -325,6 +325,275 @@ fn cli_memory_lim_extract_returns_dry_run_candidates() {
 }
 
 #[test]
+fn cli_memory_maintenance_report_is_dry_run_and_reuses_lim_candidates() {
+    let root = temp_root("maintenance-report");
+    let config_path = write_fake_config(&root);
+
+    let run = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--input",
+            "维护报告候选：长期记忆写回必须人工确认",
+            "--session-id",
+            "maintenance-session",
+            "--remember-session",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        run.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let report = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "maintenance",
+            "report",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "人工确认",
+            "--session-id",
+            "maintenance-session",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        report.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&report.stdout)).expect("stdout json");
+    assert_eq!(parsed["dry_run"], true);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["session_id"], "maintenance-session");
+    assert_eq!(
+        parsed["identity_health"]["experiences_file"],
+        "experiences.md"
+    );
+    assert_eq!(parsed["lim_candidate_count"], 1);
+    assert_eq!(parsed["lim_candidates"][0]["proposed_scope"], "experiences");
+    assert!(parsed["recommendations"]
+        .as_array()
+        .expect("recommendations")
+        .iter()
+        .any(|recommendation| recommendation
+            .as_str()
+            .expect("recommendation")
+            .contains("manually")));
+    assert!(
+        !root.join("experiences.md").exists() || {
+            std::fs::read_to_string(root.join("experiences.md"))
+                .expect("experiences file")
+                .is_empty()
+        }
+    );
+
+    let apply = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "maintenance",
+            "apply",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "人工确认",
+            "--session-id",
+            "maintenance-session",
+            "--approve-writeback",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        apply.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&apply.stdout)).expect("stdout json");
+    assert_eq!(parsed["dry_run"], false);
+    assert_eq!(parsed["approved_writeback"], true);
+    assert_eq!(
+        parsed["applied_candidate_ids"]
+            .as_array()
+            .expect("applied")
+            .len(),
+        1
+    );
+    assert_eq!(
+        parsed["skipped_candidate_ids"]
+            .as_array()
+            .expect("skipped")
+            .len(),
+        0
+    );
+
+    let experiences = std::fs::read_to_string(root.join("experiences.md"))
+        .expect("experiences file should be readable");
+    assert!(experiences.contains("source=lim_dry_run"));
+    assert!(experiences.contains("## lim-candidate-"));
+
+    let apply_again = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "maintenance",
+            "apply",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--identity-memory-root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "人工确认",
+            "--session-id",
+            "maintenance-session",
+            "--approve-writeback",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        apply_again.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&apply_again.stderr)
+    );
+    let parsed_again: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&apply_again.stdout)).expect("stdout json");
+    assert_eq!(
+        parsed_again["applied_candidate_ids"]
+            .as_array()
+            .expect("applied")
+            .len(),
+        0
+    );
+    assert_eq!(
+        parsed_again["skipped_candidate_ids"]
+            .as_array()
+            .expect("skipped")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn cli_memory_knowledge_status_is_read_only_contract() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "knowledge",
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["adapter"], "external_knowledge");
+    assert_eq!(parsed["dry_run"], true);
+    assert_eq!(parsed["read_only"], true);
+    assert_eq!(parsed["connects_real_service"], false);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["runtime_retrieval_wired"], false);
+    assert_eq!(parsed["doc"], "docs/external-knowledge-adapter.md");
+    assert!(parsed["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .any(|source| source["name"] == "wiki" && source["state"] == "documented_only"));
+    assert!(parsed["sources"]
+        .as_array()
+        .expect("sources")
+        .iter()
+        .any(|source| source["name"] == "gbrain" && source["state"] == "documented_only"));
+}
+
+#[test]
+fn cli_memory_knowledge_search_reads_local_docs_only() {
+    let root = temp_root("knowledge-search");
+    std::fs::create_dir_all(root.join("wiki")).expect("wiki dir should be created");
+    std::fs::write(
+        root.join("wiki").join("memory.md"),
+        "外脑知识库用于 provenance 检索\n第二行不命中\n",
+    )
+    .expect("knowledge doc should write");
+    std::fs::write(
+        root.join("wiki").join("secret-token.md"),
+        "外脑知识库 secret should stay unread\n",
+    )
+    .expect("sensitive doc should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "knowledge",
+            "search",
+            "--root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "provenance",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["adapter"], "local_external_knowledge");
+    assert_eq!(parsed["dry_run"], true);
+    assert_eq!(parsed["read_only"], true);
+    assert_eq!(parsed["connects_real_service"], false);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["runtime_retrieval_wired"], false);
+    assert_eq!(parsed["query"], "provenance");
+    assert_eq!(parsed["hit_count"], 1);
+    assert_eq!(parsed["hits"][0]["source"], "local_file");
+    assert_eq!(parsed["hits"][0]["path"], "wiki/memory.md");
+    assert_eq!(parsed["hits"][0]["line"], 1);
+    assert!(parsed["hits"][0]["preview"]
+        .as_str()
+        .expect("preview")
+        .contains("provenance"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("secret should stay unread"));
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);

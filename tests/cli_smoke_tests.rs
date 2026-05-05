@@ -17,6 +17,22 @@ fn write_fake_config(root: &std::path::Path) -> PathBuf {
 }
 
 #[test]
+fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-second-test-smoke.sh"))
+        .expect("second-test smoke wrapper should be readable");
+    let mvp_smoke = fs::read_to_string(manifest_dir.join("scripts/chuang-mvp-smoke.sh"))
+        .expect("mvp smoke should be readable");
+
+    assert!(wrapper.contains("CHUANG_SMOKE_NAME=second_test"));
+    assert!(wrapper.contains("scripts/chuang-mvp-smoke.sh"));
+    assert!(mvp_smoke.contains("smoke_name=\"${CHUANG_SMOKE_NAME:-mvp}\""));
+    assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
+    assert!(!wrapper.contains("rm "));
+    assert!(!wrapper.contains("systemctl"));
+}
+
+#[test]
 fn cli_run_command_boots_and_returns_structured_response() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;
@@ -190,6 +206,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     );
     let run_once_stdout = String::from_utf8_lossy(&run_once.stdout);
     assert!(run_once_stdout.contains("\"run_id\": \"queued-run-1\""));
+    assert!(run_once_stdout.contains("\"report_admission\""));
+    assert!(run_once_stdout.contains("\"status\": \"Accepted\""));
     assert!(queue_root
         .join("reports")
         .join("queued-run-1.json")
@@ -222,6 +240,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     let report_stdout = String::from_utf8_lossy(&report.stdout);
     assert!(report_stdout.contains("\"available\": true"));
     assert!(report_stdout.contains("fake runner completed turn-1"));
+    assert!(report_stdout.contains("\"report_admission\""));
+    assert!(report_stdout.contains("\"status\": \"Accepted\""));
 
     let collect = Command::new("cargo")
         .args([
@@ -251,6 +271,8 @@ fn cli_run_can_dispatch_runtime_report_to_queued_subagent() {
     assert!(collect_stdout.contains("\"dispatch_available\": true"));
     assert!(collect_stdout.contains("\"report_available\": true"));
     assert!(collect_stdout.contains("fake runner completed turn-1"));
+    assert!(collect_stdout.contains("\"report_admission\""));
+    assert!(collect_stdout.contains("\"status\": \"Accepted\""));
 }
 
 #[test]

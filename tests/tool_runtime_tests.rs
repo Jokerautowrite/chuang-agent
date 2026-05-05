@@ -6,9 +6,9 @@ use chuang_agent::governance::{RiskDecision, StaticRuleGovernance};
 use chuang_agent::tool_runtime::{
     execute_tool_call, execute_tool_call_with_governance, parse_final_answer,
     parse_tool_action_envelope, parse_tool_action_envelope_result, parse_tool_call,
-    parse_tool_model_output, proposed_action_for_tool_call, ExecutionSlot, ShellRiskRules,
-    ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport, ToolModelOutput,
-    WriteOperation,
+    parse_tool_model_output, proposed_action_for_tool_call, ExecutionSlot, MemoryToolContext,
+    ShellRiskRules, ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport,
+    ToolModelOutput, WriteOperation,
 };
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -106,6 +106,12 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
         ),
         ToolModelOutput::ToolCall(ToolCall::ShellExec { .. })
     ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"memory_recall","query":"会话锚点","limit":2}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::MemoryRecall { .. })
+    ));
 }
 
 #[test]
@@ -152,6 +158,7 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
 
     assert!(instructions.contains("file_read, file_write, code_execute"));
     assert!(instructions.contains("辅助工具：list_dir"));
+    assert!(instructions.contains("memory_recall"));
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
     assert!(instructions.contains("mouse/keyboard/screenshot/locate"));
@@ -226,6 +233,9 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"content"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"command"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"cwd"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"query"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"session_id"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"limit"));
 }
 
 #[test]
@@ -366,6 +376,124 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert!(!shell.stderr_redacted);
     assert!(!shell.stdout_truncated);
     assert!(!shell.stderr_truncated);
+}
+
+#[test]
+fn memory_recall_returns_structured_unconfigured_result() {
+    let root = temp_workspace("memory-unconfigured");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+
+    let record = execute_tool_call(
+        &root,
+        &ToolCall::MemoryRecall {
+            query: "会话锚点".to_string(),
+            session_id: None,
+            limit: Some(3),
+        },
+    );
+
+    assert!(!record.ok);
+    assert_eq!(record.tool_name, "memory_recall");
+    assert_eq!(record.atomic_tool_name, None);
+    assert_eq!(
+        record.failure_class.as_deref(),
+        Some("memory_recall_unconfigured")
+    );
+    assert!(!record.retryable);
+}
+
+#[test]
+fn memory_recall_searches_only_configured_session_memory() {
+    use chuang_agent::memory_store::MemoryStore;
+
+    let root = temp_workspace("memory-session");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let db_path = root.join("memory.db");
+    let mut store =
+        chuang_agent::memory_store_sqlite::SqliteMemoryStore::open(&db_path).expect("db opens");
+    store
+        .put(chuang_agent::memory_store::MemoryRecord {
+            id: "alpha-hit".to_string(),
+            content: "会话锚点A 要在 alpha 中召回".to_string(),
+            metadata: std::collections::BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), "alpha".to_string()),
+            ]),
+            created_at: "2026-05-04T00:00:00Z".to_string(),
+            expires_at: None,
+        })
+        .expect("alpha memory writes");
+    store
+        .put(chuang_agent::memory_store::MemoryRecord {
+            id: "beta-hit".to_string(),
+            content: "会话锚点A 不应跨会话召回".to_string(),
+            metadata: std::collections::BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), "beta".to_string()),
+            ]),
+            created_at: "2026-05-04T00:00:01Z".to_string(),
+            expires_at: None,
+        })
+        .expect("beta memory writes");
+
+    let record = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::MemoryRecall {
+            query: "会话锚点A".to_string(),
+            session_id: Some("alpha".to_string()),
+            limit: Some(5),
+        },
+        &ToolExecutionConfig {
+            memory: Some(MemoryToolContext {
+                db_path,
+                session_id: Some("alpha".to_string()),
+                default_limit: 3,
+                max_limit: 5,
+            }),
+            ..ToolExecutionConfig::default()
+        },
+    );
+
+    assert!(
+        record.ok,
+        "memory recall should succeed: {}",
+        record.summary
+    );
+    assert_eq!(record.failure_class, None);
+    let output = record.output.as_deref().expect("output json should exist");
+    assert!(output.contains(r#""hit_count":1"#));
+    assert!(output.contains("alpha-hit"));
+    assert!(!output.contains("beta-hit"));
+}
+
+#[test]
+fn memory_recall_rejects_cross_session_request() {
+    let root = temp_workspace("memory-session-mismatch");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+
+    let record = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::MemoryRecall {
+            query: "会话锚点".to_string(),
+            session_id: Some("beta".to_string()),
+            limit: None,
+        },
+        &ToolExecutionConfig {
+            memory: Some(MemoryToolContext {
+                db_path: root.join("memory.db"),
+                session_id: Some("alpha".to_string()),
+                default_limit: 3,
+                max_limit: 5,
+            }),
+            ..ToolExecutionConfig::default()
+        },
+    );
+
+    assert!(!record.ok);
+    assert_eq!(
+        record.failure_class.as_deref(),
+        Some("memory_recall_session_mismatch")
+    );
 }
 
 #[test]
@@ -651,6 +779,7 @@ fn execution_slot_uses_configured_shell_risk_rules() {
             network_change: vec![" make deploy".to_string()],
             ..ShellRiskRules::default()
         },
+        memory: None,
     });
 
     let error = slot

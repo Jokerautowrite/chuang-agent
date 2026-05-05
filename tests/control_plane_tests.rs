@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::control_plane::{
@@ -29,6 +30,11 @@ fn temp_script_path(name: &str) -> PathBuf {
         .expect("clock should be valid")
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-agent-control-{name}-{nanos}.sh"))
+}
+
+fn command_control_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD.get_or_init(|| Mutex::new(())).lock().expect("guard")
 }
 
 #[test]
@@ -79,6 +85,7 @@ fn fake_control_plane_starts_stops_and_restarts_units() {
 
 #[test]
 fn command_control_plane_lists_and_applies_external_command_json() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{"channel":"command"}}]"#
@@ -115,6 +122,7 @@ fn command_control_plane_lists_and_applies_external_command_json() {
 
 #[test]
 fn command_control_plane_passes_apply_request_to_external_command_stdin() {
+    let _guard = command_control_test_guard();
     let script_path = temp_script_path("stdin");
     fs::write(
         &script_path,
@@ -171,6 +179,7 @@ exit 2
 
 #[test]
 fn command_control_plane_preserves_quoted_arguments_without_shell() {
+    let _guard = command_control_test_guard();
     let script_path = temp_script_path("quoted");
     fs::write(
         &script_path,
@@ -209,6 +218,7 @@ exit 2
 
 #[test]
 fn command_control_plane_reports_list_command_failure() {
+    let _guard = command_control_test_guard();
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "false".to_string(),
         list_args: String::new(),
@@ -226,6 +236,7 @@ fn command_control_plane_reports_list_command_failure() {
 
 #[test]
 fn command_control_plane_reports_malformed_list_json() {
+    let _guard = command_control_test_guard();
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: "not-json".to_string(),
@@ -243,6 +254,7 @@ fn command_control_plane_reports_malformed_list_json() {
 
 #[test]
 fn command_control_plane_rejects_unknown_list_output_fields() {
+    let _guard = command_control_test_guard();
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":null,"metadata":{},"unexpected":"ignored-before"}]"#
@@ -261,6 +273,7 @@ fn command_control_plane_rejects_unknown_list_output_fields() {
 
 #[test]
 fn command_control_plane_times_out_stuck_list_command() {
+    let _guard = command_control_test_guard();
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "sleep".to_string(),
         list_args: "1".to_string(),
@@ -280,6 +293,7 @@ fn command_control_plane_times_out_stuck_list_command() {
 
 #[test]
 fn command_control_plane_rejects_apply_receipt_for_wrong_unit() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
@@ -303,6 +317,7 @@ fn command_control_plane_rejects_apply_receipt_for_wrong_unit() {
 
 #[test]
 fn command_control_plane_rejects_apply_receipt_for_wrong_action() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
@@ -326,6 +341,7 @@ fn command_control_plane_rejects_apply_receipt_for_wrong_action() {
 
 #[test]
 fn command_control_plane_rejects_apply_receipt_for_wrong_model() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
@@ -351,6 +367,7 @@ fn command_control_plane_rejects_apply_receipt_for_wrong_model() {
 
 #[test]
 fn command_control_plane_rejects_non_model_receipt_with_model_name() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
@@ -374,6 +391,7 @@ fn command_control_plane_rejects_non_model_receipt_with_model_name() {
 
 #[test]
 fn command_control_plane_rejects_unknown_receipt_output_fields() {
+    let _guard = command_control_test_guard();
     let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
         program: "printf".to_string(),
         list_args: r#"[{"unit_id":"command-agent","display_name":"CommandAgent","kind":"agent","status":"Running","model_name":"gpt-5.5","metadata":{}}]"#
@@ -397,6 +415,7 @@ fn command_control_plane_rejects_unknown_receipt_output_fields() {
 
 #[test]
 fn real_control_adapter_stays_dry_run_without_enable_env() {
+    let _guard = command_control_test_guard();
     let allowlist = temp_script_path("real-control-allowlist").with_extension("json");
     fs::write(
         &allowlist,

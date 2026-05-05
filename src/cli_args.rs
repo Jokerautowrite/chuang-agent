@@ -12,7 +12,9 @@ use chuang_agent::runtime_config::{
     ContextEngineConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
     RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
-use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
+use chuang_agent::runtime_config_file::{
+    load_runtime_config_file_with_options, RuntimeConfigFileError, RuntimeConfigFileOptions,
+};
 use chuang_agent::subagent_spawner::{ContextIsolation, RunId, SpawnRequest, SubagentToolPolicy};
 
 use crate::cli_output::{usage, ControlOutputFormat};
@@ -67,6 +69,10 @@ pub(crate) fn parse_status_output(args: &[String]) -> Result<ControlOutputFormat
         }
     }
     Ok(output)
+}
+
+pub(crate) fn parse_status_cli_options(args: &[String]) -> Result<CliOptions, String> {
+    parse_cli_options_with_options(args, CliParseOptions::allow_missing_env())
 }
 
 pub(crate) fn parse_config_init(args: &[String]) -> Result<ConfigInitCliRequest, String> {
@@ -690,9 +696,9 @@ fn parse_subagent_runner_args(
                 if parsed == 0 {
                     return Err("--max-concurrency must be greater than zero".to_string());
                 }
-                if parsed > 1 {
+                if parsed > 8 {
                     return Err(
-                        "--max-concurrency above 1 is not supported by the MVP worker loop"
+                        "--max-concurrency above 8 is not supported by the MVP worker loop"
                             .to_string(),
                     );
                 }
@@ -776,6 +782,13 @@ fn push_unique_capability(capabilities: &mut Vec<String>, capability: String) {
 }
 
 pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
+    parse_cli_options_with_options(args, CliParseOptions::strict())
+}
+
+fn parse_cli_options_with_options(
+    args: &[String],
+    options: CliParseOptions,
+) -> Result<CliOptions, String> {
     let config_path = find_config_path(args)?;
     let mut db_path: Option<PathBuf> = None;
     let mut provider_id: Option<String> = None;
@@ -872,9 +885,11 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     }
 
     let mut runtime = if let Some(path) = config_path {
-        load_runtime_config_file(&path).map_err(format_runtime_config_file_error)?
+        load_runtime_config_file_with_options(&path, options.runtime_config_file)
+            .map_err(format_runtime_config_file_error)?
     } else if let Some(path) = default_config_path() {
-        load_runtime_config_file(&path).map_err(format_runtime_config_file_error)?
+        load_runtime_config_file_with_options(&path, options.runtime_config_file)
+            .map_err(format_runtime_config_file_error)?
     } else {
         RuntimeConfig::new(default_db_path())
     };
@@ -934,6 +949,25 @@ pub(crate) fn parse_cli_options(args: &[String]) -> Result<CliOptions, String> {
     };
 
     Ok(CliOptions { runtime })
+}
+
+#[derive(Clone, Copy)]
+struct CliParseOptions {
+    runtime_config_file: RuntimeConfigFileOptions,
+}
+
+impl CliParseOptions {
+    fn strict() -> Self {
+        Self {
+            runtime_config_file: RuntimeConfigFileOptions::strict(),
+        }
+    }
+
+    fn allow_missing_env() -> Self {
+        Self {
+            runtime_config_file: RuntimeConfigFileOptions::allow_missing_env(),
+        }
+    }
 }
 
 pub(crate) fn effective_config_source(args: &[String]) -> Result<Option<String>, String> {

@@ -97,3 +97,22 @@ pub struct SubagentReport {
     pub governance_decision: Option<GovernanceDecisionSummary>,
     pub truncated: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReportAdmissionStatus {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportAdmission {
+    pub schema_version: String,
+    pub report_id: Option<ReportId>,
+    pub task_id: Option<TaskId>,
+    pub agent_id: Option<AgentId>,
+    pub controller_agent_id: AgentId,
+    pub status: ReportAdmissionStatus,
+    pub reason_code: String,
+    pub reason: String,
+    pub decided_at: Timestamp,
+}

@@ -16,16 +16,23 @@
 
 核心边界见 `docs/core-boundary.md`。provider、子代理、桌面/浏览器、控制面和外部通道都属于 adapter/plugin，不进入核心主干。
 
+当前主线验收顺序固定为：先看 `status --json` 的只读 readiness，再跑 `doctor --json` 的安全健康检查，然后用 `scripts/chuang-mvp-smoke.sh` 串起 goal/session/channel/subagent/control/experiment 的端到端冒烟。smoke 不连接真实飞书、不控制真实服务、不读取真实密钥，只使用临时目录、stub provider 和安全示例 adapter。
+
 ## 已具备能力
 
 - `ChuangKernel::run_turn()`：主运行入口，统一串起 recall、context packing、responder 和 report。
 - `ChuangKernel::remember_turn()`：显式写回普通 `turn_summary` 记忆。
 - `cargo run -- run --input TEXT`：通过内核运行一轮。
 - `cargo run -- run --goal TEXT --input TEXT`：把长期目标作为额外 context segment 注入 runtime；不改写原始 `user_input`，不新增 slot，不绕过治理。
+- `cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID]`：创建本地 `GoalRun` 计划 JSON，用于 checkpoint-first continuation；只记录目标计划，不执行命令。
+- `cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]` 和 `cargo run -- goal show ...`：追加/读取 `GoalRun` checkpoint，用于下一轮恢复目标状态；不自动续跑、不调度子代理。
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
 - `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- memory session search --query TEXT [--session-id ID] [--limit N]`：只读检索历史 `turn_summary`；带 `--session-id` 时按会话隔离过滤。
 - `cargo run -- memory lim extract --query TEXT [--session-id ID] [--limit N]`：只读生成 LIM 候选经验，带 provenance，不自动写回。
+- `cargo run -- memory maintenance report --query TEXT [--session-id ID] [--limit N]`：只读生成维护报告，复用 session search 和 LIM extract，输出健康状态、候选和建议，不自动写回。
+- `cargo run -- memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback]`：在人工确认后把 LIM 候选写回 `experiences.md`，默认幂等跳过重复候选，不自动维护。
+- `cargo run -- memory knowledge search --root PATH --query TEXT [--limit N]`：只读检索本地 markdown/text 外脑目录，输出 provenance hit，不连接真实 wiki/GBrain，不写核心记忆，不注入 runtime。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- run --input TEXT --remember-experience`：显式把本轮结果按 provenance 写入 `experiences.md`，用于内部经验层沉淀；默认运行不自动写经验。
 - `cargo run -- memory identity show`：只读展示当前 `USER.md / MEMORY.md` 全文、字符数和硬上限。
@@ -43,10 +50,17 @@
 - `cargo run -- channel simulate ... --goal TEXT`：本地演练通道目标上下文注入；真实飞书桥是否传 goal 仍由独立 channel adapter 决定。
 - `cargo run -- plugin list|check --registry PATH`：读取插件注册表，统一展示 channel、runner、control、actuator、genesis adapter，不执行插件。
 - `cargo run -- status`：查看 MVP 核心状态。
-- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、goal mode、provider request timeout、只读 `plugin_registry` 摘要。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、mapped/interface-only 原子工具名单、goal mode、goal_run readiness、identity bootstrap presence、provider request timeout、只读 `plugin_registry` 摘要。
+- `status --json` / `doctor --json` 的 `project_readiness`：按主链模块给出 `ready / partial / deferred / blocked` 和下一步动作。当前正常状态是 `ready`，不是“全部真实外部服务都已接通”。
+- `status --json` / `doctor --json` 的 `release_readiness`：给出当前测试版本交付的顶层结论。当前正常状态是 `second_test_version_ready`，表示第二测试版本围绕 readiness、smoke、goal/run 续接和 subagent protocol 可回归验收；真实外部服务验证仍按 adapter 边界后置。
 - `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
+- `status --json` / `doctor --json` 的 `memory_readiness`：按内部记忆、历史会话、LIM、外脑知识库、自动维护闭环给出 `ready / partial / deferred / blocked` 和下一步动作。当前五层本地第二测试版边界为 `ready`，但这不代表真实 wiki/GBrain 已接通，也不代表自动维护会自行写长期记忆。
+- `status --json` / `doctor --json` 的 `channel_readiness`：按 app-server、channel simulate、Chuang 专用飞书桥、Codex/Hermes 隔离、rich messages 拆分状态。它只确认边界和脚本存在性，不代表真实飞书连接在线。
+- `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态。当前 `queued_external` 里 dispatch/report 已 ready，协议层仍不是自动执行器。
+- `data/skills/external_agent_dispatch_sop.md`：外部 AI 分身调度 Skill contract，定义平台选择、任务翻译、质量评级、追问上限、记忆写回和审计边界；它不是真实浏览器/HTTP adapter，不新增 core slot。
+- `data/skills/unified_identity_engine_adapter.md`：外部 AI 的 lower adapter contract，定义平台/session 复用、结构化输入输出、失败类和审计边界；它仍不是实际登录态执行器。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。
-- `cargo run -- doctor --json`：输出结构化健康检查结果，包含 atomic tools、goal mode、plugin registry 等只读验收项，给桌面控制台或插件读取。
+- `cargo run -- doctor --json`：输出结构化健康检查结果，包含 atomic tools、goal mode、goal_run readiness、plugin registry 等只读验收项，并内嵌当前 status 快照，给桌面控制台或插件读取。
 - `cargo run -- console snapshot --json`：只读聚合 `status`、插件注册表摘要、control unit 列表和插件清单，作为未来桌面/工具/服务控制台的数据源；不执行 control apply，不启动服务。
 - `cargo run -- status --config PATH`：读取简单 `config.toml`，CLI 参数仍可覆盖配置文件。
 - `cargo run -- config init`：生成默认 `config.toml`；目标文件已存在时拒绝覆盖。
@@ -67,11 +81,13 @@
 - `GenesisActuator` trait + `AutoCliGenesisActuator` 最小实现：主通道 userDataDir，备用 CDP，登录态失效时 fallback，并返回需审批的修复计划，不自动删除 profile。
 - `cargo run -- genesis ask --prompt TEXT --approve-exec`：手动验证 Genesis 查询入口；真实外部程序执行必须显式审批，并输出治理决策与审计状态。
 - `cargo run -- genesis ask --prompt TEXT --dry-run`：只渲染 Genesis 主/备通道 AutoCLI 命令规格，不执行外部程序。
+- `cargo run -- external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N]`：本地生成统一身份引擎 dispatch 请求、审计 id 和结构化结果；不连接外部平台、不写记忆、不接真实浏览器/HTTP adapter。
 - `cargo run -- experiment plan --goal TEXT --success TEXT`：生成固定时间预算的安全实验计划，只写 `experiment.md`，不执行、不删除、不回滚。
 - `cargo run -- experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT`：追加实验结果 `report.md`，已存在时拒绝覆盖。
 - `cargo run -- experiment list`：只读列出实验状态，显示是否已有计划和报告。
 - `cargo run -- experiment show --experiment-id ID`：只读查看某个实验的计划和报告内容，不修改文件。
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录、stub provider 和示例 command control，不触碰真实服务。
+- `sh scripts/chuang-second-test-smoke.sh`：第二测试版本验收入口，复用同一安全 smoke，并输出 `second_test_smoke_ok`。
 
 ## 当前明确不做
 
@@ -85,7 +101,7 @@
 - 不在核心层硬编码任何密钥、飞书凭证、Hermes 凭证或本机私有 token。
 - 不把 API key 明文写进配置文件；真实 provider 使用 `api_key_env` 引用环境变量。
 - 不把 AutoResearch 的 `git reset --hard` 模式照搬进创项目；实验模块只能追加计划/报告，不能破坏主工作区。
-- 不把 goal mode 当成常驻后台执行器；当前它只是结构化目标上下文。
+- 不把 goal mode 当成常驻后台执行器；当前它只是结构化目标上下文，加上可恢复的计划/checkpoint 记录。
 - 不把插件注册表、GA interface-only 原子工具或安全示例 adapter 宣称为真实外部能力。
 
 ## 下一步优先级
@@ -110,6 +126,7 @@
 - `cargo run -- run --input TEXT --remember` 能写回记忆，并在下一轮被 recall。
 - `cargo run -- memory session search --query TEXT --session-id ID` 能只读检索指定会话，不跨 session 返回。
 - `cargo run -- memory lim extract --query TEXT --session-id ID` 能生成 dry-run 候选，不修改 `experiences.md`。
+- `cargo run -- memory maintenance report --query TEXT --session-id ID` 能生成 dry-run 维护报告，不修改 `MEMORY.md` 或 `experiences.md`。
 - `cargo run -- run --input TEXT --remember-identity --identity-memory-root PATH` 能显式追加身份热记忆。
 - `cargo run -- run --input TEXT --remember-experience --identity-memory-root PATH` 能显式追加带 provenance 的经验层记忆。
 - `cargo run -- subagent dispatch --task TEXT --subagent-queue-root PATH` 能生成 dispatch JSON。
@@ -123,6 +140,13 @@
 - `cargo run -- experiment list --root PATH` 能只读列出 planned/completed 状态。
 - `cargo run -- experiment show --experiment-id ID --root PATH` 能只读展示 `experiment.md` 和可选 `report.md`。
 - `sh scripts/chuang-mvp-smoke.sh` 能串起 status JSON、doctor JSON、goal runtime context、session memory diagnostics、channel simulate goal input、subagent queue、command control example 和 experiment show。
+- `sh scripts/chuang-mvp-smoke.sh` 能断言 status/doctor 的 readiness 字段：GA mapped/interface-only 工具名单、identity bootstrap presence、provider request timeout、goal_run readiness、plugin registry 和 placeholder warning。
+- `sh scripts/chuang-mvp-smoke.sh` 能断言项目级 readiness：主链和 execution tools 必须 ready，channel 和 external AI 可保持 partial/deferred，但不能被误报成已完成真实能力。
+- `sh scripts/chuang-mvp-smoke.sh` 能断言通道 readiness：Chuang 专用桥保持 partial，Codex/Hermes 隔离保持 ready，rich messages 保持 deferred。
+- `sh scripts/chuang-mvp-smoke.sh` 能断言子代理 readiness：dispatch/report 维持 ready，command runner 维持显式审批态，multi-worker 和 external AI 保持 partial。
+- `sh scripts/chuang-mvp-smoke.sh` 能断言子代理 readiness：dispatch/report 维持协议态，command runner 维持显式审批态，multi-worker 和 external AI 保持 partial。
+- `sh scripts/chuang-mvp-smoke.sh` 能验证 `GoalRun` plan/checkpoint/show 的 checkpoint-first 记录闭环，但不期待它自动执行任务。
+- `sh scripts/chuang-second-test-smoke.sh` 能复用完整 smoke 并固定第二测试版本输出标记，方便后续把第二版验收和旧 MVP 入口区分开。
 - 所有危险操作仍需显式审批或保持 fake。
 - command 控制面示例配置能 `list` 和 `apply --approve` 跑通，但不会触碰真实服务。
 - 对话 provider、子代理、actuator、control plane 的项目根配置已去 fake；安全示例 adapter 不能伪装成真实桌面/服务控制。

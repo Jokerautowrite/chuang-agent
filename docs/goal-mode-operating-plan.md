@@ -1,6 +1,6 @@
 # Goal Mode Operating Plan
 
-更新时间：2026-05-03
+更新时间：2026-05-04
 
 ## 定位
 
@@ -20,6 +20,7 @@ input -> identity/memory -> context -> runtime -> governance -> execution slot -
 2. Acceptance：写清楚可验证结果。
 3. Budget：限定本轮范围，避免扩散到子代理、飞书或外部智能体。
 4. Checkpoint：结束前更新 `docs/progress-log.md` 和 `docs/handoff-current.md`。
+5. Continuation：结束时保留可恢复 checkpoint，下一轮优先从 `GoalRun` 续接，尽量不要求操作员重复说 `continue`。
 
 当前默认 goal：
 
@@ -65,7 +66,7 @@ Worker H: control / actuator command contract
 
 ### 迁移成 Chuang 能力时的最小设计
 
-Chuang 后续可以在现有 `GoalSpec` 基础上增加一个轻量 `GoalRun` 概念，但仍不新增 core slot：
+Chuang 后续可以在现有 `GoalSpec` 基础上增加一个轻量 `GoalRun` 概念，但仍不新增 core slot。它是 checkpointable 的 planning primitive：
 
 ```text
 GoalRun
@@ -75,7 +76,11 @@ GoalRun
   -> validation_plan
   -> integration_policy
   -> checkpoint_log
+  -> diagnostics
 ```
+
+当前 continuation model 是 checkpoint-first：目标计划保留接续点，下一轮优先恢复 `GoalRun`，而不是把 `continue` 当成协议核心。
+每次记录 checkpoint 时必须写上完成者和验证备注；没有这些证据的 checkpoint 会被拒绝落盘。
 
 它应该落在现有主链外壳上：
 
@@ -141,10 +146,29 @@ GoalSpec
 
 ```text
 src/goal_mode.rs
+src/goal_run.rs
 tests/goal_mode_tests.rs
+tests/goal_run_tests.rs
 ```
 
-`GoalSpec` 目前只定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。它不执行命令、不绕过治理、不新增 slot。
+`GoalSpec` 目前只定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。`GoalRun` 负责把目标计划、worker plan、写入范围、验证计划和 checkpoint log 保存成 JSON；`goal show` 在读取时也会重新校验这些结构，避免坏文件伪装成可恢复状态。
+
+第二测试版补强的验收面：
+
+- 每个 worker 必须有 `validation_checks`；CLI 自定义 `--worker` 默认继承全局 `--validation`。
+- checkpoint 会校验 `completed_worker_ids` 不能为空且只能引用计划内 worker。
+- `goal show` 文本和 JSON 会输出 `goal_run_diagnostics`：worker scope 完整性、worker validation 完整性、validation plan 完整性、latest checkpoint 完整性、last checkpoint id/summary，以及 `executes_automatically=false` / `bypasses_governance=false`。
+- checkpoint 必须带至少一个 `completed_worker_id` 和至少一条 `validation_note`。缺 checkpoint 仍只用于提示续接风险，不会触发任务执行。
+
+当前 CLI 入口：
+
+```text
+cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID]
+cargo run -- goal show [--root PATH] [--goal-id ID]
+cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]
+```
+
+默认 root 是 `./context/goal-runs`，属于本地可恢复运行态，不进入 git。上述入口只做计划和 checkpoint 记录，不执行命令、不绕过治理、不新增 slot。
 
 ## 禁止事项
 

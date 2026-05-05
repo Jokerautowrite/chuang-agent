@@ -6,7 +6,7 @@ use chuang_agent::genesis_actuator::GenesisAskResponse;
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::ChuangMvpStatus;
 use chuang_agent::runtime_config::{ConfigSummary, RuntimeConfig};
-use chuang_agent::subagent_report::SubagentReport;
+use chuang_agent::subagent_report::{ReportAdmission, SubagentReport};
 use chuang_agent::subagent_spawner::{RunId, SpawnRequest};
 use serde::Serialize;
 
@@ -94,6 +94,7 @@ pub(crate) struct SubagentReportCliOutput {
     pub(crate) run_id: String,
     pub(crate) available: bool,
     pub(crate) report: Option<SubagentReport>,
+    pub(crate) report_admission: Option<ReportAdmission>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -109,6 +110,7 @@ pub(crate) struct SubagentCollectCliOutput {
     pub(crate) dispatch_available: bool,
     pub(crate) report_available: bool,
     pub(crate) report: Option<SubagentReport>,
+    pub(crate) report_admission: Option<ReportAdmission>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +171,7 @@ pub(crate) struct SubagentRunOnceCliOutput {
     pub(crate) ran: bool,
     pub(crate) run_id: Option<String>,
     pub(crate) report_path: Option<String>,
+    pub(crate) report_admission: Option<ReportAdmission>,
     pub(crate) summary: String,
 }
 
@@ -182,6 +185,7 @@ pub(crate) struct SubagentRunLoopCliOutput {
     pub(crate) idle: bool,
     pub(crate) run_ids: Vec<String>,
     pub(crate) report_paths: Vec<String>,
+    pub(crate) report_admissions: Vec<ReportAdmission>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

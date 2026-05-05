@@ -9,6 +9,8 @@ use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
     risk_decision_label, risk_decision_reason, ActionKind, Governance, ProposedAction, RiskDecision,
 };
+use crate::memory_recall::{MemoryRecallPipeline, RecallRequest};
+use crate::memory_store_sqlite::SqliteMemoryStore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +33,13 @@ pub enum ToolCall {
         command: String,
         #[serde(default)]
         cwd: Option<String>,
+    },
+    MemoryRecall {
+        query: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
     },
 }
 
@@ -185,7 +194,16 @@ pub const TOOL_LOOP_REPORT_SCHEMA_FIELDS: &[&str] = &[
 
 pub const TOOL_ACTION_SCHEMA_FIELDS: &[&str] = &["schema_version", "type", "call", "answer"];
 
-pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &["tool", "path", "content", "command", "cwd"];
+pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
+    "tool",
+    "path",
+    "content",
+    "command",
+    "cwd",
+    "query",
+    "session_id",
+    "limit",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GovernedToolExecutionRecord {
@@ -203,10 +221,33 @@ pub struct ToolLoopReport {
     pub calls: Vec<ToolExecutionRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolSurfaceStatus {
+    pub available: bool,
+    pub governed: bool,
+    pub source: String,
+    pub workspace_root: String,
+    pub callable_tools: Vec<String>,
+    pub mapped_atomic_tools: Vec<String>,
+    pub interface_only_atomic_tools: Vec<String>,
+    pub action_schema_version: u16,
+    pub report_schema_version: u16,
+    pub instruction_context_injected: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionConfig {
     pub shell_timeout_ms: u64,
     pub shell_risk_rules: ShellRiskRules,
+    pub memory: Option<MemoryToolContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryToolContext {
+    pub db_path: PathBuf,
+    pub session_id: Option<String>,
+    pub default_limit: usize,
+    pub max_limit: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +261,7 @@ impl Default for ToolExecutionConfig {
         Self {
             shell_timeout_ms: 30_000,
             shell_risk_rules: ShellRiskRules::default(),
+            memory: None,
         }
     }
 }
@@ -295,7 +337,12 @@ impl ExecutionSlot {
     }
 
     pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
-        self.registry.tool_instruction_block(workspace_root)
+        format!(
+            "{}\n\
+受治理只读记忆工具：memory_recall。仅可检索当前会话记忆；未配置会话 DB 或 session_id 时会返回结构化未配置结果，不会接外部知识库。\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memory_recall\",\"query\":\"关键词\",\"limit\":3}}}}",
+            self.registry.tool_instruction_block(workspace_root)
+        )
     }
 
     pub fn execute_with_governance<G: Governance>(
@@ -366,6 +413,37 @@ impl ToolLoopReport {
     }
 }
 
+impl ToolSurfaceStatus {
+    pub fn generic_agent_mvp(workspace_root: &Path) -> Self {
+        let registry = AtomicToolRegistry::generic_agent_mvp();
+        let mapped_atomic_tools = registry
+            .mapped_atomic_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut callable_tools = mapped_atomic_tools.clone();
+        callable_tools.push("list_dir".to_string());
+        callable_tools.push("memory_recall".to_string());
+
+        Self {
+            available: true,
+            governed: true,
+            source: "GenericAgent".to_string(),
+            workspace_root: workspace_root.display().to_string(),
+            callable_tools,
+            mapped_atomic_tools,
+            interface_only_atomic_tools: registry
+                .interface_only_atomic_names()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            action_schema_version: ToolActionEnvelope::schema_version(),
+            report_schema_version: ToolLoopReport::schema_version(),
+            instruction_context_injected: true,
+        }
+    }
+}
+
 impl ToolActionEnvelope {
     pub fn schema_version() -> u16 {
         TOOL_ACTION_SCHEMA_VERSION
@@ -381,7 +459,8 @@ impl ToolActionEnvelope {
 }
 
 pub fn tool_instruction_block(workspace_root: &Path) -> String {
-    AtomicToolRegistry::generic_agent_mvp().tool_instruction_block(workspace_root)
+    ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default())
+        .tool_instruction_block(workspace_root)
 }
 
 pub fn parse_tool_action_envelope(body: &str) -> Option<ToolActionEnvelope> {
@@ -543,6 +622,11 @@ fn execute_tool_call_with_registry_and_config(
             cwd,
             config.shell_timeout_ms,
         ),
+        ToolCall::MemoryRecall {
+            query,
+            session_id,
+            limit,
+        } => execute_memory_recall(registry, call, query, session_id, *limit, &config.memory),
     };
     record.duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     record.retryable = record
@@ -776,6 +860,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
         ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }
 
@@ -1059,6 +1144,141 @@ fn execute_shell_exec(
     record
 }
 
+fn execute_memory_recall(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    query: &str,
+    requested_session_id: &Option<String>,
+    requested_limit: Option<usize>,
+    memory: &Option<MemoryToolContext>,
+) -> ToolExecutionRecord {
+    let Some(memory) = memory else {
+        return memory_failed_record(registry, call, "memory_recall_unconfigured");
+    };
+    let Some(configured_session_id) = memory.session_id.as_deref() else {
+        return memory_failed_record(registry, call, "memory_recall_session_unconfigured");
+    };
+    if let Some(requested) = requested_session_id.as_deref() {
+        if requested != configured_session_id {
+            return memory_failed_record(registry, call, "memory_recall_session_mismatch");
+        }
+    }
+    if query.trim().is_empty() {
+        return memory_failed_record(registry, call, "memory_recall_query_empty");
+    }
+    let limit = requested_limit.unwrap_or(memory.default_limit);
+    if limit == 0 {
+        return memory_failed_record(registry, call, "memory_recall_limit_must_be_positive");
+    }
+    let limit = limit.min(memory.max_limit.max(1));
+    if !memory.db_path.exists() {
+        return memory_failed_record(registry, call, "memory_recall_store_unavailable");
+    }
+
+    let store = match SqliteMemoryStore::open(&memory.db_path) {
+        Ok(store) => store,
+        Err(error) => {
+            return memory_failed_record(
+                registry,
+                call,
+                &format!("memory_recall_store_open_failed: {error:?}"),
+            )
+        }
+    };
+    let pipeline = MemoryRecallPipeline::new(store);
+    let result = match pipeline.recall(&RecallRequest {
+        query_text: query.trim().to_string(),
+        metadata: std::collections::BTreeMap::from([
+            ("memory_scope".to_string(), "session".to_string()),
+            ("session_id".to_string(), configured_session_id.to_string()),
+        ]),
+        limit,
+    }) {
+        Ok(result) => result,
+        Err(error) => {
+            return memory_failed_record(
+                registry,
+                call,
+                &format!("memory_recall_failed: {error:?}"),
+            )
+        }
+    };
+
+    let output = MemoryRecallToolOutput {
+        scope: "session".to_string(),
+        session_id: configured_session_id.to_string(),
+        query: query.trim().to_string(),
+        hit_count: result.hits.len(),
+        hits: result
+            .hits
+            .into_iter()
+            .map(|hit| MemoryRecallToolHit {
+                rank: hit.rank,
+                score: hit.score,
+                id: hit.record.id,
+                content: hit.record.content,
+                metadata: hit.record.metadata,
+                created_at: hit.record.created_at,
+            })
+            .collect(),
+    };
+    let output_json = match serde_json::to_string(&output) {
+        Ok(value) => value,
+        Err(error) => {
+            return memory_failed_record(
+                registry,
+                call,
+                &format!("memory_recall_output_json_failed: {error}"),
+            )
+        }
+    };
+    let truncated = truncate_text_with_flag(&output_json, 8_000);
+    let mut record = success_record(
+        registry,
+        call,
+        format!(
+            "memory_recall scope=session session_id={} query={} hits={}",
+            configured_session_id,
+            query.trim(),
+            output.hit_count
+        ),
+        Some(truncated.text),
+        truncated.truncated,
+    );
+    record.output_lines = Some(output.hit_count);
+    record
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryRecallToolOutput {
+    scope: String,
+    session_id: String,
+    query: String,
+    hit_count: usize,
+    hits: Vec<MemoryRecallToolHit>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryRecallToolHit {
+    rank: usize,
+    score: u32,
+    id: String,
+    content: String,
+    metadata: std::collections::BTreeMap<String, String>,
+    created_at: String,
+}
+
+fn memory_failed_record(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    reason: &str,
+) -> ToolExecutionRecord {
+    let mut record = failed_record(registry, call, reason.to_string());
+    record.failure_class = Some(reason.split(':').next().unwrap_or(reason).to_string());
+    record.retryable = false;
+    record
+}
+
 fn success_record(
     registry: &AtomicToolRegistry,
     call: &ToolCall,
@@ -1214,7 +1434,9 @@ fn is_retryable_failure(failure_class: &str) -> bool {
 
 fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> ActionKind {
     match call {
-        ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } => ActionKind::Observe,
+        ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } | ToolCall::MemoryRecall { .. } => {
+            ActionKind::Observe
+        }
         ToolCall::WriteFile { .. } => ActionKind::LocalFileWrite,
         ToolCall::ShellExec { command, .. } => {
             classify_shell_action_kind(command, shell_risk_rules)
@@ -1267,6 +1489,13 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
             cwd.as_deref().unwrap_or(".").trim(),
             command.trim()
         ),
+        ToolCall::MemoryRecall {
+            query, session_id, ..
+        } => format!(
+            "memory::session={}::{}",
+            session_id.as_deref().unwrap_or("<configured>"),
+            query.trim()
+        ),
     }
 }
 
@@ -1282,6 +1511,13 @@ fn tool_summary(call: &ToolCall) -> String {
             cwd.as_deref().unwrap_or(".").trim(),
             command.trim()
         ),
+        ToolCall::MemoryRecall { query, limit, .. } => format!(
+            "memory_recall query={} limit={}",
+            query.trim(),
+            limit
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "default".to_string())
+        ),
     }
 }
 
@@ -1290,7 +1526,7 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         ToolCall::ListDir { path }
         | ToolCall::ReadFile { path }
         | ToolCall::WriteFile { path, .. } => Some(path.clone()),
-        ToolCall::ShellExec { .. } => None,
+        ToolCall::ShellExec { .. } | ToolCall::MemoryRecall { .. } => None,
     }
 }
 

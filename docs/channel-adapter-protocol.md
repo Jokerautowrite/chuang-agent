@@ -72,6 +72,8 @@ For a batch of app-server events, use `outbounds_from_app_server_events()`. It p
 
 `channel simulate` also exposes the current `runtime_report_id` and runtime observability snapshot in its JSON output. That keeps the local protocol aligned with the thin-bridge contract: the adapter can correlate a channel turn to a structured report without guessing from free-form text.
 
+The repo-local Feishu bridge renders assistant replies as Feishu interactive cards through `scripts/chuang-feishu-client-adapter.js`. If rich-card send fails, the bridge falls back to a plain text payload. The local contract is covered by `node scripts/chuang-feishu-rich-message-smoke.js`; it does not connect to Feishu.
+
 ## Feishu Rule
 
 Chuang must use a new dedicated Feishu bot and channel id. Do not reuse Codex or Hermes Feishu bridges, credentials, sessions, or services.

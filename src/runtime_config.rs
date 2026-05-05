@@ -335,6 +335,17 @@ impl RuntimeConfig {
                     .to_string(),
             );
         }
+        if let ProviderConfig::OpenAICompatible(config) = &self.provider {
+            if let Some(name) = config
+                .api_key
+                .strip_prefix("__MISSING_ENV:")
+                .and_then(|value| value.strip_suffix("__"))
+            {
+                warnings.push(format!(
+                    "provider api_key_env missing for {name}; status/config show are running in diagnostic mode"
+                ));
+            }
+        }
         if matches!(self.actuator, ActuatorConfig::Fake) {
             warnings.push(
                 "actuator=fake is a placeholder; no real desktop/browser operation adapter is configured"
@@ -862,6 +873,12 @@ fn require_positive_u64(field: &str, value: u64) -> Result<(), ConfigError> {
 }
 
 fn mask_key_state(api_key: &str) -> String {
+    if let Some(name) = api_key
+        .strip_prefix("__MISSING_ENV:")
+        .and_then(|value| value.strip_suffix("__"))
+    {
+        return format!("<missing:{name}>");
+    }
     if api_key.is_empty() {
         "<missing>".to_string()
     } else {

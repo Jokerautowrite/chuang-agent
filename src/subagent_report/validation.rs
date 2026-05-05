@@ -1,15 +1,22 @@
 use super::schema::{
-    ContextDebugSummary, ContextDropReasonSummary, ExecutionStatus, SubagentReport,
+    ContextDebugSummary, ContextDropReasonSummary, ExecutionStatus, ReportAdmission,
+    ReportAdmissionStatus, SubagentReport,
 };
 use super::size_limit::DEFAULT_REPORT_SIZE_LIMIT_BYTES;
+use crate::common::{AgentId, ReportId, TaskId, Timestamp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReportRejectReason {
+    InvalidUtf8,
+    InvalidJson,
     UnsupportedSchemaVersion {
         required_major: u64,
         current: String,
     },
     MissingRequiredField {
+        field: &'static str,
+    },
+    EmptyRequiredField {
         field: &'static str,
     },
     InvalidEnumFormat {
@@ -19,6 +26,10 @@ pub enum ReportRejectReason {
     InvalidTimestampFormat {
         field: &'static str,
         found: String,
+    },
+    InvalidTimestampOrder {
+        started_at: String,
+        finished_at: String,
     },
     SizeLimitExceeded {
         limit_bytes: usize,
@@ -84,6 +95,18 @@ impl SubagentReportValidator {
             .ok_or(ReportRejectReason::MissingRequiredField { field })
     }
 
+    fn extract_non_empty_string(
+        value: &serde_json::Value,
+        field: &'static str,
+    ) -> Result<String, ReportRejectReason> {
+        let extracted = Self::extract_string(value, field)?;
+        if extracted.trim().is_empty() {
+            Err(ReportRejectReason::EmptyRequiredField { field })
+        } else {
+            Ok(extracted)
+        }
+    }
+
     fn contains_bool(
         value: &serde_json::Value,
         field: &'static str,
@@ -125,16 +148,79 @@ impl SubagentReportValidator {
         }
     }
 
-    fn validate_timestamp(field: &'static str, value: &str) -> Result<(), ReportRejectReason> {
-        if chrono::DateTime::parse_from_rfc3339(value).is_ok() {
-            Ok(())
-        } else {
-            Err(ReportRejectReason::InvalidTimestampFormat {
+    fn parse_timestamp(
+        field: &'static str,
+        value: &str,
+    ) -> Result<chrono::DateTime<chrono::FixedOffset>, ReportRejectReason> {
+        chrono::DateTime::parse_from_rfc3339(value).map_err(|_| {
+            ReportRejectReason::InvalidTimestampFormat {
                 field,
                 found: value.to_string(),
-            })
+            }
+        })
+    }
+
+    pub fn admit_raw(
+        &self,
+        raw: &[u8],
+        controller_agent_id: AgentId,
+        decided_at: Timestamp,
+    ) -> ReportAdmission {
+        match self.validate(raw) {
+            Ok(()) => {
+                let value = serde_json::from_slice::<serde_json::Value>(raw).ok();
+                ReportAdmission {
+                    schema_version: "1.0.0".to_string(),
+                    report_id: optional_id(&value, "report_id").map(ReportId),
+                    task_id: optional_id(&value, "task_id").map(TaskId),
+                    agent_id: optional_id(&value, "agent_id").map(AgentId),
+                    controller_agent_id,
+                    status: ReportAdmissionStatus::Accepted,
+                    reason_code: "report_validated".to_string(),
+                    reason: "report_validated".to_string(),
+                    decided_at,
+                }
+            }
+            Err(reason) => {
+                let reason_code = reject_reason_code(&reason).to_string();
+                let value = serde_json::from_slice::<serde_json::Value>(raw).ok();
+                ReportAdmission {
+                    schema_version: "1.0.0".to_string(),
+                    report_id: optional_id(&value, "report_id").map(ReportId),
+                    task_id: optional_id(&value, "task_id").map(TaskId),
+                    agent_id: optional_id(&value, "agent_id").map(AgentId),
+                    controller_agent_id,
+                    status: ReportAdmissionStatus::Rejected,
+                    reason_code,
+                    reason: format!("{reason:?}"),
+                    decided_at,
+                }
+            }
         }
     }
+}
+
+fn reject_reason_code(reason: &ReportRejectReason) -> &'static str {
+    match reason {
+        ReportRejectReason::InvalidUtf8 => "invalid_utf8",
+        ReportRejectReason::InvalidJson => "invalid_json",
+        ReportRejectReason::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
+        ReportRejectReason::MissingRequiredField { .. } => "missing_required_field",
+        ReportRejectReason::EmptyRequiredField { .. } => "empty_required_field",
+        ReportRejectReason::InvalidEnumFormat { .. } => "invalid_enum_format",
+        ReportRejectReason::InvalidTimestampFormat { .. } => "invalid_timestamp_format",
+        ReportRejectReason::InvalidTimestampOrder { .. } => "invalid_timestamp_order",
+        ReportRejectReason::SizeLimitExceeded { .. } => "size_limit_exceeded",
+        ReportRejectReason::TruncationFailed { .. } => "truncation_failed",
+    }
+}
+
+fn optional_id(value: &Option<serde_json::Value>, field: &str) -> Option<String> {
+    value
+        .as_ref()
+        .and_then(|value| value.get(field))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }
 
 impl ReportValidator for SubagentReportValidator {
@@ -149,11 +235,10 @@ impl ReportValidator for SubagentReportValidator {
             });
         }
 
-        let text = std::str::from_utf8(raw)
-            .map_err(|_| ReportRejectReason::MissingRequiredField { field: "raw_utf8" })?;
+        let text = std::str::from_utf8(raw).map_err(|_| ReportRejectReason::InvalidUtf8)?;
 
-        let value: serde_json::Value = serde_json::from_str(text)
-            .map_err(|_| ReportRejectReason::MissingRequiredField { field: "json" })?;
+        let value: serde_json::Value =
+            serde_json::from_str(text).map_err(|_| ReportRejectReason::InvalidJson)?;
 
         let schema_version = Self::extract_string(&value, "schema_version")?;
         let major = schema_version
@@ -168,9 +253,9 @@ impl ReportValidator for SubagentReportValidator {
             });
         }
 
-        Self::extract_string(&value, "report_id")?;
-        Self::extract_string(&value, "task_id")?;
-        Self::extract_string(&value, "agent_id")?;
+        Self::extract_non_empty_string(&value, "report_id")?;
+        Self::extract_non_empty_string(&value, "task_id")?;
+        Self::extract_non_empty_string(&value, "agent_id")?;
         let status = Self::extract_string(&value, "status")?;
         if ExecutionStatus::from_str(&status).is_none() {
             return Err(ReportRejectReason::InvalidEnumFormat {
@@ -179,11 +264,17 @@ impl ReportValidator for SubagentReportValidator {
             });
         }
 
-        let started_at = Self::extract_string(&value, "started_at")?;
-        Self::validate_timestamp("started_at", &started_at)?;
-        let finished_at = Self::extract_string(&value, "finished_at")?;
-        Self::validate_timestamp("finished_at", &finished_at)?;
-        Self::extract_string(&value, "summary")?;
+        let started_at_raw = Self::extract_string(&value, "started_at")?;
+        let started_at = Self::parse_timestamp("started_at", &started_at_raw)?;
+        let finished_at_raw = Self::extract_string(&value, "finished_at")?;
+        let finished_at = Self::parse_timestamp("finished_at", &finished_at_raw)?;
+        if finished_at < started_at {
+            return Err(ReportRejectReason::InvalidTimestampOrder {
+                started_at: started_at_raw,
+                finished_at: finished_at_raw,
+            });
+        }
+        Self::extract_non_empty_string(&value, "summary")?;
         Self::contains_object(&value, "resource_usage")?;
         Self::contains_array(&value, "artifacts")?;
         Self::contains_bool(&value, "truncated")?;

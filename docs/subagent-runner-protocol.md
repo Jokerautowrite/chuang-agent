@@ -58,14 +58,14 @@ cargo run -- subagent run-loop \
   --runner-command ./runner.sh \
   --approve-exec \
   --max-runs 5 \
-  --max-concurrency 1 \
+  --max-concurrency 4 \
   --capability rust \
   --capability filesystem
 ```
 
 The worker only claims a dispatch when all required capabilities are present. Dispatches without requirements match any worker.
 
-Current MVP concurrency is explicit single-worker sequencing: `--max-concurrency 1`. Values above `1` are rejected until real parallel scheduling is implemented.
+Current MVP concurrency is bounded local worker batching: `--max-concurrency` accepts `1..8`. Each worker still claims from the durable queue, matches declared capabilities, and writes a normal `SubagentReport`; command runners still require explicit `--approve-exec`.
 
 ## Command Runner IO
 
@@ -78,6 +78,8 @@ The runner may return either:
 - plain stdout/stderr, which Chuang wraps into a `SubagentReport`;
 - a full `SubagentReport` JSON on stdout.
 
+Stdout that looks like a protocol report is treated as a protocol report candidate, even when it is incomplete. In the MVP that means a JSON object containing `schema_version` and at least one report identity field such as `report_id`, `task_id`, or `agent_id`. This prevents report-shaped JSON with missing required fields from being accepted as plain successful output.
+
 When a full report is returned, Chuang validates identity before accepting it:
 
 - the JSON must satisfy the `SubagentReport` v1 required-field contract;
@@ -86,6 +88,39 @@ When a full report is returned, Chuang validates identity before accepting it:
 - `parent_agent_id` must match the dispatch parent.
 
 Invalid protocol reports, including reports with missing required fields, bad status values, invalid timestamps, or identity mismatches, are stored as failed reports. They are not treated as success.
+
+Every report produced through the command runner carries controller-side governance evidence in `SubagentReport.governance_decision` unless the worker supplied its own value. The default summary is:
+
+```text
+action_id = subagent-command-runner:<run_id>
+decision = needs_approval
+reason = approved_by_cli_flag: --approve-exec
+```
+
+This records why Chuang was allowed to start the external runner process. It does not mean the worker's internal actions were independently approved; worker-side governance must still be reported by the worker or adapter.
+
+The CLI also exposes a separate `ReportAdmission` for the controller side:
+
+- `Accepted` means the controller accepted the report contract.
+- `Rejected` means the controller rejected the report contract and stored the failure reason.
+- `reason_code` is a stable machine-readable code such as `report_validated`, `missing_required_field`, `empty_required_field`, `invalid_json`, `invalid_utf8`, `unsupported_schema_version`, `invalid_enum_format`, `invalid_timestamp_format`, `invalid_timestamp_order`, `size_limit_exceeded`, or `command_protocol_report_rejected`.
+- `run-once`, `run-loop`, `report`, and `collect` return this admission metadata in their JSON output so the UI can show controller state without parsing report text.
+
+`SubagentReport` remains an immutable execution snapshot. The controller's decision to accept or reject the submitted report is represented separately as `ReportAdmission`:
+
+```text
+ReportAdmission.status = Accepted | Rejected
+ReportAdmission.reason_code = stable snake_case code
+```
+
+This keeps two states distinct:
+
+- execution status: what the worker says happened, stored in `SubagentReport.status`;
+- admission status: whether the controller accepted the submitted report contract, stored in `ReportAdmission`.
+
+The controller may reject a report because it is malformed, too large, uses an unsupported schema, or fails identity checks, even when the worker claims `ExecutionStatus::Success`.
+
+If a command runner emits a full protocol report that is rejected, Chuang stores a valid `ExecutionStatus::Failed` report for auditability. The CLI still reports the controller-side admission as `Rejected` with `reason_code=command_protocol_report_rejected` for `run-once`, `run-loop`, and later `report` reads of that stored failure report.
 
 A safe checked-in example is available at:
 

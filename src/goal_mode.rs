@@ -1,6 +1,7 @@
 use crate::context_engine::{ContextSegment, SegmentSource};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalSpec {
     pub goal_id: String,
     pub objective: String,
@@ -11,21 +12,21 @@ pub struct GoalSpec {
     pub final_report_policy: GoalFinalReportPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalBudget {
     pub max_minutes: Option<u16>,
     pub max_tool_rounds: Option<usize>,
     pub max_subtasks: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalCheckpointPolicy {
     pub update_progress_log: bool,
     pub update_handoff: bool,
     pub commit_checkpoint: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalFinalReportPolicy {
     pub include_validation: bool,
     pub include_next_steps: bool,

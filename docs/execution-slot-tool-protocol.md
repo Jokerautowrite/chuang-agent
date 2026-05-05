@@ -49,6 +49,8 @@ human_suspend -> not executable yet
 
 `list_dir` 是辅助工具，不属于 GA 9 原子工具。
 
+`memory_recall` 是受治理只读辅助工具，不属于 GA 9 原子工具。它只暴露已有 SQLite 会话记忆检索能力，不连接外部知识库，不写入记忆，不创建新的记忆域；当 runtime 没有注入 DB/session 上下文时返回结构化未配置结果。
+
 状态面和 doctor 现在会把原子工具拆成两组名单：
 
 - `mapped_atomic_tool_names`: `file_read`, `file_write`, `code_execute`
@@ -65,6 +67,7 @@ ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"file_read","path"
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"file_write","path":"notes/out.txt","content":"hello"}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"cargo test -q","cwd":"."}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"list_dir","path":"."}}
+ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"memory_recall","query":"会话关键词","limit":3}}
 ACTION: {"schema_version":1,"type":"final","answer":"最终答复"}
 ```
 
@@ -83,6 +86,20 @@ ToolActionEnvelope::call_schema_fields()
 - `schema_version` 缺省时只兼容当前 v1，高于当前版本必须回灌 `unsupported_action_schema_version`。
 - `ACTION` 前缀缺失、JSON 错误、字段缺失、空 final answer 都必须变成 `protocol_error`，不得被当作普通最终回复。
 - `schema_fields()` / `call_schema_fields()` 的顺序和内容是对控制台、通道、doctor 的契约，改字段时必须同步升级测试和文档。
+  当前 `call_schema_fields()` 为：
+
+  ```text
+  tool
+  path
+  content
+  command
+  cwd
+  query
+  session_id
+  limit
+  ```
+
+  其中 `query/session_id/limit` 对应 `memory_recall` 这个只读辅助工具。
 
 兼容旧工具名：
 
@@ -125,6 +142,7 @@ tool:code_execute
 
 ```text
 tool:list_dir
+tool:memory_recall
 ```
 
 审计 operation：
@@ -134,6 +152,7 @@ tool.file_read
 tool.file_write
 tool.code_execute
 tool.list_dir
+tool.memory_recall
 ```
 
 被治理拒绝时追加 `.rejected`。
@@ -181,6 +200,17 @@ output_redacted/stdout_redacted/stderr_redacted
 *_truncated
 call               原始结构化调用
 ```
+
+`memory_recall` 的 `ToolExecutionRecord` 使用同一 report 结构：
+
+- `tool_name=memory_recall`
+- `atomic_tool_name=null`
+- `ok=false, failure_class=memory_recall_unconfigured` 表示未注入 memory 上下文
+- `ok=false, failure_class=memory_recall_session_unconfigured` 表示没有当前 session id
+- `ok=false, failure_class=memory_recall_session_mismatch` 表示模型请求了非当前会话
+- `ok=true` 时 `output` 是有界 JSON，包含 `scope=session`、`session_id`、`query`、`hit_count` 和命中列表
+
+CLI runtime 当前只把 `db_path` 与当前 `--session-id` 注入工具上下文，并强制检索 `memory_scope=session,session_id=<当前会话>`。
 
 `write_diff_preview` 是有界预览，不是完整补丁；命中 `.env`、token、secret、password、private key 等疑似敏感路径或内容时只返回脱敏占位。
 `read_file` 和 `code_execute` 的文本输出命中疑似密钥路径或内容时也会返回脱敏占位，并通过 `*_redacted` 字段标记；`*_bytes / *_lines` 仍描述原始输出规模。

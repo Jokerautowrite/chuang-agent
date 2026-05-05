@@ -22,14 +22,28 @@ pub enum RuntimeConfigFileError {
 pub fn load_runtime_config_file(
     path: impl AsRef<Path>,
 ) -> Result<RuntimeConfig, RuntimeConfigFileError> {
+    load_runtime_config_file_with_options(path, RuntimeConfigFileOptions::strict())
+}
+
+pub fn load_runtime_config_file_with_options(
+    path: impl AsRef<Path>,
+    options: RuntimeConfigFileOptions,
+) -> Result<RuntimeConfig, RuntimeConfigFileError> {
     let path = path.as_ref();
     let content = fs::read_to_string(path).map_err(|_| RuntimeConfigFileError::ReadFailed {
         path: path.to_path_buf(),
     })?;
-    parse_runtime_config_file(&content)
+    parse_runtime_config_file_with_options(&content, options)
 }
 
 pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, RuntimeConfigFileError> {
+    parse_runtime_config_file_with_options(content, RuntimeConfigFileOptions::strict())
+}
+
+pub fn parse_runtime_config_file_with_options(
+    content: &str,
+    options: RuntimeConfigFileOptions,
+) -> Result<RuntimeConfig, RuntimeConfigFileError> {
     let values = parse_simple_toml(content)?;
     let mut config = RuntimeConfig::new(PathBuf::from(
         values
@@ -172,10 +186,29 @@ pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, Runtime
     }
 
     if values.contains_key("provider.kind") || values.contains_key("provider") {
-        config.provider = parse_provider(&values)?;
+        config.provider = parse_provider(&values, options)?;
     }
 
     Ok(config)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeConfigFileOptions {
+    pub allow_missing_env: bool,
+}
+
+impl RuntimeConfigFileOptions {
+    pub fn strict() -> Self {
+        Self {
+            allow_missing_env: false,
+        }
+    }
+
+    pub fn allow_missing_env() -> Self {
+        Self {
+            allow_missing_env: true,
+        }
+    }
 }
 
 fn parse_simple_toml(content: &str) -> Result<BTreeMap<String, String>, RuntimeConfigFileError> {
@@ -253,10 +286,11 @@ fn parse_pattern_list(key: &str, value: &str) -> Result<Vec<String>, RuntimeConf
 
 fn parse_provider(
     values: &BTreeMap<String, String>,
+    options: RuntimeConfigFileOptions,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
-    let primary = parse_primary_provider(values)?;
+    let primary = parse_primary_provider(values, options)?;
     if values.contains_key("fallback_provider") || values.contains_key("fallback.provider.kind") {
-        let fallback = parse_fallback_provider(values)?;
+        let fallback = parse_fallback_provider(values, options)?;
         let policy = parse_fallback_policy(values)?;
         return Ok(ProviderConfig::Fallback {
             primary: Box::new(primary),
@@ -270,6 +304,7 @@ fn parse_provider(
 
 fn parse_primary_provider(
     values: &BTreeMap<String, String>,
+    options: RuntimeConfigFileOptions,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
     let kind = get_any(values, &["provider.kind", "provider"])
         .map(String::as_str)
@@ -285,8 +320,7 @@ fn parse_primary_provider(
         }),
         "openai_compatible" => {
             let api_key_env = required_any(values, &["provider.api_key_env", "api_key_env"])?;
-            let api_key = std::env::var(&api_key_env)
-                .map_err(|_| RuntimeConfigFileError::MissingEnv { name: api_key_env })?;
+            let api_key = resolve_api_key_env(&api_key_env, options)?;
             Ok(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
                 provider_id: get_any(values, &["provider.id", "provider_id"])
                     .cloned()
@@ -323,6 +357,7 @@ fn parse_primary_provider(
 
 fn parse_fallback_provider(
     values: &BTreeMap<String, String>,
+    options: RuntimeConfigFileOptions,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
     let kind = get_any(values, &["fallback.provider.kind", "fallback_provider"])
         .map(String::as_str)
@@ -341,8 +376,7 @@ fn parse_fallback_provider(
                 values,
                 &["fallback.provider.api_key_env", "fallback_api_key_env"],
             )?;
-            let api_key = std::env::var(&api_key_env)
-                .map_err(|_| RuntimeConfigFileError::MissingEnv { name: api_key_env })?;
+            let api_key = resolve_api_key_env(&api_key_env, options)?;
             Ok(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
                 provider_id: get_any(values, &["fallback.provider.id", "fallback_provider_id"])
                     .cloned()
@@ -429,6 +463,19 @@ fn parse_fallback_policy(
         .map(|value| parse_csv_strings(value))
         .unwrap_or_default(),
     })
+}
+
+fn resolve_api_key_env(
+    api_key_env: &str,
+    options: RuntimeConfigFileOptions,
+) -> Result<String, RuntimeConfigFileError> {
+    match std::env::var(api_key_env) {
+        Ok(value) => Ok(value),
+        Err(_) if options.allow_missing_env => Ok(format!("__MISSING_ENV:{api_key_env}__")),
+        Err(_) => Err(RuntimeConfigFileError::MissingEnv {
+            name: api_key_env.to_string(),
+        }),
+    }
 }
 
 fn get_any<'a>(values: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a String> {

@@ -165,6 +165,15 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "session_memory_record_id",
         "tool_call_count",
         "tool_protocol_error_count",
+        "tool_surface_available",
+        "tool_surface_governed",
+        "tool_surface_source",
+        "tool_surface_callable_tools",
+        "tool_surface_mapped_atomic_tools",
+        "tool_surface_interface_only_atomic_tools",
+        "tool_action_schema_version",
+        "tool_report_schema_version",
+        "tool_instruction_context_injected",
     ] {
         if let Some(value) = extra.get(key) {
             metadata.insert(key.to_string(), value.clone());

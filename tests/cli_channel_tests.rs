@@ -104,6 +104,26 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     assert_eq!(parsed["runtime_observability"]["tool_call_count"], "0");
     assert_eq!(parsed["tool_trace"], "");
     assert!(parsed["tool_report"].is_null());
+    assert_eq!(parsed["tool_surface"]["available"], true);
+    assert_eq!(parsed["tool_surface"]["governed"], true);
+    assert!(parsed["tool_surface"]["callable_tools"]
+        .as_array()
+        .expect("callable tools should be array")
+        .iter()
+        .any(|tool| tool == "file_read"));
+    assert!(parsed["tool_surface"]["callable_tools"]
+        .as_array()
+        .expect("callable tools should be array")
+        .iter()
+        .any(|tool| tool == "list_dir"));
+    assert_eq!(
+        parsed["runtime_observability"]["tool_surface_available"],
+        "true"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["tool_surface_governed"],
+        "true"
+    );
     assert_eq!(
         parsed["tool_calls"]
             .as_array()
@@ -221,6 +241,7 @@ fn cli_channel_simulate_rejects_empty_text() {
 fn cli_channel_feishu_check_validates_dedicated_env_without_leaking_values() {
     let workspace = temp_workspace("feishu-check");
     fs::create_dir_all(&workspace).expect("workspace should create");
+    fs::write(workspace.join("config.toml"), "provider = \"fake\"\n").expect("config should write");
     let env_file = workspace.join("chuang-feishu.env");
     fs::write(
         &env_file,
@@ -253,8 +274,74 @@ CHUANG_FEISHU_APP_SECRET=secret-value
 
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["workspace_root"], workspace.display().to_string());
+    assert_eq!(parsed["workspace_root_exists"], true);
+    assert_eq!(parsed["workspace_config_exists"], true);
+    assert_eq!(parsed["env_file_is_chuang_scoped"], true);
+    assert_eq!(
+        parsed["env_file_scope_warnings"]
+            .as_array()
+            .expect("scope warnings should be array")
+            .len(),
+        0
+    );
     assert_eq!(parsed["required_vars"]["CHUANG_FEISHU_APP_SECRET"], "<set>");
     assert_eq!(parsed["connection_mode"], "websocket");
+    assert_eq!(parsed["connection_mode_ok"], true);
+    assert_eq!(
+        parsed["legacy_var_names"]
+            .as_array()
+            .expect("legacy vars should be array")
+            .len(),
+        0
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("secret-value"));
+}
+
+#[test]
+fn cli_channel_feishu_check_rejects_legacy_env_file_path_scope() {
+    let workspace = temp_workspace("feishu-check-legacy-path");
+    fs::create_dir_all(&workspace).expect("workspace should create");
+    fs::write(workspace.join("config.toml"), "provider = \"fake\"\n").expect("config should write");
+    let env_root = workspace.join(".codex-im");
+    fs::create_dir_all(&env_root).expect("env root should create");
+    let env_file = env_root.join(".env");
+    fs::write(
+        &env_file,
+        format!(
+            r#"
+CHUANG_AGENT_WORKSPACE_ROOT={}
+CHUANG_FEISHU_APP_ID=cli_a_test
+CHUANG_FEISHU_APP_SECRET=secret-value
+"#,
+            workspace.display()
+        ),
+    )
+    .expect("env should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("feishu-check")
+        .arg("--env-file")
+        .arg(&env_file)
+        .arg("--json")
+        .output()
+        .expect("feishu-check should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["env_file_is_chuang_scoped"], false);
+    assert!(parsed["env_file_scope_warnings"]
+        .as_array()
+        .expect("scope warnings should be array")
+        .iter()
+        .any(|warning| warning == "env_file_looks_like_codex_im_default_env"));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("secret-value"));
 }
@@ -263,6 +350,7 @@ CHUANG_FEISHU_APP_SECRET=secret-value
 fn cli_channel_feishu_check_rejects_legacy_env_names() {
     let workspace = temp_workspace("feishu-check-legacy");
     fs::create_dir_all(&workspace).expect("workspace should create");
+    fs::write(workspace.join("config.toml"), "provider = \"fake\"\n").expect("config should write");
     let env_file = workspace.join("chuang-feishu.env");
     fs::write(
         &env_file,
@@ -296,4 +384,49 @@ FEISHU_APP_ID=legacy-codex
 
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["has_legacy_names"], true);
+    assert_eq!(
+        parsed["legacy_var_names"],
+        serde_json::json!(["FEISHU_APP_ID"])
+    );
+}
+
+#[test]
+fn cli_channel_feishu_check_rejects_missing_workspace_config_and_bad_mode() {
+    let workspace = temp_workspace("feishu-check-bad-mode");
+    fs::create_dir_all(&workspace).expect("workspace should create");
+    let env_file = workspace.join("chuang-feishu.env");
+    fs::write(
+        &env_file,
+        format!(
+            r#"
+CHUANG_AGENT_WORKSPACE_ROOT={}
+CHUANG_FEISHU_APP_ID=cli_a_test
+CHUANG_FEISHU_APP_SECRET=secret-value
+CHUANG_FEISHU_CONNECTION_MODE=terminal
+"#,
+            workspace.display()
+        ),
+    )
+    .expect("env should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("feishu-check")
+        .arg("--env-file")
+        .arg(&env_file)
+        .arg("--json")
+        .output()
+        .expect("feishu-check should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["workspace_root_exists"], true);
+    assert_eq!(parsed["workspace_config_exists"], false);
+    assert_eq!(parsed["connection_mode_ok"], false);
 }

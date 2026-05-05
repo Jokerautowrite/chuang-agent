@@ -69,6 +69,28 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     assert_eq!(parsed["status"]["atomic_tools"]["ok"], true);
     assert_eq!(parsed["status"]["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["status"]["atomic_tools"]["mapped_count"], 3);
+    assert_eq!(parsed["status"]["release_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["release_readiness"]["release_name"],
+        "second_test_version"
+    );
+    assert_eq!(
+        parsed["status"]["release_readiness"]["overall_state"],
+        "second_test_version_ready_with_partial_modules"
+    );
+    assert_eq!(
+        parsed["status"]["release_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["release_readiness"]["verifies_real_external_services"],
+        false
+    );
+    assert!(parsed["status"]["release_readiness"]["acceptance"]
+        .as_array()
+        .expect("release acceptance should be array")
+        .iter()
+        .any(|item| item["name"] == "real_external_services" && item["state"] == "deferred"));
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
         serde_json::json!(["file_read", "file_write", "code_execute"])
@@ -145,6 +167,16 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
     assert!(stdout.contains(
         "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
+    ));
+    assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
+    assert!(stdout.contains("channel_readiness: ok=true state=ready"));
+    assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
+    assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
+    assert!(stdout.contains(
+        "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
+    ));
+    assert!(stdout.contains(
+        "release_acceptance: count=7 connects_real_external_services=false verifies_real_external_services=false uses_stub_or_local_fixtures=true"
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));

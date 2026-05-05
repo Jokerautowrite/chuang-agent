@@ -129,6 +129,32 @@ transport = "stub"
     );
     assert!(turn_response["result"]["turn"]["toolReport"].is_null());
     assert_eq!(
+        turn_response["result"]["turn"]["toolSurface"]["available"],
+        true
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["toolSurface"]["governed"],
+        true
+    );
+    assert_eq!(
+        turn_response["result"]["thread"]["turns"][0]["toolSurface"]["available"],
+        true
+    );
+    assert!(
+        turn_response["result"]["turn"]["toolSurface"]["callable_tools"]
+            .as_array()
+            .expect("callable tools should be array")
+            .iter()
+            .any(|tool| tool == "file_read")
+    );
+    assert!(
+        turn_response["result"]["turn"]["toolSurface"]["callable_tools"]
+            .as_array()
+            .expect("callable tools should be array")
+            .iter()
+            .any(|tool| tool == "list_dir")
+    );
+    assert_eq!(
         turn_response["result"]["turn"]["providerMeta"]["session_id"],
         "chuang-thread-1"
     );
@@ -164,6 +190,20 @@ transport = "stub"
         turn_response["result"]["turn"]["runtimeObservability"]["tool_call_count"],
         "0"
     );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_surface_available"],
+        "true"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_surface_governed"],
+        "true"
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_surface_callable_tools"]
+            .as_str()
+            .expect("callable tools metadata should be string")
+            .contains("file_read")
+    );
     let turn_completed = responses
         .iter()
         .find(|value| value["method"] == "turn/completed")
@@ -187,6 +227,14 @@ transport = "stub"
             .expect("event tool calls should be array")
             .len(),
         0
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["toolSurface"]["available"],
+        true
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["toolSurface"]["governed"],
+        true
     );
     assert_eq!(
         turn_completed["params"]["turn"]["toolEvents"]
@@ -426,6 +474,32 @@ transport = "stub"
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["server"], "chuang-agent-app-server");
     assert_eq!(parsed["model"], "gpt-app-server-health");
+    assert_eq!(parsed["diagnostic_mode"], false);
+    assert_eq!(parsed["api_key_state"], "<set>");
+    assert_eq!(parsed["release_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["release_readiness"]["overall_state"],
+        "second_test_version_ready_with_partial_modules"
+    );
+    assert_eq!(
+        parsed["release_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["release_readiness"]["verifies_real_external_services"],
+        false
+    );
+    assert!(parsed["release_readiness"]["acceptance"]
+        .as_array()
+        .expect("release acceptance array")
+        .iter()
+        .any(|item| item["name"] == "real_external_services"
+            && item["state"] == "deferred"
+            && item["connects_real_service"] == false));
+    assert_eq!(
+        parsed["project_readiness"]["overall_state"],
+        "mvp_ready_with_partial_modules"
+    );
     assert_eq!(parsed["workspace_root"], workspace.display().to_string());
     assert!(parsed["identity_memory_root"]
         .as_str()
@@ -438,5 +512,94 @@ transport = "stub"
     assert_eq!(
         parsed["rules_core_path"],
         workspace.join("rules/core.md").display().to_string()
+    );
+}
+
+#[test]
+fn app_server_health_diagnostic_reports_missing_provider_env_without_failing() {
+    let workspace = temp_workspace("health-diagnostic");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang health soul\n")
+        .expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang health story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang health first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+    fs::write(
+        workspace.join("config.toml"),
+        r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-health-openai"
+base_url = "https://api.example.com/v1"
+model = "gpt-app-server-health"
+api_key_env = "CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY"
+transport = "stub"
+"#,
+    )
+    .expect("config should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "app-server",
+            "health",
+            "--workspace-root",
+            workspace.to_str().expect("workspace path should be utf8"),
+            "--diagnostic",
+            "--json",
+        ])
+        .env_remove("CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY")
+        .output()
+        .expect("app-server health should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["diagnostic_mode"], true);
+    assert_eq!(
+        parsed["api_key_state"],
+        "<missing:CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY>"
+    );
+    assert!(parsed["placeholder_warnings"]
+        .as_array()
+        .expect("placeholder warnings")
+        .iter()
+        .any(|warning| warning
+            .as_str()
+            .expect("warning")
+            .contains("provider api_key_env missing")));
+    assert_eq!(
+        parsed["release_readiness"]["overall_state"],
+        "second_test_version_ready_with_partial_modules"
+    );
+    assert_eq!(
+        parsed["release_readiness"]["connects_real_external_services"],
+        false
     );
 }

@@ -52,6 +52,79 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         "identity_experiences",
         "experiences.md entrypoint is available",
     ));
+    if !status.memory_readiness.ok {
+        return Err(format!(
+            "doctor_memory_readiness_failed state={} blocked={}",
+            status.memory_readiness.overall_state, status.memory_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "memory_readiness",
+        &format!(
+            "state={} layers={} ready={} partial={} deferred={} blocked={}",
+            status.memory_readiness.overall_state,
+            status.memory_readiness.layer_count,
+            status.memory_readiness.ready_count,
+            status.memory_readiness.partial_count,
+            status.memory_readiness.deferred_count,
+            status.memory_readiness.blocked_count
+        ),
+    ));
+    if !status.channel_readiness.ok {
+        return Err(format!(
+            "doctor_channel_readiness_failed state={} blocked={}",
+            status.channel_readiness.overall_state, status.channel_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "channel_readiness",
+        &format!(
+            "state={} layers={} ready={} partial={} deferred={} blocked={}",
+            status.channel_readiness.overall_state,
+            status.channel_readiness.layer_count,
+            status.channel_readiness.ready_count,
+            status.channel_readiness.partial_count,
+            status.channel_readiness.deferred_count,
+            status.channel_readiness.blocked_count
+        ),
+    ));
+    if !status.subagent_readiness.ok {
+        return Err(format!(
+            "doctor_subagent_readiness_failed state={} blocked={}",
+            status.subagent_readiness.overall_state, status.subagent_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "subagent_readiness",
+        &format!(
+            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+            status.subagent_readiness.overall_state,
+            status.subagent_readiness.mode,
+            status.subagent_readiness.layer_count,
+            status.subagent_readiness.ready_count,
+            status.subagent_readiness.partial_count,
+            status.subagent_readiness.deferred_count,
+            status.subagent_readiness.blocked_count
+        ),
+    ));
+    if !status.external_ai_readiness.ok {
+        return Err(format!(
+            "doctor_external_ai_readiness_failed state={} blocked={}",
+            status.external_ai_readiness.overall_state, status.external_ai_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "external_ai_readiness",
+        &format!(
+            "state={} layers={} ready={} partial={} deferred={} blocked={}",
+            status.external_ai_readiness.overall_state,
+            status.external_ai_readiness.layer_count,
+            status.external_ai_readiness.ready_count,
+            status.external_ai_readiness.partial_count,
+            status.external_ai_readiness.deferred_count,
+            status.external_ai_readiness.blocked_count
+        ),
+    ));
 
     let mut slots = build_runtime_slots(runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -62,11 +135,78 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         "atomic_tools",
         "GenericAgent 9 atomic tool manifest is available",
     ));
+    if !status.governance.ok {
+        return Err("doctor_governance_readiness_failed".to_string());
+    }
+    checks.push(pass(
+        "governance_readiness",
+        &format!(
+            "rules_loaded={} tool_surface_governed={} dangerous_shell={} dangerous_write={} goal_run_executes={}",
+            status.governance.rules_loaded,
+            status.governance.tool_surface_governed,
+            status.governance.dangerous_shell_decision,
+            status.governance.dangerous_write_decision,
+            status.governance.goal_run_executes
+        ),
+    ));
 
     run_goal_mode_check()?;
     checks.push(pass(
         "goal_mode",
         "lightweight goal context wrapper is available",
+    ));
+    if !status.goal_run.ok {
+        return Err(format!(
+            "doctor_goal_run_readiness_failed path={} error={}",
+            status.goal_run.path,
+            status
+                .goal_run
+                .read_error
+                .as_deref()
+                .unwrap_or("unknown goal run read error")
+        ));
+    }
+    checks.push(pass(
+        "goal_run_readiness",
+        &format!(
+            "goal_id={} plan_exists={} checkpoint_count={}",
+            status.goal_run.goal_id, status.goal_run.plan_exists, status.goal_run.checkpoint_count
+        ),
+    ));
+    if !status.project_readiness.ok {
+        return Err(format!(
+            "doctor_project_readiness_failed state={} blocked={}",
+            status.project_readiness.overall_state, status.project_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "project_readiness",
+        &format!(
+            "state={} ready={} partial={} deferred={} blocked={}",
+            status.project_readiness.overall_state,
+            status.project_readiness.ready_count,
+            status.project_readiness.partial_count,
+            status.project_readiness.deferred_count,
+            status.project_readiness.blocked_count
+        ),
+    ));
+    if !status.release_readiness.ok {
+        return Err(format!(
+            "doctor_release_readiness_failed state={} blocked={}",
+            status.release_readiness.overall_state, status.release_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "release_readiness",
+        &format!(
+            "name={} state={} ready={} partial={} deferred={} blocked={}",
+            status.release_readiness.release_name,
+            status.release_readiness.overall_state,
+            status.release_readiness.ready_count,
+            status.release_readiness.partial_count,
+            status.release_readiness.deferred_count,
+            status.release_readiness.blocked_count
+        ),
     ));
 
     slots
@@ -160,7 +300,17 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
 
     if ToolActionEnvelope::schema_version() != 1
         || ToolActionEnvelope::schema_fields() != ["schema_version", "type", "call", "answer"]
-        || ToolActionEnvelope::call_schema_fields() != ["tool", "path", "content", "command", "cwd"]
+        || ToolActionEnvelope::call_schema_fields()
+            != [
+                "tool",
+                "path",
+                "content",
+                "command",
+                "cwd",
+                "query",
+                "session_id",
+                "limit",
+            ]
     {
         return Err("doctor_atomic_tools_failed invalid tool action schema".to_string());
     }
@@ -384,6 +534,21 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     println!("subagent: {}", doctor.status.config.subagent_kind);
     println!("execution: {}", doctor.status.slots.execution);
     println!(
+        "governance_readiness: ok={} kind={} rules_loaded={} tool_surface_governed={} goal_run_executes={}",
+        doctor.status.governance.ok,
+        doctor.status.governance.kind,
+        doctor.status.governance.rules_loaded,
+        doctor.status.governance.tool_surface_governed,
+        doctor.status.governance.goal_run_executes
+    );
+    println!(
+        "governance_decisions: read_only={} dangerous_write={} dangerous_shell={} secret_shell={}",
+        doctor.status.governance.read_only_decision,
+        doctor.status.governance.dangerous_write_decision,
+        doctor.status.governance.dangerous_shell_decision,
+        doctor.status.governance.secret_shell_decision
+    );
+    println!(
         "atomic_tools_ok: {} manifest_schema_version={} action_schema_version={} report_schema_version={}",
         doctor.status.atomic_tools.ok,
         doctor.status.atomic_tools.manifest_schema_version,
@@ -403,6 +568,85 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.goal_mode.ok,
         doctor.status.goal_mode.cli_entrypoint,
         doctor.status.goal_mode.kind
+    );
+    println!(
+        "goal_run_ok: {} plan_exists={} goal_id={} checkpoints={} path={}",
+        doctor.status.goal_run.ok,
+        doctor.status.goal_run.plan_exists,
+        doctor.status.goal_run.goal_id,
+        doctor.status.goal_run.checkpoint_count,
+        doctor.status.goal_run.path
+    );
+    println!(
+        "project_readiness: ok={} state={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.project_readiness.ok,
+        doctor.status.project_readiness.overall_state,
+        doctor.status.project_readiness.ready_count,
+        doctor.status.project_readiness.partial_count,
+        doctor.status.project_readiness.deferred_count,
+        doctor.status.project_readiness.blocked_count
+    );
+    println!(
+        "release_readiness: ok={} name={} state={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.release_readiness.ok,
+        doctor.status.release_readiness.release_name,
+        doctor.status.release_readiness.overall_state,
+        doctor.status.release_readiness.ready_count,
+        doctor.status.release_readiness.partial_count,
+        doctor.status.release_readiness.deferred_count,
+        doctor.status.release_readiness.blocked_count
+    );
+    println!(
+        "release_acceptance: count={} ready={} partial={} deferred={} connects_real_external_services={} verifies_real_external_services={} uses_stub_or_local_fixtures={} writes_repo_files={}",
+        doctor.status.release_readiness.acceptance_count,
+        doctor.status.release_readiness.acceptance_ready_count,
+        doctor.status.release_readiness.acceptance_partial_count,
+        doctor.status.release_readiness.acceptance_deferred_count,
+        doctor.status.release_readiness.connects_real_external_services,
+        doctor.status.release_readiness.verifies_real_external_services,
+        doctor.status.release_readiness.uses_stub_or_local_fixtures,
+        doctor.status.release_readiness.writes_repo_files
+    );
+    println!(
+        "memory_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.memory_readiness.ok,
+        doctor.status.memory_readiness.overall_state,
+        doctor.status.memory_readiness.layer_count,
+        doctor.status.memory_readiness.ready_count,
+        doctor.status.memory_readiness.partial_count,
+        doctor.status.memory_readiness.deferred_count,
+        doctor.status.memory_readiness.blocked_count
+    );
+    println!(
+        "channel_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.channel_readiness.ok,
+        doctor.status.channel_readiness.overall_state,
+        doctor.status.channel_readiness.layer_count,
+        doctor.status.channel_readiness.ready_count,
+        doctor.status.channel_readiness.partial_count,
+        doctor.status.channel_readiness.deferred_count,
+        doctor.status.channel_readiness.blocked_count
+    );
+    println!(
+        "subagent_readiness: ok={} state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.subagent_readiness.ok,
+        doctor.status.subagent_readiness.overall_state,
+        doctor.status.subagent_readiness.mode,
+        doctor.status.subagent_readiness.layer_count,
+        doctor.status.subagent_readiness.ready_count,
+        doctor.status.subagent_readiness.partial_count,
+        doctor.status.subagent_readiness.deferred_count,
+        doctor.status.subagent_readiness.blocked_count
+    );
+    println!(
+        "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
+        doctor.status.external_ai_readiness.ok,
+        doctor.status.external_ai_readiness.overall_state,
+        doctor.status.external_ai_readiness.layer_count,
+        doctor.status.external_ai_readiness.ready_count,
+        doctor.status.external_ai_readiness.partial_count,
+        doctor.status.external_ai_readiness.deferred_count,
+        doctor.status.external_ai_readiness.blocked_count
     );
     println!(
         "identity_bootstrap_present: soul={} story={} first_wake={} agents={}",

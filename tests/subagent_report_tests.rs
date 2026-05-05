@@ -1,7 +1,8 @@
 use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
 use chuang_agent::subagent_report::{
-    ArtifactKind, ArtifactRef, ExecutionStatus, ReportBuilder, ReportRejectReason, ReportValidator,
-    ResourceUsage, SubagentReport, SubagentReportBuilder, SubagentReportValidator,
+    ArtifactKind, ArtifactRef, ExecutionStatus, ReportAdmissionStatus, ReportBuilder,
+    ReportRejectReason, ReportValidator, ResourceUsage, SubagentReport, SubagentReportBuilder,
+    SubagentReportValidator,
 };
 
 fn sample_report() -> SubagentReport {
@@ -43,6 +44,34 @@ fn sample_report() -> SubagentReport {
         governance_decision: None,
         truncated: false,
     }
+}
+
+fn valid_report_json() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": "1.0.0",
+        "report_id": "report-1",
+        "task_id": "task-1",
+        "agent_id": "agent-1",
+        "status": "Success",
+        "started_at": "2026-04-30T10:30:00.123Z",
+        "finished_at": "2026-04-30T10:31:00.123Z",
+        "summary": "ok",
+        "resource_usage": {},
+        "artifacts": [],
+        "truncated": false
+    })
+}
+
+fn admission_for_value(
+    validator: &SubagentReportValidator,
+    value: serde_json::Value,
+) -> chuang_agent::subagent_report::ReportAdmission {
+    let raw = serde_json::to_vec(&value).expect("report JSON should serialize");
+    validator.admit_raw(
+        &raw,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    )
 }
 
 #[test]
@@ -167,6 +196,157 @@ fn subagent_report_can_roundtrip_as_json() {
     assert!(encoded.contains("\"status\":\"Success\""));
     assert!(encoded.contains("\"report_id\":\"report-1\""));
     assert!(encoded.contains("\"governance_decision\":null"));
+    assert!(!encoded.contains("admission"));
+    assert!(!encoded.contains("accepted"));
+}
+
+#[test]
+fn report_admission_accepts_valid_report_without_mutating_report() {
+    let validator = SubagentReportValidator::default();
+    let raw = serde_json::to_vec(&sample_report()).expect("report should serialize");
+
+    let admission = validator.admit_raw(
+        &raw,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Accepted);
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
+    assert_eq!(admission.controller_agent_id.0, "controller-1");
+    assert_eq!(admission.reason_code, "report_validated");
+    assert_eq!(admission.reason, "report_validated");
+
+    let report: SubagentReport =
+        serde_json::from_slice(&raw).expect("report should still deserialize");
+    assert_eq!(report.summary, "ok");
+}
+
+#[test]
+fn report_admission_accepts_contract_valid_report_without_full_deserialize() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version":"1.0.0",
+        "report_id":"report-1",
+        "task_id":"task-1",
+        "agent_id":"agent-1",
+        "status":"Success",
+        "started_at":"2026-04-30T10:30:00Z",
+        "finished_at":"2026-04-30T10:31:00Z",
+        "summary":"ok",
+        "resource_usage":{},
+        "artifacts":[],
+        "truncated":false
+    }"#;
+
+    let admission = validator.admit_raw(
+        raw,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Accepted);
+    assert_eq!(admission.reason_code, "report_validated");
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
+}
+
+#[test]
+fn report_admission_rejects_invalid_report_as_controller_state() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version":"1.0.0",
+        "report_id":"report-1",
+        "task_id":"task-1",
+        "agent_id":"agent-1",
+        "status":"Success",
+        "started_at":"2026-04-30T10:30:00Z",
+        "finished_at":"2026-04-30T10:31:00Z",
+        "resource_usage":{},
+        "artifacts":[],
+        "truncated":false
+    }"#;
+
+    let admission = validator.admit_raw(
+        raw,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
+    assert_eq!(admission.reason_code, "missing_required_field");
+    assert!(admission.reason.contains("MissingRequiredField"));
+    assert!(admission.reason.contains("summary"));
+}
+
+#[test]
+fn report_admission_uses_stable_reason_code_for_invalid_json() {
+    let validator = SubagentReportValidator::default();
+    let admission = validator.admit_raw(
+        br#"{"schema_version":"1.0.0""#,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.reason_code, "invalid_json");
+    assert!(admission.report_id.is_none());
+}
+
+#[test]
+fn report_admission_uses_stable_reason_code_for_invalid_utf8() {
+    let validator = SubagentReportValidator::default();
+    let admission = validator.admit_raw(
+        &[0xff, 0xfe, 0xfd],
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.reason_code, "invalid_utf8");
+    assert!(admission.report_id.is_none());
+}
+
+#[test]
+fn report_admission_uses_stable_reason_codes_for_validator_rejects() {
+    let validator = SubagentReportValidator::default();
+    let cases = [
+        ("schema_version", "2.0.0", "unsupported_schema_version"),
+        ("summary", "  ", "empty_required_field"),
+        ("status", "DefinitelyNotAStatus", "invalid_enum_format"),
+        ("started_at", "bad-timestamp", "invalid_timestamp_format"),
+    ];
+
+    for (field, value, expected_reason_code) in cases {
+        let mut report = valid_report_json();
+        report[field] = serde_json::Value::String(value.to_string());
+
+        let admission = admission_for_value(&validator, report);
+
+        assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+        assert_eq!(admission.reason_code, expected_reason_code);
+        assert_eq!(admission.report_id.expect("report id").0, "report-1");
+        assert_eq!(admission.task_id.expect("task id").0, "task-1");
+        assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
+    }
+}
+
+#[test]
+fn report_admission_uses_stable_reason_code_for_size_limit() {
+    let validator = SubagentReportValidator::new(32);
+    let admission = admission_for_value(&validator, valid_report_json());
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.reason_code, "size_limit_exceeded");
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
 }
 
 #[test]
@@ -222,6 +402,31 @@ fn validator_rejects_missing_required_summary() {
 }
 
 #[test]
+fn validator_rejects_empty_required_summary() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version":"1.0.0",
+        "report_id":"report-1",
+        "task_id":"task-1",
+        "agent_id":"agent-1",
+        "status":"Success",
+        "started_at":"2026-04-30T10:30:00.123Z",
+        "finished_at":"2026-04-30T10:31:00.123Z",
+        "summary":"  ",
+        "resource_usage":{},
+        "artifacts":[],
+        "truncated":false
+    }"#;
+
+    let result = validator.validate(raw);
+
+    assert_eq!(
+        result,
+        Err(ReportRejectReason::EmptyRequiredField { field: "summary" })
+    );
+}
+
+#[test]
 fn validator_rejects_invalid_timestamp() {
     let validator = SubagentReportValidator::default();
     let raw = br#"{
@@ -247,6 +452,64 @@ fn validator_rejects_invalid_timestamp() {
             found: "bad-timestamp".to_string(),
         })
     );
+}
+
+#[test]
+fn validator_rejects_finished_at_before_started_at() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version":"1.0.0",
+        "report_id":"report-1",
+        "task_id":"task-1",
+        "agent_id":"agent-1",
+        "status":"Success",
+        "started_at":"2026-04-30T10:31:00.123Z",
+        "finished_at":"2026-04-30T10:30:00.123Z",
+        "summary":"ok",
+        "resource_usage":{},
+        "artifacts":[],
+        "truncated":false
+    }"#;
+
+    let result = validator.validate(raw);
+
+    assert_eq!(
+        result,
+        Err(ReportRejectReason::InvalidTimestampOrder {
+            started_at: "2026-04-30T10:31:00.123Z".to_string(),
+            finished_at: "2026-04-30T10:30:00.123Z".to_string(),
+        })
+    );
+}
+
+#[test]
+fn report_admission_uses_stable_reason_code_for_timestamp_order() {
+    let validator = SubagentReportValidator::default();
+    let raw = br#"{
+        "schema_version":"1.0.0",
+        "report_id":"report-1",
+        "task_id":"task-1",
+        "agent_id":"agent-1",
+        "status":"Success",
+        "started_at":"2026-04-30T10:31:00.123Z",
+        "finished_at":"2026-04-30T10:30:00.123Z",
+        "summary":"ok",
+        "resource_usage":{},
+        "artifacts":[],
+        "truncated":false
+    }"#;
+
+    let admission = validator.admit_raw(
+        raw,
+        AgentId("controller-1".to_string()),
+        Timestamp("2026-04-30T10:32:00Z".to_string()),
+    );
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.reason_code, "invalid_timestamp_order");
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
 }
 
 #[test]

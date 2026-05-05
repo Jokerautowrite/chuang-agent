@@ -3,7 +3,7 @@ use std::fs;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 
 use crate::cli_args::{
-    effective_config_source, parse_cli_options, parse_config_init, parse_status_output,
+    effective_config_source, parse_config_init, parse_status_cli_options, parse_status_output,
 };
 use crate::cli_output::{print_config_summary, print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::kernel_config_from_runtime;
@@ -22,7 +22,7 @@ pub(crate) fn config_command(args: &[String]) -> Result<(), String> {
 
 fn config_check_command(args: &[String]) -> Result<(), String> {
     let output = parse_status_output(args)?;
-    let options = parse_cli_options(args)?;
+    let options = parse_status_cli_options(args)?;
     let kernel = kernel_config_from_runtime(&options.runtime)?;
     build_chuang_mvp_status(&options.runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -51,7 +51,7 @@ fn config_check_command(args: &[String]) -> Result<(), String> {
 
 fn config_show_command(args: &[String]) -> Result<(), String> {
     let output = parse_status_output(args)?;
-    let options = parse_cli_options(args)?;
+    let options = parse_status_cli_options(args)?;
     options
         .runtime
         .validate()

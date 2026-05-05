@@ -5,7 +5,7 @@ use chuang_agent::slot_registry::build_runtime_slots;
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::cli_args::{effective_config_source, parse_cli_options, parse_status_output};
+use crate::cli_args::{effective_config_source, parse_status_cli_options, parse_status_output};
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::kernel_config_from_runtime;
 
@@ -18,7 +18,7 @@ pub(crate) fn console_command(args: &[String]) -> Result<(), String> {
 
 fn console_snapshot_command(args: &[String]) -> Result<(), String> {
     let output = parse_status_output(args)?;
-    let options = parse_cli_options(args)?;
+    let options = parse_status_cli_options(args)?;
     let kernel = kernel_config_from_runtime(&options.runtime)?;
     let status = build_chuang_mvp_status(&options.runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -77,6 +77,42 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         )
     );
     println!("subagent: {}", snapshot.status.config.subagent_kind);
+    println!(
+        "project_readiness: ok={} state={}",
+        snapshot.status.project_readiness.ok, snapshot.status.project_readiness.overall_state
+    );
+    println!(
+        "channel_readiness: ok={} state={}",
+        snapshot.status.channel_readiness.ok, snapshot.status.channel_readiness.overall_state
+    );
+    println!(
+        "subagent_readiness: ok={} state={}",
+        snapshot.status.subagent_readiness.ok, snapshot.status.subagent_readiness.overall_state
+    );
+    println!(
+        "external_ai_readiness: ok={} state={}",
+        snapshot.status.external_ai_readiness.ok,
+        snapshot.status.external_ai_readiness.overall_state
+    );
+    println!(
+        "release_readiness: ok={} name={} state={}",
+        snapshot.status.release_readiness.ok,
+        snapshot.status.release_readiness.release_name,
+        snapshot.status.release_readiness.overall_state
+    );
+    println!(
+        "release_acceptance: count={} connects_real_external_services={} verifies_real_external_services={} uses_stub_or_local_fixtures={}",
+        snapshot.status.release_readiness.acceptance_count,
+        snapshot
+            .status
+            .release_readiness
+            .connects_real_external_services,
+        snapshot
+            .status
+            .release_readiness
+            .verifies_real_external_services,
+        snapshot.status.release_readiness.uses_stub_or_local_fixtures
+    );
     println!("control_units: {}", snapshot.control_units.len());
     println!("plugins: {}", snapshot.plugins.len());
     println!(

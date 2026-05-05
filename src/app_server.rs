@@ -6,16 +6,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use crate::cli_runtime::kernel_config_from_runtime;
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
 use chuang_agent::goal_mode::GoalSpec;
+use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::runtime_config::{
     IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
     RulesConfig, RuntimeConfig, SubagentQueueConfig,
 };
-use chuang_agent::runtime_config_file::{load_runtime_config_file, RuntimeConfigFileError};
+use chuang_agent::runtime_config_file::{
+    load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
+    RuntimeConfigFileOptions,
+};
 use chuang_agent::runtime_report::runtime_observability_meta;
-use chuang_agent::tool_loop_meta::ToolLoopMeta;
+use chuang_agent::tool_loop_meta::{parse_json_value, ToolLoopMeta};
 use chuang_agent::tool_runtime::{ToolExecutionRecord, ToolProtocolError};
 
 #[derive(Debug, Default)]
@@ -43,6 +48,7 @@ struct TurnState {
     model_name: String,
     status: String,
     tool_trace: String,
+    tool_surface: Option<Value>,
     updated_at: u64,
 }
 
@@ -119,6 +125,7 @@ pub(crate) fn app_server_command(args: &[String]) -> Result<(), String> {
 fn app_server_health_command(args: &[String]) -> Result<(), String> {
     let mut workspace_root = String::new();
     let mut output_json = false;
+    let mut diagnostic = false;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -135,9 +142,13 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 output_json = true;
                 index += 1;
             }
+            "--diagnostic" => {
+                diagnostic = true;
+                index += 1;
+            }
             _ => {
                 return Err(
-                    "usage: cargo run -- app-server health [--workspace-root PATH] [--json]"
+                    "usage: cargo run -- app-server health [--workspace-root PATH] [--diagnostic] [--json]"
                         .to_string(),
                 )
             }
@@ -145,10 +156,21 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
     }
 
     let normalized_workspace_root = normalize_workspace_root(&workspace_root);
-    let runtime = build_runtime_for_workspace(&normalized_workspace_root)?;
+    let runtime = if diagnostic {
+        build_runtime_for_workspace_with_options(
+            &normalized_workspace_root,
+            RuntimeConfigFileOptions::allow_missing_env(),
+        )?
+    } else {
+        build_runtime_for_workspace(&normalized_workspace_root)?
+    };
     runtime
         .validate()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let kernel = kernel_config_from_runtime(&runtime)?;
+    let status = build_chuang_mvp_status(&runtime, &kernel)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let config_summary = runtime.summary();
     let identity_memory_root = runtime
         .identity_memory
         .build_dual_file_config()
@@ -162,6 +184,14 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "version": env!("CARGO_PKG_VERSION"),
         "workspace_root": normalized_workspace_root,
         "model": provider_summary_model_name(&runtime),
+        "diagnostic_mode": diagnostic,
+        "api_key_state": config_summary.api_key_state,
+        "placeholder_warnings": config_summary.placeholder_warnings,
+        "project_readiness": status.project_readiness,
+        "release_readiness": status.release_readiness,
+        "channel_readiness": status.channel_readiness,
+        "subagent_readiness": status.subagent_readiness,
+        "external_ai_readiness": status.external_ai_readiness,
         "db_path": runtime.db_path.display().to_string(),
         "identity_memory_root": identity_memory_root,
         "identity_soul_path": runtime.identity_bootstrap.soul_path.display().to_string(),
@@ -177,11 +207,25 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         );
     } else {
         println!("app_server_ok: true");
+        println!("diagnostic_mode: {diagnostic}");
         println!(
             "workspace_root: {}",
             result["workspace_root"].as_str().unwrap_or("")
         );
         println!("model: {}", result["model"].as_str().unwrap_or(""));
+        println!(
+            "release_readiness: ok={} name={} state={}",
+            status.release_readiness.ok,
+            status.release_readiness.release_name,
+            status.release_readiness.overall_state
+        );
+        println!(
+            "release_acceptance: count={} connects_real_external_services={} verifies_real_external_services={} uses_stub_or_local_fixtures={}",
+            status.release_readiness.acceptance_count,
+            status.release_readiness.connects_real_external_services,
+            status.release_readiness.verifies_real_external_services,
+            status.release_readiness.uses_stub_or_local_fixtures
+        );
     }
 
     Ok(())
@@ -310,6 +354,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let tool_trace = tool_run.tool_trace.clone();
     let tool_calls = tool_run.tool_calls.clone();
     let tool_report = tool_run.tool_report.clone();
+    let tool_surface = tool_run.tool_surface.clone();
     let tool_protocol_errors = tool_run.tool_protocol_errors.clone();
     let tool_events = tool_run.tool_events.clone();
     let tool_call_count = tool_calls.len();
@@ -340,6 +385,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         model_name: model_name.clone(),
         status: status.clone(),
         tool_trace: tool_trace.clone(),
+        tool_surface: tool_surface.clone(),
         updated_at: now,
     });
 
@@ -392,6 +438,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                     "toolProtocolErrorCount": tool_protocol_error_count,
                     "toolTrace": tool_trace.clone(),
                     "toolReport": tool_report.clone(),
+                    "toolSurface": tool_surface.clone(),
                     "toolCalls": tool_calls
                         .iter()
                         .map(tool_execution_record_to_json)
@@ -436,6 +483,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
             "toolProtocolErrorCount": tool_protocol_error_count,
             "toolTrace": tool_trace,
             "toolReport": tool_report,
+            "toolSurface": tool_surface,
             "toolCalls": tool_calls
                 .iter()
                 .map(tool_execution_record_to_json)
@@ -457,6 +505,7 @@ struct ToolLoopResult {
     tool_events: Vec<Value>,
     tool_trace: String,
     tool_report: Option<Value>,
+    tool_surface: Option<Value>,
     runtime_report_id: Option<String>,
 }
 
@@ -487,6 +536,7 @@ fn run_turn_with_tools(
         ToolLoopMeta::<ToolExecutionRecord, ToolProtocolError, Value>::typed_from_extra(
             &result.response.meta.extra,
         )?;
+    let tool_surface = parse_json_value(&result.response.meta.extra, "tool_surface_json")?;
 
     Ok(ToolLoopResult {
         result,
@@ -495,6 +545,7 @@ fn run_turn_with_tools(
         tool_events: tool_meta.tool_events,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
+        tool_surface,
         runtime_report_id: records.runtime_report_id,
     })
 }
@@ -615,6 +666,7 @@ fn turn_to_json(turn: &TurnState) -> Value {
         "updatedAt": turn.updated_at,
         "status": turn.status,
         "toolTrace": turn.tool_trace,
+        "toolSurface": turn.tool_surface,
         "items": [
             {
                 "type": "userMessage",
@@ -667,10 +719,23 @@ fn extract_turn_goal(params: &Value) -> Result<Option<GoalSpec>, String> {
 }
 
 pub(crate) fn build_runtime_for_workspace(workspace_root: &str) -> Result<RuntimeConfig, String> {
+    build_runtime_for_workspace_with_options(workspace_root, RuntimeConfigFileOptions::strict())
+}
+
+fn build_runtime_for_workspace_with_options(
+    workspace_root: &str,
+    options: RuntimeConfigFileOptions,
+) -> Result<RuntimeConfig, String> {
     let base_dir = workspace_base_dir(workspace_root);
     let config_path = base_dir.join("config.toml");
     let mut runtime = if config_path.exists() {
-        load_runtime_config_file(&config_path).map_err(|error| runtime_config_file_error(&error))?
+        if options == RuntimeConfigFileOptions::strict() {
+            load_runtime_config_file(&config_path)
+                .map_err(|error| runtime_config_file_error(&error))?
+        } else {
+            load_runtime_config_file_with_options(&config_path, options)
+                .map_err(|error| runtime_config_file_error(&error))?
+        }
     } else {
         RuntimeConfig::new(base_dir.join("data/chuang-agent.db"))
     };

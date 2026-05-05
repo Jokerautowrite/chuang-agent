@@ -14,7 +14,7 @@ use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
 use chuang_agent::runtime_report::runtime_observability_meta;
-use chuang_agent::tool_loop_meta::ToolLoopMeta;
+use chuang_agent::tool_loop_meta::{parse_json_value, ToolLoopMeta};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct ChannelSimulateOutput {
@@ -28,6 +28,7 @@ struct ChannelSimulateOutput {
     tool_protocol_error_count: usize,
     tool_trace: String,
     tool_report: Option<Value>,
+    tool_surface: Option<Value>,
     tool_calls: Vec<Value>,
     tool_protocol_errors: Vec<Value>,
     tool_events: Vec<Value>,
@@ -61,23 +62,46 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
         })
         .map(|name| name.to_string())
         .collect::<Vec<_>>();
-    let has_legacy_names = values.keys().any(|key| {
-        matches!(
-            key.as_str(),
-            "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_BOT_ID" | "HERMES_FEISHU_APP_ID"
-        )
-    });
+    let legacy_var_names = values
+        .keys()
+        .filter(|key| {
+            matches!(
+                key.as_str(),
+                "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_BOT_ID" | "HERMES_FEISHU_APP_ID"
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let has_legacy_names = !legacy_var_names.is_empty();
+    let workspace_root = values
+        .get("CHUANG_AGENT_WORKSPACE_ROOT")
+        .cloned()
+        .unwrap_or_default();
+    let workspace_path = PathBuf::from(&workspace_root);
+    let workspace_root_exists = !workspace_root.trim().is_empty() && workspace_path.is_dir();
+    let workspace_config_exists =
+        workspace_root_exists && workspace_path.join("config.toml").is_file();
+    let connection_mode = values
+        .get("CHUANG_FEISHU_CONNECTION_MODE")
+        .cloned()
+        .unwrap_or_else(|| "websocket".to_string());
+    let connection_mode_ok = matches!(connection_mode.as_str(), "websocket" | "webhook");
+    let env_scope = classify_feishu_env_file_scope(&request.env_file);
     let output = FeishuCheckOutput {
-        ok: missing.is_empty() && !has_legacy_names,
+        ok: missing.is_empty()
+            && !has_legacy_names
+            && workspace_root_exists
+            && workspace_config_exists
+            && connection_mode_ok
+            && env_scope.is_chuang_scoped,
         env_file: request.env_file.display().to_string(),
-        workspace_root: values
-            .get("CHUANG_AGENT_WORKSPACE_ROOT")
-            .cloned()
-            .unwrap_or_default(),
-        connection_mode: values
-            .get("CHUANG_FEISHU_CONNECTION_MODE")
-            .cloned()
-            .unwrap_or_else(|| "websocket".to_string()),
+        env_file_is_chuang_scoped: env_scope.is_chuang_scoped,
+        env_file_scope_warnings: env_scope.warnings,
+        workspace_root,
+        workspace_root_exists,
+        workspace_config_exists,
+        connection_mode,
+        connection_mode_ok,
         required_vars: required
             .iter()
             .map(|name| {
@@ -110,6 +134,7 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
         })
         .collect(),
         missing,
+        legacy_var_names,
         has_legacy_names,
     };
 
@@ -117,8 +142,24 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
         ControlOutputFormat::Text => {
             println!("feishu_check_ok: {}", output.ok);
             println!("env_file: {}", output.env_file);
+            println!(
+                "env_file_is_chuang_scoped: {}",
+                output.env_file_is_chuang_scoped
+            );
+            if !output.env_file_scope_warnings.is_empty() {
+                println!(
+                    "env_file_scope_warnings: {}",
+                    output.env_file_scope_warnings.join(",")
+                );
+            }
             println!("workspace_root: {}", output.workspace_root);
+            println!("workspace_root_exists: {}", output.workspace_root_exists);
+            println!(
+                "workspace_config_exists: {}",
+                output.workspace_config_exists
+            );
             println!("connection_mode: {}", output.connection_mode);
+            println!("connection_mode_ok: {}", output.connection_mode_ok);
             if output.missing.is_empty() {
                 println!("missing: none");
             } else {
@@ -128,6 +169,9 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
                 println!("optional_vars: {}", output.optional_vars.len());
             }
             println!("has_legacy_names: {}", output.has_legacy_names);
+            if !output.legacy_var_names.is_empty() {
+                println!("legacy_var_names: {}", output.legacy_var_names.join(","));
+            }
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -178,6 +222,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_protocol_error_count: tool_meta.tool_protocol_error_count,
         tool_trace: tool_meta.tool_trace,
         tool_report: tool_meta.tool_report,
+        tool_surface: parse_json_value(&result.response.meta.extra, "tool_surface_json")?,
         runtime_report_id: records.runtime_report_id,
         tool_calls: tool_meta.tool_calls,
         tool_protocol_errors: tool_meta.tool_protocol_errors,
@@ -307,12 +352,57 @@ struct ChannelFeishuCheckRequest {
 struct FeishuCheckOutput {
     ok: bool,
     env_file: String,
+    env_file_is_chuang_scoped: bool,
+    env_file_scope_warnings: Vec<String>,
     workspace_root: String,
+    workspace_root_exists: bool,
+    workspace_config_exists: bool,
     connection_mode: String,
+    connection_mode_ok: bool,
     required_vars: BTreeMap<String, String>,
     optional_vars: BTreeMap<String, String>,
     missing: Vec<String>,
+    legacy_var_names: Vec<String>,
     has_legacy_names: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FeishuEnvFileScope {
+    is_chuang_scoped: bool,
+    warnings: Vec<String>,
+}
+
+fn classify_feishu_env_file_scope(path: &PathBuf) -> FeishuEnvFileScope {
+    let normalized = path.display().to_string().replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let mut warnings = Vec::new();
+
+    if lower.ends_with("/.codex-im/.env") {
+        warnings.push("env_file_looks_like_codex_im_default_env".to_string());
+    }
+    if lower.contains("codex-feishu") {
+        warnings.push("env_file_looks_like_codex_feishu_bridge".to_string());
+    }
+    if lower.contains("hermes-gateway") || lower.contains("hermes-feishu") {
+        warnings.push("env_file_looks_like_hermes_channel_env".to_string());
+    }
+
+    let explicitly_chuang = file_name.contains("chuang")
+        || lower.contains("/chuang-agent/")
+        || lower.contains("chuang-feishu");
+    let is_chuang_scoped = explicitly_chuang && warnings.is_empty();
+    if !explicitly_chuang {
+        warnings.push("env_file_name_should_be_chuang_scoped".to_string());
+    }
+
+    FeishuEnvFileScope {
+        is_chuang_scoped,
+        warnings,
+    }
 }
 
 fn parse_channel_feishu_check(args: &[String]) -> Result<ChannelFeishuCheckRequest, String> {

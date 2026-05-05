@@ -29,6 +29,23 @@ fn write_fake_status_config(root: &std::path::Path) -> PathBuf {
     config_path
 }
 
+fn write_openai_status_config(root: &std::path::Path, env_name: &str) -> PathBuf {
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nidentity_root = \"{}\"\nprovider = \"openai_compatible\"\nprovider_id = \"openai-status\"\nmodel = \"gpt-status\"\nbase_url = \"https://api.example.com/v1\"\napi_key_env = \"{}\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display(),
+            root.join("identity-bootstrap").display(),
+            env_name
+        ),
+    )
+    .expect("config should be written");
+    config_path
+}
+
 #[test]
 fn cli_status_prints_mvp_health_summary() {
     let root = temp_identity_root("status-text");
@@ -76,6 +93,13 @@ fn cli_status_prints_mvp_health_summary() {
         "identity_bootstrap_present: soul=false story=false first_wake=false agents=false"
     ));
     assert!(stdout.contains("governance: static_rule"));
+    assert!(stdout.contains(
+        "governance_readiness: ok=true kind=static_rule rules_loaded=true tool_surface_governed=true goal_run_executes=false"
+    ));
+    assert!(stdout.contains("governance_rules: path=./rules/core.md rule_count="));
+    assert!(stdout.contains(
+        "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=draft_only"
+    ));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
@@ -83,7 +107,36 @@ fn cli_status_prints_mvp_health_summary() {
         "context_budget: max=512 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
     ));
     assert!(stdout.contains("control_plane: fake_local"));
+    assert!(stdout.contains("goal_run: ok=true"));
+    assert!(stdout.contains("goal_id=mainline-mvp"));
+    assert!(stdout.contains("checkpoints="));
     assert!(stdout.contains("plugin_registry: available=true ok=true"));
+    assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
+    assert!(stdout.contains("project_module name=main_chain state=ready"));
+    assert!(stdout.contains("project_module name=external_ai state=ready"));
+    assert!(stdout.contains(
+        "release_readiness: ok=true name=second_test_version state=second_test_version_ready_with_partial_modules"
+    ));
+    assert!(stdout.contains("release_acceptance: count=7 ready="));
+    assert!(stdout.contains(
+        "connects_real_external_services=false verifies_real_external_services=false uses_stub_or_local_fixtures=true writes_repo_files=false"
+    ));
+    assert!(stdout.contains("release_acceptance_item name=real_external_services state=deferred"));
+    assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
+    assert!(stdout.contains("memory_layer name=internal_identity state=ready"));
+    assert!(stdout.contains("memory_layer name=external_knowledge state=ready storage=docs/external-knowledge-adapter.md"));
+    assert!(stdout.contains(
+        "memory_layer name=maintenance_loop state=ready storage=docs/memory-maintenance-loop.md"
+    ));
+    assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
+    assert!(stdout.contains("channel_layer name=app_server state=ready"));
+    assert!(stdout.contains("channel_layer name=dedicated_feishu_bridge state=ready"));
+    assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
+    assert!(stdout.contains("subagent_layer name=command_runner state=ready"));
+    assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
+    assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
+    assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
+    assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: actuator=fake"));
     assert!(stdout.contains("placeholder_warning: subagent=fake"));
@@ -193,7 +246,188 @@ fn cli_status_can_render_json_without_secret_leak() {
         .iter()
         .any(|field| field == "atomic_tool_name"));
     assert_eq!(parsed["atomic_tools"]["manifests"][0]["name"], "mouse");
+    assert_eq!(parsed["governance"]["ok"], true);
+    assert_eq!(parsed["governance"]["kind"], "static_rule");
+    assert_eq!(parsed["governance"]["rules_loaded"], true);
+    assert!(
+        parsed["governance"]["rule_count"]
+            .as_u64()
+            .expect("rule count should be numeric")
+            > 0
+    );
+    assert_eq!(parsed["governance"]["tool_surface_governed"], true);
+    assert_eq!(parsed["governance"]["read_only_decision"], "allowed");
+    assert_eq!(
+        parsed["governance"]["dangerous_write_decision"],
+        "needs_approval"
+    );
+    assert_eq!(
+        parsed["governance"]["dangerous_shell_decision"],
+        "needs_approval"
+    );
+    assert_eq!(parsed["governance"]["secret_shell_decision"], "draft_only");
+    assert_eq!(parsed["governance"]["goal_run_executes"], false);
+    assert_eq!(parsed["goal_run"]["ok"], true);
+    assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
+    assert!(parsed["goal_run"]["plan_exists"].is_boolean());
+    assert!(parsed["goal_run"]["checkpoint_count"].is_number());
+    assert_eq!(parsed["project_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["project_readiness"]["overall_state"],
+        "mvp_ready_with_partial_modules"
+    );
+    assert_eq!(parsed["release_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["release_readiness"]["release_name"],
+        "second_test_version"
+    );
+    assert_eq!(
+        parsed["release_readiness"]["overall_state"],
+        "second_test_version_ready_with_partial_modules"
+    );
+    assert_eq!(
+        parsed["release_readiness"]["readiness_scope"],
+        "readiness_and_smoke_acceptance_only_no_live_external_service_connection"
+    );
+    assert_eq!(parsed["release_readiness"]["acceptance_count"], 7);
+    assert_eq!(
+        parsed["release_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["release_readiness"]["verifies_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["release_readiness"]["uses_stub_or_local_fixtures"],
+        true
+    );
+    assert_eq!(parsed["release_readiness"]["writes_repo_files"], false);
+    assert!(parsed["release_readiness"]["acceptance"]
+        .as_array()
+        .expect("release acceptance should be an array")
+        .iter()
+        .any(|item| item["name"] == "real_external_services"
+            && item["state"] == "deferred"
+            && item["connects_real_service"] == false));
+    assert!(parsed["release_readiness"]["acceptance"]
+        .as_array()
+        .expect("release acceptance should be an array")
+        .iter()
+        .any(|item| item["name"] == "channel_preflight_only"
+            && item["state"] == "partial"
+            && item["read_only"] == true
+            && item["connects_real_service"] == false));
+    assert!(
+        parsed["project_readiness"]["ready_count"]
+            .as_u64()
+            .expect("ready count should be numeric")
+            >= 7
+    );
+    assert!(parsed["project_readiness"]["modules"]
+        .as_array()
+        .expect("modules should be an array")
+        .iter()
+        .any(|module| module["name"] == "main_chain" && module["state"] == "ready"));
+    assert!(parsed["project_readiness"]["modules"]
+        .as_array()
+        .expect("modules should be an array")
+        .iter()
+        .any(|module| module["name"] == "external_ai" && module["state"] == "ready"));
+    assert_eq!(parsed["memory_readiness"]["ok"], true);
+    assert_eq!(parsed["memory_readiness"]["overall_state"], "ready");
+    assert_eq!(parsed["memory_readiness"]["layer_count"], 5);
+    assert!(parsed["memory_readiness"]["layers"]
+        .as_array()
+        .expect("memory layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "lim_long_term" && layer["state"] == "ready"));
+    assert!(parsed["memory_readiness"]["layers"]
+        .as_array()
+        .expect("memory layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "external_knowledge"
+            && layer["state"] == "ready"
+            && layer["storage"] == "docs/external-knowledge-adapter.md"));
+    assert!(parsed["memory_readiness"]["layers"]
+        .as_array()
+        .expect("memory layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "maintenance_loop"
+            && layer["state"] == "ready"
+            && layer["storage"] == "docs/memory-maintenance-loop.md"));
+    assert_eq!(parsed["channel_readiness"]["ok"], true);
+    assert_eq!(parsed["channel_readiness"]["overall_state"], "ready");
+    assert_eq!(parsed["channel_readiness"]["layer_count"], 5);
+    assert!(parsed["channel_readiness"]["layers"]
+        .as_array()
+        .expect("channel layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "rich_messages" && layer["state"] == "ready"));
+    assert_eq!(parsed["subagent_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["subagent_readiness"]["overall_state"],
+        "queued_protocol_partial"
+    );
+    assert_eq!(parsed["subagent_readiness"]["layer_count"], 5);
+    assert!(parsed["subagent_readiness"]["layers"]
+        .as_array()
+        .expect("subagent layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "external_ai_downstream" && layer["state"] == "ready"));
+    assert_eq!(parsed["external_ai_readiness"]["ok"], true);
+    assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
+    assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);
+    assert!(parsed["external_ai_readiness"]["layers"]
+        .as_array()
+        .expect("external ai layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "genesis_actuator" && layer["state"] == "ready"));
+    assert!(parsed["external_ai_readiness"]["layers"]
+        .as_array()
+        .expect("external ai layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "ready"));
     assert!(!stdout.contains("test-secret-key"));
+}
+
+#[test]
+fn cli_status_reports_missing_provider_env_in_diagnostic_mode() {
+    let root = temp_identity_root("status-missing-env");
+    let env_name = "CHUANG_AGENT_STATUS_MISSING_KEY";
+    std::env::remove_var(env_name);
+    let config_path = write_openai_status_config(&root, env_name);
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--json",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
+    assert_eq!(
+        parsed["config"]["api_key_state"],
+        format!("<missing:{env_name}>")
+    );
+    assert!(parsed["config"]["placeholder_warnings"]
+        .as_array()
+        .expect("placeholder warnings array")
+        .iter()
+        .any(|warning| warning.as_str().unwrap_or_default().contains(env_name)));
 }
 
 #[test]
