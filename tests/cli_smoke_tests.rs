@@ -34,6 +34,35 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
 }
 
 #[test]
+fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-complete-local-smoke.sh"))
+        .expect("complete local smoke wrapper should be readable");
+
+    assert!(wrapper.contains("scripts/chuang-second-test-smoke.sh"));
+    assert!(wrapper.contains("scripts/chuang-goal-watchdog.sh"));
+    assert!(wrapper.contains("--once"));
+    assert!(wrapper.contains("chuang-feishu-command-smoke.js"));
+    assert!(wrapper.contains("chuang-feishu-session-smoke.js"));
+    assert!(wrapper.contains("chuang-feishu-rich-message-smoke.js"));
+    assert!(
+        wrapper.contains("app-server health --workspace-root \"$work_dir\" --diagnostic --json")
+    );
+    assert!(wrapper.contains("console snapshot --config \"$config_path\" --json"));
+    assert!(wrapper.contains("complete_local_smoke_ok"));
+    assert!(wrapper.contains("transport = \"stub\""));
+    assert!(wrapper.contains("CHUANG_AGENT_COMPLETE_SMOKE_API_KEY=\"test-key\""));
+    assert!(wrapper.contains("connects_real_external_services"));
+    assert!(wrapper.contains("verifies_real_external_services"));
+    assert!(wrapper.contains("for gate in data[\"live_adapter_gates\"][\"gates\"]"));
+    assert!(!wrapper.contains("rm "));
+    assert!(!wrapper.contains("systemctl"));
+    assert!(!wrapper.contains("https://liusuapi.top"));
+    assert!(!wrapper.contains(".codex-im/.env"));
+    assert!(!wrapper.contains("hermes-gateway"));
+}
+
+#[test]
 fn goal_watchdog_once_writes_readonly_status_report() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nanos = SystemTime::now()
