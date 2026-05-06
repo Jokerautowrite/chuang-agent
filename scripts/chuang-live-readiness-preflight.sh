@@ -1,6 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
 set -eu
 
-ROOT="/home/user/projects/chuang-agent"
-
-exec "$ROOT/scripts/chuang-live-readonly-preflight.sh" "$@"
+root_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+exec "$root_dir/scripts/chuang-live-readonly-preflight.sh" "$@"

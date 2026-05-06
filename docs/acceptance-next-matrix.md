@@ -22,7 +22,7 @@
 | --- | --- | --- | --- |
 | 第二测试版本地合同 | ready | `sh scripts/chuang-second-test-smoke.sh` | 不连接真实外部服务，不证明 live Feishu/桌面/wiki |
 | 完整本地可用闭环 | ready | `sh scripts/chuang-complete-local-smoke.sh` | 串联本地 smoke、watchdog 只读快照和诊断读面，仍不连接真实 Feishu、不读真实 secret、不控制真实服务 |
-| live readiness 总入口 | ready | `sh scripts/chuang-live-readonly-preflight.sh` | 串联 watchdog `--once`、status/doctor/app-server/console 诊断和 complete-local smoke；仍不连接真实 Feishu、不读真实 secret、不控制真实服务 |
+| live readonly preflight 主入口 | ready | `sh scripts/chuang-live-readonly-preflight.sh` | 串联 chmod/syntax check、provider fallback smoke、Feishu live preflight smoke、subagent live preflight、watchdog once、console snapshot 和 complete-local smoke；`scripts/chuang-live-readiness-preflight.sh` 仅作兼容别名/旧入口提示，仍不连接真实 Feishu、不读真实 secret、不控制真实服务 |
 | 项目 readiness/doctor | ready | `cargo run --quiet -- status --config config.toml --json` 和 `cargo run --quiet -- doctor --config config.toml --json` | `project_readiness=ready` 只代表本地模块合同绿 |
 | 主链 runtime/app-server/channel simulate | ready | `cargo run --quiet -- channel simulate --workspace-root . --message-id m --sender-id u --thread-id t --text "ping" --json` | channel simulate 不等于真实飞书在线 |
 | GoalRun 计划/checkpoint | ready | `cargo run --quiet -- goal show --goal-id mainline-mvp --json` | 只是计划和续接记录，不执行任务 |
@@ -84,12 +84,12 @@
    验证内容：second-test smoke、watchdog `--once`、Feishu command/session/rich smoke、status/doctor/app-server/console 诊断读面。
    边界：仍使用临时目录/stub/local fixtures，不连接 live services。
 
-8. 已完成：`feat(smoke): add live readiness preflight wrapper`
-   文件范围：`scripts/chuang-live-readonly-preflight.sh`、README / MVP scope / readiness matrix / handoff / progress 说明。
+8. 已完成：`feat(smoke): add live readonly preflight wrapper`
+   文件范围：`scripts/chuang-live-readonly-preflight.sh`、README / readiness matrix 小段说明；`scripts/chuang-live-readiness-preflight.sh` 仅作兼容别名/旧入口提示。
    验证：`bash -n scripts/chuang-live-readonly-preflight.sh`、`sh scripts/chuang-live-readonly-preflight.sh`、`git diff --check`。
    边界：只读预检，不连接真实 Feishu，不读真实 secret，不控制服务。
 
-9. 下一步：`docs: keep readiness entry points aligned`
+9. 下一步：`docs: keep live preflight entry points aligned`
    文件范围：`README.md`、`docs/mvp-scope.md`、`docs/handoff-current.md`、`docs/progress-log.md`。
    验证：`git diff --check`。
    边界：只同步入口说明，不改 runtime。
