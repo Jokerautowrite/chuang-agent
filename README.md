@@ -22,6 +22,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `cargo run -- memory identity show|append|write-user|write-memory`：管理 Hermes 风格 `USER.md / MEMORY.md`，覆盖写入必须显式 `--approve-overwrite`。
 - `--provider-transport stub|http|native|curl`：OpenAI-compatible provider 的四种接入形态。
 - `fallback_provider = "openai_compatible"`：可在配置里显式启用备用 provider；未配置时不会 silent fallback。
+- `config.example-provider-fallback.toml` / `sh scripts/chuang-provider-fallback-smoke.sh`：provider fallback 操作员配置示例和本地 fixture 验证入口；secret 只通过 `api_key_env` 指向环境变量。
 - `cargo run -- app-server`：JSON-RPC 式应用入口，当前会读取 workspace `config.toml` 并写会话记忆；后续新飞书机器人应接这里或独立 channel adapter。
 - `cargo run -- app-server health --workspace-root PATH --json`：只读健康检查，验证 workspace runtime 配置，不发起模型请求。
 - `cargo run -- control list|apply --config PATH`：通过 command 控制面管理服务/Agent；未配置 command adapter 时只做本地协议检查。

@@ -41,3 +41,32 @@ provider_fallback_used=false
 ```
 
 That is the intentional boundary: visible failure, no silent fallback.
+
+## Operator Setup
+
+Start from `config.example-provider-fallback.toml` when an operator wants a real
+primary and backup provider:
+
+```bash
+cp config.example-provider-fallback.toml config.provider-fallback.local.toml
+export CHUANG_AGENT_PRIMARY_API_KEY='<set>'
+export CHUANG_AGENT_FALLBACK_API_KEY='<set>'
+cargo run --quiet -- config check --config config.provider-fallback.local.toml
+cargo run --quiet -- run --config config.provider-fallback.local.toml --input 'provider fallback check'
+```
+
+Only the environment variable names belong in config. Reports and docs should
+describe secret state as `<set>` or `<missing>`, never the actual value.
+
+For a local fixture that does not call any real provider:
+
+```bash
+sh scripts/chuang-provider-fallback-smoke.sh
+```
+
+The fixture runs two turns:
+
+- Primary unavailable without fallback: `provider_fallback_configured=false`
+  and `provider_fallback_used=false`.
+- Same primary with explicit fallback: `provider_fallback_configured=true`,
+  `provider_fallback_used=true`, and primary error context is preserved.

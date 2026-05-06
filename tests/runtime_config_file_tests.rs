@@ -5,7 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::runtime_config::{
     ActuatorConfig, ContextEngineConfig, ControlPlaneConfig, ProviderConfig, SubagentConfig,
 };
-use chuang_agent::runtime_config_file::{parse_runtime_config_file, RuntimeConfigFileError};
+use chuang_agent::runtime_config_file::{
+    parse_runtime_config_file, parse_runtime_config_file_with_options, RuntimeConfigFileError,
+    RuntimeConfigFileOptions,
+};
 
 #[test]
 fn config_file_parses_simple_fake_runtime_config() {
@@ -337,6 +340,54 @@ fallback_error_classes = "transport,tls"
         config.summary().provider_fallback_policy.as_deref(),
         Some("retryable=false status_codes=401,402,429 error_classes=transport,tls")
     );
+}
+
+#[test]
+fn config_file_parses_provider_fallback_example_without_secret_values() {
+    let content = fs::read_to_string("config.example-provider-fallback.toml")
+        .expect("provider fallback example should be readable");
+
+    let config = parse_runtime_config_file_with_options(
+        &content,
+        RuntimeConfigFileOptions::allow_missing_env(),
+    )
+    .expect("provider fallback example should parse in diagnostic mode");
+
+    assert_eq!(config.summary().provider_kind, "fallback");
+    assert_eq!(
+        config.summary().provider_id,
+        "primary-openai-compatible->backup-openai-compatible"
+    );
+    assert_eq!(config.summary().model_name, "primary-model->backup-model");
+    assert_eq!(
+        config.summary().api_key_state,
+        Some(
+            "primary:<missing:CHUANG_AGENT_PRIMARY_API_KEY> fallback:<missing:CHUANG_AGENT_FALLBACK_API_KEY>"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        config.summary().provider_fallback_policy.as_deref(),
+        Some("retryable=true status_codes=429,500,502,503,504 error_classes=transport,tls")
+    );
+
+    match &config.provider {
+        ProviderConfig::Fallback {
+            primary, fallback, ..
+        } => {
+            assert!(matches!(
+                primary.as_ref(),
+                ProviderConfig::OpenAICompatible(primary)
+                    if primary.api_key == "__MISSING_ENV:CHUANG_AGENT_PRIMARY_API_KEY__"
+            ));
+            assert!(matches!(
+                fallback.as_ref(),
+                ProviderConfig::OpenAICompatible(fallback)
+                    if fallback.api_key == "__MISSING_ENV:CHUANG_AGENT_FALLBACK_API_KEY__"
+            ));
+        }
+        other => panic!("expected fallback provider, got {other:?}"),
+    }
 }
 
 #[test]

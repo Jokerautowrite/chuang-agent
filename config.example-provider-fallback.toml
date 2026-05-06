@@ -1,0 +1,43 @@
+# Provider fallback operator example.
+# Keep secrets out of this file. Set only environment variables locally.
+
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "primary-openai-compatible"
+base_url = "https://primary.example.com/v1"
+model = "primary-model"
+api_key_env = "CHUANG_AGENT_PRIMARY_API_KEY"
+transport = "native"
+provider_timeout_ms = 120000
+
+# Fallback is explicit. Removing this block means provider failures are returned
+# to the operator with provider_fallback_configured=false.
+fallback_provider = "openai_compatible"
+fallback_provider_id = "backup-openai-compatible"
+fallback_base_url = "https://backup.example.com/v1"
+fallback_model = "backup-model"
+fallback_api_key_env = "CHUANG_AGENT_FALLBACK_API_KEY"
+fallback_transport = "native"
+
+# Default retryable fallback is on. Keep status codes narrow unless the operator
+# has verified the provider's error contract.
+fallback_on_retryable = "true"
+fallback_status_codes = "429,500,502,503,504"
+fallback_error_classes = "transport,tls"
+
+subagent = "fake"
+context_engine = "deterministic_budget"
+context_max_tokens = 512
+context_reserve_system_tokens = 32
+context_min_working_tokens = 1
+context_max_tool_results = 5
+context_max_memory_segments = 5
