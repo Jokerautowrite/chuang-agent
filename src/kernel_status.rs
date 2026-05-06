@@ -6,6 +6,7 @@ use crate::governance::{
     risk_decision_parts, ActionKind, Governance, MarkdownRuleSet, ProposedAction,
     StaticRuleGovernance,
 };
+use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
 use crate::runtime_config::{ConfigError, ConfigSummary, RuntimeConfig};
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
@@ -24,6 +25,7 @@ pub struct ChuangMvpStatus {
     pub channel_readiness: ChannelReadinessStatus,
     pub subagent_readiness: SubagentReadinessStatus,
     pub external_ai_readiness: ExternalAiReadinessStatus,
+    pub live_adapter_gates: LiveAdapterGateStatus,
     pub atomic_tools: AtomicToolSurfaceStatus,
     pub governance: GovernanceReadinessStatus,
     pub release_readiness: ReleaseReadinessStatus,
@@ -186,6 +188,28 @@ pub struct ExternalAiLayerStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveAdapterGateStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub gate_count: usize,
+    pub enabled_count: usize,
+    pub disabled_count: usize,
+    pub gates: Vec<LiveAdapterGateLayerStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveAdapterGateLayerStatus {
+    pub name: String,
+    pub state: String,
+    pub enabled: bool,
+    pub default_enabled: bool,
+    pub required_env: String,
+    pub audit_label: String,
+    pub reason: String,
+    pub next_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AtomicToolSurfaceStatus {
     pub source: String,
     pub ok: bool,
@@ -326,6 +350,7 @@ pub fn build_chuang_mvp_status(
     let channel_readiness = build_channel_readiness();
     let subagent_readiness = build_subagent_readiness(&slots, &config_summary);
     let external_ai_readiness = build_external_ai_readiness();
+    let live_adapter_gates = build_live_adapter_gate_status();
     let release_readiness = build_release_readiness(
         &project_readiness,
         &memory_readiness,
@@ -398,6 +423,7 @@ pub fn build_chuang_mvp_status(
         channel_readiness,
         subagent_readiness,
         external_ai_readiness,
+        live_adapter_gates,
         atomic_tools,
         governance,
         release_readiness,
@@ -707,6 +733,54 @@ fn external_ai_layer(
         next_action: next_action.to_string(),
         boundary: boundary.to_string(),
         path,
+    }
+}
+
+fn build_live_adapter_gate_status() -> LiveAdapterGateStatus {
+    let gates = [
+        LiveAdapterSlot::SubagentRunner,
+        LiveAdapterSlot::ControlApply,
+        LiveAdapterSlot::ActuatorOperation,
+    ]
+    .into_iter()
+    .map(|slot| {
+        let gate = evaluate_live_adapter_gate(slot);
+        LiveAdapterGateLayerStatus {
+            name: gate.name.to_string(),
+            state: if gate.enabled {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            enabled: gate.enabled,
+            default_enabled: gate.default_enabled,
+            required_env: gate.required_env.to_string(),
+            audit_label: gate.audit_label.to_string(),
+            reason: gate.reason,
+            next_action: if gate.enabled {
+                "verify allowlist, approval, and audit receipt before running live adapter work"
+                    .to_string()
+            } else {
+                "keep disabled until the operator approves exact live adapter targets".to_string()
+            },
+        }
+    })
+    .collect::<Vec<_>>();
+
+    let enabled_count = gates.iter().filter(|gate| gate.enabled).count();
+    let disabled_count = gates.len().saturating_sub(enabled_count);
+    LiveAdapterGateStatus {
+        ok: true,
+        overall_state: if enabled_count == 0 {
+            "disabled_by_default"
+        } else {
+            "live_gates_enabled"
+        }
+        .to_string(),
+        gate_count: gates.len(),
+        enabled_count,
+        disabled_count,
+        gates,
     }
 }
 

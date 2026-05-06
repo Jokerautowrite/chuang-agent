@@ -141,6 +141,12 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains("live_adapter_reason=local command-runner contract is ready"));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
+    assert!(stdout.contains(
+        "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
+    ));
+    assert!(stdout.contains(
+        "live_adapter_gate name=control_apply state=disabled enabled=false default_enabled=false required_env=CHUANG_REAL_CONTROL_ENABLE audit_label=control.apply.live"
+    ));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
@@ -418,6 +424,22 @@ fn cli_status_can_render_json_without_secret_leak() {
                 .as_str()
                 .expect("layer live adapter reason should be a string")
                 .contains("live runner adapters remain deferred")));
+    assert_eq!(parsed["live_adapter_gates"]["ok"], true);
+    assert_eq!(
+        parsed["live_adapter_gates"]["overall_state"],
+        "disabled_by_default"
+    );
+    assert_eq!(parsed["live_adapter_gates"]["gate_count"], 3);
+    assert_eq!(parsed["live_adapter_gates"]["enabled_count"], 0);
+    assert!(parsed["live_adapter_gates"]["gates"]
+        .as_array()
+        .expect("live adapter gates should be an array")
+        .iter()
+        .any(|gate| gate["name"] == "actuator_operation"
+            && gate["required_env"] == "CHUANG_REAL_ACTUATOR_ENABLE"
+            && gate["audit_label"] == "actuator.operation.live"
+            && gate["enabled"] == false
+            && gate["default_enabled"] == false));
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);

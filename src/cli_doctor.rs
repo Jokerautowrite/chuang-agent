@@ -684,6 +684,27 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.subagent_readiness.live_adapter_reason
     );
     println!(
+        "live_adapter_gates: ok={} state={} gates={} enabled={} disabled={}",
+        doctor.status.live_adapter_gates.ok,
+        doctor.status.live_adapter_gates.overall_state,
+        doctor.status.live_adapter_gates.gate_count,
+        doctor.status.live_adapter_gates.enabled_count,
+        doctor.status.live_adapter_gates.disabled_count
+    );
+    for gate in &doctor.status.live_adapter_gates.gates {
+        println!(
+            "live_adapter_gate name={} state={} enabled={} default_enabled={} required_env={} audit_label={} reason={} next={}",
+            gate.name,
+            gate.state,
+            gate.enabled,
+            gate.default_enabled,
+            gate.required_env,
+            gate.audit_label,
+            gate.reason,
+            gate.next_action
+        );
+    }
+    println!(
         "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
         doctor.status.external_ai_readiness.ok,
         doctor.status.external_ai_readiness.overall_state,

@@ -234,6 +234,20 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && layer.state == "ready"
             && layer.local_contract_state == "ready"
             && layer.live_adapter_state == "deferred"));
+    assert!(status.live_adapter_gates.ok);
+    assert_eq!(
+        status.live_adapter_gates.overall_state,
+        "disabled_by_default"
+    );
+    assert_eq!(status.live_adapter_gates.gate_count, 3);
+    assert_eq!(status.live_adapter_gates.enabled_count, 0);
+    assert!(status.live_adapter_gates.gates.iter().any(|gate| {
+        gate.name == "control_apply"
+            && gate.required_env == "CHUANG_REAL_CONTROL_ENABLE"
+            && gate.audit_label == "control.apply.live"
+            && !gate.enabled
+            && !gate.default_enabled
+    }));
     assert!(status.external_ai_readiness.ok);
     assert_eq!(status.external_ai_readiness.overall_state, "ready");
     assert!(status

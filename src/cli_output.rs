@@ -368,6 +368,27 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
+        "live_adapter_gates: ok={} state={} gates={} enabled={} disabled={}",
+        status.live_adapter_gates.ok,
+        status.live_adapter_gates.overall_state,
+        status.live_adapter_gates.gate_count,
+        status.live_adapter_gates.enabled_count,
+        status.live_adapter_gates.disabled_count
+    );
+    for gate in &status.live_adapter_gates.gates {
+        println!(
+            "live_adapter_gate name={} state={} enabled={} default_enabled={} required_env={} audit_label={} reason={} next={}",
+            gate.name,
+            gate.state,
+            gate.enabled,
+            gate.default_enabled,
+            gate.required_env,
+            gate.audit_label,
+            gate.reason,
+            gate.next_action
+        );
+    }
+    println!(
         "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
         status.external_ai_readiness.ok,
         status.external_ai_readiness.overall_state,
