@@ -18,6 +18,14 @@
 /context/
 /data/
 /tmp/
+/$tmp/
+/$work_dir/
+
+# Local operator config / generated identity runtime files
+/config.toml
+/identity/MEMORY.md
+/identity/USER.md
+/identity/experiences.md
 
 # OS / editor noise
 Thumbs.db
