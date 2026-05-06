@@ -95,7 +95,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             .pack_context(request, &recall_result.segments)
             .map_err(AgentRuntimeError::ContextPack)?;
 
-        let packed_context_preview = render_prompt_context(&packed_context);
+        let packed_context_preview = packed_context.render_prompt();
         let prompt = format!(
             "[chuang-agent-runtime]\nuser_input={}\n{}",
             request.user_input, packed_context_preview
@@ -154,53 +154,6 @@ fn map_runtime_response(output: ResponderOutput) -> RuntimeResponse {
         trace: output.trace,
         meta: output.meta,
     }
-}
-
-fn render_prompt_context(packed: &PackedContext) -> String {
-    let drop_reasons = render_drop_reasons(&packed.drop_reasons);
-    let budget_exceeded_reasons = render_budget_exceeded_reasons(&packed.budget_exceeded_reasons);
-    let mut lines = vec![
-        "[packed-context]".to_string(),
-        format!("segments={}", packed.segments.len()),
-        format!("total_tokens={}", packed.total_tokens),
-        format!("dropped={}", packed.dropped_ids.join(",")),
-        format!("drop_reasons={}", drop_reasons),
-        format!("budget_exceeded={}", packed.budget_exceeded),
-        format!("budget_exceeded_reasons={}", budget_exceeded_reasons),
-    ];
-
-    for segment in &packed.segments {
-        lines.push(format!(
-            "- {:?}/p{} [{}] {}",
-            segment.source, segment.priority, segment.id, segment.content
-        ));
-    }
-
-    lines.join("\n")
-}
-
-fn render_drop_reasons(reasons: &[DropReason]) -> String {
-    if reasons.is_empty() {
-        return "none".to_string();
-    }
-
-    reasons
-        .iter()
-        .map(|reason| format!("{}:{}", reason.segment_id, reason.reason.as_str()))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn render_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
-    if reasons.is_empty() {
-        return "none".to_string();
-    }
-
-    reasons
-        .iter()
-        .map(BudgetExceededReason::as_str)
-        .collect::<Vec<_>>()
-        .join(",")
 }
 
 pub fn debug_pack_for_test(

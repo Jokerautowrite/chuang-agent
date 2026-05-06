@@ -175,6 +175,10 @@ fn pack_normalizes_missing_tokens_before_budget_merge() {
         .expect("memory segment should remain");
     assert_eq!(memory.tokens, Some(11));
     assert_eq!(packed.total_tokens, 21);
+    assert!(packed
+        .trace
+        .iter()
+        .any(|step| step.name == "normalize_tokens" && step.input_count == 2));
 }
 
 #[test]
@@ -475,4 +479,95 @@ fn pack_reserves_minimum_working_tokens_before_lower_priority_segments() {
     assert!(!ids.iter().any(|id| id == "memory-1"));
     assert!(packed.dropped_ids.iter().any(|id| id == "memory-1"));
     assert!(!packed.budget_exceeded);
+}
+
+#[test]
+fn pack_records_first_version_pipeline_trace_and_rendered_prompt() {
+    let packer = ContextPacker::new(ContextBudget {
+        max_tokens: 24,
+        reserve_system_tokens: 10,
+        min_working_tokens: 5,
+        max_tool_results: 1,
+        max_memory_segments: 1,
+    });
+
+    let packed = packer
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system",
+                Some(10),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "tool-old",
+                SegmentSource::ToolResult,
+                "old tool",
+                Some(3),
+                100,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "tool-new",
+                SegmentSource::ToolResult,
+                "new tool",
+                Some(3),
+                100,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "memory-old",
+                SegmentSource::Memory,
+                "old memory",
+                Some(3),
+                100,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "memory-new",
+                SegmentSource::Memory,
+                "new memory",
+                Some(3),
+                100,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "working-1",
+                SegmentSource::Working,
+                "work",
+                Some(5),
+                220,
+                "2026-04-30T18:00:03Z",
+                "2026-04-30T18:00:03Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let trace_names: Vec<&'static str> = packed.trace.iter().map(|step| step.name).collect();
+    assert_eq!(
+        trace_names,
+        vec![
+            "normalize_tokens",
+            "trim",
+            "rank",
+            "reserve_working",
+            "merge_under_budget"
+        ]
+    );
+    assert!(packed
+        .trace
+        .iter()
+        .any(|step| step.name == "trim" && step.dropped_count == 2));
+
+    let rendered = packed.render_prompt();
+    assert!(rendered.contains("pack_trace=normalize_tokens:6->6(-0),trim:6->4(-2)"));
+    assert!(rendered.contains("drop_reasons=tool-old:tool_result_trim,memory-old:memory_trim"));
+    assert!(rendered.contains("- Working/p220 [working-1] work"));
 }

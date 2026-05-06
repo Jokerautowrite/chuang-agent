@@ -49,6 +49,15 @@ pub struct PackedContext {
     pub budget_exceeded: bool,
     pub budget_exceeded_reasons: Vec<BudgetExceededReason>,
     pub working_reservation: Option<WorkingReservation>,
+    pub trace: Vec<ContextPackTraceStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextPackTraceStep {
+    pub name: &'static str,
+    pub input_count: usize,
+    pub output_count: usize,
+    pub dropped_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,13 +164,25 @@ impl ContextPacker {
     }
 
     pub fn pack(&self, segments: Vec<ContextSegment>) -> Result<PackedContext, ContextPackError> {
+        let original_count = segments.len();
+        let mut trace = Vec::new();
         let mut dropped_ids = Vec::new();
         let mut drop_reasons = Vec::new();
-        let trimmed = self.trim_segments(
-            self.normalize_segments(segments),
-            &mut dropped_ids,
-            &mut drop_reasons,
-        );
+        let normalized = self.normalize_segments(segments);
+        trace.push(ContextPackTraceStep {
+            name: "normalize_tokens",
+            input_count: original_count,
+            output_count: normalized.len(),
+            dropped_count: 0,
+        });
+        let before_trim_dropped = dropped_ids.len();
+        let trimmed = self.trim_segments(normalized, &mut dropped_ids, &mut drop_reasons);
+        trace.push(ContextPackTraceStep {
+            name: "trim",
+            input_count: original_count,
+            output_count: trimmed.len(),
+            dropped_count: dropped_ids.len().saturating_sub(before_trim_dropped),
+        });
 
         let system_tokens = trimmed
             .iter()
@@ -186,7 +207,14 @@ impl ContextPacker {
                 Reverse(segment.created_at),
             )
         });
+        trace.push(ContextPackTraceStep {
+            name: "rank",
+            input_count: trimmed.len(),
+            output_count: sorted.len(),
+            dropped_count: 0,
+        });
 
+        let before_reservation_dropped = dropped_ids.len();
         let mut budget_exceeded_reasons = Vec::new();
         let working_reservation = self.reserve_minimum_working_segments(
             &sorted,
@@ -194,6 +222,12 @@ impl ContextPacker {
             &mut drop_reasons,
             &mut budget_exceeded_reasons,
         );
+        trace.push(ContextPackTraceStep {
+            name: "reserve_working",
+            input_count: sorted.len(),
+            output_count: sorted.len(),
+            dropped_count: dropped_ids.len().saturating_sub(before_reservation_dropped),
+        });
         let reserved_working_ids = working_reservation
             .as_ref()
             .map(|reservation| vec![reservation.reserved_segment_id.clone()])
@@ -207,6 +241,8 @@ impl ContextPacker {
             .map(|segment| segment.tokens.unwrap_or(0))
             .sum::<u16>();
 
+        let merge_input_count = sorted.len();
+        let before_merge_dropped = dropped_ids.len();
         for segment in sorted {
             let tokens = segment.tokens.unwrap_or(0);
             if reserved_working_ids.contains(&segment.id) {
@@ -248,6 +284,12 @@ impl ContextPacker {
         {
             budget_exceeded_reasons.push(BudgetExceededReason::MinWorkingTokensUnmet);
         }
+        trace.push(ContextPackTraceStep {
+            name: "merge_under_budget",
+            input_count: merge_input_count,
+            output_count: packed.len(),
+            dropped_count: dropped_ids.len().saturating_sub(before_merge_dropped),
+        });
 
         Ok(PackedContext {
             segments: packed,
@@ -257,6 +299,7 @@ impl ContextPacker {
             budget_exceeded,
             budget_exceeded_reasons,
             working_reservation,
+            trace,
         })
     }
 
@@ -386,6 +429,73 @@ impl ContextPacker {
     fn estimate_tokens(&self, content: &str) -> u16 {
         content.chars().count().min(u16::MAX as usize) as u16
     }
+}
+
+impl PackedContext {
+    pub fn render_prompt(&self) -> String {
+        let mut lines = vec![
+            "[packed-context]".to_string(),
+            format!("segments={}", self.segments.len()),
+            format!("total_tokens={}", self.total_tokens),
+            format!("dropped={}", self.dropped_ids.join(",")),
+            format!("drop_reasons={}", render_drop_reasons(&self.drop_reasons)),
+            format!("budget_exceeded={}", self.budget_exceeded),
+            format!(
+                "budget_exceeded_reasons={}",
+                render_budget_exceeded_reasons(&self.budget_exceeded_reasons)
+            ),
+            format!("pack_trace={}", render_pack_trace(&self.trace)),
+        ];
+
+        for segment in &self.segments {
+            lines.push(format!(
+                "- {:?}/p{} [{}] {}",
+                segment.source, segment.priority, segment.id, segment.content
+            ));
+        }
+
+        lines.join("\n")
+    }
+}
+
+fn render_pack_trace(trace: &[ContextPackTraceStep]) -> String {
+    if trace.is_empty() {
+        return "none".to_string();
+    }
+    trace
+        .iter()
+        .map(|step| {
+            format!(
+                "{}:{}->{}(-{})",
+                step.name, step.input_count, step.output_count, step.dropped_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn render_drop_reasons(reasons: &[DropReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(|reason| format!("{}:{}", reason.segment_id, reason.reason.as_str()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn render_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(BudgetExceededReason::as_str)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
