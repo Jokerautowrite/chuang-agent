@@ -23,6 +23,7 @@
 - `ChuangKernel::run_turn()`：主运行入口，统一串起 recall、context packing、responder 和 report。
 - `ChuangKernel::remember_turn()`：显式写回普通 `turn_summary` 记忆。
 - `cargo run -- run --input TEXT`：通过内核运行一轮。
+- `./scripts/launch-chuang-agent-repl.sh`：启动本地交互 REPL，默认读取项目根 `config.toml`，并优先从仓库外 `CHUANG_PROVIDER_ENV_FILE`（默认 `~/.config/chuang-agent/provider.env`）加载 `CODEX_PPTOKEN_API_KEY`；缺失时只给出提示，不回落到 fake。设置 `CHUANG_REPL_STUB=1` 时只走 stub 链路验证。
 - `cargo run -- run --goal TEXT --input TEXT`：把长期目标作为额外 context segment 注入 runtime；不改写原始 `user_input`，不新增 slot，不绕过治理。
 - `cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID]`：创建本地 `GoalRun` 计划 JSON，用于 checkpoint-first continuation；只记录目标计划，不执行命令。
 - `cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]` 和 `cargo run -- goal show ...`：追加/读取 `GoalRun` checkpoint，用于下一轮恢复目标状态；不自动续跑、不调度子代理。
@@ -56,7 +57,7 @@
 - `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
 - `status --json` / `doctor --json` 的 `memory_readiness`：按内部记忆、历史会话、LIM、外脑知识库、自动维护闭环给出 `ready / partial / deferred / blocked` 和下一步动作。当前五层本地第二测试版边界为 `ready`，但这不代表真实 wiki/GBrain 已接通，也不代表自动维护会自行写长期记忆。
 - `status --json` / `doctor --json` 的 `channel_readiness`：按 app-server、channel simulate、Chuang 专用飞书桥、Codex/Hermes 隔离、rich messages 拆分状态。它只确认边界和脚本存在性，不代表真实飞书连接在线。
-- `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态。当前 `queued_external` 里 dispatch/report 已 ready，协议层仍不是自动执行器。
+- `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态，并显式区分 `local_contract_ready` 与 `live_adapter_ready`。当前 `queued_external` 里本地协议合同可验收，但真实外部 worker/live adapter 仍未接入，协议层也不是自动执行器。
 - `data/skills/external_agent_dispatch_sop.md`：外部 AI 分身调度 Skill contract，定义平台选择、任务翻译、质量评级、追问上限、记忆写回和审计边界；它不是真实浏览器/HTTP adapter，不新增 core slot。
 - `data/skills/unified_identity_engine_adapter.md`：外部 AI 的 lower adapter contract，定义平台/session 复用、结构化输入输出、失败类和审计边界；它仍不是实际登录态执行器。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。

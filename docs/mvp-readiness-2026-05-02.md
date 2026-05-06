@@ -41,8 +41,10 @@ As of 2026-05-03, the MVP readiness surface also expects:
 - plugin registry: checked as manifest/path readiness only; disabled plugins are not executed, and status/doctor readiness only treats enabled plugins as runtime failures
 - project readiness: `status` / `doctor` expose a module-level rollup across main chain, identity, memory, context, governance, execution tools, reporting, channel, subagent, goal, plugins, and external AI. Current expected overall state is `ready`.
 - release readiness: `status` / `doctor` now report `release_name=second_test_version` with `overall_state=second_test_version_ready`. The second-test surface is an acceptance/readiness gate, not a live integration claim: `connects_real_external_services=false`, `verifies_real_external_services=false`, `uses_stub_or_local_fixtures=true`, and `writes_repo_files=false`.
+- local live provider setup: this workstation may provide `CODEX_PPTOKEN_API_KEY` through the external `CHUANG_PROVIDER_ENV_FILE` path for terminal/Feishu bridge use. That proves the local runtime can be pointed at pptoken `gpt-5.5`, but it is deliberately outside the second-test smoke gate.
 - channel readiness: `status` / `doctor` expose app-server, channel simulate, Chuang dedicated Feishu bridge, Codex/Hermes isolation, and rich-message boundary status. This is a local readiness surface, not a live Feishu connection check.
 - subagent readiness: `status` / `doctor` expose dispatch queue, report collect, command runner, multi-worker orchestration, and external-AI downstream status. The current `queued_external` mode remains a protocol surface, not an autonomous executor.
+- goal run readiness: `status` / `doctor` expose read/parse failures, latest checkpoint completeness, latest checkpoint summary, and structured incomplete reasons. Legacy checkpoint files remain readable, but weak continuation evidence is visible instead of silently looking complete.
 
 ## Current Acceptance Commands
 
@@ -64,6 +66,8 @@ The second-test smoke wrapper sets `CHUANG_SMOKE_NAME=second_test` and reuses th
 - GoalRun plan/checkpoint/show persistence for checkpoint-first continuation
 - session memory diagnostic meta for isolated recall and writeback
 - channel simulate with `--goal`
+- Feishu bridge local commands `/new` and `/help` without loading Feishu SDK or connecting to Feishu
+- provider-env wrapper behavior using a temporary `CHUANG_PROVIDER_ENV_FILE`; it does not read the workstation's real provider key and does not send a live provider request
 - queued subagent dispatch/command-runner/report/collect with capability matching and report admission metadata
 - command control example list/apply
 - experiment plan/show
@@ -107,6 +111,7 @@ It does not delete files and does not touch real services.
 - Treating GoalRun readiness as task execution or worker dispatch; the readiness field `goal_run_executes=false` is intentional.
 - Treating `project_readiness.overall_state=ready` as proof that every live adapter is connected. It only means the local module rollup is green; live Feishu or other external service verification remains separate.
 - Treating `release_readiness.release_name=second_test_version` as proof that real external services are connected. The second-test fields explicitly say the opposite: live provider, Feishu, desktop/browser, wiki/GBrain, and Hermes connections are not verified by status/doctor/smoke.
+- Treating the workstation's `CHUANG_PROVIDER_ENV_FILE` as a repository contract. It is a local operator secret path used by launch scripts; checked-in config must still reference only `api_key_env`.
 
 ## Next Build Steps
 

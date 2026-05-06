@@ -275,9 +275,41 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
         serde_json::Value::String("checkpoint-1".to_string())
     );
     assert_eq!(
+        run["goal_run_diagnostics"]["last_checkpoint_summary"],
+        serde_json::Value::String("diagnostics landed".to_string())
+    );
+    assert_rfc3339_timestamp(
+        run["checkpoint_log"][0]["created_at"]
+            .as_str()
+            .expect("checkpoint created_at should be present"),
+    );
+    assert_eq!(
         run["goal_run_diagnostics"]["checkpoint_log_complete"],
         serde_json::Value::Bool(true)
     );
+
+    let show_text = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "checkpoint-goal",
+        ])
+        .output()
+        .expect("goal show text should execute");
+
+    assert!(
+        show_text.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show_text.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&show_text.stdout);
+    assert!(stdout.contains("goal_checkpoint_log_complete: true"));
+    assert!(stdout.contains("goal_last_checkpoint: checkpoint-1"));
+    assert!(stdout.contains("goal_last_summary: diagnostics landed"));
+    assert!(stdout.contains("goal_incomplete_reasons: none"));
 }
 
 #[test]
@@ -424,4 +456,8 @@ fn cli_goal_checkpoint_rejects_duplicate_completed_worker_id() {
     let stderr = String::from_utf8_lossy(&checkpoint.stderr);
     assert!(stderr.contains("goal_run_invalid: checkpoint_log.completed_worker_ids"));
     assert!(stderr.contains("completed worker ids must be unique"));
+}
+
+fn assert_rfc3339_timestamp(value: &str) {
+    chrono::DateTime::parse_from_rfc3339(value).expect("created_at should be RFC3339");
 }

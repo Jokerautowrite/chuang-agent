@@ -364,9 +364,9 @@ fn cli_repl_command_accepts_one_turn_and_exits() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("chuang-agent repl ready"));
-    assert!(stdout.contains("model_name: stub-responder"));
     assert!(stdout.contains("创项目继续推进"));
+    assert!(!stdout.contains("model_name:"));
+    assert!(!stdout.contains("trace:"));
 }
 
 #[test]

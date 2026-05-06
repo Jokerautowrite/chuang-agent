@@ -18,6 +18,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `cargo run -- status`：查看核心状态。
 - `cargo run -- run --config config.toml --input TEXT`：按项目配置跑一轮本地 runtime。
 - `cargo run -- run --input TEXT --remember`：跑完后写回 SQLite turn summary。
+- `./scripts/launch-chuang-agent-repl.sh`：启动本地交互 REPL；默认只显示对话正文。真实对话会优先读取仓库外 `CHUANG_PROVIDER_ENV_FILE`（默认 `~/.config/chuang-agent/provider.env`）里的 `CODEX_PPTOKEN_API_KEY`，需要调试诊断时可直接加 `--verbose`；只验证链路可用可用 `CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh`。
 - `cargo run -- memory identity show|append|write-user|write-memory`：管理 Hermes 风格 `USER.md / MEMORY.md`，覆盖写入必须显式 `--approve-overwrite`。
 - `--provider-transport stub|http|native|curl`：OpenAI-compatible provider 的四种接入形态。
 - `fallback_provider = "openai_compatible"`：可在配置里显式启用备用 provider；未配置时不会 silent fallback。
@@ -36,6 +37,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `cargo run -- experiment list`：只读查看实验计划和报告状态。
 - `cargo run -- experiment show --experiment-id ID`：只读查看某个实验的计划和报告内容。
 - `cargo run -- channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT`：本地演练外部消息通道，不接真实飞书。
+- Chuang Feishu bridge 本地命令：`/new` 作为开新窗口/新上下文入口，提示新开飞书聊天/话题/线程并保持不进入 Agent runtime；`/help` 显示桥命令。
 - `cargo run -- console snapshot --json`：给未来桌面/工具/服务控制台读取只读状态、插件摘要、control unit 列表和插件清单。
 - `cargo run -- plugin list|check --registry plugins/registry.example.json`：查看和校验插件/adapter 注册表，不执行插件。
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录和 stub provider，不触碰真实服务。

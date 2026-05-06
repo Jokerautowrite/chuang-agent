@@ -51,6 +51,8 @@ human_suspend -> not executable yet
 
 `memory_recall` 是受治理只读辅助工具，不属于 GA 9 原子工具。它只暴露已有 SQLite 会话记忆检索能力，不连接外部知识库，不写入记忆，不创建新的记忆域；当 runtime 没有注入 DB/session 上下文时返回结构化未配置结果。
 
+`apply_patch` 是受治理的 workspace 辅助写工具，不属于 GA 9 原子工具。它只允许在 workspace root 内新增或更新文件，默认拒绝 `Delete File` 和 `Move to` 语义；执行时先完整预检，再统一备份和写入，因此拒绝路径不会留下前半段 patch 的部分写入。
+
 状态面和 doctor 现在会把原子工具拆成两组名单：
 
 - `mapped_atomic_tool_names`: `file_read`, `file_write`, `code_execute`
@@ -67,6 +69,7 @@ ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"file_read","path"
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"file_write","path":"notes/out.txt","content":"hello"}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"cargo test -q","cwd":"."}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"list_dir","path":"."}}
+ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"apply_patch","patch":"*** Begin Patch\n*** Update File: notes/out.txt\n@@\n-old\n+new\n*** End Patch"}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"memory_recall","query":"会话关键词","limit":3}}
 ACTION: {"schema_version":1,"type":"final","answer":"最终答复"}
 ```

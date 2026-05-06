@@ -4,13 +4,12 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
-use chuang_agent::slot_registry::SubagentRuntimeSlot;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{
     ExecutionStatus, GovernanceDecisionSummary, ReportAdmissionStatus, ResourceUsage,
     SubagentReport, SubagentReportValidator,
 };
-use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId, SubagentSpawner};
+use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId};
 
 use crate::cli_args::{
     parse_subagent_collect, parse_subagent_dispatch, parse_subagent_list,
@@ -432,13 +431,24 @@ fn subagent_report_command(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     let queue = FileSubagentQueue::open(queue_config)
         .map_err(|e| format!("subagent_queue_open_failed: {e:?}"))?;
-    let report = queue
-        .read_report(&request.run_id)
+    let report_raw = queue
+        .read_report_raw(&request.run_id)
         .map_err(|e| format!("subagent_report_read_failed: {e:?}"))?;
-    let report_admission = report.as_ref().map(build_report_admission).transpose()?;
+    let mut report_admission = report_raw
+        .as_deref()
+        .map(build_report_admission_raw)
+        .transpose()?;
+    let report = report_raw
+        .as_deref()
+        .and_then(|raw| serde_json::from_slice::<SubagentReport>(raw).ok());
+    if let Some(report) = &report {
+        if let Some(admission) = command_protocol_reject_admission(report)? {
+            report_admission = Some(admission);
+        }
+    }
     let output = SubagentReportCliOutput {
         run_id: request.run_id.0.clone(),
-        available: report.is_some(),
+        available: report_raw.is_some(),
         report,
         report_admission,
     };
@@ -458,7 +468,20 @@ fn subagent_report_command(args: &[String]) -> Result<(), String> {
                         .unwrap_or_else(|| "none".to_string())
                 );
             } else {
-                println!("subagent_report_missing run_id={}", output.run_id);
+                println!(
+                    "subagent_report_{} run_id={} admission={}",
+                    if output.available {
+                        "unavailable"
+                    } else {
+                        "missing"
+                    },
+                    output.run_id,
+                    output
+                        .report_admission
+                        .as_ref()
+                        .map(|admission| format!("{:?}", admission.status))
+                        .unwrap_or_else(|| "none".to_string())
+                );
             }
         }
         ControlOutputFormat::Json => print_json(&output)?,
@@ -497,19 +520,34 @@ fn subagent_collect_command(args: &[String]) -> Result<(), String> {
         };
     };
 
-    let mut spawner = QueuedSubagentSpawner::new();
-    spawner
-        .restore_dispatch(dispatch)
-        .map_err(|e| format!("subagent_dispatch_restore_failed: {e:?}"))?;
-    let mut slot = SubagentRuntimeSlot::QueuedExternal { spawner, queue };
-    let report = slot
-        .collect(&request.run_id)
-        .map_err(|e| format!("subagent_collect_failed: {e:?}"))?;
-    let report_admission = report.as_ref().map(build_report_admission).transpose()?;
+    let report_raw = queue
+        .read_report_raw(&request.run_id)
+        .map_err(|e| format!("subagent_report_read_failed: {e:?}"))?;
+    let mut report_admission = report_raw
+        .as_deref()
+        .map(build_report_admission_raw)
+        .transpose()?;
+    let report = report_raw
+        .as_deref()
+        .and_then(|raw| serde_json::from_slice::<SubagentReport>(raw).ok());
+    if let Some(report) = &report {
+        if let Some(admission) = command_protocol_reject_admission(report)? {
+            report_admission = Some(admission);
+        }
+        if report.task_id != dispatch.task_id
+            || report.agent_id != dispatch.agent_id
+            || report.parent_agent_id.as_ref() != Some(&dispatch.parent_agent_id)
+        {
+            return Err(
+                "subagent_collect_failed: InvalidRequest(\"report identity does not match queued run\")"
+                    .to_string(),
+            );
+        }
+    }
     let output = SubagentCollectCliOutput {
         run_id: request.run_id.0.clone(),
         dispatch_available: true,
-        report_available: report.is_some(),
+        report_available: report_raw.is_some(),
         report,
         report_admission,
     };
@@ -764,6 +802,17 @@ fn build_report_admission(
     ))
 }
 
+fn build_report_admission_raw(
+    raw: &[u8],
+) -> Result<chuang_agent::subagent_report::ReportAdmission, String> {
+    let validator = SubagentReportValidator::default();
+    Ok(validator.admit_raw(
+        raw,
+        AgentId("cli-subagent-controller".to_string()),
+        Timestamp(current_rfc3339_timestamp()?),
+    ))
+}
+
 fn command_protocol_reject_admission(
     report: &SubagentReport,
 ) -> Result<Option<chuang_agent::subagent_report::ReportAdmission>, String> {
@@ -782,6 +831,7 @@ fn command_protocol_reject_admission(
             .unwrap_or_else(|| AgentId("cli-subagent-controller".to_string())),
         status: ReportAdmissionStatus::Rejected,
         reason_code: "command_protocol_report_rejected".to_string(),
+        upstream_reason_code: command_protocol_upstream_reason_code(report),
         reason: report
             .stderr_preview
             .clone()
@@ -844,7 +894,10 @@ fn try_build_protocol_report(
                 Timestamp(finished_at.to_string()),
             );
             if admission.status == ReportAdmissionStatus::Rejected {
-                Err(format!("report_admission_rejected:{}", admission.reason))
+                Err(format!(
+                    "report_admission_rejected:{}:{}",
+                    admission.reason_code, admission.reason
+                ))
             } else {
                 Ok(())
             }
@@ -986,6 +1039,44 @@ fn build_command_runner_protocol_reject_report(
         governance_decision: Some(command_runner_governance_decision(dispatch)),
         truncated: stderr_preview.chars().count() > COMMAND_RUNNER_PREVIEW_CHARS,
     }
+}
+
+fn command_protocol_upstream_reason_code(report: &SubagentReport) -> Option<String> {
+    let raw = report
+        .stderr_preview
+        .as_deref()
+        .unwrap_or(report.summary.as_str());
+    extract_command_protocol_upstream_reason_code(raw)
+}
+
+fn extract_command_protocol_upstream_reason_code(raw: &str) -> Option<String> {
+    let normalized = raw.to_ascii_lowercase();
+    if let Some(rest) = normalized.strip_prefix("report_admission_rejected:") {
+        return rest
+            .split(':')
+            .next()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
+    }
+    for code in [
+        "agent_id_mismatch",
+        "task_id_mismatch",
+        "parent_agent_id_mismatch",
+        "invalid_timestamp_order",
+        "missing_required_field",
+        "empty_required_field",
+        "invalid_json",
+        "invalid_utf8",
+        "unsupported_schema_version",
+        "invalid_enum_format",
+        "invalid_timestamp_format",
+        "size_limit_exceeded",
+    ] {
+        if normalized.contains(code) {
+            return Some(code.to_string());
+        }
+    }
+    None
 }
 
 struct CommandRunnerOutput {

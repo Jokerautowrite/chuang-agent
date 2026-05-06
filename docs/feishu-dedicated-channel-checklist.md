@@ -9,6 +9,7 @@ This checklist is for the future Chuang Feishu bot. It must stay separate from C
 - Do not reuse Hermes gateway service, credentials, session, or message queue.
 - Do not write Feishu secrets into repo files.
 - Store secrets in an external env file or service manager secret store.
+- Keep provider credentials separate from Feishu credentials. The current bridge reads `CHUANG_PROVIDER_ENV_FILE` and expects that external file to define `CODEX_PPTOKEN_API_KEY=<set>`.
 - Bind the channel to `/home/user/projects/chuang-agent` explicitly.
 - For the current long-connection adapter, only `CHUANG_FEISHU_APP_ID` and `CHUANG_FEISHU_APP_SECRET` are mandatory; `CHUANG_FEISHU_BOT_ID` and `CHUANG_FEISHU_VERIFICATION_TOKEN` stay optional unless you later switch to a webhook-style adapter.
 
@@ -32,6 +33,8 @@ Before enabling the bot:
 
 ```bash
 cargo run --quiet -- doctor --config config.toml
+CHUANG_PROVIDER_ENV_FILE=/home/user/.config/chuang-agent/provider.env \
+  scripts/chuang-app-server-health.sh
 cargo run --quiet -- channel feishu-check \
   --env-file /home/user/.codex-im/chuang-feishu-bridge.env \
   --json
@@ -43,6 +46,7 @@ cargo run --quiet -- channel simulate \
   --text "还在吗？" \
   --json
 sh scripts/chuang-mvp-smoke.sh
+node scripts/chuang-feishu-command-smoke.js
 ```
 
 Expected root status:
@@ -82,6 +86,10 @@ scripts/chuang-feishu-bridge.sh
 ```
 
 The bridge script is a long-connection runtime. It validates the Chuang-only env file, opens the Feishu websocket client, and forwards plain text to Chuang `app-server`.
+
+The bridge also sources `CHUANG_PROVIDER_ENV_FILE` before it starts the Node process. Keep this provider env outside the repository, with file mode `600`, and store only variable assignments such as `CODEX_PPTOKEN_API_KEY=<set>`. Do not put provider keys into the Feishu env template or `config.toml`.
+
+The bridge handles `/new` and `/help` locally as bridge commands. `/new` is the open-new-window/new-context entry command: it replies with guidance for opening a fresh Feishu chat/topic/thread and explicitly stays out of the Agent mainline. `/help` lists the local commands. Neither command is forwarded to `app-server` or the Agent runtime.
 
 ## First Live Test
 

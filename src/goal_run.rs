@@ -45,6 +45,8 @@ pub struct GoalIntegrationPolicy {
 pub struct GoalCheckpoint {
     pub checkpoint_id: String,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
     pub completed_worker_ids: Vec<String>,
     pub validation_notes: Vec<String>,
 }
@@ -131,7 +133,8 @@ impl GoalRun {
             .checkpoint_log
             .last()
             .map(|checkpoint| {
-                !checkpoint.validation_notes.is_empty()
+                !checkpoint.completed_worker_ids.is_empty()
+                    && !checkpoint.validation_notes.is_empty()
                     && validate_checkpoint_worker_ids(checkpoint, &self.worker_plan).is_ok()
             })
             .unwrap_or(false);
@@ -151,7 +154,7 @@ impl GoalRun {
             incomplete_reasons.push("no checkpoint has been recorded".to_string());
         } else if !checkpoint_log_complete {
             incomplete_reasons.push(
-                "latest checkpoint is missing validation notes or references an unknown worker"
+                "latest checkpoint is missing completed worker evidence, validation notes, or references an unknown worker"
                     .to_string(),
             );
         }
@@ -360,6 +363,7 @@ impl GoalCheckpoint {
         Self {
             checkpoint_id: checkpoint_id.into(),
             summary: summary.into(),
+            created_at: Some(current_rfc3339_timestamp()),
             completed_worker_ids,
             validation_notes,
         }
@@ -368,6 +372,7 @@ impl GoalCheckpoint {
     fn validate(&self) -> Result<(), GoalRunError> {
         require_non_empty("checkpoint_log.checkpoint_id", &self.checkpoint_id)?;
         require_non_empty("checkpoint_log.summary", &self.summary)?;
+        validate_checkpoint_created_at(self.created_at.as_deref())?;
         require_non_empty_vec(
             "checkpoint_log.completed_worker_ids",
             self.completed_worker_ids.len(),
@@ -497,6 +502,7 @@ fn validate_checkpoint_log_strict(
 fn validate_checkpoint_log_ids(checkpoint_log: &[GoalCheckpoint]) -> Result<(), GoalRunError> {
     let mut checkpoint_ids = HashSet::new();
     for checkpoint in checkpoint_log {
+        validate_checkpoint_created_at(checkpoint.created_at.as_deref())?;
         if !checkpoint_ids.insert(checkpoint.checkpoint_id.as_str()) {
             return Err(GoalRunError::new(
                 "checkpoint_log.checkpoint_id",
@@ -505,6 +511,21 @@ fn validate_checkpoint_log_ids(checkpoint_log: &[GoalCheckpoint]) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn validate_checkpoint_created_at(created_at: Option<&str>) -> Result<(), GoalRunError> {
+    let Some(created_at) = created_at else {
+        return Ok(());
+    };
+    require_non_empty("checkpoint_log.created_at", created_at)?;
+    chrono::DateTime::parse_from_rfc3339(created_at).map_err(|_| {
+        GoalRunError::new("checkpoint_log.created_at", "created_at must be RFC3339")
+    })?;
+    Ok(())
+}
+
+fn current_rfc3339_timestamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 fn worker_scope_complete(worker_plan: &[GoalWorkerPlan], write_scopes: &[GoalWriteScope]) -> bool {

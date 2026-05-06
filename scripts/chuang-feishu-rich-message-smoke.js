@@ -18,7 +18,9 @@ const card = JSON.parse(rich.content);
 assert.strictEqual(card.config.wide_screen_mode, true);
 assert.strictEqual(card.header.title.content, "Chuang");
 assert(card.elements.some((element) => element.tag === "markdown" && element.content.includes("&lt;ok&gt;")));
-assert(card.elements.some((element) => element.tag === "div"));
+const fieldBlock = card.elements.find((element) => element.tag === "div");
+assert(fieldBlock);
+assert(fieldBlock.fields.some((field) => field.text.content.includes("report-1")));
 
 const text = buildChuangTextPayload("纯文本回复");
 assert.strictEqual(text.msgType, "text");

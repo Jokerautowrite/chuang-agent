@@ -10,6 +10,7 @@ use chuang_agent::tool_runtime::{
     ShellRiskRules, ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport,
     ToolModelOutput, WriteOperation,
 };
+use chuang_agent::workspace_file_adapter::WorkspaceFileAdapter;
 
 fn temp_workspace(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -112,15 +113,45 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
         ),
         ToolModelOutput::ToolCall(ToolCall::MemoryRecall { .. })
     ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"mouse","x":1,"y":2}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Mouse { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"keyboard","text":"abc","secret":false}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Keyboard { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"screenshot","target":"screen"}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Screenshot { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"locate","target":"screen"}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Locate { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"wait","millis":5}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Wait { .. })
+    ));
 }
 
 #[test]
-fn parse_structured_action_does_not_accept_interface_only_desktop_tools_yet() {
+fn parse_structured_action_accepts_interface_only_desktop_tools() {
     assert!(matches!(
         parse_tool_model_output(
             r#"ACTION: {"type":"tool_call","call":{"tool":"mouse","x":10,"y":20}}"#
         ),
-        ToolModelOutput::ProtocolError(_)
+        ToolModelOutput::ToolCall(ToolCall::Mouse { .. })
     ));
 }
 
@@ -158,6 +189,7 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
 
     assert!(instructions.contains("file_read, file_write, code_execute"));
     assert!(instructions.contains("辅助工具：list_dir"));
+    assert!(instructions.contains("apply_patch"));
     assert!(instructions.contains("memory_recall"));
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
@@ -231,6 +263,7 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"tool"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"path"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"content"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"patch"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"command"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"cwd"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"query"));
@@ -379,6 +412,245 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
 }
 
 #[test]
+fn workspace_file_adapter_can_apply_patch_and_enforce_workspace_bounds() {
+    let root = temp_workspace("patch");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("keep.txt"), "old\nvalue\n").expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let result = adapter
+        .apply_patch("*** Begin Patch\n*** Update File: keep.txt\n@@\n-old\n+new\n*** End Patch")
+        .expect("patch should apply");
+    assert_eq!(result.operation_count, 1);
+    assert_eq!(
+        result.changed_files,
+        vec![root.join("keep.txt").display().to_string()]
+    );
+    assert!(result.diff_preview.contains("keep.txt"));
+    assert!(!result.backup_paths.is_empty());
+    assert_eq!(
+        fs::read_to_string(root.join("keep.txt")).unwrap(),
+        "new\nvalue\n"
+    );
+
+    let escape = adapter
+        .list_dir("../")
+        .expect_err("outside workspace should be rejected");
+    assert!(escape.contains("path_outside_workspace"));
+}
+
+#[test]
+fn workspace_file_adapter_write_file_creates_auditable_backup() {
+    let root = temp_workspace("write-backup");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("note.txt"), "before\n").expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let result = adapter
+        .write_file("note.txt", "after\n")
+        .expect("write should succeed");
+
+    assert_eq!(
+        result.operation,
+        chuang_agent::workspace_file_adapter::WorkspaceWriteOperation::Modified
+    );
+    assert_eq!(result.before_bytes, Some("before\n".len()));
+    assert_eq!(result.after_bytes, "after\n".len());
+    assert!(result.changed);
+    assert_eq!(result.backup_paths.len(), 1);
+    assert!(result.backup_paths[0].contains(".chuang-file-audit"));
+    assert_eq!(
+        fs::read_to_string(&result.backup_paths[0]).expect("backup should be readable"),
+        "before\n"
+    );
+    assert!(result.diff_preview.contains("-before"));
+    assert!(result.diff_preview.contains("+after"));
+}
+
+#[test]
+fn workspace_file_adapter_rejects_patch_delete_without_removing_file() {
+    let root = temp_workspace("patch-delete-rejected");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("keep.txt"), "keep\n").expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let error = adapter
+        .apply_patch("*** Begin Patch\n*** Delete File: keep.txt\n*** End Patch")
+        .expect_err("delete patch should be rejected");
+
+    assert!(error.contains("apply_patch_delete_not_allowed"));
+    assert_eq!(
+        fs::read_to_string(root.join("keep.txt")).expect("file should remain"),
+        "keep\n"
+    );
+}
+
+#[test]
+fn workspace_file_adapter_rejects_patch_without_partial_writes() {
+    let root = temp_workspace("patch-no-partial-writes");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("keep.txt"), "keep\n").expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let error = adapter
+        .apply_patch(
+            "*** Begin Patch\n*** Add File: created.txt\n+created\n*** Delete File: keep.txt\n*** End Patch",
+        )
+        .expect_err("mixed patch should be rejected before writing");
+
+    assert!(error.contains("apply_patch_delete_not_allowed"));
+    assert!(
+        !root.join("created.txt").exists(),
+        "earlier add operation should not be committed"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("keep.txt")).expect("existing file should remain"),
+        "keep\n"
+    );
+}
+
+#[test]
+fn workspace_file_adapter_rejects_patch_move_without_removing_source() {
+    let root = temp_workspace("patch-move-rejected");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("source.txt"), "old\n").expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let error = adapter
+        .apply_patch(
+            "*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n@@\n-old\n+new\n*** End Patch",
+        )
+        .expect_err("move patch should be rejected");
+
+    assert!(error.contains("apply_patch_move_not_allowed"));
+    assert_eq!(
+        fs::read_to_string(root.join("source.txt")).expect("source should remain"),
+        "old\n"
+    );
+    assert!(
+        !root.join("moved.txt").exists(),
+        "move target should not be created"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_file_adapter_rejects_writes_through_symlink_parent() {
+    let root = temp_workspace("symlink-parent-escape");
+    let outside = temp_workspace("symlink-parent-outside");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::create_dir_all(&outside).expect("outside dir should be created");
+    std::os::unix::fs::symlink(&outside, root.join("linked")).expect("symlink should be created");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let error = adapter
+        .write_file("linked/created.txt", "outside\n")
+        .expect_err("symlink parent should not escape workspace");
+
+    assert!(error.contains("path_outside_workspace"));
+    assert!(
+        !outside.join("created.txt").exists(),
+        "outside file should not be created"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_file_adapter_rejects_patch_add_through_symlink_parent() {
+    let root = temp_workspace("patch-symlink-parent-escape");
+    let outside = temp_workspace("patch-symlink-parent-outside");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::create_dir_all(&outside).expect("outside dir should be created");
+    std::os::unix::fs::symlink(&outside, root.join("linked")).expect("symlink should be created");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let error = adapter
+        .apply_patch("*** Begin Patch\n*** Add File: linked/created.txt\n+outside\n*** End Patch")
+        .expect_err("patch add through symlink parent should not escape workspace");
+
+    assert!(error.contains("path_outside_workspace"));
+    assert!(
+        !outside.join("created.txt").exists(),
+        "outside file should not be created"
+    );
+}
+
+#[test]
+fn workspace_file_adapter_read_file_redacts_secret_like_content() {
+    let root = temp_workspace("read-redaction");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::write(root.join("config.txt"), "api_key = \"secret-value\"\n")
+        .expect("seed file should write");
+
+    let adapter = WorkspaceFileAdapter::new(&root);
+    let result = adapter
+        .read_file("config.txt")
+        .expect("read should succeed");
+
+    assert!(result.redacted);
+    assert_eq!(result.content, "[redacted: secret-like path or content]");
+    assert_eq!(result.bytes, "api_key = \"secret-value\"\n".len());
+    assert_eq!(result.lines, 1);
+}
+
+#[test]
+fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
+    let root = temp_workspace("desktop-tools");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+
+    let config = ToolExecutionConfig {
+        actuator: Some(chuang_agent::runtime_config::ActuatorConfig::Fake),
+        ..ToolExecutionConfig::default()
+    };
+
+    let mouse = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::Mouse { x: 10, y: 20 },
+        &config,
+    );
+    assert!(mouse.ok, "mouse should succeed: {}", mouse.summary);
+
+    let keyboard = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::Keyboard {
+            text: "hello".to_string(),
+            secret: false,
+        },
+        &config,
+    );
+    assert!(keyboard.ok, "keyboard should succeed: {}", keyboard.summary);
+
+    let screenshot = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::Screenshot {
+            target: Some("screen".to_string()),
+        },
+        &config,
+    );
+    assert!(
+        screenshot.ok,
+        "screenshot should succeed: {}",
+        screenshot.summary
+    );
+
+    let locate = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::Locate {
+            target: Some("screen".to_string()),
+        },
+        &config,
+    );
+    assert!(locate.ok, "locate should succeed: {}", locate.summary);
+
+    let wait = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::Wait { millis: 1 },
+        &config,
+    );
+    assert!(wait.ok, "wait should succeed: {}", wait.summary);
+}
+
+#[test]
 fn memory_recall_returns_structured_unconfigured_result() {
     let root = temp_workspace("memory-unconfigured");
     fs::create_dir_all(&root).expect("workspace root should be created");
@@ -450,6 +722,7 @@ fn memory_recall_searches_only_configured_session_memory() {
                 default_limit: 3,
                 max_limit: 5,
             }),
+            actuator: None,
             ..ToolExecutionConfig::default()
         },
     );
@@ -485,6 +758,7 @@ fn memory_recall_rejects_cross_session_request() {
                 default_limit: 3,
                 max_limit: 5,
             }),
+            actuator: None,
             ..ToolExecutionConfig::default()
         },
     );
@@ -517,6 +791,31 @@ fn write_file_diff_preview_redacts_secret_like_changes() {
     assert_eq!(record.write_operation, Some(WriteOperation::Created));
     assert!(record.output_redacted);
     assert!(!record.write_diff_truncated);
+}
+
+#[cfg(unix)]
+#[test]
+fn tool_runtime_rejects_symlink_parent_writes() {
+    let root = temp_workspace("runtime-symlink-parent-escape");
+    let outside = temp_workspace("runtime-symlink-parent-outside");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    fs::create_dir_all(&outside).expect("outside dir should be created");
+    std::os::unix::fs::symlink(&outside, root.join("linked")).expect("symlink should be created");
+
+    let record = execute_tool_call(
+        &root,
+        &ToolCall::WriteFile {
+            path: "linked/created.txt".to_string(),
+            content: "outside".to_string(),
+        },
+    );
+
+    assert!(!record.ok);
+    assert!(record.summary.contains("path_outside_workspace"));
+    assert!(
+        !outside.join("created.txt").exists(),
+        "outside file should not be created"
+    );
 }
 
 #[test]
@@ -679,6 +978,7 @@ fn execution_slot_wraps_registry_config_and_governed_execution() {
     let mut governance = StaticRuleGovernance::new();
     let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig {
         shell_timeout_ms: 30_000,
+        actuator: None,
         ..ToolExecutionConfig::default()
     });
 
@@ -780,6 +1080,7 @@ fn execution_slot_uses_configured_shell_risk_rules() {
             ..ShellRiskRules::default()
         },
         memory: None,
+        actuator: None,
     });
 
     let error = slot

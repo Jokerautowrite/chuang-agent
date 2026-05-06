@@ -64,6 +64,7 @@ fn goal_run_records_checkpoints_in_order() {
 
     assert_eq!(run.checkpoint_log.len(), 1);
     assert_eq!(run.checkpoint_log[0].checkpoint_id, "checkpoint-1");
+    assert_rfc3339_timestamp(run.checkpoint_log[0].created_at.as_deref());
     assert_eq!(run.checkpoint_log[0].completed_worker_ids, vec!["worker-1"]);
     let diagnostics = run.diagnostics();
     assert!(diagnostics.checkpoint_log_complete);
@@ -139,6 +140,22 @@ fn goal_run_rejects_duplicate_completed_worker_ids_in_checkpoint() {
         err.message,
         "completed worker ids must be unique within a checkpoint"
     );
+}
+
+#[test]
+fn goal_run_rejects_checkpoint_with_invalid_created_at() {
+    let mut run = sample_goal_run();
+    let err = run
+        .record_checkpoint(GoalCheckpoint {
+            checkpoint_id: "checkpoint-invalid-time".to_string(),
+            summary: "checkpoint timestamps must be parseable".to_string(),
+            created_at: Some("not-a-timestamp".to_string()),
+            completed_worker_ids: vec!["worker-1".to_string()],
+            validation_notes: vec!["cargo test -q --test goal_run_tests".to_string()],
+        })
+        .expect_err("invalid timestamp should fail");
+
+    assert_eq!(err.field, "checkpoint_log.created_at");
 }
 
 #[test]
@@ -259,10 +276,165 @@ fn goal_run_store_creates_loads_and_records_checkpoint() {
         .load("mainline-mvp")
         .expect("checkpointed goal run should load");
     assert_eq!(resumed.checkpoint_log.len(), 1);
+    assert_rfc3339_timestamp(resumed.checkpoint_log[0].created_at.as_deref());
     assert_eq!(
         resumed.checkpoint_log[0].summary,
         "stored checkpoint can resume work"
     );
+}
+
+#[test]
+fn goal_run_store_loads_legacy_persisted_checkpoint_without_created_at() {
+    let root = temp_goal_root("load-legacy-without-created-at");
+    let store = GoalRunStore::new(&root);
+    let path = store
+        .goal_path("mainline-mvp")
+        .expect("goal path should resolve");
+
+    std::fs::create_dir_all(&root).expect("goal root should exist");
+    std::fs::write(
+        &path,
+        r#"{
+  "goal_spec": {
+    "goal_id": "mainline-mvp",
+    "objective": "split a goal run into owned worker scopes",
+    "acceptance_checks": ["cargo fmt --all", "cargo test -q"],
+    "budget": {
+      "max_minutes": 60,
+      "max_tool_rounds": 8,
+      "max_subtasks": 0
+    },
+    "allowed_slots": ["context"],
+    "checkpoint_policy": {
+      "update_progress_log": true,
+      "update_handoff": true,
+      "commit_checkpoint": true
+    },
+    "final_report_policy": {
+      "include_validation": true,
+      "include_next_steps": true
+    }
+  },
+  "worker_plan": [
+    {
+      "worker_id": "worker-1",
+      "objective": "implement library primitive",
+      "write_scope_ids": ["goal-run-lib"],
+      "validation_checks": ["cargo test -q goal_run --test goal_run_tests"]
+    }
+  ],
+  "disjoint_write_scopes": [
+    {
+      "scope_id": "goal-run-lib",
+      "paths": ["src/goal_run.rs"]
+    }
+  ],
+  "validation_plan": {
+    "commands": ["cargo fmt --all"]
+  },
+  "integration_policy": {
+    "main_process_owns_integration": true,
+    "workers_may_commit": false,
+    "workers_may_touch_secrets": false,
+    "require_worker_reports": true
+  },
+  "checkpoint_log": [
+    {
+      "checkpoint_id": "checkpoint-legacy-without-created-at",
+      "summary": "legacy checkpoint records remain loadable",
+      "completed_worker_ids": ["worker-1"],
+      "validation_notes": ["cargo test -q --test goal_run_tests"]
+    }
+  ]
+}"#,
+    )
+    .expect("legacy run should be written");
+
+    let loaded = store
+        .load("mainline-mvp")
+        .expect("legacy persisted checkpoint should load");
+
+    assert_eq!(loaded.checkpoint_log.len(), 1);
+    assert_eq!(loaded.checkpoint_log[0].created_at, None);
+    assert_eq!(
+        loaded.checkpoint_log[0].checkpoint_id,
+        "checkpoint-legacy-without-created-at"
+    );
+}
+
+#[test]
+fn goal_run_store_rejects_persisted_checkpoint_with_invalid_created_at() {
+    let root = temp_goal_root("load-invalid-created-at");
+    let store = GoalRunStore::new(&root);
+    let path = store
+        .goal_path("mainline-mvp")
+        .expect("goal path should resolve");
+
+    std::fs::create_dir_all(&root).expect("goal root should exist");
+    std::fs::write(
+        &path,
+        r#"{
+  "goal_spec": {
+    "goal_id": "mainline-mvp",
+    "objective": "split a goal run into owned worker scopes",
+    "acceptance_checks": ["cargo fmt --all", "cargo test -q"],
+    "budget": {
+      "max_minutes": 60,
+      "max_tool_rounds": 8,
+      "max_subtasks": 0
+    },
+    "allowed_slots": ["context"],
+    "checkpoint_policy": {
+      "update_progress_log": true,
+      "update_handoff": true,
+      "commit_checkpoint": true
+    },
+    "final_report_policy": {
+      "include_validation": true,
+      "include_next_steps": true
+    }
+  },
+  "worker_plan": [
+    {
+      "worker_id": "worker-1",
+      "objective": "implement library primitive",
+      "write_scope_ids": ["goal-run-lib"],
+      "validation_checks": ["cargo test -q goal_run --test goal_run_tests"]
+    }
+  ],
+  "disjoint_write_scopes": [
+    {
+      "scope_id": "goal-run-lib",
+      "paths": ["src/goal_run.rs"]
+    }
+  ],
+  "validation_plan": {
+    "commands": ["cargo fmt --all"]
+  },
+  "integration_policy": {
+    "main_process_owns_integration": true,
+    "workers_may_commit": false,
+    "workers_may_touch_secrets": false,
+    "require_worker_reports": true
+  },
+  "checkpoint_log": [
+    {
+      "checkpoint_id": "checkpoint-invalid-created-at",
+      "summary": "invalid created_at should not be accepted",
+      "created_at": "",
+      "completed_worker_ids": ["worker-1"],
+      "validation_notes": ["cargo test -q --test goal_run_tests"]
+    }
+  ]
+}"#,
+    )
+    .expect("invalid run should be written");
+
+    let err = store
+        .load("mainline-mvp")
+        .expect_err("invalid persisted checkpoint should fail on load");
+
+    assert_eq!(err.field, "checkpoint_log.created_at");
 }
 
 #[test]
@@ -560,4 +732,9 @@ fn temp_goal_root(name: &str) -> std::path::PathBuf {
         "chuang-goal-run-test-{name}-{}",
         std::process::id()
     ))
+}
+
+fn assert_rfc3339_timestamp(value: Option<&str>) {
+    let value = value.expect("checkpoint should include created_at");
+    chrono::DateTime::parse_from_rfc3339(value).expect("created_at should be RFC3339");
 }

@@ -158,6 +158,8 @@ tests/goal_run_tests.rs
 - 每个 worker 必须有 `validation_checks`；CLI 自定义 `--worker` 默认继承全局 `--validation`。
 - checkpoint 会校验 `completed_worker_ids` 不能为空且只能引用计划内 worker。
 - `goal show` 文本和 JSON 会输出 `goal_run_diagnostics`：worker scope 完整性、worker validation 完整性、validation plan 完整性、latest checkpoint 完整性、last checkpoint id/summary，以及 `executes_automatically=false` / `bypasses_governance=false`。
+- `GoalRun` checkpoint 会记录 RFC3339 `created_at`；旧 checkpoint 缺该字段仍可读取，但新写入和带字段的持久化记录必须是合法时间戳。
+- `incomplete_reasons` 是结构化恢复提示：旧 checkpoint 缺完成者、缺验证备注、worker scope 不完整或 validation plan 不完整时，readiness/诊断面应直接暴露原因。
 - checkpoint 必须带至少一个 `completed_worker_id` 和至少一条 `validation_note`。缺 checkpoint 仍只用于提示续接风险，不会触发任务执行。
 
 当前 CLI 入口：

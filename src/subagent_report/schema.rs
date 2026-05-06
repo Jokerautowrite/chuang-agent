@@ -113,6 +113,8 @@ pub struct ReportAdmission {
     pub controller_agent_id: AgentId,
     pub status: ReportAdmissionStatus,
     pub reason_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_reason_code: Option<String>,
     pub reason: String,
     pub decided_at: Timestamp,
 }

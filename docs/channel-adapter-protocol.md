@@ -72,7 +72,11 @@ For a batch of app-server events, use `outbounds_from_app_server_events()`. It p
 
 `channel simulate` also exposes the current `runtime_report_id` and runtime observability snapshot in its JSON output. That keeps the local protocol aligned with the thin-bridge contract: the adapter can correlate a channel turn to a structured report without guessing from free-form text.
 
-The repo-local Feishu bridge renders assistant replies as Feishu interactive cards through `scripts/chuang-feishu-client-adapter.js`. If rich-card send fails, the bridge falls back to a plain text payload. The local contract is covered by `node scripts/chuang-feishu-rich-message-smoke.js`; it does not connect to Feishu.
+The repo-local Feishu bridge renders assistant replies as Feishu interactive cards through `scripts/chuang-feishu-client-adapter.js`. If rich-card send fails, the bridge falls back to a plain text payload. The card includes the thread id and runtime report id when app-server returns them, so a live channel reply can be correlated to the structured runtime report. The local contract is covered by `node scripts/chuang-feishu-rich-message-smoke.js`; it does not connect to Feishu.
+
+The repo-local Feishu bridge also has local bridge commands in `scripts/chuang-feishu-bridge-commands.js`. `/new` is the open-new-window/new-context entry command: it explains how to open a fresh Feishu chat/topic/thread, and `/help` lists bridge commands. These commands are answered by the bridge and are not forwarded to app-server or the Agent runtime. The local contract is covered by `node scripts/chuang-feishu-command-smoke.js`; it does not connect to Feishu.
+
+The repo-local Feishu bridge sources `CHUANG_PROVIDER_ENV_FILE` before starting its Node runtime, so `app-server` child processes inherit provider variables such as `CODEX_PPTOKEN_API_KEY=<set>`. This provider env must stay outside the repository and separate from Feishu app credentials.
 
 ## Feishu Rule
 

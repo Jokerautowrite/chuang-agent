@@ -247,6 +247,31 @@ fn cli_subagent_dispatch_rejects_comma_in_required_capability() {
 }
 
 #[test]
+fn cli_subagent_report_rejects_unsafe_run_id_path() {
+    let queue_root = temp_queue_root("unsafe-report-run-id");
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "report",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            "../escape",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("InvalidRunId"));
+    assert!(!queue_root.join("escape.json").exists());
+}
+
+#[test]
 fn cli_subagent_run_once_rejects_comma_in_worker_capability() {
     let queue_root = temp_queue_root("bad-worker-capability");
     let output = cargo_command()
@@ -1063,6 +1088,10 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
         parsed["report_admission"]["reason_code"],
         "command_protocol_report_rejected"
     );
+    assert_eq!(
+        parsed["report_admission"]["upstream_reason_code"],
+        "agent_id_mismatch"
+    );
 
     let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
     let report: Value = serde_json::from_str(
@@ -1178,6 +1207,10 @@ fn cli_subagent_run_once_command_runner_rejects_incomplete_protocol_report() {
         report_parsed["report_admission"]["reason_code"],
         "command_protocol_report_rejected"
     );
+    assert_eq!(
+        report_parsed["report_admission"]["upstream_reason_code"],
+        "missing_required_field"
+    );
 }
 
 #[test]
@@ -1231,6 +1264,10 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_missing_status()
     assert_eq!(
         parsed["report_admission"]["reason_code"],
         "command_protocol_report_rejected"
+    );
+    assert_eq!(
+        parsed["report_admission"]["upstream_reason_code"],
+        "missing_required_field"
     );
 
     let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
@@ -1516,6 +1553,49 @@ fn cli_subagent_report_marks_missing_report_without_error() {
 }
 
 #[test]
+fn cli_subagent_report_returns_rejected_admission_for_malformed_report_file() {
+    let queue_root = temp_queue_root("report-malformed");
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root.join("reports").join("queued-run-bad.json"),
+        "{bad json",
+    )
+    .expect("bad report should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "report",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            "queued-run-bad",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["available"], true);
+    assert_eq!(parsed["report"], Value::Null);
+    assert_eq!(
+        parsed["report_admission"]["status"],
+        Value::String("Rejected".to_string())
+    );
+    assert_eq!(parsed["report_admission"]["reason_code"], "invalid_json");
+}
+
+#[test]
 fn cli_subagent_collect_uses_dispatch_identity_before_returning_report() {
     let queue_root = temp_queue_root("collect");
     let dispatch_output = dispatch_task(&queue_root, "task-cli-collect", "收集子代理报告");
@@ -1562,6 +1642,57 @@ fn cli_subagent_collect_uses_dispatch_identity_before_returning_report() {
     assert_eq!(parsed["dispatch_available"], true);
     assert_eq!(parsed["report_available"], true);
     assert_eq!(parsed["report"]["summary"], "identity checked report");
+}
+
+#[test]
+fn cli_subagent_collect_returns_rejected_admission_for_partial_report_file() {
+    let queue_root = temp_queue_root("collect-partial-report");
+    let dispatch_output = dispatch_task(&queue_root, "task-cli-partial-report", "收集缺字段报告");
+    let run_id = dispatch_output["run_id"].as_str().expect("run id");
+    let agent_id = dispatch_agent_id(&queue_root, run_id);
+
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root.join("reports").join(format!("{run_id}.json")),
+        report_json_without_status("task-cli-partial-report", &agent_id, "missing status"),
+    )
+    .expect("partial report should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--run-id",
+            run_id,
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["dispatch_available"], true);
+    assert_eq!(parsed["report_available"], true);
+    assert_eq!(parsed["report"], Value::Null);
+    assert_eq!(
+        parsed["report_admission"]["status"],
+        Value::String("Rejected".to_string())
+    );
+    assert_eq!(
+        parsed["report_admission"]["reason_code"],
+        "missing_required_field"
+    );
 }
 
 #[test]

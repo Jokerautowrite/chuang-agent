@@ -200,11 +200,16 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         "queued_protocol_partial"
     );
     assert_eq!(status.subagent_readiness.mode, "fake");
+    assert!(status.subagent_readiness.local_contract_ready);
+    assert!(!status.subagent_readiness.live_adapter_ready);
     assert!(status
         .subagent_readiness
         .layers
         .iter()
-        .any(|layer| layer.name == "command_runner" && layer.state == "ready"));
+        .any(|layer| layer.name == "command_runner"
+            && layer.state == "ready"
+            && layer.local_contract_ready
+            && !layer.live_adapter_ready));
     assert!(status
         .subagent_readiness
         .layers
@@ -307,6 +312,8 @@ fn goal_run_readiness_reports_absent_plan_without_failure() {
     assert!(!status.plan_exists);
     assert_eq!(status.checkpoint_count, 0);
     assert_eq!(status.worker_count, 0);
+    assert!(!status.checkpoint_log_complete);
+    assert!(status.incomplete_reasons.is_empty());
     assert!(status.read_error.is_none());
     assert!(status.path.ends_with("mainline-mvp.json"));
 }
@@ -350,11 +357,125 @@ fn goal_run_readiness_reports_checkpoint_count_for_existing_plan() {
     assert_eq!(status.checkpoint_count, 1);
     assert_eq!(status.worker_count, 1);
     assert_eq!(status.validation_command_count, 2);
+    assert!(status.checkpoint_log_complete);
     assert_eq!(
         status.last_checkpoint_id.as_deref(),
         Some("checkpoint-readiness")
     );
+    assert_eq!(
+        status.last_checkpoint_summary.as_deref(),
+        Some("readiness status can count checkpoints")
+    );
+    assert!(status.incomplete_reasons.is_empty());
     assert!(status.read_error.is_none());
+}
+
+#[test]
+fn goal_run_readiness_surfaces_incomplete_legacy_checkpoint() {
+    let root = temp_goal_root("legacy-incomplete");
+    let store = GoalRunStore::new(&root);
+    let path = store
+        .goal_path("mainline-mvp")
+        .expect("goal path should resolve");
+
+    std::fs::create_dir_all(&root).expect("goal root should exist");
+    std::fs::write(
+        &path,
+        r#"{
+  "goal_spec": {
+    "goal_id": "mainline-mvp",
+    "objective": "surface weak legacy checkpoints",
+    "acceptance_checks": ["cargo fmt --all", "cargo test -q"],
+    "budget": {
+      "max_minutes": 60,
+      "max_tool_rounds": 8,
+      "max_subtasks": 0
+    },
+    "allowed_slots": ["context"],
+    "checkpoint_policy": {
+      "update_progress_log": true,
+      "update_handoff": true,
+      "commit_checkpoint": true
+    },
+    "final_report_policy": {
+      "include_validation": true,
+      "include_next_steps": true
+    }
+  },
+  "worker_plan": [
+    {
+      "worker_id": "main-process",
+      "objective": "continue from checkpoints",
+      "write_scope_ids": ["mainline"],
+      "validation_checks": ["cargo test -q --test kernel_status_tests"]
+    }
+  ],
+  "disjoint_write_scopes": [
+    {
+      "scope_id": "mainline",
+      "paths": ["src/kernel_status.rs"]
+    }
+  ],
+  "validation_plan": {
+    "commands": ["cargo test -q --test kernel_status_tests"]
+  },
+  "integration_policy": {
+    "main_process_owns_integration": true,
+    "workers_may_commit": false,
+    "workers_may_touch_secrets": false,
+    "require_worker_reports": true
+  },
+  "checkpoint_log": [
+    {
+      "checkpoint_id": "checkpoint-legacy-incomplete",
+      "summary": "legacy checkpoint has no worker evidence",
+      "completed_worker_ids": [],
+      "validation_notes": ["cargo test -q --test kernel_status_tests"]
+    }
+  ]
+}"#,
+    )
+    .expect("legacy run should be written");
+
+    let status = summarize_goal_run_readiness(&root, "mainline-mvp");
+
+    assert!(status.ok);
+    assert!(status.plan_exists);
+    assert_eq!(status.checkpoint_count, 1);
+    assert!(!status.checkpoint_log_complete);
+    assert_eq!(
+        status.last_checkpoint_id.as_deref(),
+        Some("checkpoint-legacy-incomplete")
+    );
+    assert!(status
+        .incomplete_reasons
+        .iter()
+        .any(|reason| reason.contains("latest checkpoint is missing completed worker evidence")));
+}
+
+#[test]
+fn goal_run_readiness_reports_invalid_plan_read_error() {
+    let root = temp_goal_root("invalid-json");
+    let store = GoalRunStore::new(&root);
+    let path = store
+        .goal_path("mainline-mvp")
+        .expect("goal path should resolve");
+    std::fs::create_dir_all(&root).expect("goal root should exist");
+    std::fs::write(&path, "{not json").expect("invalid goal run should be written");
+
+    let status = summarize_goal_run_readiness(&root, "mainline-mvp");
+
+    assert!(!status.ok);
+    assert!(status.plan_exists);
+    assert!(!status.checkpoint_log_complete);
+    assert!(status
+        .read_error
+        .as_deref()
+        .expect("read error should be present")
+        .contains("goal_run.json"));
+    assert!(status
+        .incomplete_reasons
+        .contains(&"goal run could not be loaded".to_string()));
 }
 
 fn temp_goal_root(name: &str) -> PathBuf {

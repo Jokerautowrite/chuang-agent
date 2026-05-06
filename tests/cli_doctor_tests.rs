@@ -84,6 +84,10 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("goal_mode_ok: true entrypoint=run --goal TEXT"));
     assert!(stdout.contains("goal_run_ok: true"));
     assert!(stdout.contains("goal_id=mainline-mvp"));
+    assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
+    assert!(stdout.contains("goal_run_last_checkpoint:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
@@ -94,7 +98,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
     ));
     assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
-    assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
+    assert!(stdout.contains(
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true live_adapter_ready=false"
+    ));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
@@ -232,6 +238,13 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(parsed["status"]["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["status"]["goal_run"]["plan_exists"].is_boolean());
     assert!(parsed["status"]["goal_run"]["checkpoint_count"].is_number());
+    assert!(parsed["status"]["goal_run"]["checkpoint_log_complete"].is_boolean());
+    assert!(parsed["status"]["goal_run"]["last_checkpoint_summary"].is_string());
+    assert!(parsed["status"]["goal_run"]["incomplete_reasons"]
+        .as_array()
+        .expect("goal run incomplete reasons should be an array")
+        .iter()
+        .all(|reason| reason.is_string()));
     assert_eq!(parsed["status"]["project_readiness"]["ok"], true);
     assert_eq!(
         parsed["status"]["project_readiness"]["overall_state"],
@@ -303,6 +316,14 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(
         parsed["status"]["subagent_readiness"]["overall_state"],
         "queued_protocol_partial"
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["local_contract_ready"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["live_adapter_ready"],
+        false
     );
     assert_eq!(parsed["status"]["subagent_readiness"]["layer_count"], 5);
     assert!(parsed["status"]["subagent_readiness"]["layers"]

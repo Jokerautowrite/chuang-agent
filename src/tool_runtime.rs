@@ -1,9 +1,12 @@
 use std::fs;
-use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::actuator::{
+    Actuator, ClickTarget, CommandActuator, FakeActuator, InputTarget, ObserveTarget,
+    ScreenshotTarget, SecretOrPlainText,
+};
 use crate::atomic_tool::AtomicToolRegistry;
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
@@ -11,6 +14,9 @@ use crate::governance::{
 };
 use crate::memory_recall::{MemoryRecallPipeline, RecallRequest};
 use crate::memory_store_sqlite::SqliteMemoryStore;
+use crate::path_utils::resolve_candidate_preserving_existing_symlinks;
+use crate::runtime_config::ActuatorConfig;
+use crate::workspace_file_adapter::WorkspaceFileAdapter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +33,29 @@ pub enum ToolCall {
     WriteFile {
         path: String,
         content: String,
+    },
+    Mouse {
+        x: i32,
+        y: i32,
+    },
+    Keyboard {
+        text: String,
+        #[serde(default)]
+        secret: bool,
+    },
+    Screenshot {
+        #[serde(default)]
+        target: Option<String>,
+    },
+    Locate {
+        #[serde(default)]
+        target: Option<String>,
+    },
+    Wait {
+        millis: u64,
+    },
+    ApplyPatch {
+        patch: String,
     },
     #[serde(alias = "code_execute")]
     ShellExec {
@@ -198,6 +227,13 @@ pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
     "tool",
     "path",
     "content",
+    "x",
+    "y",
+    "text",
+    "secret",
+    "target",
+    "millis",
+    "patch",
     "command",
     "cwd",
     "query",
@@ -240,6 +276,7 @@ pub struct ToolExecutionConfig {
     pub shell_timeout_ms: u64,
     pub shell_risk_rules: ShellRiskRules,
     pub memory: Option<MemoryToolContext>,
+    pub actuator: Option<ActuatorConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,6 +299,7 @@ impl Default for ToolExecutionConfig {
             shell_timeout_ms: 30_000,
             shell_risk_rules: ShellRiskRules::default(),
             memory: None,
+            actuator: None,
         }
     }
 }
@@ -422,7 +460,13 @@ impl ToolSurfaceStatus {
             .map(str::to_string)
             .collect::<Vec<_>>();
         let mut callable_tools = mapped_atomic_tools.clone();
+        callable_tools.push("mouse".to_string());
+        callable_tools.push("keyboard".to_string());
+        callable_tools.push("screenshot".to_string());
+        callable_tools.push("locate".to_string());
+        callable_tools.push("wait".to_string());
         callable_tools.push("list_dir".to_string());
+        callable_tools.push("apply_patch".to_string());
         callable_tools.push("memory_recall".to_string());
 
         Self {
@@ -613,6 +657,22 @@ fn execute_tool_call_with_registry_and_config(
         ToolCall::ReadFile { path } => execute_read_file(workspace_root, registry, call, path),
         ToolCall::WriteFile { path, content } => {
             execute_write_file(workspace_root, registry, call, path, content)
+        }
+        ToolCall::Mouse { x, y } => execute_mouse(registry, call, config.actuator.as_ref(), *x, *y),
+        ToolCall::Keyboard { text, secret } => {
+            execute_keyboard(registry, call, config.actuator.as_ref(), text, *secret)
+        }
+        ToolCall::Screenshot { target } => {
+            execute_screenshot(registry, call, config.actuator.as_ref(), target)
+        }
+        ToolCall::Locate { target } => {
+            execute_locate(registry, call, config.actuator.as_ref(), target)
+        }
+        ToolCall::Wait { millis } => {
+            execute_wait(registry, call, config.actuator.as_ref(), *millis)
+        }
+        ToolCall::ApplyPatch { patch } => {
+            execute_apply_patch(workspace_root, registry, call, patch)
         }
         ToolCall::ShellExec { command, cwd } => execute_shell_exec(
             workspace_root,
@@ -859,6 +919,12 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ListDir { .. } => "list_dir",
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
+        ToolCall::Mouse { .. } => "mouse",
+        ToolCall::Keyboard { .. } => "keyboard",
+        ToolCall::Screenshot { .. } => "screenshot",
+        ToolCall::Locate { .. } => "locate",
+        ToolCall::Wait { .. } => "wait",
+        ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }
@@ -1413,6 +1479,8 @@ fn tool_rejection_error(decision: &RiskDecision) -> String {
 fn classify_tool_failure(summary: &str) -> &'static str {
     if summary.contains("path_outside_workspace") {
         "path_outside_workspace"
+    } else if summary.contains("apply_patch_") {
+        "write_failed"
     } else if summary.contains("timed out") || summary.contains("shell_exec_wait_failed") {
         "timeout"
     } else if summary.contains("spawn_failed") {
@@ -1437,7 +1505,13 @@ fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> Actio
         ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } | ToolCall::MemoryRecall { .. } => {
             ActionKind::Observe
         }
+        ToolCall::Mouse { .. }
+        | ToolCall::Keyboard { .. }
+        | ToolCall::Screenshot { .. }
+        | ToolCall::Locate { .. }
+        | ToolCall::Wait { .. } => ActionKind::Observe,
         ToolCall::WriteFile { .. } => ActionKind::LocalFileWrite,
+        ToolCall::ApplyPatch { .. } => ActionKind::LocalFileWrite,
         ToolCall::ShellExec { command, .. } => {
             classify_shell_action_kind(command, shell_risk_rules)
         }
@@ -1484,6 +1558,24 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
         | ToolCall::WriteFile { path, .. } => {
             format!("{}::{}", workspace_root.display(), path.trim())
         }
+        ToolCall::Mouse { x, y } => format!("actuator::mouse x={} y={}", x, y),
+        ToolCall::Keyboard { text, secret } => {
+            format!("actuator::keyboard secret={} bytes={}", secret, text.len())
+        }
+        ToolCall::Screenshot { target } => format!(
+            "actuator::screenshot target={}",
+            target.as_deref().unwrap_or("screen")
+        ),
+        ToolCall::Locate { target } => format!(
+            "actuator::locate target={}",
+            target.as_deref().unwrap_or("screen")
+        ),
+        ToolCall::Wait { millis } => format!("actuator::wait millis={}", millis),
+        ToolCall::ApplyPatch { patch } => format!(
+            "{}::apply_patch bytes={}",
+            workspace_root.display(),
+            patch.len()
+        ),
         ToolCall::ShellExec { command, cwd } => format!(
             "{}::{}",
             cwd.as_deref().unwrap_or(".").trim(),
@@ -1506,6 +1598,21 @@ fn tool_summary(call: &ToolCall) -> String {
         ToolCall::WriteFile { path, content } => {
             format!("write_file path={} bytes={}", path.trim(), content.len())
         }
+        ToolCall::Mouse { x, y } => format!("mouse x={} y={}", x, y),
+        ToolCall::Keyboard { text, secret } => {
+            format!("keyboard secret={} bytes={}", secret, text.len())
+        }
+        ToolCall::Screenshot { target } => format!(
+            "screenshot target={}",
+            target.as_deref().unwrap_or("screen")
+        ),
+        ToolCall::Locate { target } => {
+            format!("locate target={}", target.as_deref().unwrap_or("screen"))
+        }
+        ToolCall::Wait { millis } => format!("wait millis={}", millis),
+        ToolCall::ApplyPatch { patch } => {
+            format!("apply_patch bytes={}", patch.len())
+        }
         ToolCall::ShellExec { command, cwd } => format!(
             "shell_exec cwd={} command={}",
             cwd.as_deref().unwrap_or(".").trim(),
@@ -1526,7 +1633,14 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         ToolCall::ListDir { path }
         | ToolCall::ReadFile { path }
         | ToolCall::WriteFile { path, .. } => Some(path.clone()),
-        ToolCall::ShellExec { .. } | ToolCall::MemoryRecall { .. } => None,
+        ToolCall::Mouse { .. }
+        | ToolCall::Keyboard { .. }
+        | ToolCall::Screenshot { .. }
+        | ToolCall::Locate { .. }
+        | ToolCall::Wait { .. }
+        | ToolCall::ApplyPatch { .. }
+        | ToolCall::ShellExec { .. }
+        | ToolCall::MemoryRecall { .. } => None,
     }
 }
 
@@ -1542,6 +1656,203 @@ fn command_from_call(call: &ToolCall) -> Option<String> {
         ToolCall::ShellExec { command, .. } => Some(command.clone()),
         _ => None,
     }
+}
+
+fn build_actuator(config: Option<&ActuatorConfig>) -> Option<Box<dyn Actuator>> {
+    match config? {
+        ActuatorConfig::Fake => Some(Box::new(FakeActuator::new())),
+        ActuatorConfig::Command(command) => Some(Box::new(CommandActuator::new(command.clone()))),
+    }
+}
+
+fn execute_mouse(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    actuator: Option<&ActuatorConfig>,
+    x: i32,
+    y: i32,
+) -> ToolExecutionRecord {
+    let mut record = success_record(
+        registry,
+        call,
+        format!("mouse x={} y={}", x, y),
+        None,
+        false,
+    );
+    let Some(mut actuator) = build_actuator(actuator) else {
+        record.ok = false;
+        record.failure_class = Some("actuator_unconfigured".to_string());
+        return record;
+    };
+    if let Err(error) = actuator.click(ClickTarget::Coordinates { x, y }) {
+        record.ok = false;
+        record.failure_class = Some("actuator_failed".to_string());
+        record.summary = format!("actuator_click_failed: {}", error.message);
+    }
+    record
+}
+
+fn execute_keyboard(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    actuator: Option<&ActuatorConfig>,
+    text: &str,
+    secret: bool,
+) -> ToolExecutionRecord {
+    let mut record = success_record(
+        registry,
+        call,
+        format!("keyboard secret={} bytes={}", secret, text.len()),
+        None,
+        false,
+    );
+    let Some(mut actuator) = build_actuator(actuator) else {
+        record.ok = false;
+        record.failure_class = Some("actuator_unconfigured".to_string());
+        return record;
+    };
+    let text_value = if secret {
+        SecretOrPlainText::Secret {
+            label: "keyboard_secret".to_string(),
+        }
+    } else {
+        SecretOrPlainText::Plain(text.to_string())
+    };
+    if let Err(error) = actuator.input_text(InputTarget::Focused, text_value) {
+        record.ok = false;
+        record.failure_class = Some("actuator_failed".to_string());
+        record.summary = format!("actuator_input_failed: {}", error.message);
+    }
+    record
+}
+
+fn execute_screenshot(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    actuator: Option<&ActuatorConfig>,
+    target: &Option<String>,
+) -> ToolExecutionRecord {
+    let mut record = success_record(
+        registry,
+        call,
+        format!(
+            "screenshot target={}",
+            target.as_deref().unwrap_or("screen")
+        ),
+        None,
+        false,
+    );
+    let Some(mut actuator) = build_actuator(actuator) else {
+        record.ok = false;
+        record.failure_class = Some("actuator_unconfigured".to_string());
+        return record;
+    };
+    let screenshot_target = match target.as_deref() {
+        Some(value) if !value.trim().is_empty() && value.trim() != "screen" => {
+            ScreenshotTarget::Window(value.trim().to_string())
+        }
+        _ => ScreenshotTarget::Screen,
+    };
+    match actuator.screenshot(screenshot_target) {
+        Ok(evidence_ref) => {
+            record.output = Some(evidence_ref.uri);
+        }
+        Err(error) => {
+            record.ok = false;
+            record.failure_class = Some("actuator_failed".to_string());
+            record.summary = format!("actuator_screenshot_failed: {}", error.message);
+        }
+    }
+    record
+}
+
+fn execute_locate(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    actuator: Option<&ActuatorConfig>,
+    target: &Option<String>,
+) -> ToolExecutionRecord {
+    let mut record = success_record(
+        registry,
+        call,
+        format!("locate target={}", target.as_deref().unwrap_or("screen")),
+        None,
+        false,
+    );
+    let Some(mut actuator) = build_actuator(actuator) else {
+        record.ok = false;
+        record.failure_class = Some("actuator_unconfigured".to_string());
+        return record;
+    };
+    let observe_target = match target.as_deref() {
+        Some(value) if !value.trim().is_empty() && value.trim() != "screen" => {
+            ObserveTarget::Window(value.trim().to_string())
+        }
+        _ => ObserveTarget::Screen,
+    };
+    match actuator.observe(observe_target) {
+        Ok(observation) => {
+            record.output = Some(observation.summary);
+        }
+        Err(error) => {
+            record.ok = false;
+            record.failure_class = Some("actuator_failed".to_string());
+            record.summary = format!("actuator_observe_failed: {}", error.message);
+        }
+    }
+    record
+}
+
+fn execute_wait(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    _actuator: Option<&ActuatorConfig>,
+    millis: u64,
+) -> ToolExecutionRecord {
+    std::thread::sleep(std::time::Duration::from_millis(millis.min(50)));
+    success_record(
+        registry,
+        call,
+        format!("wait millis={}", millis),
+        None,
+        false,
+    )
+}
+
+fn execute_apply_patch(
+    workspace_root: &Path,
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    patch: &str,
+) -> ToolExecutionRecord {
+    let adapter = WorkspaceFileAdapter::new(workspace_root);
+    let result = match adapter.apply_patch(patch) {
+        Ok(result) => result,
+        Err(error) => return failed_record(registry, call, error),
+    };
+    let mut record = success_record(
+        registry,
+        call,
+        format!(
+            "apply_patch changed_files={} operations={}",
+            result.changed_files.len(),
+            result.operation_count
+        ),
+        Some(result.diff_preview.clone()),
+        result.diff_truncated,
+    );
+    record.changed_files = result.changed_files;
+    record.write_diff_preview = Some(result.diff_preview);
+    record.write_diff_truncated = result.diff_truncated;
+    record.output_redacted = false;
+    if !result.backup_paths.is_empty() {
+        record.summary = format!(
+            "{} backups={}",
+            record.summary,
+            result.backup_paths.join(",")
+        );
+    }
+    record
 }
 
 fn count_lines(value: &str) -> usize {
@@ -1574,12 +1885,7 @@ fn resolve_workspace_path(workspace_root: &Path, raw_path: &str) -> Result<PathB
             workspace_root.display()
         )
     })?;
-    let normalized_candidate = if candidate.exists() {
-        fs::canonicalize(&candidate)
-            .map_err(|e| format!("path_invalid path={} error={e}", candidate.display()))?
-    } else {
-        normalize_path_lexically(&candidate)
-    };
+    let normalized_candidate = resolve_candidate_preserving_existing_symlinks(&candidate)?;
 
     if !normalized_candidate.starts_with(&normalized_root) {
         return Err(format!(
@@ -1590,22 +1896,6 @@ fn resolve_workspace_path(workspace_root: &Path, raw_path: &str) -> Result<PathB
     }
 
     Ok(normalized_candidate)
-}
-
-fn normalize_path_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
 }
 
 fn wait_with_timeout(

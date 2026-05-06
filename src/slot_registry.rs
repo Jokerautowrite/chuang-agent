@@ -180,6 +180,7 @@ fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
         shell_timeout_ms: config.tool_loop.shell_timeout_ms,
         shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
         memory: None,
+        actuator: None,
     })
 }
 

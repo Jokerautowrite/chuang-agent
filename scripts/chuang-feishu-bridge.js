@@ -21,6 +21,7 @@ const {
   buildChuangTextPayload,
   patchWsClientForCardCallbacks,
 } = require("./chuang-feishu-client-adapter");
+const { parseBridgeCommand } = require("./chuang-feishu-bridge-commands");
 
 const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
 const ENV_FILE =
@@ -153,6 +154,7 @@ class AppServerClient {
       threadId: thread.id || inbound.threadId || inbound.messageId,
       replyText: fullText,
       modelName: assistant.model || result.model || "unknown",
+      runtimeReportId: normalizeText(turn.runtimeReportId || turn.runtime_report_id || turn.runtimeObservability?.runtime_report_id || turn.providerMeta?.runtime_report_id),
     };
   }
 }
@@ -240,6 +242,17 @@ class ChuangFeishuBridge {
       text: truncateText(inbound.text, 240),
     });
 
+    const command = parseBridgeCommand(inbound.text);
+    if (command) {
+      await this.sendReply(inbound, command);
+      appendEventLog("command", {
+        chatId: inbound.chatId,
+        messageId: inbound.messageId,
+        command: command.commandName,
+      });
+      return;
+    }
+
     const turn = await this.appServer.turnStart(inbound);
     await this.sendReply(inbound, turn);
     appendEventLog("outbound", {
@@ -256,6 +269,7 @@ class ChuangFeishuBridge {
       replyText: turn.replyText,
       modelName: turn.modelName,
       threadId: turn.threadId,
+      runtimeReportId: turn.runtimeReportId,
     });
     try {
       await this.adapter.sendResourceMessage({
@@ -448,3 +462,5 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
+module.exports = { parseBridgeCommand };

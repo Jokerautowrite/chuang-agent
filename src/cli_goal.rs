@@ -81,6 +81,21 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                 diagnostics.checkpoint_log_complete
             );
             println!(
+                "goal_last_checkpoint: {}",
+                diagnostics.last_checkpoint_id.as_deref().unwrap_or("none")
+            );
+            println!(
+                "goal_last_summary: {}",
+                diagnostics
+                    .last_checkpoint_summary
+                    .as_deref()
+                    .unwrap_or("none")
+            );
+            println!(
+                "goal_incomplete_reasons: {}",
+                format_text_list(&diagnostics.incomplete_reasons)
+            );
+            println!(
                 "goal_executes_automatically: {}",
                 diagnostics.executes_automatically
             );
@@ -365,4 +380,12 @@ fn default_goal_root() -> PathBuf {
 
 fn format_goal_run_error(error: chuang_agent::goal_run::GoalRunError) -> String {
     format!("goal_run_invalid: {}: {}", error.field, error.message)
+}
+
+fn format_text_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(" | ")
+    }
 }

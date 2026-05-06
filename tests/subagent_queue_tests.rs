@@ -55,6 +55,22 @@ fn file_subagent_queue_returns_none_when_report_is_missing() {
 }
 
 #[test]
+fn file_subagent_queue_rejects_unsafe_run_id_paths() {
+    let root = temp_root("unsafe-run-id");
+    let queue =
+        FileSubagentQueue::open(FileSubagentQueueConfig::new(&root)).expect("queue should open");
+    let err = queue
+        .read_report(&RunId("../escape".to_string()))
+        .expect_err("unsafe run id should fail before path access");
+
+    assert!(matches!(
+        err,
+        chuang_agent::subagent_queue::FileSubagentQueueError::InvalidRunId(_)
+    ));
+    assert!(!root.join("escape.json").exists());
+}
+
+#[test]
 fn file_subagent_queue_reads_report_json() {
     let root = temp_root("report");
     let queue =

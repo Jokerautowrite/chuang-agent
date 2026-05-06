@@ -305,6 +305,13 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
                 "tool",
                 "path",
                 "content",
+                "x",
+                "y",
+                "text",
+                "secret",
+                "target",
+                "millis",
+                "patch",
                 "command",
                 "cwd",
                 "query",
@@ -578,6 +585,32 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.goal_run.path
     );
     println!(
+        "goal_run_checkpoint_log_complete: {}",
+        doctor.status.goal_run.checkpoint_log_complete
+    );
+    println!(
+        "goal_run_last_checkpoint: {}",
+        doctor
+            .status
+            .goal_run
+            .last_checkpoint_id
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_summary: {}",
+        doctor
+            .status
+            .goal_run
+            .last_checkpoint_summary
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_incomplete_reasons: {}",
+        format_text_list(&doctor.status.goal_run.incomplete_reasons)
+    );
+    println!(
         "project_readiness: ok={} state={} ready={} partial={} deferred={} blocked={}",
         doctor.status.project_readiness.ok,
         doctor.status.project_readiness.overall_state,
@@ -628,10 +661,12 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.channel_readiness.blocked_count
     );
     println!(
-        "subagent_readiness: ok={} state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} live_adapter_ready={} layers={} ready={} partial={} deferred={} blocked={}",
         doctor.status.subagent_readiness.ok,
         doctor.status.subagent_readiness.overall_state,
         doctor.status.subagent_readiness.mode,
+        doctor.status.subagent_readiness.local_contract_ready,
+        doctor.status.subagent_readiness.live_adapter_ready,
         doctor.status.subagent_readiness.layer_count,
         doctor.status.subagent_readiness.ready_count,
         doctor.status.subagent_readiness.partial_count,
@@ -690,5 +725,13 @@ fn format_name_list(names: &[String]) -> String {
         "none".to_string()
     } else {
         names.join(",")
+    }
+}
+
+fn format_text_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(" | ")
     }
 }

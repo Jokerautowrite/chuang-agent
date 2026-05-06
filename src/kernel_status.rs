@@ -134,6 +134,8 @@ pub struct SubagentReadinessStatus {
     pub ok: bool,
     pub overall_state: String,
     pub mode: String,
+    pub local_contract_ready: bool,
+    pub live_adapter_ready: bool,
     pub layer_count: usize,
     pub ready_count: usize,
     pub partial_count: usize,
@@ -146,6 +148,8 @@ pub struct SubagentReadinessStatus {
 pub struct SubagentLayerStatus {
     pub name: String,
     pub state: String,
+    pub local_contract_ready: bool,
+    pub live_adapter_ready: bool,
     pub current: String,
     pub next_action: String,
     pub boundary: String,
@@ -231,7 +235,10 @@ pub struct GoalRunReadinessStatus {
     pub checkpoint_count: usize,
     pub worker_count: usize,
     pub validation_command_count: usize,
+    pub checkpoint_log_complete: bool,
     pub last_checkpoint_id: Option<String>,
+    pub last_checkpoint_summary: Option<String>,
+    pub incomplete_reasons: Vec<String>,
     pub read_error: Option<String>,
 }
 
@@ -705,6 +712,8 @@ fn build_subagent_readiness(
         subagent_layer(
             "dispatch_queue",
             if queued { "ready" } else { "deferred" },
+            queued,
+            false,
             &format!("subagent slot={} queue_root={}", slots.subagent, config.subagent_queue_root),
             "keep dispatch files as the durable handoff format before adding live workers",
             "slot",
@@ -712,6 +721,8 @@ fn build_subagent_readiness(
         subagent_layer(
             "report_collect",
             if queued { "ready" } else { "deferred" },
+            queued,
+            false,
             "collect path validates dispatch identity before accepting reports",
             "keep ReportAdmission separate from immutable SubagentReport",
             "protocol",
@@ -719,6 +730,8 @@ fn build_subagent_readiness(
         subagent_layer(
             "command_runner",
             "ready",
+            true,
+            false,
             "run-once/run-loop command runner is governed by explicit --approve-exec, capability matching, report admission, output bounds, and dispatch timeouts",
             "connect additional real runners through the same report-admission boundary",
             "adapter",
@@ -726,6 +739,8 @@ fn build_subagent_readiness(
         subagent_layer(
             "multi_worker",
             "ready",
+            true,
+            false,
             "run-loop supports bounded local multi-worker batches through durable queue claims and existing runner governance",
             "keep live external worker pools behind audited adapters",
             "orchestration",
@@ -737,6 +752,8 @@ fn build_subagent_readiness(
             } else {
                 "partial"
             },
+            Path::new("src/external_ai_dispatch.rs").exists(),
+            false,
             "external AI dispatch remains below subagents, with a dry-run unified-identity adapter contract available for review",
             "connect live agent-browser or HTTP sessions only through audited adapters",
             "adapter",
@@ -768,6 +785,10 @@ fn build_subagent_readiness(
         ok: blocked_count == 0,
         overall_state: overall_state.to_string(),
         mode: slots.subagent.clone(),
+        local_contract_ready: layers
+            .iter()
+            .all(|layer| layer.local_contract_ready || layer.state == "deferred"),
+        live_adapter_ready: layers.iter().all(|layer| layer.live_adapter_ready),
         layer_count: layers.len(),
         ready_count,
         partial_count,
@@ -780,6 +801,8 @@ fn build_subagent_readiness(
 fn subagent_layer(
     name: &str,
     state: &str,
+    local_contract_ready: bool,
+    live_adapter_ready: bool,
     current: &str,
     next_action: &str,
     boundary: &str,
@@ -787,6 +810,8 @@ fn subagent_layer(
     SubagentLayerStatus {
         name: name.to_string(),
         state: state.to_string(),
+        local_contract_ready,
+        live_adapter_ready,
         current: current.to_string(),
         next_action: next_action.to_string(),
         boundary: boundary.to_string(),
@@ -1261,7 +1286,10 @@ pub fn summarize_goal_run_readiness(
                 checkpoint_count: 0,
                 worker_count: 0,
                 validation_command_count: 0,
+                checkpoint_log_complete: false,
                 last_checkpoint_id: None,
+                last_checkpoint_summary: None,
+                incomplete_reasons: vec!["goal path could not be resolved".to_string()],
                 read_error: Some(format!("{}: {}", error.field, error.message)),
             };
         }
@@ -1277,27 +1305,33 @@ pub fn summarize_goal_run_readiness(
             checkpoint_count: 0,
             worker_count: 0,
             validation_command_count: 0,
+            checkpoint_log_complete: false,
             last_checkpoint_id: None,
+            last_checkpoint_summary: None,
+            incomplete_reasons: Vec::new(),
             read_error: None,
         };
     }
 
     match store.load(goal_id) {
-        Ok(run) => GoalRunReadinessStatus {
-            ok: true,
-            root: root.display().to_string(),
-            goal_id: goal_id.to_string(),
-            path: path.display().to_string(),
-            plan_exists: true,
-            checkpoint_count: run.checkpoint_log.len(),
-            worker_count: run.worker_plan.len(),
-            validation_command_count: run.validation_plan.commands.len(),
-            last_checkpoint_id: run
-                .checkpoint_log
-                .last()
-                .map(|checkpoint| checkpoint.checkpoint_id.clone()),
-            read_error: None,
-        },
+        Ok(run) => {
+            let diagnostics = run.diagnostics();
+            GoalRunReadinessStatus {
+                ok: true,
+                root: root.display().to_string(),
+                goal_id: goal_id.to_string(),
+                path: path.display().to_string(),
+                plan_exists: true,
+                checkpoint_count: run.checkpoint_log.len(),
+                worker_count: run.worker_plan.len(),
+                validation_command_count: run.validation_plan.commands.len(),
+                checkpoint_log_complete: diagnostics.checkpoint_log_complete,
+                last_checkpoint_id: diagnostics.last_checkpoint_id,
+                last_checkpoint_summary: diagnostics.last_checkpoint_summary,
+                incomplete_reasons: diagnostics.incomplete_reasons,
+                read_error: None,
+            }
+        }
         Err(error) => GoalRunReadinessStatus {
             ok: false,
             root: root.display().to_string(),
@@ -1307,7 +1341,10 @@ pub fn summarize_goal_run_readiness(
             checkpoint_count: 0,
             worker_count: 0,
             validation_command_count: 0,
+            checkpoint_log_complete: false,
             last_checkpoint_id: None,
+            last_checkpoint_summary: None,
+            incomplete_reasons: vec!["goal run could not be loaded".to_string()],
             read_error: Some(format!("{}: {}", error.field, error.message)),
         },
     }

@@ -1,6 +1,44 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-06 本轮把 `workspace adapter` / `tool_runtime` / `app_server` 的路径归一化收成共享模块 `src/path_utils.rs`，同一套 lexical-normalize / symlink-parent resolve 现在由三处共用，减少路径边界分叉。
+- 已补回归覆盖共享路径解析后的 `write_file` / `apply_patch Add File` / `execute_tool_call(WriteFile ...)` 三条路径；验证通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q --test tool_runtime_tests workspace_file_adapter`、`cargo test -q --test tool_runtime_tests symlink_parent`。
+- 2026-05-06 本轮把 workspace path 逃逸防护收成单一共享模块 `src/path_utils.rs`，`tool_runtime` 与 `workspace_file_adapter` 现在共用同一套“canonicalize 已存在父路径 + 拼回缺失尾部”的解析逻辑，避免以后两处路径边界分叉。
+- 已补回归覆盖共享路径解析后的 `execute_tool_call(WriteFile { path: "linked/created.txt" })`、`write_file("linked/created.txt")`、`apply_patch Add File: linked/created.txt` 三条路径；验证通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q --test tool_runtime_tests workspace_file_adapter`、`cargo test -q --test tool_runtime_tests symlink_parent`。
+- 2026-05-06 本轮把 `tool_runtime` 的路径解析和 `workspace_file_adapter` 对齐：不存在的目标文件也会先 canonicalize 最近已存在的父路径，再拼回缺失尾部，避免 `execute_tool_call` / `write_file` / `apply_patch Add File` 经 workspace 内 symlink 父目录写到工作区外。
+- 已补 Unix 回归覆盖 `execute_tool_call(WriteFile { path: "linked/created.txt" })`：当 `linked` 指向外部目录时会返回 `path_outside_workspace`，外部文件不会被创建；局部验证通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q --test tool_runtime_tests workspace_file_adapter`、`cargo test -q --test tool_runtime_tests symlink_parent`。
+- 2026-05-06 本轮继续收紧 workspace adapter 路径边界：不存在的目标文件现在会先 canonicalize 最近已存在的父路径，再拼回缺失尾部，避免 `write_file` / `apply_patch Add File` 通过 workspace 内 symlink 父目录写到工作区外。
+- 已补 Unix 回归：`write_file("linked/created.txt")` 和 `apply_patch Add File: linked/created.txt` 在 `linked` 指向外部目录时都会返回 `path_outside_workspace`，外部文件不会被创建；局部验证通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q --test tool_runtime_tests workspace_file_adapter`。
+- 2026-05-06 本轮把 `WorkspaceFileAdapter::apply_patch()` 改成两阶段执行：先解析、路径校验、delete/move 拒绝、hunk 校验，全部通过后才创建目录、备份和写文件，避免 patch 前半段已落盘、后半段失败导致部分写入。
+- 已补回归：混合 `Add File` + `Delete File` 的 patch 会因 `apply_patch_delete_not_allowed` 整体拒绝，新增文件不会被创建，既有文件保持原样。
+- 2026-05-06 本轮继续补 workspace adapter 安全边界：`WorkspaceFileAdapter::apply_patch()` 现在拒绝 `*** Delete File` 和 `*** Move to` 这类会删除源文件的 patch 语义，返回稳定 `apply_patch_delete_not_allowed` / `apply_patch_move_not_allowed`，符合“删除必须显式批准”的项目规则。
+- 已补回归锁定拒绝后文件仍保留、move 目标不会被创建；验证通过 `cargo test -q --test tool_runtime_tests workspace_file_adapter`、`cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-second-test-smoke.sh`。
+- `repl` 默认输出现在只保留模型正文，调试诊断字段改为 `--verbose` 才显示；对应的 REPL smoke / transport tests 已回归，避免日常对话刷出一长串运行报告。
+- 最新 `goal checkpoint` 已写入 `checkpoint-1777990193168985465`。
+- `goal show` 文本输出现在也补齐了 checkpoint 续接诊断：`goal_checkpoint_log_complete`、`goal_last_checkpoint`、`goal_last_summary`、`goal_incomplete_reasons`，并新增文本回归覆盖。
+- 最新 `goal checkpoint` 已写入 `checkpoint-1777988338607449831`。
+- `status` / `doctor` 文本输出现在会固定打印 `goal_run_checkpoint_log_complete`、`goal_run_last_checkpoint`、`goal_run_last_checkpoint_summary` 和 `goal_run_incomplete_reasons`，把 checkpoint 续接诊断从结构体字段真正落到可读 CLI 输出；相关 JSON 字段已同步回归覆盖。
+- 最新 `goal checkpoint` 已写入 `checkpoint-1777988021122441409`。
+- 本轮从 Feishu 细节切回 Chuang 主线：`GoalCheckpoint` 新写入现在带 RFC3339 `created_at`，旧 checkpoint 缺该字段仍兼容读取；带字段但非法/空时间戳会在严格写入和 persisted load 时拒绝。
+- `goal_run` readiness 现在透出 `checkpoint_log_complete`、`last_checkpoint_summary` 和 `incomplete_reasons`；旧弱 checkpoint 仍可加载，但缺完成者/验证证据会显式显示为不完整，不再静默看起来完全可续接。
+- 子代理文件队列已加 `run_id` 路径安全约束：dispatch/report/claim/release 等文件入口只接受 ASCII 字母、数字、`-`、`_`，CLI `subagent report --run-id ../escape` 会拒绝，不会越出 queue root。
+- `subagent report/collect` 现在先读取 raw report 并生成 `ReportAdmission`：坏 JSON、缺字段等 report 文件会稳定返回 `Rejected` 和 `reason_code`，不再直接把 CLI 命令打成 Decode 失败；完整 report 仍保留 collect 身份校验。
+- `subagent_readiness` 已拆出 `local_contract_ready` / `live_adapter_ready`：第二测试版可以明确表达本地队列、runner、multi-worker、external-AI downstream 合同可验收，但真实外部 worker/live adapter 仍未接入。
+- `ReportAdmission` 新增可选 `upstream_reason_code`：command runner 协议报告被包装成 `command_protocol_report_rejected` 时，会保留底层 `missing_required_field`、`agent_id_mismatch` 等稳定原因，UI 不需要再解析 stderr 文本。
+- 最新 `goal checkpoint` 已写入 `checkpoint-report-admission-upstream-reason-code-20260505`，checkpoint count 到 68。
+- 最新 `goal checkpoint` 已写入 `checkpoint-subagent-readiness-contract-live-split-20260505`，checkpoint count 到 67。
+- 最新 `goal checkpoint` 已写入 `checkpoint-subagent-raw-report-admission-20260505`，`goal_run_diagnostics.checkpoint_log_complete=true`，checkpoint count 到 66。
+- 第二测试 smoke 已锁定 checkpoint `created_at` 和 `last_checkpoint_summary`；readiness 文档说明 read/parse failures 与结构化 incomplete reasons 是可验收诊断面。
+- 本轮验证已通过：`cargo fmt --all --check`、`git diff --check`、`cargo test -q --test cli_subagent_dispatch_tests --test subagent_queue_tests`、`cargo test -q`、`sh scripts/chuang-second-test-smoke.sh`。
+- Chuang 的真实 provider key 已接到仓库外私有 env：`~/.config/chuang-agent/provider.env`，只包含 `CODEX_PPTOKEN_API_KEY=<set>`，权限 `600`；项目根 `config.toml` 继续使用 `https://api.pptoken.org/v1` + `gpt-5.5` + `api_key_env`，不写明文 key。`launch-chuang-agent-repl.sh`、`chuang-feishu-bridge.sh`、`chuang-app-server-health.sh` 会自动加载该私有 env；真实 REPL 验证返回 `status_code=200`。
+- 第二测试 smoke 已补临时 provider env 验收：`[smoke] repl launcher` 现在同时验证 stub REPL、`CHUANG_PROVIDER_ENV_FILE` 驱动的 `chuang-app-server-health.sh`，以及未带外部 shell env 时 REPL 可从临时 provider env 启动退出；不读取真实 key、不发真实模型请求。
+- Feishu/channel/readiness 文档已同步 provider env 边界：`CHUANG_PROVIDER_ENV_FILE` 是仓库外 operator secret path，和 Feishu app credential env 分离；第二测试验收仍是不连接真实外部服务的 acceptance gate，不把本机真实 pptoken 配置误报成 smoke 的 live integration。
+- Chuang Feishu bridge 富消息现在会把 app-server `turn.runtimeReportId` / `runtimeObservability.runtime_report_id` 传进卡片“报告”字段，真实飞书消息可直接关联本轮 runtime report；`node scripts/chuang-feishu-rich-message-smoke.js` 已锁定报告字段渲染。
+- 本地终端对话入口已收口：`scripts/launch-chuang-agent-repl.sh` 现在默认读取项目根 `config.toml` 启动 REPL，缺 `CODEX_PPTOKEN_API_KEY` 时只提示不回落 fake；`CHUANG_REPL_STUB=1` 可显式跑 stub 链路验证。第二测试 smoke 已纳入 `[smoke] repl launcher`。
+- Chuang Feishu bridge 的 `/new` 文案已收紧成“开新窗口/新上下文命令”：桥层明确不进入 Agent 主链、不消耗任务轮次，并说明飞书客户端窗口需由用户在飞书内新开；命令 smoke 和第二测试 smoke 已验证通过。
+- Chuang Feishu bridge 的 `/new` 命令已抽成纯本地模块 `scripts/chuang-feishu-bridge-commands.js`，`node scripts/chuang-feishu-command-smoke.js` 不加载 Feishu SDK 也能验证；`/new` 不会转发给 app-server/runtime。最新 checkpoint 是 `checkpoint-second-smoke-new-command`。
+- Chuang Feishu bridge 本地命令补上 `/help`，用于列出 `/new` 和 `/help`；普通文本仍转发到 app-server，命令 smoke 覆盖 `/new`、`/help` 和普通文本不误吞。
+- 第二测试版本 smoke 已纳入 Feishu bridge 本地命令验证：`[smoke] feishu bridge commands` 会运行 `node scripts/chuang-feishu-command-smoke.js`，确保 `/new`、`/help` 不依赖 Feishu SDK、不连接飞书。
 - 当前 repo-root 状态已收口：`status --json` 报 `project_readiness=ready`、`release_readiness=second_test_version_ready`、`channel_readiness=ready`、`subagent_readiness=ready`、`memory_readiness=ready`。
 - 最新 `goal checkpoint` 已写入 `checkpoint-second-test-version-ready-20260505`，`goal_run_diagnostics.checkpoint_log_complete=true`。
 - 子代理本地多 worker 缺口已补：`subagent run-loop --max-concurrency 1..8` 现在会启动 bounded worker batch，通过文件队列 claim/report admission 收口；`command_runner` 和 `multi_worker` readiness 在 queued_external 配置下升为 `ready`，第二测试版 `subagent_protocol_acceptance` 也升为 `ready`。
@@ -42,6 +80,7 @@
 - `scripts/chuang-mvp-smoke.sh` 和 status/doctor/app-server/console 回归断言已同步第二测试版本状态名，继续把 smoke 作为端到端门禁。
 - `status` / `doctor` / `console snapshot` / `app-server health` 的文本输出也补上 `release_acceptance` 摘要，直接显示 `connects_real_external_services=false / verifies_real_external_services=false / uses_stub_or_local_fixtures=true`，不用只看 JSON 才能确认第二测试版本没有接真实外部服务。
 - 新增 `scripts/chuang-second-test-smoke.sh` 作为第二测试版本专用验收入口；它设置 `CHUANG_SMOKE_NAME=second_test` 后复用安全 `chuang-mvp-smoke.sh`，最终输出 `second_test_smoke_ok`，方便后续区分第二版验收和旧 MVP 入口。该 wrapper 不连接真实服务、不做系统控制。
+- Chuang 专用 Feishu bridge 新增本地 `/new` 命令：收到 `/new` 时直接回复“如何新开飞书聊天/话题/线程或重新绑定”的说明，不转发给 app-server、不进入 Agent runtime、不消耗一轮任务；新增 `scripts/chuang-feishu-command-smoke.js` 只读验证命令解析。
 - 外脑知识库层从只读 status 往前推进一格：新增 `memory knowledge search --root PATH --query TEXT [--limit N] [--json]`，只扫描本地 markdown/text 根目录并输出 `source/path/line/score/preview` provenance hit；仍显式 `dry_run=true / read_only=true / connects_real_service=false / writes_automatically=false / runtime_retrieval_wired=false`，不连接真实 wiki/GBrain、不写核心记忆、不注入 runtime。
 - 本地外脑检索会跳过隐藏路径和疑似 secret/token/password/private/credential 文件；`cli_identity_memory_tests` 增加本地知识检索只读回归，MVP smoke 也加入 `memory knowledge search` 验收。
 - 外脑知识库层补上只读 contract CLI：`memory knowledge status [--json]` 会输出 `external_knowledge` adapter 的当前边界，明确 `dry_run=true / read_only=true / connects_real_service=false / writes_automatically=false / runtime_retrieval_wired=false`，并列出 `wiki`、`gbrain` 仍为 `documented_only`。该入口不连接真实 wiki/GBrain、不做检索、不写核心记忆。
@@ -1266,3 +1305,6 @@
 - 进度必须持续写入本文件，避免 new 后丢失上下文
 - 最终以本地代码和测试为准，不以网页对话停留状态为准
 - BrowserWorker 是并行能力线，不能反客为主抢掉长期记忆/多子代理/上下文管理三大主线
+- 本轮补齐本地 `workspace_file_adapter`，新增 `read_file / write_file / list_dir / apply_patch` 四个能力，路径严格限制在 workspace root 内，写入保留审计备份与 diff 预览。
+- `tool_runtime` 已接入 `apply_patch`：`ToolCall`、协议字段、治理动作、`ToolSurfaceStatus`、CLI 工具名映射和 `cli_doctor` schema 校验都已同步。
+- 新增对应测试并通过 `cargo test -q` 与 `sh scripts/chuang-mvp-smoke.sh`，当前第二个测试版本的文件工作区能力已可验收、可回归、可续接。

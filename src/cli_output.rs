@@ -246,12 +246,33 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.goal_run.validation_command_count,
         status.goal_run.path
     );
-    if let Some(last_checkpoint_id) = &status.goal_run.last_checkpoint_id {
-        println!("goal_run_last_checkpoint: {last_checkpoint_id}");
-    }
+    println!(
+        "goal_run_checkpoint_log_complete: {}",
+        status.goal_run.checkpoint_log_complete
+    );
+    println!(
+        "goal_run_last_checkpoint: {}",
+        status
+            .goal_run
+            .last_checkpoint_id
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_summary: {}",
+        status
+            .goal_run
+            .last_checkpoint_summary
+            .as_deref()
+            .unwrap_or("none")
+    );
     if let Some(read_error) = &status.goal_run.read_error {
         println!("goal_run_read_error: {read_error}");
     }
+    println!(
+        "goal_run_incomplete_reasons: {}",
+        format_text_list(&status.goal_run.incomplete_reasons)
+    );
     println!(
         "plugin_registry: available={} ok={} path={} plugin_count={} enabled_count={} issue_count={}",
         status.plugin_registry.available,
@@ -309,10 +330,12 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
-        "subagent_readiness: ok={} state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} live_adapter_ready={} layers={} ready={} partial={} deferred={} blocked={}",
         status.subagent_readiness.ok,
         status.subagent_readiness.overall_state,
         status.subagent_readiness.mode,
+        status.subagent_readiness.local_contract_ready,
+        status.subagent_readiness.live_adapter_ready,
         status.subagent_readiness.layer_count,
         status.subagent_readiness.ready_count,
         status.subagent_readiness.partial_count,
@@ -321,8 +344,13 @@ pub fn print_status(status: &ChuangMvpStatus) {
     );
     for layer in &status.subagent_readiness.layers {
         println!(
-            "subagent_layer name={} state={} boundary={} next={}",
-            layer.name, layer.state, layer.boundary, layer.next_action
+            "subagent_layer name={} state={} local_contract_ready={} live_adapter_ready={} boundary={} next={}",
+            layer.name,
+            layer.state,
+            layer.local_contract_ready,
+            layer.live_adapter_ready,
+            layer.boundary,
+            layer.next_action
         );
     }
     println!(
@@ -448,6 +476,14 @@ fn format_name_list(names: &[String]) -> String {
     }
 }
 
+fn format_text_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(" | ")
+    }
+}
+
 pub fn print_runtime_result(result: &RuntimeResult) {
     println!("model_name: {}", result.response.model_name);
     println!("body: {}", result.response.body);
@@ -487,7 +523,7 @@ pub fn print_runtime_result(result: &RuntimeResult) {
 }
 
 pub fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|experiment|external-ai|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..8] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | plugin list|check [--registry PATH] [--json] | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|experiment|external-ai|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | repl [--verbose] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..8] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | plugin list|check [--registry PATH] [--json] | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
 }
 
 fn format_drop_reasons(reasons: &[DropReason]) -> String {

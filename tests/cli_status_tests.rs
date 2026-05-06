@@ -131,12 +131,19 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("channel_layer name=app_server state=ready"));
     assert!(stdout.contains("channel_layer name=dedicated_feishu_bridge state=ready"));
-    assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
-    assert!(stdout.contains("subagent_layer name=command_runner state=ready"));
+    assert!(stdout.contains(
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true live_adapter_ready=false"
+    ));
+    assert!(stdout.contains(
+        "subagent_layer name=command_runner state=ready local_contract_ready=true live_adapter_ready=false"
+    ));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
+    assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: actuator=fake"));
     assert!(stdout.contains("placeholder_warning: subagent=fake"));
@@ -271,6 +278,13 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["goal_run"]["plan_exists"].is_boolean());
     assert!(parsed["goal_run"]["checkpoint_count"].is_number());
+    assert!(parsed["goal_run"]["checkpoint_log_complete"].is_boolean());
+    assert!(parsed["goal_run"]["last_checkpoint_summary"].is_string());
+    assert!(parsed["goal_run"]["incomplete_reasons"]
+        .as_array()
+        .expect("goal run incomplete reasons should be an array")
+        .iter()
+        .all(|reason| reason.is_string()));
     assert_eq!(parsed["project_readiness"]["ok"], true);
     assert_eq!(
         parsed["project_readiness"]["overall_state"],
@@ -369,12 +383,17 @@ fn cli_status_can_render_json_without_secret_leak() {
         parsed["subagent_readiness"]["overall_state"],
         "queued_protocol_partial"
     );
+    assert_eq!(parsed["subagent_readiness"]["local_contract_ready"], true);
+    assert_eq!(parsed["subagent_readiness"]["live_adapter_ready"], false);
     assert_eq!(parsed["subagent_readiness"]["layer_count"], 5);
     assert!(parsed["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers should be an array")
         .iter()
-        .any(|layer| layer["name"] == "external_ai_downstream" && layer["state"] == "ready"));
+        .any(|layer| layer["name"] == "external_ai_downstream"
+            && layer["state"] == "ready"
+            && layer["local_contract_ready"] == true
+            && layer["live_adapter_ready"] == false));
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);

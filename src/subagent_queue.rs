@@ -30,25 +30,25 @@ impl FileSubagentQueueConfig {
     pub fn dispatch_path(&self, run_id: &RunId) -> PathBuf {
         self.root
             .join(&self.dispatch_dir)
-            .join(format!("{}.json", run_id.0))
+            .join(format!("{}.json", safe_run_file_stem(run_id)))
     }
 
     pub fn report_path(&self, run_id: &RunId) -> PathBuf {
         self.root
             .join(&self.report_dir)
-            .join(format!("{}.json", run_id.0))
+            .join(format!("{}.json", safe_run_file_stem(run_id)))
     }
 
     pub fn claim_path(&self, run_id: &RunId) -> PathBuf {
         self.root
             .join(&self.claim_dir)
-            .join(format!("{}.json", run_id.0))
+            .join(format!("{}.json", safe_run_file_stem(run_id)))
     }
 
     pub fn claim_release_path(&self, run_id: &RunId) -> PathBuf {
         self.root
             .join(&self.claim_release_dir)
-            .join(format!("{}.json", run_id.0))
+            .join(format!("{}.json", safe_run_file_stem(run_id)))
     }
 }
 
@@ -57,6 +57,7 @@ pub enum FileSubagentQueueError {
     StorageUnavailable { path: PathBuf },
     Encode(String),
     Decode(String),
+    InvalidRunId(String),
     Spawner(SubagentError),
 }
 
@@ -78,6 +79,7 @@ impl FileSubagentQueue {
         &self,
         dispatch: &SubagentDispatch,
     ) -> Result<PathBuf, FileSubagentQueueError> {
+        validate_run_id(&dispatch.run_id)?;
         let path = self.config.dispatch_path(&dispatch.run_id);
         let payload = serde_json::to_string_pretty(dispatch)
             .map_err(|e| FileSubagentQueueError::Encode(e.to_string()))?;
@@ -89,6 +91,7 @@ impl FileSubagentQueue {
         &self,
         run_id: &RunId,
     ) -> Result<Option<SubagentDispatch>, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let path = self.config.dispatch_path(run_id);
         if !path.exists() {
             return Ok(None);
@@ -105,16 +108,27 @@ impl FileSubagentQueue {
         &self,
         run_id: &RunId,
     ) -> Result<Option<SubagentReport>, FileSubagentQueueError> {
+        let Some(payload) = self.read_report_raw(run_id)? else {
+            return Ok(None);
+        };
+        let report = serde_json::from_slice(&payload)
+            .map_err(|e| FileSubagentQueueError::Decode(e.to_string()))?;
+        Ok(Some(report))
+    }
+
+    pub fn read_report_raw(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Vec<u8>>, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let path = self.config.report_path(run_id);
         if !path.exists() {
             return Ok(None);
         }
 
-        let payload = fs::read_to_string(&path)
+        let payload = fs::read(&path)
             .map_err(|_| FileSubagentQueueError::StorageUnavailable { path: path.clone() })?;
-        let report = serde_json::from_str(&payload)
-            .map_err(|e| FileSubagentQueueError::Decode(e.to_string()))?;
-        Ok(Some(report))
+        Ok(Some(payload))
     }
 
     pub fn list_dispatches(&self) -> Result<Vec<SubagentDispatch>, FileSubagentQueueError> {
@@ -159,6 +173,7 @@ impl FileSubagentQueue {
         run_id: &RunId,
         report: &SubagentReport,
     ) -> Result<PathBuf, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let path = self.config.report_path(run_id);
         let payload = serde_json::to_string_pretty(report)
             .map_err(|e| FileSubagentQueueError::Encode(e.to_string()))?;
@@ -182,6 +197,7 @@ impl FileSubagentQueue {
         spawner: &mut QueuedSubagentSpawner,
         run_id: &RunId,
     ) -> Result<bool, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let Some(report) = self.read_report(run_id)? else {
             return Ok(false);
         };
@@ -205,6 +221,7 @@ impl FileSubagentQueue {
         owner: &str,
         stale_after_ms: Option<u64>,
     ) -> Result<Option<PathBuf>, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let path = self.config.claim_path(run_id);
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         ensure_dir(parent)?;
@@ -242,6 +259,7 @@ impl FileSubagentQueue {
         owner: &str,
         reason: &str,
     ) -> Result<PathBuf, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let path = self.config.claim_release_path(run_id);
         let payload = serde_json::json!({
             "run_id": run_id.0,
@@ -256,6 +274,7 @@ impl FileSubagentQueue {
     }
 
     pub fn is_claim_released(&self, run_id: &RunId) -> Result<bool, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let release_path = self.config.claim_release_path(run_id);
         if !release_path.exists() {
             return Ok(false);
@@ -302,6 +321,7 @@ impl FileSubagentQueue {
     }
 
     pub fn is_claimed(&self, run_id: &RunId) -> Result<bool, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         Ok(self.config.claim_path(run_id).exists() && !self.is_claim_released(run_id)?)
     }
 
@@ -310,6 +330,7 @@ impl FileSubagentQueue {
         run_id: &RunId,
         stale_after_ms: u64,
     ) -> Result<bool, FileSubagentQueueError> {
+        validate_run_id(run_id)?;
         let claim_path = self.config.claim_path(run_id);
         if !claim_path.exists() || self.is_claim_released(run_id)? {
             return Ok(false);
@@ -336,18 +357,22 @@ impl FileSubagentQueue {
     }
 
     pub fn claim_path(&self, run_id: &RunId) -> PathBuf {
+        debug_assert!(validate_run_id(run_id).is_ok());
         self.config.claim_path(run_id)
     }
 
     pub fn claim_release_path(&self, run_id: &RunId) -> PathBuf {
+        debug_assert!(validate_run_id(run_id).is_ok());
         self.config.claim_release_path(run_id)
     }
 
     pub fn report_path(&self, run_id: &RunId) -> PathBuf {
+        debug_assert!(validate_run_id(run_id).is_ok());
         self.config.report_path(run_id)
     }
 
     pub fn dispatch_path(&self, run_id: &RunId) -> PathBuf {
+        debug_assert!(validate_run_id(run_id).is_ok());
         self.config.dispatch_path(run_id)
     }
 
@@ -362,7 +387,10 @@ fn list_run_ids(path: &Path) -> Result<Vec<RunId>, FileSubagentQueueError> {
         let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
             continue;
         };
-        run_ids.push(RunId(stem.to_string()));
+        let run_id = RunId(stem.to_string());
+        if validate_run_id(&run_id).is_ok() {
+            run_ids.push(run_id);
+        }
     }
     run_ids.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(run_ids)
@@ -380,6 +408,32 @@ fn current_unix_nanos() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0)
+}
+
+fn validate_run_id(run_id: &RunId) -> Result<(), FileSubagentQueueError> {
+    let value = run_id.0.as_str();
+    if value.is_empty() || value.len() > 128 {
+        return Err(FileSubagentQueueError::InvalidRunId(
+            "run_id must be 1..=128 characters".to_string(),
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(FileSubagentQueueError::InvalidRunId(
+            "run_id may only contain ASCII letters, digits, '-' and '_'".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn safe_run_file_stem(run_id: &RunId) -> &str {
+    if validate_run_id(run_id).is_ok() {
+        run_id.0.as_str()
+    } else {
+        "__invalid_run_id__"
+    }
 }
 
 fn read_json_u128_field(path: &Path, field: &str) -> Result<Option<u128>, FileSubagentQueueError> {

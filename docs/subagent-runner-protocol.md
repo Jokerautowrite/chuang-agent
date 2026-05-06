@@ -104,6 +104,7 @@ The CLI also exposes a separate `ReportAdmission` for the controller side:
 - `Accepted` means the controller accepted the report contract.
 - `Rejected` means the controller rejected the report contract and stored the failure reason.
 - `reason_code` is a stable machine-readable code such as `report_validated`, `missing_required_field`, `empty_required_field`, `invalid_json`, `invalid_utf8`, `unsupported_schema_version`, `invalid_enum_format`, `invalid_timestamp_format`, `invalid_timestamp_order`, `size_limit_exceeded`, or `command_protocol_report_rejected`.
+- `upstream_reason_code` is optional. It is set when a command runner emits a protocol-shaped report that must be wrapped as `command_protocol_report_rejected`; the upstream code preserves the lower-level cause such as `missing_required_field`, `invalid_timestamp_order`, or `agent_id_mismatch`.
 - `run-once`, `run-loop`, `report`, and `collect` return this admission metadata in their JSON output so the UI can show controller state without parsing report text.
 
 `SubagentReport` remains an immutable execution snapshot. The controller's decision to accept or reject the submitted report is represented separately as `ReportAdmission`:
@@ -120,7 +121,7 @@ This keeps two states distinct:
 
 The controller may reject a report because it is malformed, too large, uses an unsupported schema, or fails identity checks, even when the worker claims `ExecutionStatus::Success`.
 
-If a command runner emits a full protocol report that is rejected, Chuang stores a valid `ExecutionStatus::Failed` report for auditability. The CLI still reports the controller-side admission as `Rejected` with `reason_code=command_protocol_report_rejected` for `run-once`, `run-loop`, and later `report` reads of that stored failure report.
+If a command runner emits a full protocol report that is rejected, Chuang stores a valid `ExecutionStatus::Failed` report for auditability. The CLI still reports the controller-side admission as `Rejected` with `reason_code=command_protocol_report_rejected` for `run-once`, `run-loop`, and later `report` reads of that stored failure report. When available, `upstream_reason_code` carries the original protocol cause so UI layers do not need to parse human-readable stderr text.
 
 A safe checked-in example is available at:
 

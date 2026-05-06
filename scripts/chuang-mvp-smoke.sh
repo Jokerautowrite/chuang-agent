@@ -108,12 +108,20 @@ assert channel_layers["dedicated_feishu_bridge"] == "ready"
 assert channel_layers["rich_messages"] == "ready"
 assert data["subagent_readiness"]["ok"] is True
 assert data["subagent_readiness"]["overall_state"] == "ready"
+assert data["subagent_readiness"]["local_contract_ready"] is True
+assert data["subagent_readiness"]["live_adapter_ready"] is False
 subagent_layers = {layer["name"]: layer["state"] for layer in data["subagent_readiness"]["layers"]}
+subagent_local = {layer["name"]: layer["local_contract_ready"] for layer in data["subagent_readiness"]["layers"]}
+subagent_live = {layer["name"]: layer["live_adapter_ready"] for layer in data["subagent_readiness"]["layers"]}
 assert subagent_layers["dispatch_queue"] == "ready"
 assert subagent_layers["report_collect"] == "ready"
 assert subagent_layers["command_runner"] == "ready"
 assert subagent_layers["multi_worker"] == "ready"
 assert subagent_layers["external_ai_downstream"] == "ready"
+assert subagent_local["command_runner"] is True
+assert subagent_local["multi_worker"] is True
+assert subagent_live["command_runner"] is False
+assert subagent_live["external_ai_downstream"] is False
 assert data["external_ai_readiness"]["ok"] is True
 assert data["external_ai_readiness"]["overall_state"] == "ready"
 external_ai_layers = {layer["name"]: layer["state"] for layer in data["external_ai_readiness"]["layers"]}
@@ -233,9 +241,11 @@ assert data["integration_policy"]["main_process_owns_integration"] is True
 assert data["integration_policy"]["workers_may_commit"] is False
 assert len(data["checkpoint_log"]) == 1
 assert data["checkpoint_log"][0]["summary"] == "mvp smoke checkpoint recorded"
+assert data["checkpoint_log"][0]["created_at"].endswith("Z")
 assert data["checkpoint_log"][0]["completed_worker_ids"] == ["main-process"]
 assert data["checkpoint_log"][0]["validation_notes"] == ["mvp smoke checkpoint validation noted"]
 assert data["goal_run_diagnostics"]["checkpoint_log_complete"] is True
+assert data["goal_run_diagnostics"]["last_checkpoint_summary"] == "mvp smoke checkpoint recorded"
 '
 
 printf '%s\n' "[smoke] identity memory compact flow"
@@ -340,6 +350,9 @@ assert data["legacy_var_names"] == []
 assert data["required_vars"]["CHUANG_FEISHU_APP_SECRET"] == "<set>"
 '
 
+printf '%s\n' "[smoke] feishu bridge commands"
+node scripts/chuang-feishu-command-smoke.js >/dev/null
+
 printf '%s\n' "[smoke] feishu rich message renderer"
 node scripts/chuang-feishu-rich-message-smoke.js >/dev/null
 
@@ -359,6 +372,14 @@ assert data["result"]["audit_id"].startswith("external-ai-kimi-")
 
 printf '%s\n' "[smoke] app-server health"
 cargo run --quiet -- app-server health --workspace-root "$work_dir" --json >/dev/null
+
+printf '%s\n' "[smoke] repl launcher"
+bash -n scripts/launch-chuang-agent-repl.sh
+printf 'exit\n' | CHUANG_REPL_STUB=1 scripts/launch-chuang-agent-repl.sh >/dev/null
+provider_env_path="$work_dir/provider.env"
+printf '%s\n' 'CODEX_PPTOKEN_API_KEY=test-key' >"$provider_env_path"
+env -u CODEX_PPTOKEN_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/chuang-app-server-health.sh >/dev/null
+printf 'exit\n' | env -u CODEX_PPTOKEN_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/launch-chuang-agent-repl.sh >/dev/null
 
 printf '%s\n' "[smoke] console snapshot"
 cargo run --quiet -- console snapshot --config "$config_path" --json >/dev/null

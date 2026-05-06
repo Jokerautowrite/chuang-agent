@@ -99,9 +99,7 @@ fn run_command(args: &[String]) -> Result<(), String> {
 }
 
 fn repl_command(args: &[String]) -> Result<(), String> {
-    let options = parse_cli_options(args)?;
-
-    println!("chuang-agent repl ready (输入 exit 退出)");
+    let (options, verbose) = parse_repl_options(args)?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
@@ -127,14 +125,38 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             dispatch_subagent: false,
             goal_spec: None,
         })?;
-        print_runtime_result(&result);
-        writeln!(stdout, "---").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        if verbose {
+            print_runtime_result(&result);
+        } else {
+            writeln!(stdout, "{}", result.response.body)
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
         stdout
             .flush()
             .map_err(|e| format!("stdout_flush_failed: {e}"))?;
     }
 
     Ok(())
+}
+
+fn parse_repl_options(args: &[String]) -> Result<(CliOptions, bool), String> {
+    let mut verbose = false;
+    let mut runtime_args: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--verbose" => {
+                verbose = true;
+                index += 1;
+            }
+            _ => {
+                runtime_args.push(args[index].clone());
+                index += 1;
+            }
+        }
+    }
+
+    Ok((parse_cli_options(&runtime_args)?, verbose))
 }
 
 fn status_command(args: &[String]) -> Result<(), String> {

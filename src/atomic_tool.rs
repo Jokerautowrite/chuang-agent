@@ -89,6 +89,7 @@ pub struct AtomicToolRegistry {
 pub enum ToolCallAtomicKind {
     Atomic(AtomicToolKind),
     AuxiliaryListDir,
+    AuxiliaryApplyPatch,
     AuxiliaryMemoryRecall,
 }
 
@@ -204,6 +205,13 @@ impl AtomicToolRegistry {
                 audit_operation: "tool.list_dir",
                 callable_now: true,
             },
+            ToolCallAtomicKind::AuxiliaryApplyPatch => AtomicToolCallMapping {
+                protocol_tool_name: "apply_patch",
+                kind: ToolCallAtomicKind::AuxiliaryApplyPatch,
+                atomic_tool_name: None,
+                audit_operation: "tool.apply_patch",
+                callable_now: true,
+            },
             ToolCallAtomicKind::AuxiliaryMemoryRecall => AtomicToolCallMapping {
                 protocol_tool_name: "memory_recall",
                 kind: ToolCallAtomicKind::AuxiliaryMemoryRecall,
@@ -236,7 +244,7 @@ impl AtomicToolRegistry {
         format!(
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
-辅助工具：list_dir。兼容旧名：read_file, write_file, shell_exec。\n\
+辅助工具：list_dir, apply_patch。兼容旧名：read_file, write_file, shell_exec。\n\
 桌面原子工具 {interface_only} 目前只在 actuator 接口层登记，不能直接调用。\n\
 输出协议：\n\
 1. 优先输出一行 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"...\"}}}}\n\
@@ -250,6 +258,7 @@ impl AtomicToolRegistry {
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"list_dir\",\"path\":\".\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"file_read\",\"path\":\"src/main.rs\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"file_write\",\"path\":\"notes/todo.txt\",\"content\":\"hello\"}}}}\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"apply_patch\",\"patch\":\"*** Begin Patch\\n*** End Patch\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"code_execute\",\"command\":\"cargo test --quiet\",\"cwd\":\".\"}}}}",
             workspace_root.display()
         )
@@ -287,6 +296,12 @@ pub fn actuator_method_for_atomic_tool(kind: AtomicToolKind) -> Option<&'static 
 pub fn tool_call_atomic_kind(call: &ToolCall) -> ToolCallAtomicKind {
     match call {
         ToolCall::ListDir { .. } => ToolCallAtomicKind::AuxiliaryListDir,
+        ToolCall::ApplyPatch { .. } => ToolCallAtomicKind::AuxiliaryApplyPatch,
+        ToolCall::Mouse { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Mouse),
+        ToolCall::Keyboard { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Keyboard),
+        ToolCall::Screenshot { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Screenshot),
+        ToolCall::Locate { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Locate),
+        ToolCall::Wait { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Wait),
         ToolCall::ReadFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileRead),
         ToolCall::WriteFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileWrite),
         ToolCall::ShellExec { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::CodeExecute),
@@ -299,6 +314,12 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::ListDir { .. } => "list_dir",
         ToolCall::ReadFile { .. } => "read_file",
         ToolCall::WriteFile { .. } => "write_file",
+        ToolCall::Mouse { .. } => "mouse",
+        ToolCall::Keyboard { .. } => "keyboard",
+        ToolCall::Screenshot { .. } => "screenshot",
+        ToolCall::Locate { .. } => "locate",
+        ToolCall::Wait { .. } => "wait",
+        ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }

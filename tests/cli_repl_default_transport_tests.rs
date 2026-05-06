@@ -29,7 +29,7 @@ fn cli_repl_defaults_provider_transport_to_stub() {
     let output = Command::new("bash")
         .arg("-lc")
         .arg(format!(
-            "printf '继续推进 default transport\\nexit\\n' | cargo run --quiet -- repl --config '{}' --provider-base-url https://api.example.com/v1 --provider-api-key test-key --provider-model gpt-4.1-mini --provider-id custom-openai",
+            "printf '继续推进 default transport\\nexit\\n' | cargo run --quiet -- repl --config '{}' --provider-base-url https://api.example.com/v1 --provider-api-key test-key --provider-model gpt-4.1-mini --provider-id custom-openai --verbose",
             config_path.display()
         ))
         .output()

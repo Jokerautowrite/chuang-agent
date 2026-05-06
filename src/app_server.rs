@@ -11,6 +11,7 @@ use crate::cli_runtime::run_with_options;
 use crate::cli_types::{CliOptions, RunCliRequest};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
+use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
     IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
     RulesConfig, RuntimeConfig, SubagentQueueConfig,
@@ -871,22 +872,6 @@ fn resolve_path_if_relative(base_dir: &Path, path: PathBuf) -> PathBuf {
     } else {
         normalize_path_lexically(&resolved)
     }
-}
-
-fn normalize_path_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            std::path::Component::RootDir => normalized.push(component.as_os_str()),
-            std::path::Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
 }
 
 fn workspace_base_dir(workspace_root: &str) -> PathBuf {

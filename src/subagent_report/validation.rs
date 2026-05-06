@@ -177,6 +177,7 @@ impl SubagentReportValidator {
                     controller_agent_id,
                     status: ReportAdmissionStatus::Accepted,
                     reason_code: "report_validated".to_string(),
+                    upstream_reason_code: None,
                     reason: "report_validated".to_string(),
                     decided_at,
                 }
@@ -192,6 +193,7 @@ impl SubagentReportValidator {
                     controller_agent_id,
                     status: ReportAdmissionStatus::Rejected,
                     reason_code,
+                    upstream_reason_code: None,
                     reason: format!("{reason:?}"),
                     decided_at,
                 }
