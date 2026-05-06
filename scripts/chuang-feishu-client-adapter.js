@@ -35,15 +35,23 @@ class ChuangFeishuClientAdapter {
   }
 }
 
-function buildChuangReplyPayload({ replyText, modelName = "unknown", threadId = "", runtimeReportId = "" }) {
+function buildChuangReplyPayload({
+  replyText,
+  modelName = "unknown",
+  threadId = "",
+  runtimeReportId = "",
+  channelMessageId = "",
+}) {
   const text = normalizeCardText(replyText) || "已收到。";
   const model = normalizeCardText(modelName) || "unknown";
   const thread = normalizeCardText(threadId);
   const report = normalizeCardText(runtimeReportId);
+  const message = normalizeCardText(channelMessageId);
   const fields = [
     { label: "模型", value: model },
     thread ? { label: "线程", value: thread } : null,
     report ? { label: "报告", value: report } : null,
+    message ? { label: "消息", value: message } : null,
   ].filter(Boolean);
 
   return {

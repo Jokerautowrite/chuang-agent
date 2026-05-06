@@ -89,12 +89,14 @@ The bridge script is a long-connection runtime. It validates the Chuang-only env
 
 The bridge also sources `CHUANG_PROVIDER_ENV_FILE` before it starts the Node process. Keep this provider env outside the repository, with file mode `600`, and store only variable assignments such as `CODEX_PPTOKEN_API_KEY=<set>`. Do not put provider keys into the Feishu env template or `config.toml`.
 
-The bridge handles `/new` and `/help` locally as bridge commands. `/new` is the open-new-window/new-context entry command: it replies with guidance for opening a fresh Feishu chat/topic/thread and explicitly stays out of the Agent mainline. `/help` lists the local commands. Neither command is forwarded to `app-server` or the Agent runtime.
+The bridge handles `/new`, `/session`, `/health` and `/help` locally as bridge commands. `/new` starts a fresh app-server thread and binds the current Feishu chat to it; `/session` reports that binding; `/health` reports local bridge/app-server/provider-env status with secret values shown only as `<set>` or `<missing>`; `/help` lists the local commands. App-server failures during `/new` or normal `turn/start` are returned to Feishu as sanitized operational messages. These commands are not forwarded as user tasks to the Agent runtime.
 
 ## First Live Test
 
 1. Send a text message to the new Chuang bot.
 2. Confirm the response does not contain `fake-responder`.
-3. Confirm Chuang writes session memory for the thread.
-4. Confirm Codex Feishu and Hermes Feishu still respond on their own channels.
-5. Confirm no service file for Codex or Hermes changed.
+3. Send `/session` and confirm the reported thread matches the active chat binding.
+4. Send `/health` and confirm it shows bridge/app-server/provider-env status using only `<set>/<missing>` secret states.
+5. Confirm Chuang writes session memory for the thread.
+6. Confirm Codex Feishu and Hermes Feishu still respond on their own channels.
+7. Confirm no service file for Codex or Hermes changed.

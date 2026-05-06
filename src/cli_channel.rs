@@ -87,6 +87,29 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
         .unwrap_or_else(|| "websocket".to_string());
     let connection_mode_ok = matches!(connection_mode.as_str(), "websocket" | "webhook");
     let env_scope = classify_feishu_env_file_scope(&request.env_file);
+    let next_actions = feishu_check_next_actions(
+        &missing,
+        has_legacy_names,
+        workspace_root_exists,
+        workspace_config_exists,
+        connection_mode_ok,
+        env_scope.is_chuang_scoped,
+        &env_scope.warnings,
+    );
+    let diagnostic_status = if next_actions.is_empty() {
+        "ready".to_string()
+    } else {
+        "blocked".to_string()
+    };
+    let diagnostic_summary = if next_actions.is_empty() {
+        "Chuang Feishu env is ready for local bridge startup; no live Feishu call was made."
+            .to_string()
+    } else {
+        format!(
+            "Chuang Feishu env is not ready for bridge startup; {} local issue(s) need attention.",
+            next_actions.len()
+        )
+    };
     let output = FeishuCheckOutput {
         ok: missing.is_empty()
             && !has_legacy_names
@@ -94,6 +117,9 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
             && workspace_config_exists
             && connection_mode_ok
             && env_scope.is_chuang_scoped,
+        diagnostic_status,
+        diagnostic_summary,
+        next_actions,
         env_file: request.env_file.display().to_string(),
         env_file_is_chuang_scoped: env_scope.is_chuang_scoped,
         env_file_scope_warnings: env_scope.warnings,
@@ -141,6 +167,8 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
     match request.output {
         ControlOutputFormat::Text => {
             println!("feishu_check_ok: {}", output.ok);
+            println!("diagnostic_status: {}", output.diagnostic_status);
+            println!("diagnostic_summary: {}", output.diagnostic_summary);
             println!("env_file: {}", output.env_file);
             println!(
                 "env_file_is_chuang_scoped: {}",
@@ -171,6 +199,11 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
             println!("has_legacy_names: {}", output.has_legacy_names);
             if !output.legacy_var_names.is_empty() {
                 println!("legacy_var_names: {}", output.legacy_var_names.join(","));
+            }
+            if output.next_actions.is_empty() {
+                println!("next_actions: none");
+            } else {
+                println!("next_actions: {}", output.next_actions.join(";"));
             }
         }
         ControlOutputFormat::Json => print_json(&output)?,
@@ -351,6 +384,9 @@ struct ChannelFeishuCheckRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct FeishuCheckOutput {
     ok: bool,
+    diagnostic_status: String,
+    diagnostic_summary: String,
+    next_actions: Vec<String>,
     env_file: String,
     env_file_is_chuang_scoped: bool,
     env_file_scope_warnings: Vec<String>,
@@ -364,6 +400,41 @@ struct FeishuCheckOutput {
     missing: Vec<String>,
     legacy_var_names: Vec<String>,
     has_legacy_names: bool,
+}
+
+fn feishu_check_next_actions(
+    missing: &[String],
+    has_legacy_names: bool,
+    workspace_root_exists: bool,
+    workspace_config_exists: bool,
+    connection_mode_ok: bool,
+    env_file_is_chuang_scoped: bool,
+    env_file_scope_warnings: &[String],
+) -> Vec<String> {
+    let mut actions = Vec::new();
+    if !missing.is_empty() {
+        actions.push(format!("set_missing_chuang_env_vars:{}", missing.join(",")));
+    }
+    if !env_file_is_chuang_scoped {
+        let warning = if env_file_scope_warnings.is_empty() {
+            "env_file_not_chuang_scoped".to_string()
+        } else {
+            env_file_scope_warnings.join(",")
+        };
+        actions.push(format!("use_chuang_scoped_env_file:{warning}"));
+    }
+    if has_legacy_names {
+        actions.push("remove_legacy_feishu_env_names".to_string());
+    }
+    if !workspace_root_exists {
+        actions.push("fix_chuang_agent_workspace_root".to_string());
+    } else if !workspace_config_exists {
+        actions.push("add_or_fix_workspace_config_toml".to_string());
+    }
+    if !connection_mode_ok {
+        actions.push("set_chuang_feishu_connection_mode_to_websocket_or_webhook".to_string());
+    }
+    actions
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

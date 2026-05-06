@@ -12,6 +12,7 @@ const rich = buildChuangReplyPayload({
   modelName: "gpt-test",
   threadId: "thread-1",
   runtimeReportId: "report-1",
+  channelMessageId: "msg-1",
 });
 assert.strictEqual(rich.msgType, "interactive");
 const card = JSON.parse(rich.content);
@@ -21,6 +22,7 @@ assert(card.elements.some((element) => element.tag === "markdown" && element.con
 const fieldBlock = card.elements.find((element) => element.tag === "div");
 assert(fieldBlock);
 assert(fieldBlock.fields.some((field) => field.text.content.includes("report-1")));
+assert(fieldBlock.fields.some((field) => field.text.content.includes("msg-1")));
 
 const text = buildChuangTextPayload("纯文本回复");
 assert.strictEqual(text.msgType, "text");

@@ -273,6 +273,18 @@ CHUANG_FEISHU_APP_SECRET=secret-value
     let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["diagnostic_status"], "ready");
+    assert!(parsed["diagnostic_summary"]
+        .as_str()
+        .expect("diagnostic summary")
+        .contains("no live Feishu call"));
+    assert_eq!(
+        parsed["next_actions"]
+            .as_array()
+            .expect("next actions should be array")
+            .len(),
+        0
+    );
     assert_eq!(parsed["workspace_root"], workspace.display().to_string());
     assert_eq!(parsed["workspace_root_exists"], true);
     assert_eq!(parsed["workspace_config_exists"], true);
@@ -336,12 +348,21 @@ CHUANG_FEISHU_APP_SECRET=secret-value
     let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["diagnostic_status"], "blocked");
     assert_eq!(parsed["env_file_is_chuang_scoped"], false);
     assert!(parsed["env_file_scope_warnings"]
         .as_array()
         .expect("scope warnings should be array")
         .iter()
         .any(|warning| warning == "env_file_looks_like_codex_im_default_env"));
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions should be array")
+        .iter()
+        .any(|action| action
+            .as_str()
+            .expect("next action should be string")
+            .starts_with("use_chuang_scoped_env_file:")));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("secret-value"));
 }
@@ -388,6 +409,11 @@ FEISHU_APP_ID=legacy-codex
         parsed["legacy_var_names"],
         serde_json::json!(["FEISHU_APP_ID"])
     );
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions should be array")
+        .iter()
+        .any(|action| action == "remove_legacy_feishu_env_names"));
 }
 
 #[test]
@@ -426,7 +452,18 @@ CHUANG_FEISHU_CONNECTION_MODE=terminal
     let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], false);
+    assert_eq!(parsed["diagnostic_status"], "blocked");
     assert_eq!(parsed["workspace_root_exists"], true);
     assert_eq!(parsed["workspace_config_exists"], false);
     assert_eq!(parsed["connection_mode_ok"], false);
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions should be array")
+        .iter()
+        .any(|action| action == "add_or_fix_workspace_config_toml"));
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions should be array")
+        .iter()
+        .any(|action| action == "set_chuang_feishu_connection_mode_to_websocket_or_webhook"));
 }

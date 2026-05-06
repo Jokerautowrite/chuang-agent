@@ -23,7 +23,10 @@ const {
   patchWsClientForCardCallbacks,
 } = require("./chuang-feishu-client-adapter");
 const {
+  buildBridgeErrorReply,
+  buildHealthCommandReply,
   buildNewSessionCommandReply,
+  buildSessionCommandReply,
   parseBridgeCommand,
 } = require("./chuang-feishu-bridge-commands");
 
@@ -32,6 +35,8 @@ const ENV_FILE =
   process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
 const WORKSPACE_ROOT =
   process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT;
+const PROVIDER_ENV_FILE =
+  process.env.CHUANG_PROVIDER_ENV_FILE || path.join(os.homedir(), ".config/chuang-agent/provider.env");
 const SESSION_STATE_FILE =
   process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
 const FEISHU_SDK_MODULES =
@@ -62,6 +67,8 @@ class AppServerClient {
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = "";
+    this.startedAt = "";
+    this.lastError = "";
     this.restart();
   }
 
@@ -74,15 +81,19 @@ class AppServerClient {
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.startedAt = new Date().toISOString();
+    this.lastError = "";
     this.child.stdout.on("data", (chunk) => this.handleStdout(chunk));
     this.child.stderr.on("data", (chunk) => {
       const text = chunk.toString().trimEnd();
       if (text) {
         console.error(`[chuang-feishu] app-server: ${text}`);
+        this.lastError = truncateText(text, 240);
       }
     });
     this.child.on("exit", (code, signal) => {
       const error = new Error(`app-server exited: code=${code} signal=${signal || ""}`.trim());
+      this.lastError = error.message;
       for (const [, pending] of this.pending.entries()) {
         pending.reject(error);
       }
@@ -128,6 +139,15 @@ class AppServerClient {
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(`${payload}\n`);
     });
+  }
+
+  status() {
+    return {
+      running: Boolean(this.child && this.child.exitCode === null && !this.child.killed),
+      startedAt: this.startedAt,
+      pendingCount: this.pending.size,
+      lastError: this.lastError,
+    };
   }
 
   async turnStart(inbound) {
@@ -261,17 +281,35 @@ class ChuangFeishuBridge {
     const command = parseBridgeCommand(inbound.text);
     if (command) {
       if (command.commandName === "new") {
-        const thread = await this.appServer.startThread(
-          inbound.workspaceRoot,
-          buildNewThreadDisplayName(inbound)
-        );
-        if (thread && thread.id) {
-          this.sessionStore.bind(inbound.chatId, thread.id, inbound.workspaceRoot);
+        try {
+          const thread = await this.appServer.startThread(
+            inbound.workspaceRoot,
+            buildNewThreadDisplayName(inbound)
+          );
+          if (thread && thread.id) {
+            this.sessionStore.bind(inbound.chatId, thread.id, inbound.workspaceRoot);
+          }
+          await this.sendReply(inbound, {
+            ...buildNewSessionCommandReply(thread.id || ""),
+            threadId: thread.id || "",
+          });
+        } catch (error) {
+          await this.sendReply(inbound, buildBridgeErrorReply({
+            operation: "/new thread/start",
+            error,
+            threadId: effectiveThreadId,
+          }));
         }
-        await this.sendReply(inbound, {
-          ...buildNewSessionCommandReply(thread.id || ""),
-          threadId: thread.id || "",
-        });
+      } else if (command.commandName === "session") {
+        await this.sendReply(
+          inbound,
+          buildSessionCommandReply(this.sessionStore.getBinding(inbound.chatId))
+        );
+      } else if (command.commandName === "health") {
+        await this.sendReply(
+          inbound,
+          buildHealthCommandReply(this.buildHealthDiagnostics(inbound, effectiveThreadId))
+        );
       } else {
         await this.sendReply(inbound, command);
       }
@@ -279,25 +317,64 @@ class ChuangFeishuBridge {
         chatId: inbound.chatId,
         messageId: inbound.messageId,
         command: command.commandName,
+        threadId: this.sessionStore.getThreadId(inbound.chatId) || effectiveThreadId,
       });
       return;
     }
 
-    const turn = await this.appServer.turnStart({
-      ...inbound,
-      threadId: effectiveThreadId,
-    });
-    if (turn.threadId) {
-      this.sessionStore.bind(inbound.chatId, turn.threadId, inbound.workspaceRoot);
+    try {
+      const turn = await this.appServer.turnStart({
+        ...inbound,
+        threadId: effectiveThreadId,
+      });
+      if (turn.threadId) {
+        this.sessionStore.bind(inbound.chatId, turn.threadId, inbound.workspaceRoot);
+      }
+      await this.sendReply(inbound, turn);
+      appendEventLog("outbound", {
+        chatId: inbound.chatId,
+        messageId: inbound.messageId,
+        threadId: turn.threadId,
+        modelName: turn.modelName,
+        runtimeReportId: turn.runtimeReportId,
+        reply: truncateText(turn.replyText, 360),
+      });
+    } catch (error) {
+      const errorReply = buildBridgeErrorReply({
+        operation: "turn/start",
+        error,
+        threadId: effectiveThreadId,
+      });
+      await this.sendReply(inbound, errorReply);
+      appendEventLog("turn_error", {
+        chatId: inbound.chatId,
+        messageId: inbound.messageId,
+        threadId: effectiveThreadId,
+        reason: truncateText(error.message, 240),
+      });
     }
-    await this.sendReply(inbound, turn);
-    appendEventLog("outbound", {
-      chatId: inbound.chatId,
-      messageId: inbound.messageId,
-      threadId: turn.threadId,
-      modelName: turn.modelName,
-      reply: truncateText(turn.replyText, 360),
-    });
+  }
+
+  buildHealthDiagnostics(inbound, effectiveThreadId = "") {
+    const binding = inbound?.chatId ? this.sessionStore.getBinding(inbound.chatId) : null;
+    return {
+      bridgeReady: true,
+      workspaceRoot: WORKSPACE_ROOT,
+      appServer: this.appServer.status(),
+      session: binding
+        ? { ...binding, bound: true }
+        : {
+            bound: false,
+            chatId: inbound?.chatId || "",
+            threadId: normalizeText(effectiveThreadId),
+            workspaceRoot: inbound?.workspaceRoot || WORKSPACE_ROOT,
+          },
+      env: {
+        appIdState: envState("CHUANG_FEISHU_APP_ID"),
+        appSecretState: envState("CHUANG_FEISHU_APP_SECRET"),
+        providerEnvState: providerEnvState(),
+      },
+    };
   }
 
   async sendReply(inbound, turn) {
@@ -306,6 +383,7 @@ class ChuangFeishuBridge {
       modelName: turn.modelName,
       threadId: turn.threadId,
       runtimeReportId: turn.runtimeReportId,
+      channelMessageId: inbound.messageId,
     });
     try {
       await this.adapter.sendResourceMessage({
@@ -335,6 +413,15 @@ class ChuangFeishuBridge {
       content: textPayload.content,
     });
   }
+}
+
+function envState(name) {
+  return normalizeText(process.env[name]) ? "<set>" : "<missing>";
+}
+
+function providerEnvState() {
+  const providerFileState = fs.existsSync(PROVIDER_ENV_FILE) ? "<set>" : "<missing>";
+  return `CHUANG_PROVIDER_ENV_FILE=${providerFileState} CODEX_PPTOKEN_API_KEY=${envState("CODEX_PPTOKEN_API_KEY")}`;
 }
 
 function normalizeFeishuTextEvent(data) {

@@ -2,9 +2,13 @@
 
 const assert = require("assert");
 const {
+  buildBridgeErrorReply,
   buildHelpCommandReply,
+  buildHealthCommandReply,
   buildNewSessionCommandReply,
+  buildSessionCommandReply,
   parseBridgeCommand,
+  sanitizeErrorMessage,
 } = require("./chuang-feishu-bridge-commands");
 
 const reply = parseBridgeCommand(" /new ");
@@ -25,8 +29,56 @@ const help = parseBridgeCommand("/help");
 assert(help, "/help should be handled as a bridge command");
 assert.strictEqual(help.commandName, "help");
 assert(help.replyText.includes("/new"));
+assert(help.replyText.includes("/session"));
+assert(help.replyText.includes("/health"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
 assert(help.replyText.includes("普通文本会转发到 Chuang app-server"));
 assert.strictEqual(buildHelpCommandReply().commandName, "help");
+
+const session = parseBridgeCommand("/session");
+assert(session, "/session should be handled as a bridge command");
+assert.strictEqual(session.commandName, "session");
+assert(session.replyText.includes("当前会话"));
+const boundSession = buildSessionCommandReply({
+  chatId: "chat-1",
+  threadId: "chuang-thread-9",
+  workspaceRoot: "/home/user/projects/chuang-agent",
+  updatedAt: "2026-05-07T00:00:00.000Z",
+});
+assert(boundSession.replyText.includes("已绑定当前飞书聊天"));
+assert(boundSession.replyText.includes("chuang-thread-9"));
+assert(boundSession.replyText.includes("工作区：/home/user/projects/chuang-agent"));
+
+const health = parseBridgeCommand("/health");
+assert(health, "/health should be handled as a bridge command");
+assert.strictEqual(health.commandName, "health");
+const healthReply = buildHealthCommandReply({
+  bridgeReady: true,
+  workspaceRoot: "/home/user/projects/chuang-agent",
+  appServer: { running: true, lastError: "token=secret-value app_secret=hidden" },
+  session: { bound: true, threadId: "chuang-thread-9" },
+  env: {
+    appIdState: "<set>",
+    appSecretState: "<set>",
+    providerEnvState: "CHUANG_PROVIDER_ENV_FILE=<set> CODEX_PPTOKEN_API_KEY=<set>",
+  },
+});
+assert(healthReply.replyText.includes("健康诊断"));
+assert(healthReply.replyText.includes("app-server：running"));
+assert(healthReply.replyText.includes("session：bound chuang-thread-9"));
+assert(healthReply.replyText.includes("CODEX_PPTOKEN_API_KEY=<set>"));
+assert(!healthReply.replyText.includes("secret-value"));
+assert(!healthReply.replyText.includes("hidden"));
+
+const errorReply = buildBridgeErrorReply({
+  operation: "turn/start",
+  error: new Error("provider failed api_key=secret-value Authorization Bearer abc.def"),
+  threadId: "chuang-thread-9",
+});
+assert(errorReply.replyText.includes("本轮没有完成"));
+assert(errorReply.replyText.includes("turn/start"));
+assert(!errorReply.replyText.includes("secret-value"));
+assert(!errorReply.replyText.includes("abc.def"));
+assert.strictEqual(sanitizeErrorMessage("token=abc"), "token=<redacted>");
 
 console.log("chuang_feishu_command_smoke_ok");

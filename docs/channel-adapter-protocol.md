@@ -74,7 +74,14 @@ For a batch of app-server events, use `outbounds_from_app_server_events()`. It p
 
 The repo-local Feishu bridge renders assistant replies as Feishu interactive cards through `scripts/chuang-feishu-client-adapter.js`. If rich-card send fails, the bridge falls back to a plain text payload. The card includes the thread id and runtime report id when app-server returns them, so a live channel reply can be correlated to the structured runtime report. The local contract is covered by `node scripts/chuang-feishu-rich-message-smoke.js`; it does not connect to Feishu.
 
-The repo-local Feishu bridge also has local bridge commands in `scripts/chuang-feishu-bridge-commands.js`. `/new` is the open-new-window/new-context entry command: it explains how to open a fresh Feishu chat/topic/thread, and `/help` lists bridge commands. These commands are answered by the bridge and are not forwarded to app-server or the Agent runtime. The local contract is covered by `node scripts/chuang-feishu-command-smoke.js`; it does not connect to Feishu.
+The repo-local Feishu bridge also has local bridge commands in `scripts/chuang-feishu-bridge-commands.js`. These commands are answered by the bridge and are not forwarded as user tasks to the Agent runtime. The local contract is covered by `node scripts/chuang-feishu-command-smoke.js`; it does not connect to Feishu.
+
+- `/new` starts a fresh app-server thread and binds the current Feishu chat to it.
+- `/session` shows the current Feishu chat to Chuang thread binding.
+- `/health` or `/status` shows local bridge, app-server process, workspace, Chuang Feishu env state, and provider env presence without printing secret values.
+- `/help` lists bridge commands.
+
+If `thread/start` or `turn/start` fails, the bridge sends a short sanitized error card back to the Feishu chat instead of only logging locally. The error tells the operator which stage failed and suggests `/health` or `/new`; secret-like tokens are redacted before rendering. Rich cards include the Feishu message id alongside model, thread id, and runtime report id, so local logs, channel messages, and runtime reports can be correlated.
 
 The repo-local Feishu bridge sources `CHUANG_PROVIDER_ENV_FILE` before starting its Node runtime, so `app-server` child processes inherit provider variables such as `CODEX_PPTOKEN_API_KEY=<set>`. This provider env must stay outside the repository and separate from Feishu app credentials.
 
