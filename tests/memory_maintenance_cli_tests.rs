@@ -142,10 +142,20 @@ fn memory_maintenance_apply_dry_run_previews_selected_candidates_without_writeba
     assert_eq!(parsed["dry_run"], true);
     assert_eq!(parsed["approved_writeback"], false);
     assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["approval"]["required"], true);
+    assert_eq!(parsed["approval"]["approved"], false);
+    assert_eq!(parsed["approval"]["writes_automatically"], false);
     assert_eq!(
         parsed["selected_candidate_ids"]
             .as_array()
             .expect("selected")
+            .len(),
+        1
+    );
+    assert_eq!(
+        parsed["selected_candidates"]
+            .as_array()
+            .expect("selected candidates")
             .len(),
         1
     );
@@ -162,6 +172,81 @@ fn memory_maintenance_apply_dry_run_previews_selected_candidates_without_writeba
                 .expect("experiences file")
                 .is_empty()
     );
+}
+
+#[test]
+fn memory_maintenance_apply_approved_writeback_records_approval_and_provenance() {
+    let root = temp_root("approved-writeback");
+    let config_path = write_fake_config(&root);
+    seed_session_summary(
+        &config_path,
+        "maintenance",
+        "批准写回候选：保留 provenance 和人工批准记录",
+    );
+
+    let output = run_chuang(&[
+        "memory",
+        "maintenance",
+        "apply",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "provenance",
+        "--session-id",
+        "maintenance",
+        "--approve-writeback",
+        "--approval-note",
+        "老爸批准写入 LIM 候选",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["dry_run"], false);
+    assert_eq!(parsed["approved_writeback"], true);
+    assert_eq!(parsed["approval"]["required"], true);
+    assert_eq!(parsed["approval"]["approved"], true);
+    assert_eq!(
+        parsed["approval"]["approval_source"],
+        "cli --approve-writeback"
+    );
+    assert_eq!(parsed["approval"]["approval_note"], "老爸批准写入 LIM 候选");
+    assert_eq!(parsed["approval"]["writeback_scope"], "experiences");
+    assert_eq!(parsed["approval"]["writes_automatically"], false);
+    assert!(parsed["approval"]["approved_at"]
+        .as_str()
+        .expect("approved_at")
+        .contains('T'));
+    assert_eq!(
+        parsed["selected_candidates"]
+            .as_array()
+            .expect("selected candidates")
+            .len(),
+        1
+    );
+    assert_eq!(
+        parsed["applied_candidate_ids"]
+            .as_array()
+            .expect("applied")
+            .len(),
+        1
+    );
+
+    let experiences = std::fs::read_to_string(root.join("experiences.md"))
+        .expect("experiences file should be readable");
+    assert!(experiences.contains("writeback=memory_maintenance_apply"));
+    assert!(experiences.contains("approved_writeback=true"));
+    assert!(experiences.contains("approval_source=cli --approve-writeback"));
+    assert!(experiences.contains("approval_note=老爸批准写入 LIM 候选"));
+    assert!(experiences.contains("provenance_preserved=true"));
+    assert!(experiences.contains("source=lim_dry_run"));
+    assert!(experiences.contains("source_record_id="));
 }
 
 #[test]

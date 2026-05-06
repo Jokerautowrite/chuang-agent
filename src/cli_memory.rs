@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::Utc;
 use chuang_agent::hermes_memory::{
     DualFileMemoryError, DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry,
 };
@@ -296,6 +297,20 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         ));
     }
 
+    let approval = MemoryMaintenanceApprovalOutput {
+        required: true,
+        approved: request.approve_writeback,
+        approval_source: if request.approve_writeback {
+            Some("cli --approve-writeback".to_string())
+        } else {
+            None
+        },
+        approval_note: request.approval_note.clone(),
+        approved_at: request.approve_writeback.then(|| Utc::now().to_rfc3339()),
+        writeback_scope: "experiences".to_string(),
+        writes_automatically: false,
+    };
+
     let mut applied_candidate_ids = Vec::new();
     let mut skipped_candidate_ids = Vec::new();
     if request.approve_writeback {
@@ -303,7 +318,7 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         for candidate in &selected_candidates {
             match store.append_experience(HotMemoryEntry {
                 id: candidate.candidate_id.clone(),
-                content: candidate.content.clone(),
+                content: build_memory_maintenance_writeback_content(candidate, &approval),
             }) {
                 Ok(()) => applied_candidate_ids.push(candidate.candidate_id.clone()),
                 Err(DualFileMemoryError::DuplicateEntry { .. }) => {
@@ -328,7 +343,9 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         batches: plan.batches,
         lim_candidate_count: plan.lim_candidate_count,
         decay_candidate_count: plan.decay_candidate_count,
+        selected_candidates,
         selected_candidate_ids: unique_selected_candidate_ids,
+        approval,
         applied_candidate_ids,
         skipped_candidate_ids,
         recommendations: plan.recommendations,
@@ -345,6 +362,14 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
                 output.applied_candidate_ids.len(),
                 output.skipped_candidate_ids.len()
             );
+            println!(
+                "approval required={} approved={} source={} scope={} writes_automatically={}",
+                output.approval.required,
+                output.approval.approved,
+                output.approval.approval_source.as_deref().unwrap_or("none"),
+                output.approval.writeback_scope,
+                output.approval.writes_automatically
+            );
             for candidate_id in &output.applied_candidate_ids {
                 println!("applied_candidate_id: {candidate_id}");
             }
@@ -356,6 +381,30 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn build_memory_maintenance_writeback_content(
+    candidate: &LimExtractionCandidateOutput,
+    approval: &MemoryMaintenanceApprovalOutput,
+) -> String {
+    let mut lines = vec![
+        "writeback=memory_maintenance_apply".to_string(),
+        "approved_writeback=true".to_string(),
+        format!(
+            "approval_source={}",
+            approval.approval_source.as_deref().unwrap_or("none")
+        ),
+        format!(
+            "approved_at={}",
+            approval.approved_at.as_deref().unwrap_or("unknown")
+        ),
+        "provenance_preserved=true".to_string(),
+    ];
+    if let Some(note) = &approval.approval_note {
+        lines.push(format!("approval_note={note}"));
+    }
+    lines.push(candidate.content.clone());
+    lines.join("\n")
 }
 
 fn lim_memory_extract_command(args: &[String]) -> Result<(), String> {
@@ -806,6 +855,7 @@ fn parse_memory_maintenance_apply(
     let mut candidate_ids = Vec::new();
     let mut dry_run = false;
     let mut approve_writeback = false;
+    let mut approval_note = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -854,6 +904,16 @@ fn parse_memory_maintenance_apply(
                 approve_writeback = true;
                 index += 1;
             }
+            "--approval-note" => {
+                let value = take_local_value(args, &mut index, "--approval-note")?;
+                let normalized = normalize_approval_note(&value);
+                if normalized.is_empty() {
+                    return Err(
+                        "memory maintenance apply requires non-empty --approval-note".to_string(),
+                    );
+                }
+                approval_note = Some(normalized);
+            }
             "--dry-run" => {
                 dry_run = true;
                 index += 1;
@@ -875,6 +935,7 @@ fn parse_memory_maintenance_apply(
         candidate_ids,
         dry_run,
         approve_writeback,
+        approval_note,
     })
 }
 
@@ -1413,6 +1474,7 @@ struct MemoryMaintenanceApplyRequest {
     candidate_ids: Vec<String>,
     dry_run: bool,
     approve_writeback: bool,
+    approval_note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1494,10 +1556,23 @@ struct MemoryMaintenanceApplyOutput {
     batches: Vec<MemoryMaintenanceBatchOutput>,
     lim_candidate_count: usize,
     decay_candidate_count: usize,
+    selected_candidates: Vec<LimExtractionCandidateOutput>,
     selected_candidate_ids: Vec<String>,
+    approval: MemoryMaintenanceApprovalOutput,
     applied_candidate_ids: Vec<String>,
     skipped_candidate_ids: Vec<String>,
     recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryMaintenanceApprovalOutput {
+    required: bool,
+    approved: bool,
+    approval_source: Option<String>,
+    approval_note: Option<String>,
+    approved_at: Option<String>,
+    writeback_scope: String,
+    writes_automatically: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1581,6 +1656,10 @@ fn first_non_empty_line(content: &str) -> String {
         .find(|line| !line.trim().is_empty())
         .map(|line| line.trim().chars().take(180).collect())
         .unwrap_or_else(|| "empty_turn_summary".to_string())
+}
+
+fn normalize_approval_note(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn sanitize_candidate_id(raw: &str) -> String {
