@@ -44,6 +44,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录和 stub provider，不触碰真实服务。
 - `sh scripts/chuang-second-test-smoke.sh`：第二测试版本验收入口，复用同一安全 smoke，但输出 `second_test_smoke_ok`。
 - `sh scripts/chuang-complete-local-smoke.sh`：完整本地可用闭环验收入口，串起第二测试 smoke、watchdog 一次性只读检查、本地诊断读面和飞书本地命令 smoke，最终输出 `complete_local_smoke_ok`。
+- `sh scripts/chuang-live-readiness-preflight.sh`：只读 live readiness 总入口，串起 provider fallback、Feishu live preflight、subagent live preflight、watchdog once、console snapshot 和 complete-local smoke，最终输出 `live_readiness_preflight_ok`。
 - `GenesisActuator`：新版网页 AI 查询插件线，旧 `BrowserWorker` 暂停推进。
 - `cargo test`：全量回归。
 

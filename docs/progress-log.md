@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 新增 live readiness 总入口 `scripts/chuang-live-readiness-preflight.sh`：它串起 provider fallback smoke、Feishu live preflight smoke、subagent live-preflight、watchdog once、console snapshot 和 complete-local smoke，输出 `live_readiness_preflight_ok`；仍全部只读、本地 fixture、本地 smoke，不连接真实 Feishu、不读真实 secret、不控制服务。
 - 2026-05-07 Worker J 本轮补真实外部 subagent runner 启用前 rehearsal：新增只读 `subagent live-preflight`，检查 `CHUANG_CODEX_RUNNER_ENABLE` live gate、runner command 显式 allowlist、required/worker capability routing、ReportAdmission 证据，以及 unscoped external worker pool、直接写核心记忆、登录态/session mutation 等 forbidden capability 是否仍拒绝。
 - 该 rehearsal 不 claim dispatch、不启动 runner、不写 report、不触碰服务；`ok=true` 表示只读合同检查通过，`ready_for_live=true` 还要求 live gate 已由操作员显式开启。
 - 2026-05-07 Worker F 本轮把 terminal watchdog 只读状态接入 `console snapshot`：console 现在默认读取 `/home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json`，JSON 输出 `terminal_watchdog` 摘要，文本输出显示 available/readonly/session/tmux/codex process/git dirty/next_action。
