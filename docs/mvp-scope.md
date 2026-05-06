@@ -58,6 +58,7 @@
 - `status --json` / `doctor --json` 的 `memory_readiness`：按内部记忆、历史会话、LIM、外脑知识库、自动维护闭环给出 `ready / partial / deferred / blocked` 和下一步动作。当前五层本地第二测试版边界为 `ready`，但这不代表真实 wiki/GBrain 已接通，也不代表自动维护会自行写长期记忆。
 - `status --json` / `doctor --json` 的 `channel_readiness`：按 app-server、channel simulate、Chuang 专用飞书桥、Codex/Hermes 隔离、rich messages 拆分状态。它只确认边界和脚本存在性，不代表真实飞书连接在线。
 - `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态，并显式区分 `local_contract_ready` 与 `live_adapter_ready`。当前 `queued_external` 里本地协议合同可验收，但真实外部 worker/live adapter 仍未接入，协议层也不是自动执行器。
+- `status --json` / `doctor --json` 的 `live_adapter_gates`：统一列出 live subagent runner、control apply、actuator operation 的启用门禁。默认全部关闭，必须分别设置 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1` 才视为 live enabled，并且仍需走 allowlist、审批和审计边界。
 - `data/skills/external_agent_dispatch_sop.md`：外部 AI 分身调度 Skill contract，定义平台选择、任务翻译、质量评级、追问上限、记忆写回和审计边界；它不是真实浏览器/HTTP adapter，不新增 core slot。
 - `data/skills/unified_identity_engine_adapter.md`：外部 AI 的 lower adapter contract，定义平台/session 复用、结构化输入输出、失败类和审计边界；它仍不是实际登录态执行器。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。
@@ -78,6 +79,7 @@
 - `cargo run -- subagent run-loop --runner command --runner-command PATH --approve-exec --max-runs N [--capability NAME]`：按队列批量处理匹配 worker 能力的 pending dispatch，并保留 claim/report 证据；超出 dispatch `idle_timeout_ms` 的 stale claim 可被重领。
 - `--context-max-tokens / --context-reserve-system-tokens / --context-min-working-tokens / --context-max-tool-results / --context-max-memory-segments`：可从 CLI 调整 context budget。
 - `ContextEngine` trait + `deterministic_budget` 默认实现：上下文策略已具备可替换接口。
+- `PackedContext` 会记录第一版确定性打包 trace：`normalize_tokens -> trim -> rank -> reserve_working -> merge_under_budget`，并通过统一 `render_prompt()` 暴露 dropped ids、drop reasons、budget diagnostics 和 trace，供 runtime/report/UI 复用。
 - `summary_compression` 非默认轻量压缩策略：会对长 memory / tool result 段做本地截断压缩，再交给同一预算 packer，用于验证配置切换面。
 - `GenesisActuator` trait + `AutoCliGenesisActuator` 最小实现：主通道 userDataDir，备用 CDP，登录态失效时 fallback，并返回需审批的修复计划，不自动删除 profile。
 - `cargo run -- genesis ask --prompt TEXT --approve-exec`：手动验证 Genesis 查询入口；真实外部程序执行必须显式审批，并输出治理决策与审计状态。

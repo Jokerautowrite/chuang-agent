@@ -1,6 +1,10 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 本轮按老爸选择推进后续清单第 3/4 项：新增 `src/live_adapter_gate.rs`，把 subagent runner、control apply、actuator operation 的 live adapter 启用门禁收成统一结构，默认全部 disabled，只认精确 env 值 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1`，并暴露 audit label。
+- `status` / `doctor` 现在新增 `live_adapter_gates` JSON 与文本输出，明确 gate_count、enabled/disabled 数量、required_env、audit_label 和 next_action；这只增加启用前门禁和诊断面，没有打开真实桌面、控制面或 live worker。
+- ContextEngine 第一版继续收口：`PackedContext` 现在记录 `normalize_tokens -> trim -> rank -> reserve_working -> merge_under_budget` 的 `trace`，并由 `PackedContext::render_prompt()` 统一渲染 prompt 诊断，runtime 不再保留私有重复渲染逻辑。
+- 已补 `tests/live_adapter_gate_tests.rs`、`context_engine_tests`、`kernel_status_tests`、`cli_status_tests`、`cli_doctor_tests` 回归；专项验证已通过 `cargo test -q --test live_adapter_gate_tests --test context_engine_tests` 与 `cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests`。
 - 2026-05-06 本轮把 Chuang Feishu `\/new` 从静态说明升级为真会话切换：bridge 现在会为当前 Feishu chat 创建新的 app-server thread，并把 chat->thread 绑定写到本地 session state 文件，后续同一 chat 的普通消息会路由到这个新 thread，不再沿用旧上下文。
 - 已新增 `scripts/chuang-feishu-session-store.js` 与 `scripts/chuang-feishu-session-smoke.js`，并把 session smoke 纳入 `scripts/chuang-mvp-smoke.sh`；验证通过 `node scripts/chuang-feishu-command-smoke.js`、`node scripts/chuang-feishu-session-smoke.js`、`cargo test -q --test cli_status_tests --test cli_doctor_tests --test kernel_status_tests`、`cargo test -q`、`sh scripts/chuang-second-test-smoke.sh`。
 - 2026-05-06 本轮继续推进 subagent readiness 可诊断性：`SubagentReadinessStatus` 和 `SubagentLayerStatus` 新增 `local_contract_reason` / `live_adapter_reason`，`status` / `doctor` 文本输出也会直接展示本地合同已 ready 与 live adapter 尚未接入的结构化原因，避免 UI 或值守脚本只能解析状态字符串。
