@@ -661,17 +661,27 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.channel_readiness.blocked_count
     );
     println!(
-        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} live_adapter_ready={} layers={} ready={} partial={} deferred={} blocked={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={}",
         doctor.status.subagent_readiness.ok,
         doctor.status.subagent_readiness.overall_state,
         doctor.status.subagent_readiness.mode,
         doctor.status.subagent_readiness.local_contract_ready,
+        doctor.status.subagent_readiness.local_contract_state,
         doctor.status.subagent_readiness.live_adapter_ready,
+        doctor.status.subagent_readiness.live_adapter_state,
         doctor.status.subagent_readiness.layer_count,
         doctor.status.subagent_readiness.ready_count,
         doctor.status.subagent_readiness.partial_count,
         doctor.status.subagent_readiness.deferred_count,
         doctor.status.subagent_readiness.blocked_count
+    );
+    println!(
+        "subagent_readiness_local_contract_reason: {}",
+        doctor.status.subagent_readiness.local_contract_reason
+    );
+    println!(
+        "subagent_readiness_live_adapter_reason: {}",
+        doctor.status.subagent_readiness.live_adapter_reason
     );
     println!(
         "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",

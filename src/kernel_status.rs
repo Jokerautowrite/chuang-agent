@@ -135,7 +135,11 @@ pub struct SubagentReadinessStatus {
     pub overall_state: String,
     pub mode: String,
     pub local_contract_ready: bool,
+    pub local_contract_state: String,
+    pub local_contract_reason: String,
     pub live_adapter_ready: bool,
+    pub live_adapter_state: String,
+    pub live_adapter_reason: String,
     pub layer_count: usize,
     pub ready_count: usize,
     pub partial_count: usize,
@@ -149,7 +153,11 @@ pub struct SubagentLayerStatus {
     pub name: String,
     pub state: String,
     pub local_contract_ready: bool,
+    pub local_contract_state: String,
+    pub local_contract_reason: String,
     pub live_adapter_ready: bool,
+    pub live_adapter_state: String,
+    pub live_adapter_reason: String,
     pub current: String,
     pub next_action: String,
     pub boundary: String,
@@ -717,6 +725,7 @@ fn build_subagent_readiness(
             &format!("subagent slot={} queue_root={}", slots.subagent, config.subagent_queue_root),
             "keep dispatch files as the durable handoff format before adding live workers",
             "slot",
+            "durable queue handoff is protocol-ready; live worker delivery is still deferred",
         ),
         subagent_layer(
             "report_collect",
@@ -726,6 +735,7 @@ fn build_subagent_readiness(
             "collect path validates dispatch identity before accepting reports",
             "keep ReportAdmission separate from immutable SubagentReport",
             "protocol",
+            "report admission is local-contract ready; live adapter collection is still deferred",
         ),
         subagent_layer(
             "command_runner",
@@ -735,6 +745,7 @@ fn build_subagent_readiness(
             "run-once/run-loop command runner is governed by explicit --approve-exec, capability matching, report admission, output bounds, and dispatch timeouts",
             "connect additional real runners through the same report-admission boundary",
             "adapter",
+            "local command-runner contract is ready; live runner adapters remain deferred until a real backend is connected",
         ),
         subagent_layer(
             "multi_worker",
@@ -744,6 +755,7 @@ fn build_subagent_readiness(
             "run-loop supports bounded local multi-worker batches through durable queue claims and existing runner governance",
             "keep live external worker pools behind audited adapters",
             "orchestration",
+            "bounded local multi-worker orchestration is ready; live external worker pools remain deferred",
         ),
         subagent_layer(
             "external_ai_downstream",
@@ -757,6 +769,7 @@ fn build_subagent_readiness(
             "external AI dispatch remains below subagents, with a dry-run unified-identity adapter contract available for review",
             "connect live agent-browser or HTTP sessions only through audited adapters",
             "adapter",
+            "dry-run downstream contract is ready; live external AI sessions remain deferred behind audited adapters",
         ),
     ];
 
@@ -780,15 +793,47 @@ fn build_subagent_readiness(
     } else {
         "ready"
     };
+    let local_contract_ready = layers
+        .iter()
+        .all(|layer| layer.local_contract_ready || layer.state == "deferred");
+    let local_contract_state = if local_contract_ready {
+        "ready"
+    } else if layers.iter().any(|layer| layer.state == "blocked") {
+        "blocked"
+    } else {
+        "partial"
+    };
+    let live_adapter_ready = layers.iter().all(|layer| layer.live_adapter_ready);
+    let live_adapter_state = if live_adapter_ready {
+        "ready"
+    } else if layers.iter().any(|layer| layer.state == "blocked") {
+        "blocked"
+    } else {
+        "partial"
+    };
 
     SubagentReadinessStatus {
         ok: blocked_count == 0,
         overall_state: overall_state.to_string(),
         mode: slots.subagent.clone(),
-        local_contract_ready: layers
-            .iter()
-            .all(|layer| layer.local_contract_ready || layer.state == "deferred"),
-        live_adapter_ready: layers.iter().all(|layer| layer.live_adapter_ready),
+        local_contract_ready,
+        local_contract_state: local_contract_state.to_string(),
+        local_contract_reason: if local_contract_ready {
+            "dispatch queue, report collect, command runner, and multi-worker orchestration are protocol-ready".to_string()
+        } else if layers.iter().any(|layer| layer.state == "blocked") {
+            "one or more local subagent contract layers are blocked".to_string()
+        } else {
+            "one or more local subagent contract layers are still deferred".to_string()
+        },
+        live_adapter_ready,
+        live_adapter_state: live_adapter_state.to_string(),
+        live_adapter_reason: if live_adapter_ready {
+            "all subagent layers have live adapters".to_string()
+        } else if layers.iter().any(|layer| layer.state == "blocked") {
+            "one or more live subagent adapters are blocked".to_string()
+        } else {
+            "live adapters are not yet connected for the subagent layers".to_string()
+        },
         layer_count: layers.len(),
         ready_count,
         partial_count,
@@ -806,12 +851,43 @@ fn subagent_layer(
     current: &str,
     next_action: &str,
     boundary: &str,
+    live_adapter_reason: &str,
 ) -> SubagentLayerStatus {
+    let local_contract_state = if local_contract_ready {
+        "ready"
+    } else if state == "blocked" {
+        "blocked"
+    } else if state == "partial" {
+        "partial"
+    } else {
+        "deferred"
+    };
+    let live_adapter_state = if live_adapter_ready {
+        "ready"
+    } else if state == "blocked" {
+        "blocked"
+    } else if state == "partial" {
+        "partial"
+    } else {
+        "deferred"
+    };
     SubagentLayerStatus {
         name: name.to_string(),
         state: state.to_string(),
         local_contract_ready,
+        local_contract_state: local_contract_state.to_string(),
+        local_contract_reason: if local_contract_ready {
+            format!("{name} local contract is protocol-ready")
+        } else if state == "blocked" {
+            format!("{name} local contract is blocked")
+        } else if state == "partial" {
+            format!("{name} local contract is partially ready")
+        } else {
+            format!("{name} local contract is deferred")
+        },
         live_adapter_ready,
+        live_adapter_state: live_adapter_state.to_string(),
+        live_adapter_reason: live_adapter_reason.to_string(),
         current: current.to_string(),
         next_action: next_action.to_string(),
         boundary: boundary.to_string(),

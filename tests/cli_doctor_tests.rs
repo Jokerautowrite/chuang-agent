@@ -99,8 +99,10 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains(
-        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true live_adapter_ready=false"
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
+    assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
+    assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
@@ -321,16 +323,33 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         parsed["status"]["subagent_readiness"]["local_contract_ready"],
         true
     );
+    assert!(
+        parsed["status"]["subagent_readiness"]["local_contract_reason"]
+            .as_str()
+            .expect("subagent local contract reason")
+            .contains("protocol-ready")
+    );
     assert_eq!(
         parsed["status"]["subagent_readiness"]["live_adapter_ready"],
         false
+    );
+    assert!(
+        parsed["status"]["subagent_readiness"]["live_adapter_reason"]
+            .as_str()
+            .expect("subagent live adapter reason")
+            .contains("not yet connected")
     );
     assert_eq!(parsed["status"]["subagent_readiness"]["layer_count"], 5);
     assert!(parsed["status"]["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers array")
         .iter()
-        .any(|layer| layer["name"] == "multi_worker" && layer["state"] == "ready"));
+        .any(|layer| layer["name"] == "multi_worker"
+            && layer["state"] == "ready"
+            && layer["live_adapter_reason"]
+                .as_str()
+                .expect("multi-worker live adapter reason")
+                .contains("external worker pools remain deferred")));
     assert!(parsed["status"]["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers array")

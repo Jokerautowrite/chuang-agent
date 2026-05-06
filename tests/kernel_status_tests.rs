@@ -201,7 +201,17 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     );
     assert_eq!(status.subagent_readiness.mode, "fake");
     assert!(status.subagent_readiness.local_contract_ready);
+    assert_eq!(status.subagent_readiness.local_contract_state, "ready");
+    assert!(status
+        .subagent_readiness
+        .local_contract_reason
+        .contains("protocol-ready"));
     assert!(!status.subagent_readiness.live_adapter_ready);
+    assert_eq!(status.subagent_readiness.live_adapter_state, "partial");
+    assert!(status
+        .subagent_readiness
+        .live_adapter_reason
+        .contains("not yet connected"));
     assert!(status
         .subagent_readiness
         .layers
@@ -209,12 +219,21 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|layer| layer.name == "command_runner"
             && layer.state == "ready"
             && layer.local_contract_ready
-            && !layer.live_adapter_ready));
+            && layer.local_contract_state == "ready"
+            && layer.local_contract_reason.contains("protocol-ready")
+            && !layer.live_adapter_ready
+            && layer.live_adapter_state == "deferred"
+            && layer
+                .live_adapter_reason
+                .contains("live runner adapters remain deferred")));
     assert!(status
         .subagent_readiness
         .layers
         .iter()
-        .any(|layer| layer.name == "multi_worker" && layer.state == "ready"));
+        .any(|layer| layer.name == "multi_worker"
+            && layer.state == "ready"
+            && layer.local_contract_state == "ready"
+            && layer.live_adapter_state == "deferred"));
     assert!(status.external_ai_readiness.ok);
     assert_eq!(status.external_ai_readiness.overall_state, "ready");
     assert!(status

@@ -330,26 +330,40 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
-        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} live_adapter_ready={} layers={} ready={} partial={} deferred={} blocked={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={}",
         status.subagent_readiness.ok,
         status.subagent_readiness.overall_state,
         status.subagent_readiness.mode,
         status.subagent_readiness.local_contract_ready,
+        status.subagent_readiness.local_contract_state,
         status.subagent_readiness.live_adapter_ready,
+        status.subagent_readiness.live_adapter_state,
         status.subagent_readiness.layer_count,
         status.subagent_readiness.ready_count,
         status.subagent_readiness.partial_count,
         status.subagent_readiness.deferred_count,
         status.subagent_readiness.blocked_count
     );
+    println!(
+        "subagent_readiness_local_contract_reason: {}",
+        status.subagent_readiness.local_contract_reason
+    );
+    println!(
+        "subagent_readiness_live_adapter_reason: {}",
+        status.subagent_readiness.live_adapter_reason
+    );
     for layer in &status.subagent_readiness.layers {
         println!(
-            "subagent_layer name={} state={} local_contract_ready={} live_adapter_ready={} boundary={} next={}",
+            "subagent_layer name={} state={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} boundary={} local_contract_reason={} live_adapter_reason={} next={}",
             layer.name,
             layer.state,
             layer.local_contract_ready,
+            layer.local_contract_state,
             layer.live_adapter_ready,
+            layer.live_adapter_state,
             layer.boundary,
+            layer.local_contract_reason,
+            layer.live_adapter_reason,
             layer.next_action
         );
     }

@@ -132,11 +132,14 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("channel_layer name=app_server state=ready"));
     assert!(stdout.contains("channel_layer name=dedicated_feishu_bridge state=ready"));
     assert!(stdout.contains(
-        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true live_adapter_ready=false"
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
+    assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
+    assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains(
-        "subagent_layer name=command_runner state=ready local_contract_ready=true live_adapter_ready=false"
+        "subagent_layer name=command_runner state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred"
     ));
+    assert!(stdout.contains("live_adapter_reason=local command-runner contract is ready"));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
@@ -384,7 +387,15 @@ fn cli_status_can_render_json_without_secret_leak() {
         "queued_protocol_partial"
     );
     assert_eq!(parsed["subagent_readiness"]["local_contract_ready"], true);
+    assert!(parsed["subagent_readiness"]["local_contract_reason"]
+        .as_str()
+        .expect("subagent local contract reason should be a string")
+        .contains("protocol-ready"));
     assert_eq!(parsed["subagent_readiness"]["live_adapter_ready"], false);
+    assert!(parsed["subagent_readiness"]["live_adapter_reason"]
+        .as_str()
+        .expect("subagent live adapter reason should be a string")
+        .contains("not yet connected"));
     assert_eq!(parsed["subagent_readiness"]["layer_count"], 5);
     assert!(parsed["subagent_readiness"]["layers"]
         .as_array()
@@ -393,7 +404,20 @@ fn cli_status_can_render_json_without_secret_leak() {
         .any(|layer| layer["name"] == "external_ai_downstream"
             && layer["state"] == "ready"
             && layer["local_contract_ready"] == true
+            && layer["local_contract_reason"]
+                .as_str()
+                .expect("layer local contract reason should be a string")
+                .contains("protocol-ready")
             && layer["live_adapter_ready"] == false));
+    assert!(parsed["subagent_readiness"]["layers"]
+        .as_array()
+        .expect("subagent layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "command_runner"
+            && layer["live_adapter_reason"]
+                .as_str()
+                .expect("layer live adapter reason should be a string")
+                .contains("live runner adapters remain deferred")));
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);
