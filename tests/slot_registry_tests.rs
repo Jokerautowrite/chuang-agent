@@ -1,5 +1,7 @@
-use std::net::TcpListener;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
+use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::actuator::{Actuator, ObserveTarget};
@@ -29,6 +31,30 @@ fn temp_queue_root(name: &str) -> PathBuf {
         .expect("clock should be valid")
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-agent-slot-registry-{name}-{nanos}"))
+}
+
+fn spawn_provider_error_server(
+    status_line: &'static str,
+    body: &'static str,
+) -> (SocketAddr, JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        let response = format!(
+            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+    (address, server)
 }
 
 #[test]
@@ -242,6 +268,143 @@ fn slot_registry_provider_fallback_uses_secondary_on_primary_error() {
             .get("provider_fallback_primary_error_class")
             .map(String::as_str),
         Some("transport")
+    );
+}
+
+#[test]
+fn slot_registry_marks_unconfigured_fallback_on_model_capacity_error() {
+    let (address, server) = spawn_provider_error_server(
+        "429 Too Many Requests",
+        r#"{"error":{"message":"Selected model is at capacity"}}"#,
+    );
+
+    let provider =
+        build_provider_responder(&ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "primary-openai".to_string(),
+            base_url: format!("http://{address}/v1"),
+            api_key: "test-key".to_string(),
+            model_name: "primary-model".to_string(),
+            transport: ProviderTransport::Http,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
+        }))
+        .expect("provider should build");
+
+    let output = provider.generate(&ResponderRequest {
+        prompt: "prompt".to_string(),
+        user_input: "capacity smoke".to_string(),
+        recall_hit_count: 0,
+    });
+    server.join().expect("server thread should finish");
+
+    assert_eq!(output.model_name, "primary-model");
+    assert!(output.body.contains("PROVIDER_HTTP_ERROR"));
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_configured")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("model_capacity")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("capacity")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_retryable")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[test]
+fn slot_registry_provider_fallback_preserves_primary_capacity_reason() {
+    let (address, server) = spawn_provider_error_server(
+        "429 Too Many Requests",
+        r#"{"error":{"message":"Selected model is at capacity"}}"#,
+    );
+
+    let provider = build_provider_responder(&ProviderConfig::Fallback {
+        primary: Box::new(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
+            provider_id: "primary-openai".to_string(),
+            base_url: format!("http://{address}/v1"),
+            api_key: "test-key".to_string(),
+            model_name: "primary-model".to_string(),
+            transport: ProviderTransport::Http,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
+        })),
+        fallback: Box::new(ProviderConfig::Fake {
+            provider_id: "fallback-fake".to_string(),
+            model_name: "fallback-model".to_string(),
+        }),
+        policy: ProviderFallbackPolicy::default(),
+    })
+    .expect("fallback provider should build");
+
+    let output = provider.generate(&ResponderRequest {
+        prompt: "prompt".to_string(),
+        user_input: "capacity fallback smoke".to_string(),
+        recall_hit_count: 0,
+    });
+    server.join().expect("server thread should finish");
+
+    assert_eq!(output.model_name, "fallback-model");
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_configured")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_primary_failure_reason_code")
+            .map(String::as_str),
+        Some("model_capacity")
+    );
+    assert_eq!(
+        output
+            .meta
+            .extra
+            .get("provider_fallback_primary_failure_category")
+            .map(String::as_str),
+        Some("capacity")
     );
 }
 

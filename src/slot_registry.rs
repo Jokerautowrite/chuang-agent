@@ -290,8 +290,16 @@ impl ControlPlaneSlot {
 impl Responder for ProviderSlot {
     fn generate(&self, request: &ResponderRequest) -> ResponderOutput {
         match self {
-            Self::Fake(responder) => responder.generate(request),
-            Self::OpenAICompatible(responder) => responder.generate(request),
+            Self::Fake(responder) => {
+                let mut output = responder.generate(request);
+                mark_provider_fallback_unconfigured(&mut output);
+                output
+            }
+            Self::OpenAICompatible(responder) => {
+                let mut output = responder.generate(request);
+                mark_provider_fallback_unconfigured(&mut output);
+                output
+            }
             Self::Fallback {
                 primary,
                 fallback,
@@ -299,6 +307,10 @@ impl Responder for ProviderSlot {
             } => {
                 let mut primary_output = primary.generate(request);
                 if !provider_output_should_fallback(&primary_output, policy) {
+                    primary_output.meta.extra.insert(
+                        "provider_fallback_configured".to_string(),
+                        "true".to_string(),
+                    );
                     primary_output
                         .meta
                         .extra
@@ -307,6 +319,10 @@ impl Responder for ProviderSlot {
                 }
 
                 let mut fallback_output = fallback.generate(request);
+                fallback_output.meta.extra.insert(
+                    "provider_fallback_configured".to_string(),
+                    "true".to_string(),
+                );
                 fallback_output
                     .meta
                     .extra
@@ -344,6 +360,22 @@ impl Responder for ProviderSlot {
                         error_class.clone(),
                     );
                 }
+                if let Some(reason_code) = primary_output
+                    .meta
+                    .extra
+                    .get("provider_failure_reason_code")
+                {
+                    fallback_output.meta.extra.insert(
+                        "provider_fallback_primary_failure_reason_code".to_string(),
+                        reason_code.clone(),
+                    );
+                }
+                if let Some(category) = primary_output.meta.extra.get("provider_failure_category") {
+                    fallback_output.meta.extra.insert(
+                        "provider_fallback_primary_failure_category".to_string(),
+                        category.clone(),
+                    );
+                }
                 fallback_output.trace = format!(
                     "{} fallback_from_trace=({})",
                     fallback_output.trace, primary_output.trace
@@ -369,6 +401,19 @@ impl Responder for ProviderSlot {
             }
         }
     }
+}
+
+fn mark_provider_fallback_unconfigured(output: &mut ResponderOutput) {
+    output
+        .meta
+        .extra
+        .entry("provider_fallback_configured".to_string())
+        .or_insert_with(|| "false".to_string());
+    output
+        .meta
+        .extra
+        .entry("provider_fallback_used".to_string())
+        .or_insert_with(|| "false".to_string());
 }
 
 fn provider_output_should_fallback(

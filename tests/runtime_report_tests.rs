@@ -394,6 +394,10 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
         "status_code=429".to_string(),
     );
     extra.insert(
+        "provider_fallback_configured".to_string(),
+        "true".to_string(),
+    );
+    extra.insert(
         "provider_fallback_primary_retryable".to_string(),
         "true".to_string(),
     );
@@ -404,6 +408,14 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     extra.insert(
         "provider_fallback_primary_error_class".to_string(),
         "http_status".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_failure_reason_code".to_string(),
+        "model_capacity".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_failure_category".to_string(),
+        "capacity".to_string(),
     );
 
     let result = chuang_agent::agent_runtime::RuntimeResult {
@@ -435,6 +447,10 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
 
     let observability = runtime_observability_meta(&result);
     assert_eq!(
+        observability.get("provider_fallback_configured"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
         observability.get("provider_fallback_used"),
         Some(&"true".to_string())
     );
@@ -457,6 +473,14 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     assert_eq!(
         observability.get("provider_fallback_primary_error_class"),
         Some(&"http_status".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_failure_reason_code"),
+        Some(&"model_capacity".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_failure_category"),
+        Some(&"capacity".to_string())
     );
 }
 

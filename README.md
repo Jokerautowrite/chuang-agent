@@ -45,7 +45,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `GenesisActuator`：新版网页 AI 查询插件线，旧 `BrowserWorker` 暂停推进。
 - `cargo test`：全量回归。
 
-当前 MVP 边界见 `docs/mvp-scope.md`，就绪状态见 `docs/mvp-readiness-2026-05-02.md`，核心边界见 `docs/core-boundary.md`，app-server 服务说明见 `docs/app-server-service.md`，channel adapter 协议见 `docs/channel-adapter-protocol.md`，子代理 runner 协议见 `docs/subagent-runner-protocol.md`，新飞书通道检查清单见 `docs/feishu-dedicated-channel-checklist.md`，command 控制面协议见 `docs/control-command-protocol.md`，command 操作面协议见 `docs/actuator-command-protocol.md`，真实控制适配器安全计划见 `docs/real-control-adapter-safety-plan.md`，长期进度见 `docs/progress-log.md`。
+当前 MVP 边界见 `docs/mvp-scope.md`，就绪状态见 `docs/mvp-readiness-2026-05-02.md`，核心边界见 `docs/core-boundary.md`，provider fallback 诊断见 `docs/provider-fallback-diagnostics.md`，app-server 服务说明见 `docs/app-server-service.md`，channel adapter 协议见 `docs/channel-adapter-protocol.md`，子代理 runner 协议见 `docs/subagent-runner-protocol.md`，新飞书通道检查清单见 `docs/feishu-dedicated-channel-checklist.md`，command 控制面协议见 `docs/control-command-protocol.md`，command 操作面协议见 `docs/actuator-command-protocol.md`，真实控制适配器安全计划见 `docs/real-control-adapter-safety-plan.md`，长期进度见 `docs/progress-log.md`。
 
 ## 目录约定
 

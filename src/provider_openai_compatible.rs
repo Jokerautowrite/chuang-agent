@@ -626,7 +626,13 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                             let mut meta = build_success_meta(&call);
                             meta.insert("provider_response_ok".to_string(), "false".to_string());
                             meta.insert("provider_error_class".to_string(), "http_status".to_string());
-                            meta.insert("provider_error_message".to_string(), error_message);
+                            meta.insert("provider_error_message".to_string(), error_message.clone());
+                            insert_provider_failure_meta(
+                                &mut meta,
+                                Some(status_code),
+                                "http_status",
+                                Some(&error_message),
+                            );
                             meta
                         },
                     };
@@ -651,6 +657,12 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                         "missing assistant content in successful provider response".to_string(),
                     );
                     extra_meta.insert("provider_retryable".to_string(), "false".to_string());
+                    insert_provider_failure_meta(
+                        &mut extra_meta,
+                        Some(call.status_code()),
+                        "missing_content",
+                        Some("missing assistant content in successful provider response"),
+                    );
                     format!(
                         "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
                         self.identity.provider_id,
@@ -915,7 +927,63 @@ fn build_config_error_meta(
         );
     }
 
+    insert_provider_failure_meta(&mut meta, None, error_class, Some(&error.message));
+
     meta
+}
+
+fn insert_provider_failure_meta(
+    meta: &mut BTreeMap<String, String>,
+    status_code: Option<u16>,
+    error_class: &str,
+    error_message: Option<&str>,
+) {
+    let (reason_code, category) = provider_failure_reason(status_code, error_class, error_message);
+    meta.insert(
+        "provider_failure_reason_code".to_string(),
+        reason_code.to_string(),
+    );
+    meta.insert(
+        "provider_failure_category".to_string(),
+        category.to_string(),
+    );
+}
+
+fn provider_failure_reason(
+    status_code: Option<u16>,
+    error_class: &str,
+    error_message: Option<&str>,
+) -> (&'static str, &'static str) {
+    let message = error_message.unwrap_or("").to_ascii_lowercase();
+    if message.contains("capacity") || message.contains("overloaded") {
+        return ("model_capacity", "capacity");
+    }
+    if message.contains("rate limit") || message.contains("rate_limit") {
+        return ("rate_limited", "rate_limit");
+    }
+    if message.contains("quota") || message.contains("billing") {
+        return ("quota_or_billing", "quota");
+    }
+
+    if let Some(status_code) = status_code {
+        return match status_code {
+            401 => ("auth_failed", "auth"),
+            402 => ("quota_or_billing", "quota"),
+            403 => ("permission_denied", "auth"),
+            408 | 429 => ("rate_limited", "rate_limit"),
+            500..=599 => ("upstream_unavailable", "upstream"),
+            _ => ("http_status_error", "http_status"),
+        };
+    }
+
+    match error_class {
+        "transport" => ("transport_failure", "transport"),
+        "tls" => ("tls_failure", "transport"),
+        "protocol" => ("provider_protocol_failure", "protocol"),
+        "config" => ("provider_config_invalid", "config"),
+        "missing_content" => ("missing_content", "response"),
+        _ => ("provider_failure_unknown", "unknown"),
+    }
 }
 
 fn provider_error_class(error: &ProviderConfigError) -> &'static str {

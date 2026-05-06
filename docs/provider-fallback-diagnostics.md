@@ -1,0 +1,43 @@
+# Provider Fallback Diagnostics
+
+Chuang provider fallback is explicit only. A fallback provider runs only when configuration declares `fallback_provider` or `[fallback.provider]`; otherwise provider failures are returned as diagnosable runtime output and are not silently rerouted.
+
+## Runtime Fields
+
+Provider failures expose stable metadata:
+
+- `provider_retryable`: whether the primary failure is retryable.
+- `provider_error_class`: coarse source such as `http_status`, `transport`, `tls`, `protocol`, `config`, or `missing_content`.
+- `provider_failure_reason_code`: stable reason such as `model_capacity`, `rate_limited`, `quota_or_billing`, `auth_failed`, `upstream_unavailable`, or `transport_failure`.
+- `provider_failure_category`: broader group such as `capacity`, `rate_limit`, `quota`, `auth`, `upstream`, `transport`, `protocol`, `config`, or `response`.
+- `provider_fallback_configured`: `true` only when fallback was explicitly configured.
+- `provider_fallback_used`: `true` only when the fallback provider actually answered this turn.
+
+When fallback is used, the fallback response also preserves primary failure context:
+
+- `provider_fallback_from`
+- `provider_fallback_reason`
+- `provider_fallback_primary_retryable`
+- `provider_fallback_primary_status_code`
+- `provider_fallback_primary_error_class`
+- `provider_fallback_primary_failure_reason_code`
+- `provider_fallback_primary_failure_category`
+
+## Capacity Boundary
+
+Upstream messages like `Selected model is at capacity` are classified as:
+
+```text
+provider_failure_reason_code=model_capacity
+provider_failure_category=capacity
+provider_retryable=true
+```
+
+If no fallback is configured, the same turn must also say:
+
+```text
+provider_fallback_configured=false
+provider_fallback_used=false
+```
+
+That is the intentional boundary: visible failure, no silent fallback.
