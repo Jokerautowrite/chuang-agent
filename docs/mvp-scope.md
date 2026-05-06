@@ -32,7 +32,7 @@
 - `cargo run -- memory session search --query TEXT [--session-id ID] [--limit N]`：只读检索历史 `turn_summary`；带 `--session-id` 时按会话隔离过滤。
 - `cargo run -- memory lim extract --query TEXT [--session-id ID] [--limit N]`：只读生成 LIM 候选经验，带 provenance，不自动写回。
 - `cargo run -- memory maintenance report --query TEXT [--session-id ID] [--limit N]`：只读生成维护报告，复用 session search 和 LIM extract，输出健康状态、候选和建议，不自动写回。
-- `cargo run -- memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback]`：在人工确认后把 LIM 候选写回 `experiences.md`，默认幂等跳过重复候选，不自动维护。
+- `cargo run -- memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] (--dry-run|--approve-writeback) [--approval-note TEXT]`：先 dry-run 预览候选；人工确认后把 LIM 候选写回 `experiences.md`，输出 approval receipt，并在写入内容里保留 provenance。默认幂等跳过重复候选，不自动维护。
 - `cargo run -- memory knowledge search --root PATH --query TEXT [--limit N]`：只读检索本地 markdown/text 外脑目录，输出 provenance hit，不连接真实 wiki/GBrain，不写核心记忆，不注入 runtime。
 - `cargo run -- run --input TEXT --remember-identity`：运行后追加写入 Hermes 风格 `MEMORY.md` 热记忆。
 - `cargo run -- run --input TEXT --remember-experience`：显式把本轮结果按 provenance 写入 `experiences.md`，用于内部经验层沉淀；默认运行不自动写经验。
@@ -44,7 +44,7 @@
 - `identity/SOUL.md`、`identity/STORY.md`、`identity/FIRST_WAKE.md`、`identity/agents.toml`：最小身份启动层，启动时作为冻结 identity context 注入。
 - `rules/core.md`：治理层 Markdown 规则；slot 构建时加载，治理决策 reason 会带规则指纹，便于追溯。
 - `--provider-transport stub|http|native|curl`：OpenAI-compatible provider 的当前接入形态；`native` 已支持 `https://` 目标。
-- 显式 provider fallback：配置 `fallback_*` 字段后，组合层可在主 provider 结构化失败时切备用 provider；未配置时不会 silent fallback。
+- 显式 provider fallback：配置 `fallback_*` 字段后，组合层可在主 provider 结构化失败时切备用 provider；未配置时不会 silent fallback，并会输出 `provider_fallback_configured=false` / `provider_fallback_used=false` 以及稳定失败原因码。
 - `cargo run -- app-server`：JSON-RPC 式应用入口，会读取 workspace `config.toml`，并用 thread id 写会话记忆；后续新飞书机器人可接这个入口或独立 channel adapter。
 - `cargo run -- app-server health --workspace-root PATH --json`：只读健康检查 workspace runtime 配置，不发起模型请求。
 - `cargo run -- channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT`：本地演练外部消息通道，读取 workspace 配置并返回 `ChannelOutboundMessage`。

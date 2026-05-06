@@ -1,6 +1,17 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 Worker D 本轮补 Chuang 专用 Feishu 通道真实使用面：bridge 新增 `/session` 与 `/health`/`/status` 本地命令，分别查看 chat->thread 绑定和 bridge/app-server/workspace/env/provider-env 诊断；命令只读本地状态，不连接真实飞书、不打印 secret。
+- 本轮继续补强 `/session` 和 `/health` 的可读诊断：`/session` 现在明确显示当前飞书聊天是否已绑定，`/health` 在未绑定时显示默认 thread、在已绑定时显示 chat binding，并把 provider env 拆成 `CHUANG_PROVIDER_ENV_FILE=<set|missing>` 与 `CODEX_PPTOKEN_API_KEY=<set|missing>`；command event log 也会带 thread id，便于排查真实聊天路由。
+- 本轮 Feishu/channel 验证已通过 `node --check scripts/chuang-feishu-bridge.js`、`node scripts/chuang-feishu-command-smoke.js`、`node scripts/chuang-feishu-session-smoke.js`、`node scripts/chuang-feishu-rich-message-smoke.js`、`cargo test -q --test cli_channel_tests`、`git diff --check`。
+- `/new` 的 `thread/start` 失败和普通消息 `turn/start` 失败现在会回复脱敏错误卡片，给出失败阶段和下一步 `/health`/`/new` 建议，避免真实飞书用户只看到无响应；富消息卡片补 Feishu message id 字段，用于和 runtime report id、bridge 事件日志对齐。
+- `channel feishu-check` 新增 `diagnostic_status`、`diagnostic_summary`、`next_actions`，本地 preflight 能结构化提示缺失 Chuang env、误用 legacy/Codex/Hermes env、workspace/config/mode 问题；验证通过 `node scripts/chuang-feishu-command-smoke.js`、`node scripts/chuang-feishu-rich-message-smoke.js`、`node --check scripts/chuang-feishu-bridge.js`、`cargo test -q --test cli_channel_tests`、`cargo fmt --all --check`、`git diff --check`。
+- 2026-05-07 Worker B 继续推进 memory maintenance 人工批准写回闭环：`memory maintenance apply` 现在会输出结构化 `approval` 回执和 `selected_candidates`，`apply --dry-run` 仍只预览不写，真实写回仍必须显式 `--approve-writeback`，且 `writes_automatically=false` 保持不变。
+- 经批准写入 `experiences.md` 的 LIM 候选现在会附带 `writeback=memory_maintenance_apply`、批准来源、批准时间、可选 `approval_note` 和 `provenance_preserved=true`，并保留原始 `source=lim_dry_run / source_record_id / created_at / lesson` provenance；decay 候选仍不是写回候选。
+- 2026-05-07 Worker A 本轮补 provider/model 满载与 fallback 诊断边界：OpenAI-compatible provider 失败会输出稳定 `provider_failure_reason_code` / `provider_failure_category`，`Selected model is at capacity` 归类为 `model_capacity/capacity`；无 fallback 配置时显式标记 `provider_fallback_configured=false`、`provider_fallback_used=false`，避免 silent fallback。
+- 显式 fallback 使用时，fallback 响应会保留 primary 的 retryable、status/error_class 以及 failure reason/category；runtime observability 已提升这些字段，新增 `docs/provider-fallback-diagnostics.md` 记录边界和字段。
+- 2026-05-07 Worker C 本轮补齐 live adapter 启用前审计面：`LiveAdapterGate` 现在区分 `env_value_state`，并为 subagent runner、control apply、actuator operation 固定输出 `preflight_checks`、`must_reject_capabilities` 和 `next_action`。这只是 preflight/audit/diagnostic，不打开真实桌面、真实服务控制或真实外部 worker。
+- `status` / `doctor` 文本和 JSON 会直接暴露每个 live gate 的 env/gate 状态、审计标签、仍必须拒绝的能力和下一步动作；即使 env 被设为 `1`，仍必须走 allowlist、治理审批和审计 receipt，且任意服务控制、Codex/Hermes 控制、删除、直接写核心记忆、登录态/验证码等能力仍拒绝。
 - 2026-05-07 本轮把终端 worker watchdog 从纯文本日志推进到只读结构化状态快照：`scripts/chuang-goal-watchdog.sh` 现在每轮写 `latest-watchdog-report.json`，同时维护 pane/process/git 的最新文件路径与摘要，报告里给出 `takeover.next_action`，方便主控判断 attach、review diff 或继续观察。
 - 新增 watchdog `--once` / `WATCHDOG_ONCE=1` 一次性模式，专门用于人工接管检查、smoke 和未来只读控制台读取；报告明确声明 `readonly=true`，并把 `dispatches_tasks / modifies_repo / restarts_worker / touches_services` 全部标为 `false`，没有增加飞书命令层、常驻服务、自动修复或自动重启。
 - 已补 `tests/cli_smoke_tests.rs` 回归锁定一次性 watchdog 会生成有效 JSON 状态报告，并验证只读边界字段；已通过 `bash -n scripts/chuang-goal-watchdog.sh`、手动 `--once` JSON 解析、`cargo fmt --all --check`、`cargo test -q --test cli_smoke_tests`、`git diff --check`、`sh scripts/chuang-second-test-smoke.sh`。
