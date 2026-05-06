@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chuang_agent::hermes_memory::{
     DualFileMemoryError, DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry,
@@ -169,22 +169,28 @@ fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
 
 fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
     let request = parse_memory_maintenance_report(args)?;
-    let context = build_memory_maintenance_context(
+    let plan = build_memory_maintenance_plan(
         &request.runtime_args,
-        &request.query,
+        &request.queries,
         request.session_id.as_deref(),
         request.limit,
     )?;
     let output = MemoryMaintenanceReportOutput {
         dry_run: true,
         writes_automatically: false,
-        query: request.query,
+        explicit_writeback_required: true,
+        query: request.queries.first().cloned().unwrap_or_default(),
+        queries: request.queries,
         session_id: request.session_id,
         limit: request.limit,
-        identity_health: context.identity_health,
-        lim_candidate_count: context.lim_candidates.len(),
-        lim_candidates: context.lim_candidates,
-        recommendations: context.recommendations,
+        identity_health: plan.identity_health,
+        batch_count: plan.batches.len(),
+        batches: plan.batches.clone(),
+        lim_candidate_count: plan.lim_candidate_count,
+        lim_candidates: plan.lim_candidates,
+        decay_candidate_count: plan.decay_candidate_count,
+        decay_candidates: plan.decay_candidates,
+        recommendations: plan.recommendations,
     };
 
     match request.output {
@@ -194,6 +200,12 @@ fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
                 output.query,
                 output.session_id.as_deref().unwrap_or("any"),
                 output.lim_candidate_count
+            );
+            println!(
+                "maintenance_boundary explicit_writeback_required={} batch_count={} decay_candidates={}",
+                output.explicit_writeback_required,
+                output.batch_count,
+                output.decay_candidate_count
             );
             println!(
                 "identity_health root={} user={}/{} memory={}/{} experiences_chars={}",
@@ -213,6 +225,12 @@ fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
                     candidate.candidate_id, candidate.source_record_id, candidate.confidence
                 );
             }
+            for candidate in &output.decay_candidates {
+                println!(
+                    "decay_candidate id={} source_scope={} reason={}",
+                    candidate.candidate_id, candidate.source_scope, candidate.reason_code
+                );
+            }
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
@@ -222,19 +240,23 @@ fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
 
 fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
     let request = parse_memory_maintenance_apply(args)?;
-    if !request.approve_writeback {
+    if request.dry_run && request.approve_writeback {
+        return Err(
+            "memory_maintenance_apply_dry_run_conflicts_with_approve_writeback".to_string(),
+        );
+    }
+    if !request.dry_run && !request.approve_writeback {
         return Err("memory_maintenance_apply_requires_approve_writeback".to_string());
     }
 
-    let context = build_memory_maintenance_context(
+    let plan = build_memory_maintenance_plan(
         &request.runtime_args,
-        &request.query,
+        &request.queries,
         request.session_id.as_deref(),
         request.limit,
     )?;
     let selected_candidate_ids = if request.candidate_ids.is_empty() {
-        context
-            .lim_candidates
+        plan.lim_candidates
             .iter()
             .map(|candidate| candidate.candidate_id.clone())
             .collect::<Vec<_>>()
@@ -242,48 +264,82 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         request.candidate_ids.clone()
     };
 
-    let mut store = open_identity_memory_store(&request.runtime_args)?;
-    let mut applied_candidate_ids = Vec::new();
-    let mut skipped_candidate_ids = Vec::new();
-    for candidate_id in &selected_candidate_ids {
-        let candidate = context
+    let mut unique_selected_candidate_ids = Vec::new();
+    let mut seen = BTreeSet::new();
+    for candidate_id in selected_candidate_ids {
+        if seen.insert(candidate_id.clone()) {
+            unique_selected_candidate_ids.push(candidate_id);
+        }
+    }
+
+    let mut selected_candidates = Vec::new();
+    for candidate_id in &unique_selected_candidate_ids {
+        let candidate = plan
             .lim_candidates
             .iter()
-            .find(|candidate| candidate.candidate_id == *candidate_id)
-            .ok_or_else(|| {
-                format!("memory_maintenance_apply_unknown_candidate_id: {candidate_id}")
-            })?;
-        match store.append_experience(HotMemoryEntry {
-            id: candidate.candidate_id.clone(),
-            content: candidate.content.clone(),
-        }) {
-            Ok(()) => applied_candidate_ids.push(candidate.candidate_id.clone()),
-            Err(DualFileMemoryError::DuplicateEntry { .. }) => {
-                skipped_candidate_ids.push(candidate.candidate_id.clone());
+            .find(|candidate| candidate.candidate_id == *candidate_id);
+        if let Some(candidate) = candidate {
+            selected_candidates.push(candidate.clone());
+            continue;
+        }
+        if plan
+            .decay_candidates
+            .iter()
+            .any(|candidate| candidate.candidate_id == *candidate_id)
+        {
+            return Err(format!(
+                "memory_maintenance_apply_candidate_not_writeback_candidate: {candidate_id}"
+            ));
+        }
+        return Err(format!(
+            "memory_maintenance_apply_unknown_candidate_id: {candidate_id}"
+        ));
+    }
+
+    let mut applied_candidate_ids = Vec::new();
+    let mut skipped_candidate_ids = Vec::new();
+    if request.approve_writeback {
+        let mut store = open_identity_memory_store(&request.runtime_args)?;
+        for candidate in &selected_candidates {
+            match store.append_experience(HotMemoryEntry {
+                id: candidate.candidate_id.clone(),
+                content: candidate.content.clone(),
+            }) {
+                Ok(()) => applied_candidate_ids.push(candidate.candidate_id.clone()),
+                Err(DualFileMemoryError::DuplicateEntry { .. }) => {
+                    skipped_candidate_ids.push(candidate.candidate_id.clone());
+                }
+                Err(err) => return Err(format_identity_memory_error(err)),
             }
-            Err(err) => return Err(format_identity_memory_error(err)),
         }
     }
 
     let output = MemoryMaintenanceApplyOutput {
-        dry_run: false,
+        dry_run: request.dry_run,
         writes_automatically: false,
-        approved_writeback: true,
-        query: request.query,
+        explicit_writeback_required: true,
+        approved_writeback: request.approve_writeback,
+        query: request.queries.first().cloned().unwrap_or_default(),
+        queries: request.queries,
         session_id: request.session_id,
         limit: request.limit,
-        identity_health: context.identity_health,
-        lim_candidate_count: context.lim_candidates.len(),
-        selected_candidate_ids,
+        identity_health: plan.identity_health,
+        batch_count: plan.batches.len(),
+        batches: plan.batches,
+        lim_candidate_count: plan.lim_candidate_count,
+        decay_candidate_count: plan.decay_candidate_count,
+        selected_candidate_ids: unique_selected_candidate_ids,
         applied_candidate_ids,
         skipped_candidate_ids,
-        recommendations: context.recommendations,
+        recommendations: plan.recommendations,
     };
 
     match request.output {
         ControlOutputFormat::Text => {
             println!(
-                "memory_maintenance_apply dry_run=false writes_automatically=false approved_writeback=true query={} session_id={} applied={} skipped={}",
+                "memory_maintenance_apply dry_run={} writes_automatically=false approved_writeback={} query={} session_id={} applied={} skipped={}",
+                output.dry_run,
+                output.approved_writeback,
                 output.query,
                 output.session_id.as_deref().unwrap_or("any"),
                 output.applied_candidate_ids.len(),
@@ -364,9 +420,36 @@ fn build_lim_candidates(hits: Vec<SearchHit>) -> Vec<LimExtractionCandidateOutpu
         .collect()
 }
 
+fn build_decay_candidates(
+    health: &IdentityMaintenanceHealthOutput,
+) -> Vec<MemoryDecayCandidateOutput> {
+    let mut candidates = Vec::new();
+    if health.memory_chars > health.memory_max_chars.saturating_mul(8) / 10 {
+        candidates.push(MemoryDecayCandidateOutput {
+            candidate_id: "decay-hot-memory-review".to_string(),
+            source_scope: "MEMORY.md".to_string(),
+            reason_code: "memory_over_80_percent".to_string(),
+            recommendation: "review and compact hot memory manually; do not auto-rewrite"
+                .to_string(),
+            writeback_allowed: false,
+        });
+    }
+    if health.user_chars > health.user_max_chars.saturating_mul(8) / 10 {
+        candidates.push(MemoryDecayCandidateOutput {
+            candidate_id: "decay-user-memory-review".to_string(),
+            source_scope: "USER.md".to_string(),
+            reason_code: "user_over_80_percent".to_string(),
+            recommendation: "review fixed user facts manually; do not auto-rewrite".to_string(),
+            writeback_allowed: false,
+        });
+    }
+    candidates
+}
+
 fn build_maintenance_recommendations(
     health: &IdentityMaintenanceHealthOutput,
     lim_candidates: &[LimExtractionCandidateOutput],
+    decay_candidates: &[MemoryDecayCandidateOutput],
 ) -> Vec<String> {
     let mut recommendations = Vec::new();
     if health.memory_chars > health.memory_max_chars.saturating_mul(8) / 10 {
@@ -381,6 +464,12 @@ fn build_maintenance_recommendations(
     } else {
         recommendations.push(
             "review LIM candidates manually before append-experience or write-memory".to_string(),
+        );
+    }
+    if !decay_candidates.is_empty() {
+        recommendations.push(
+            "review decay candidates manually; maintenance apply never rewrites hot memory"
+                .to_string(),
         );
     }
     recommendations.push("do not run automatic rewrite from maintenance report".to_string());
@@ -696,11 +785,11 @@ fn parse_lim_memory_extract(args: &[String]) -> Result<LimExtractionRequest, Str
 fn parse_memory_maintenance_report(
     args: &[String],
 ) -> Result<MemoryMaintenanceReportRequest, String> {
-    let request = parse_session_memory_search(args)?;
+    let request = parse_memory_maintenance_query_args(args, "report")?;
     Ok(MemoryMaintenanceReportRequest {
         runtime_args: request.runtime_args,
         output: request.output,
-        query: request.query,
+        queries: request.queries,
         session_id: request.session_id,
         limit: request.limit,
     })
@@ -711,10 +800,11 @@ fn parse_memory_maintenance_apply(
 ) -> Result<MemoryMaintenanceApplyRequest, String> {
     let mut runtime_args = Vec::new();
     let mut output = ControlOutputFormat::Text;
-    let mut query = None;
+    let mut queries = Vec::new();
     let mut session_id = None;
     let mut limit = 5usize;
     let mut candidate_ids = Vec::new();
+    let mut dry_run = false;
     let mut approve_writeback = false;
     let mut index = 0;
     while index < args.len() {
@@ -724,7 +814,11 @@ fn parse_memory_maintenance_apply(
                 index += 1;
             }
             "--query" => {
-                query = Some(take_local_value(args, &mut index, "--query")?);
+                let value = take_local_value(args, &mut index, "--query")?;
+                if value.trim().is_empty() {
+                    return Err("memory maintenance apply requires non-empty --query".to_string());
+                }
+                queries.push(value);
             }
             "--session-id" => {
                 let value = take_local_value(args, &mut index, "--session-id")?;
@@ -760,41 +854,106 @@ fn parse_memory_maintenance_apply(
                 approve_writeback = true;
                 index += 1;
             }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
             _ => return Err(usage()),
         }
+    }
+
+    if queries.is_empty() {
+        return Err("memory maintenance apply requires --query".to_string());
     }
 
     Ok(MemoryMaintenanceApplyRequest {
         runtime_args,
         output,
-        query: {
-            let query =
-                query.ok_or_else(|| "memory maintenance apply requires --query".to_string())?;
-            if query.trim().is_empty() {
-                return Err("memory maintenance apply requires non-empty --query".to_string());
-            }
-            query
-        },
+        queries,
         session_id,
         limit,
         candidate_ids,
+        dry_run,
         approve_writeback,
     })
 }
 
-fn build_memory_maintenance_context(
+fn parse_memory_maintenance_query_args(
+    args: &[String],
+    command_name: &str,
+) -> Result<MemoryMaintenanceQueryRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut queries = Vec::new();
+    let mut session_id = None;
+    let mut limit = 5usize;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--query" => {
+                let value = take_local_value(args, &mut index, "--query")?;
+                if value.trim().is_empty() {
+                    return Err(format!(
+                        "memory maintenance {command_name} requires non-empty --query"
+                    ));
+                }
+                queries.push(value);
+            }
+            "--session-id" => {
+                let value = take_local_value(args, &mut index, "--session-id")?;
+                if value.trim().is_empty() {
+                    return Err(format!(
+                        "memory maintenance {command_name} requires non-empty --session-id"
+                    ));
+                }
+                session_id = Some(value);
+            }
+            "--limit" => {
+                let value = take_local_value(args, &mut index, "--limit")?;
+                limit = value.parse::<usize>().map_err(|_| {
+                    format!("memory maintenance {command_name} requires numeric --limit")
+                })?;
+                if limit == 0 {
+                    return Err(format!(
+                        "memory maintenance {command_name} requires --limit > 0"
+                    ));
+                }
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            _ => return Err(usage()),
+        }
+    }
+    if queries.is_empty() {
+        return Err(format!(
+            "memory maintenance {command_name} requires --query"
+        ));
+    }
+    Ok(MemoryMaintenanceQueryRequest {
+        runtime_args,
+        output,
+        queries,
+        session_id,
+        limit,
+    })
+}
+
+fn build_memory_maintenance_plan(
     runtime_args: &[String],
-    query: &str,
+    queries: &[String],
     session_id: Option<&str>,
     limit: usize,
-) -> Result<MemoryMaintenanceContext, String> {
+) -> Result<MemoryMaintenancePlan, String> {
     let store = open_identity_memory_store(runtime_args)?;
     let config = store.config().clone();
     let snapshot = store
         .snapshot()
         .map_err(|e| format!("identity_memory_snapshot_failed: {e:?}"))?;
-    let hits = search_turn_summaries(runtime_args, query, session_id, limit)?;
-    let lim_candidates = build_lim_candidates(hits);
     let identity_health = IdentityMaintenanceHealthOutput {
         root: config.root.display().to_string(),
         user_chars: snapshot.user.chars().count(),
@@ -804,10 +963,38 @@ fn build_memory_maintenance_context(
         experiences_chars: snapshot.experiences.chars().count(),
         experiences_file: config.experiences_file,
     };
-    let recommendations = build_maintenance_recommendations(&identity_health, &lim_candidates);
-    Ok(MemoryMaintenanceContext {
+
+    let mut batches = Vec::new();
+    let mut lim_candidates = Vec::new();
+    let mut seen_candidate_ids = BTreeSet::new();
+    for query in queries {
+        let hits = search_turn_summaries(runtime_args, query, session_id, limit)?;
+        let candidates = build_lim_candidates(hits);
+        for candidate in &candidates {
+            if seen_candidate_ids.insert(candidate.candidate_id.clone()) {
+                lim_candidates.push(candidate.clone());
+            }
+        }
+        batches.push(MemoryMaintenanceBatchOutput {
+            query: query.clone(),
+            lim_candidate_count: candidates.len(),
+            lim_candidate_ids: candidates
+                .iter()
+                .map(|candidate| candidate.candidate_id.clone())
+                .collect(),
+        });
+    }
+
+    let decay_candidates = build_decay_candidates(&identity_health);
+    let recommendations =
+        build_maintenance_recommendations(&identity_health, &lim_candidates, &decay_candidates);
+    Ok(MemoryMaintenancePlan {
         identity_health,
+        batches,
+        lim_candidate_count: lim_candidates.len(),
         lim_candidates,
+        decay_candidate_count: decay_candidates.len(),
+        decay_candidates,
         recommendations,
     })
 }
@@ -1211,7 +1398,7 @@ struct LimExtractionRequest {
 struct MemoryMaintenanceReportRequest {
     runtime_args: Vec<String>,
     output: ControlOutputFormat,
-    query: String,
+    queries: Vec<String>,
     session_id: Option<String>,
     limit: usize,
 }
@@ -1220,11 +1407,21 @@ struct MemoryMaintenanceReportRequest {
 struct MemoryMaintenanceApplyRequest {
     runtime_args: Vec<String>,
     output: ControlOutputFormat,
-    query: String,
+    queries: Vec<String>,
     session_id: Option<String>,
     limit: usize,
     candidate_ids: Vec<String>,
+    dry_run: bool,
     approve_writeback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MemoryMaintenanceQueryRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    queries: Vec<String>,
+    session_id: Option<String>,
+    limit: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1248,15 +1445,37 @@ struct LimExtractionCandidateOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryDecayCandidateOutput {
+    candidate_id: String,
+    source_scope: String,
+    reason_code: String,
+    recommendation: String,
+    writeback_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryMaintenanceBatchOutput {
+    query: String,
+    lim_candidate_count: usize,
+    lim_candidate_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct MemoryMaintenanceReportOutput {
     dry_run: bool,
     writes_automatically: bool,
+    explicit_writeback_required: bool,
     query: String,
+    queries: Vec<String>,
     session_id: Option<String>,
     limit: usize,
     identity_health: IdentityMaintenanceHealthOutput,
+    batch_count: usize,
+    batches: Vec<MemoryMaintenanceBatchOutput>,
     lim_candidate_count: usize,
     lim_candidates: Vec<LimExtractionCandidateOutput>,
+    decay_candidate_count: usize,
+    decay_candidates: Vec<MemoryDecayCandidateOutput>,
     recommendations: Vec<String>,
 }
 
@@ -1264,12 +1483,17 @@ struct MemoryMaintenanceReportOutput {
 struct MemoryMaintenanceApplyOutput {
     dry_run: bool,
     writes_automatically: bool,
+    explicit_writeback_required: bool,
     approved_writeback: bool,
     query: String,
+    queries: Vec<String>,
     session_id: Option<String>,
     limit: usize,
     identity_health: IdentityMaintenanceHealthOutput,
+    batch_count: usize,
+    batches: Vec<MemoryMaintenanceBatchOutput>,
     lim_candidate_count: usize,
+    decay_candidate_count: usize,
     selected_candidate_ids: Vec<String>,
     applied_candidate_ids: Vec<String>,
     skipped_candidate_ids: Vec<String>,
@@ -1341,9 +1565,15 @@ struct IdentityMaintenanceHealthOutput {
 
 struct MemoryMaintenanceContext {
     identity_health: IdentityMaintenanceHealthOutput,
+    batches: Vec<MemoryMaintenanceBatchOutput>,
+    lim_candidate_count: usize,
     lim_candidates: Vec<LimExtractionCandidateOutput>,
+    decay_candidate_count: usize,
+    decay_candidates: Vec<MemoryDecayCandidateOutput>,
     recommendations: Vec<String>,
 }
+
+type MemoryMaintenancePlan = MemoryMaintenanceContext;
 
 fn first_non_empty_line(content: &str) -> String {
     content
