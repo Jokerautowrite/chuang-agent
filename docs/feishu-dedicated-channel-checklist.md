@@ -32,6 +32,9 @@ The core helper is `src/channel_adapter.rs`. It only converts messages; it does 
 Before enabling the bot:
 
 ```bash
+node scripts/chuang-feishu-live-preflight.js \
+  --env-file /home/user/.codex-im/chuang-feishu-bridge.env \
+  --json
 cargo run --quiet -- doctor --config config.toml
 CHUANG_PROVIDER_ENV_FILE=/home/user/.config/chuang-agent/provider.env \
   scripts/chuang-app-server-health.sh
@@ -47,6 +50,16 @@ cargo run --quiet -- channel simulate \
   --json
 sh scripts/chuang-mvp-smoke.sh
 node scripts/chuang-feishu-command-smoke.js
+```
+
+The live preflight is a local-only readiness gate. It checks the Chuang-scoped
+Feishu env file, workspace/config, `channel feishu-check`, app-server diagnostic
+health, bridge command smoke, provider env file presence, and session state path
+access. It does not connect to Feishu, send messages, write the session store,
+modify services, or print secret values. For a fixture-backed contract test, run:
+
+```bash
+node scripts/chuang-feishu-live-preflight-smoke.js
 ```
 
 Expected root status:

@@ -85,6 +85,15 @@ If `thread/start` or `turn/start` fails, the bridge sends a short sanitized erro
 
 The repo-local Feishu bridge sources `CHUANG_PROVIDER_ENV_FILE` before starting its Node runtime, so `app-server` child processes inherit provider variables such as `CODEX_PPTOKEN_API_KEY=<set>`. This provider env must stay outside the repository and separate from Feishu app credentials.
 
+The dedicated Feishu live preflight lives in `scripts/chuang-feishu-live-preflight.js`.
+It is an executable, read-only gate for the bridge startup path: it validates the
+Chuang env path through `channel feishu-check`, checks workspace/config and
+app-server diagnostic health, runs the local bridge command smoke, confirms the
+session state path can be accessed without writing it, and reports provider env
+file presence with `<set>/<missing>` states only. It must remain local-only:
+no Feishu websocket/webhook connection, no outbound message, no service change,
+no session store write, and no secret value in stdout/stderr.
+
 ## Feishu Rule
 
 Chuang must use a new dedicated Feishu bot and channel id. Do not reuse Codex or Hermes Feishu bridges, credentials, sessions, or services.
