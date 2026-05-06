@@ -66,6 +66,23 @@ pub struct EvidenceRef {
     pub uri: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActuatorCommandKind {
+    Observe,
+    OpenApp,
+    Focus,
+    Click,
+    InputText,
+    Screenshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActuatorCommandContract {
+    pub allowed_actions: Vec<ActuatorCommandKind>,
+    pub audit_label: String,
+    pub real_execution: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActuatorError {
     pub message: String,
@@ -82,4 +99,47 @@ pub trait Actuator {
         text: SecretOrPlainText,
     ) -> Result<(), ActuatorError>;
     fn screenshot(&mut self, target: ScreenshotTarget) -> Result<EvidenceRef, ActuatorError>;
+}
+
+impl ActuatorCommandKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::OpenApp => "open_app",
+            Self::Focus => "focus",
+            Self::Click => "click",
+            Self::InputText => "input_text",
+            Self::Screenshot => "screenshot",
+        }
+    }
+}
+
+pub fn validate_actuator_command_contract(
+    contract: &ActuatorCommandContract,
+    action: ActuatorCommandKind,
+) -> Result<(), ActuatorError> {
+    if contract.audit_label.trim().is_empty() {
+        return Err(actuator_contract_error(
+            "actuator audit_label must not be empty",
+        ));
+    }
+    if contract.allowed_actions.is_empty() {
+        return Err(actuator_contract_error(
+            "actuator command contract has no allowlisted actions",
+        ));
+    }
+    if !contract.allowed_actions.contains(&action) {
+        return Err(actuator_contract_error(format!(
+            "actuator action {} is not allowlisted for {}",
+            action.as_str(),
+            contract.audit_label
+        )));
+    }
+    Ok(())
+}
+
+fn actuator_contract_error(message: impl Into<String>) -> ActuatorError {
+    ActuatorError {
+        message: message.into(),
+    }
 }

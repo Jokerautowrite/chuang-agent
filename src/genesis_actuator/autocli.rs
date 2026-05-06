@@ -27,11 +27,22 @@ pub trait GenesisCommandRunner {
     fn run(&mut self, spec: &GenesisCommandSpec) -> Result<GenesisCommandOutput, GenesisError>;
 }
 
+impl GenesisCommandSpec {
+    pub fn audit_label(&self) -> &'static str {
+        match self.channel {
+            GenesisChannel::UserDataDir => "genesis.autocli.user_data_dir",
+            GenesisChannel::Cdp => "genesis.autocli.cdp",
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SystemGenesisCommandRunner;
 
 impl GenesisCommandRunner for SystemGenesisCommandRunner {
     fn run(&mut self, spec: &GenesisCommandSpec) -> Result<GenesisCommandOutput, GenesisError> {
+        validate_genesis_command_spec(spec)?;
+
         let child = Command::new(&spec.program)
             .args(&spec.args)
             .stdout(std::process::Stdio::piped())
@@ -102,6 +113,7 @@ impl<R: GenesisCommandRunner> AutoCliGenesisActuator<R> {
         &mut self,
         spec: GenesisCommandSpec,
     ) -> Result<GenesisAskResponse, GenesisError> {
+        validate_genesis_command_spec(&spec)?;
         let output = self.runner.run(&spec)?;
         if output.status_code != Some(0) {
             return Err(GenesisError::CommandFailed {
@@ -124,6 +136,21 @@ impl<R: GenesisCommandRunner> AutoCliGenesisActuator<R> {
             primary_repair: None,
         })
     }
+}
+
+fn validate_genesis_command_spec(spec: &GenesisCommandSpec) -> Result<(), GenesisError> {
+    if spec.program.trim().is_empty() {
+        return Err(GenesisError::CommandNotFound(
+            "genesis command program must not be empty".to_string(),
+        ));
+    }
+    if spec.timeout_ms == 0 {
+        return Err(GenesisError::Timeout {
+            channel: spec.channel.clone(),
+            message: "genesis command timeout_ms must be greater than zero".to_string(),
+        });
+    }
+    Ok(())
 }
 
 impl<R: GenesisCommandRunner> GenesisActuator for AutoCliGenesisActuator<R> {
