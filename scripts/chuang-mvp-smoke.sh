@@ -353,6 +353,9 @@ assert data["required_vars"]["CHUANG_FEISHU_APP_SECRET"] == "<set>"
 printf '%s\n' "[smoke] feishu bridge commands"
 node scripts/chuang-feishu-command-smoke.js >/dev/null
 
+printf '%s\n' "[smoke] feishu session store"
+node scripts/chuang-feishu-session-smoke.js >/dev/null
+
 printf '%s\n' "[smoke] feishu rich message renderer"
 node scripts/chuang-feishu-rich-message-smoke.js >/dev/null
 

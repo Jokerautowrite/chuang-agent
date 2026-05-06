@@ -273,7 +273,13 @@ fn handle_thread_start(state: &mut AppServerState, params: &Value) -> Result<Val
             .and_then(|value| value.as_str())
             .unwrap_or(""),
     );
-    let thread = create_thread(state, workspace_root, "workspace thread".to_string());
+    let display_name = params
+        .get("displayName")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "workspace thread".to_string());
+    let thread = create_thread(state, workspace_root, display_name);
     Ok(json!({
         "thread": thread_to_json(&thread),
     }))

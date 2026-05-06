@@ -16,6 +16,7 @@ assert(reply.replyText.includes("不会进入 Agent 主链"));
 assert(reply.replyText.includes("不会消耗一轮任务"));
 assert(reply.replyText.includes("飞书机器人不能直接替你创建客户端窗口"));
 assert(reply.replyText.includes("/codex bind /home/user/projects/chuang-agent"));
+assert(buildNewSessionCommandReply("chuang-thread-1").replyText.includes("当前 Feishu 聊天已切到新的 Chuang 会话"));
 
 assert.strictEqual(parseBridgeCommand("继续推进"), null);
 assert.strictEqual(buildNewSessionCommandReply().commandName, "new");

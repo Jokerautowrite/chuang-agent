@@ -15,19 +15,25 @@ const {
   LoggerLevel,
   WSClient,
 } = require("@larksuiteoapi/node-sdk");
+const { FeishuSessionStore } = require("./chuang-feishu-session-store");
 const {
   ChuangFeishuClientAdapter,
   buildChuangReplyPayload,
   buildChuangTextPayload,
   patchWsClientForCardCallbacks,
 } = require("./chuang-feishu-client-adapter");
-const { parseBridgeCommand } = require("./chuang-feishu-bridge-commands");
+const {
+  buildNewSessionCommandReply,
+  parseBridgeCommand,
+} = require("./chuang-feishu-bridge-commands");
 
 const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
 const ENV_FILE =
   process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
 const WORKSPACE_ROOT =
   process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT;
+const SESSION_STATE_FILE =
+  process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
 const FEISHU_SDK_MODULES =
   process.env.CHUANG_FEISHU_SDK_NODE_MODULES ||
   "/home/user/.codex/codex-feishu-bridge/node_modules";
@@ -157,6 +163,14 @@ class AppServerClient {
       runtimeReportId: normalizeText(turn.runtimeReportId || turn.runtime_report_id || turn.runtimeObservability?.runtime_report_id || turn.providerMeta?.runtime_report_id),
     };
   }
+
+  async startThread(workspaceRoot, displayName) {
+    const result = await this.request("thread/start", {
+      cwd: workspaceRoot,
+      displayName,
+    });
+    return result.thread || {};
+  }
 }
 
 class ChuangFeishuBridge {
@@ -167,6 +181,7 @@ class ChuangFeishuBridge {
     this.adapter = null;
     this.queue = Promise.resolve();
     this.appServer = new AppServerClient(WORKSPACE_ROOT);
+    this.sessionStore = new FeishuSessionStore(SESSION_STATE_FILE);
   }
 
   async start() {
@@ -234,17 +249,32 @@ class ChuangFeishuBridge {
     if (!inbound) {
       return;
     }
+    const effectiveThreadId = this.sessionStore.getThreadId(inbound.chatId) || inbound.threadId;
     appendEventLog("inbound", {
       chatId: inbound.chatId,
       messageId: inbound.messageId,
-      threadId: inbound.threadId,
+      threadId: effectiveThreadId,
       senderId: inbound.senderId,
       text: truncateText(inbound.text, 240),
     });
 
     const command = parseBridgeCommand(inbound.text);
     if (command) {
-      await this.sendReply(inbound, command);
+      if (command.commandName === "new") {
+        const thread = await this.appServer.startThread(
+          inbound.workspaceRoot,
+          buildNewThreadDisplayName(inbound)
+        );
+        if (thread && thread.id) {
+          this.sessionStore.bind(inbound.chatId, thread.id, inbound.workspaceRoot);
+        }
+        await this.sendReply(inbound, {
+          ...buildNewSessionCommandReply(thread.id || ""),
+          threadId: thread.id || "",
+        });
+      } else {
+        await this.sendReply(inbound, command);
+      }
       appendEventLog("command", {
         chatId: inbound.chatId,
         messageId: inbound.messageId,
@@ -253,7 +283,13 @@ class ChuangFeishuBridge {
       return;
     }
 
-    const turn = await this.appServer.turnStart(inbound);
+    const turn = await this.appServer.turnStart({
+      ...inbound,
+      threadId: effectiveThreadId,
+    });
+    if (turn.threadId) {
+      this.sessionStore.bind(inbound.chatId, turn.threadId, inbound.workspaceRoot);
+    }
     await this.sendReply(inbound, turn);
     appendEventLog("outbound", {
       chatId: inbound.chatId,
@@ -341,6 +377,11 @@ function parseFeishuTextContent(rawContent) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildNewThreadDisplayName(inbound) {
+  const chat = normalizeText(inbound.chatId) || "feishu-chat";
+  return `feishu:${chat}`;
 }
 
 function buildStatusFooter(turn) {
