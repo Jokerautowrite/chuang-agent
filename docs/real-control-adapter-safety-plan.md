@@ -54,6 +54,19 @@ Each gate reports `env_value_state`, `preflight_checks`, `must_reject_capabiliti
 
 Capabilities that still must be rejected include arbitrary service/process control, Codex or Hermes service control unless explicitly requested, deletion of logs/queues/reports/memories/credentials/claims, unscoped external worker pools, direct core-memory writes by subagents, real desktop/browser operations without an action allowlist, credential/login-state mutation, and verification-code entry without operator-provided code and approval.
 
+For the subagent runner slot, the executable rehearsal is:
+
+```bash
+cargo run -- subagent live-preflight \
+  --runner-command scripts/chuang-codex-runner.py \
+  --allow-runner-command scripts/chuang-codex-runner.py \
+  --requires-capability rust \
+  --capability rust \
+  --json
+```
+
+The rehearsal is read-only. It reports the `CHUANG_CODEX_RUNNER_ENABLE` gate, exact runner command allowlist, capability routing, controller-side `ReportAdmission` evidence, and forbidden live subagent capabilities without starting an external worker.
+
 ## First Real Integration Steps
 
 1. Create a Chuang-only service allowlist file.

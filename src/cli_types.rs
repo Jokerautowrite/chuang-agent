@@ -5,6 +5,7 @@ use chuang_agent::control_intent::ControlIntentInput;
 use chuang_agent::genesis_actuator::GenesisAskResponse;
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::ChuangMvpStatus;
+use chuang_agent::live_subagent_rehearsal::LiveSubagentRehearsalReport;
 use chuang_agent::runtime_config::{ConfigSummary, RuntimeConfig};
 use chuang_agent::subagent_report::{ReportAdmission, SubagentReport};
 use chuang_agent::subagent_spawner::{RunId, SpawnRequest};
@@ -162,6 +163,21 @@ pub(crate) struct SubagentRunLoopCliRequest {
     pub(crate) approve_exec: bool,
     pub(crate) max_runs: usize,
     pub(crate) max_concurrency: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubagentLivePreflightCliRequest {
+    pub(crate) output: ControlOutputFormat,
+    pub(crate) runner: String,
+    pub(crate) runner_command: String,
+    pub(crate) allowed_runner_commands: Vec<String>,
+    pub(crate) required_capabilities: Vec<String>,
+    pub(crate) worker_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SubagentLivePreflightCliOutput {
+    pub(crate) rehearsal: LiveSubagentRehearsalReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

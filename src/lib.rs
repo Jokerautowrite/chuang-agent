@@ -23,6 +23,7 @@ pub mod hermes_memory;
 pub mod kernel_status;
 pub mod lifecycle;
 pub mod live_adapter_gate;
+pub mod live_subagent_rehearsal;
 pub mod memory_admission;
 pub mod memory_policy;
 pub mod memory_recall;

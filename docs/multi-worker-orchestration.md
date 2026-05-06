@@ -29,6 +29,7 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 - worker 之间只通过计划和报告协作，不共享临时状态。
 - command runner 仍必须显式传 `--approve-exec`。
 - live external worker pool 仍是后续 audited adapter 边界，本地 run-loop 不连接真实外部平台。
+- 真实外部 worker runner 启用前先跑只读 `subagent live-preflight`，确认 live gate、runner allowlist、capability routing、ReportAdmission 证据和 forbidden capability rejection 都可见；该命令不启动真实 worker。
 
 ## 下一步
 

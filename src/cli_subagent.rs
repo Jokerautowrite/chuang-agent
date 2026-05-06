@@ -4,6 +4,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
+use chuang_agent::live_subagent_rehearsal::{
+    rehearse_live_subagent_adapter, LiveSubagentRehearsalInput,
+};
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{
     ExecutionStatus, GovernanceDecisionSummary, ReportAdmissionStatus, ResourceUsage,
@@ -13,8 +16,8 @@ use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId};
 
 use crate::cli_args::{
     parse_subagent_collect, parse_subagent_dispatch, parse_subagent_list,
-    parse_subagent_release_claim, parse_subagent_report, parse_subagent_run_loop,
-    parse_subagent_run_once,
+    parse_subagent_live_preflight, parse_subagent_release_claim, parse_subagent_report,
+    parse_subagent_run_loop, parse_subagent_run_once,
 };
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_types::*;
@@ -31,8 +34,42 @@ pub(crate) fn subagent_command(args: &[String]) -> Result<(), String> {
         Some("list") => subagent_list_command(&args[1..]),
         Some("run-once") => subagent_run_once_command(&args[1..]),
         Some("run-loop") => subagent_run_loop_command(&args[1..]),
+        Some("live-preflight") => subagent_live_preflight_command(&args[1..]),
         _ => Err(usage()),
     }
+}
+
+fn subagent_live_preflight_command(args: &[String]) -> Result<(), String> {
+    let request = parse_subagent_live_preflight(args)?;
+    let rehearsal = rehearse_live_subagent_adapter(LiveSubagentRehearsalInput {
+        runner: request.runner,
+        runner_command: request.runner_command,
+        allowed_runner_commands: request.allowed_runner_commands,
+        required_capabilities: request.required_capabilities,
+        worker_capabilities: request.worker_capabilities,
+    });
+    let output = SubagentLivePreflightCliOutput { rehearsal };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "subagent_live_preflight ok={} ready_for_live={} readonly={} starts_external_worker={} gate_enabled={} runner_allowlist_ok={} capability_routing_ok={} report_admission_ok={} forbidden_capabilities_ok={} next={}",
+                output.rehearsal.ok,
+                output.rehearsal.ready_for_live,
+                output.rehearsal.readonly,
+                output.rehearsal.starts_external_worker,
+                output.rehearsal.gate.enabled,
+                output.rehearsal.runner_allowlist.ok,
+                output.rehearsal.capability_routing.ok,
+                output.rehearsal.report_admission.ok,
+                output.rehearsal.forbidden_capabilities.ok,
+                output.rehearsal.next_action
+            );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
 }
 
 fn subagent_dispatch_command(args: &[String]) -> Result<(), String> {

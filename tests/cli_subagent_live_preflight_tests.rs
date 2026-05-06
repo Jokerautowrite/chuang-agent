@@ -1,0 +1,141 @@
+use std::process::Command;
+
+use serde_json::Value;
+
+fn cargo_command() -> Command {
+    let mut command = Command::new("cargo");
+    command.env("CODEX_PPTOKEN_API_KEY", "test-key");
+    command
+}
+
+#[test]
+fn cli_subagent_live_preflight_is_readonly_and_reports_disabled_gate() {
+    let output = cargo_command()
+        .env_remove("CHUANG_CODEX_RUNNER_ENABLE")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--requires-capability",
+            "rust",
+            "--requires-capability",
+            "filesystem",
+            "--capability",
+            "rust",
+            "--capability",
+            "filesystem",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let rehearsal = &parsed["rehearsal"];
+
+    assert_eq!(rehearsal["ok"], true);
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["readonly"], true);
+    assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["gate"]["enabled"], false);
+    assert_eq!(
+        rehearsal["gate"]["required_env"],
+        "CHUANG_CODEX_RUNNER_ENABLE"
+    );
+    assert_eq!(rehearsal["runner_allowlist"]["ok"], true);
+    assert_eq!(rehearsal["capability_routing"]["ok"], true);
+    assert_eq!(rehearsal["report_admission"]["ok"], true);
+    assert_eq!(rehearsal["forbidden_capabilities"]["ok"], true);
+}
+
+#[test]
+fn cli_subagent_live_preflight_requires_runner_allowlist_match() {
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/other-runner.py",
+            "--capability",
+            "rust",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let rehearsal = &parsed["rehearsal"];
+
+    assert_eq!(rehearsal["ok"], false);
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["gate"]["enabled"], true);
+    assert_eq!(rehearsal["runner_allowlist"]["ok"], false);
+    assert!(rehearsal["runner_allowlist"]["reason"]
+        .as_str()
+        .expect("reason")
+        .contains("not present"));
+}
+
+#[test]
+fn cli_subagent_live_preflight_rejects_forbidden_subagent_capability() {
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--requires-capability",
+            "core-memory-write",
+            "--capability",
+            "core-memory-write",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let forbidden = &parsed["rehearsal"]["forbidden_capabilities"];
+
+    assert_eq!(parsed["rehearsal"]["ok"], false);
+    assert_eq!(parsed["rehearsal"]["ready_for_live"], false);
+    assert_eq!(forbidden["ok"], false);
+    assert_eq!(
+        forbidden["requested_forbidden_capabilities"][0],
+        "core-memory-write"
+    );
+}

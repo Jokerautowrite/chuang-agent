@@ -67,6 +67,29 @@ The worker only claims a dispatch when all required capabilities are present. Di
 
 Current MVP concurrency is bounded local worker batching: `--max-concurrency` accepts `1..8`. Each worker still claims from the durable queue, matches declared capabilities, and writes a normal `SubagentReport`; command runners still require explicit `--approve-exec`.
 
+## Live Runner Preflight Rehearsal
+
+Before any real external worker runner is enabled, run the read-only rehearsal:
+
+```bash
+cargo run -- subagent live-preflight \
+  --runner-command scripts/chuang-codex-runner.py \
+  --allow-runner-command scripts/chuang-codex-runner.py \
+  --requires-capability rust \
+  --capability rust \
+  --json
+```
+
+This command does not claim dispatches, start runner processes, write reports, touch services, or open external sessions. It only reports whether the live subagent adapter would pass the current preflight surface:
+
+- `CHUANG_CODEX_RUNNER_ENABLE` gate status and audit label.
+- Exact runner command allowlist match.
+- Dispatch `required_capabilities` satisfied by worker `--capability` values.
+- `ReportAdmission` boundary present for controller acceptance/rejection evidence.
+- Forbidden live subagent capabilities still rejected, including unscoped external worker pools, direct core-memory writes, and platform login/session mutation.
+
+`ok=true` means the read-only rehearsal contract passed. `ready_for_live=true` additionally requires the live gate to be enabled, so it should only appear after explicit operator approval for the exact runner command and target dispatch.
+
 ## Command Runner IO
 
 When `--runner command` is used, Chuang starts the runner process directly. It does not invoke a shell unless the configured command is a shell program such as `sh`.

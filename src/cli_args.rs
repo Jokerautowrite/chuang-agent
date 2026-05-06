@@ -612,6 +612,95 @@ pub(crate) fn parse_subagent_run_loop(
     })
 }
 
+pub(crate) fn parse_subagent_live_preflight(
+    args: &[String],
+) -> Result<SubagentLivePreflightCliRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut runner: Option<String> = None;
+    let mut runner_command: Option<String> = None;
+    let mut allowed_runner_commands: Vec<String> = Vec::new();
+    let mut required_capabilities: Vec<String> = Vec::new();
+    let mut worker_capabilities: Vec<String> = Vec::new();
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--runner" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent live-preflight requires value after --runner".to_string()
+                })?;
+                runner = Some(value.clone());
+                index += 2;
+            }
+            "--runner-command" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent live-preflight requires value after --runner-command".to_string()
+                })?;
+                runner_command = Some(value.clone());
+                index += 2;
+            }
+            "--allow-runner-command" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent live-preflight requires value after --allow-runner-command"
+                        .to_string()
+                })?;
+                if value.trim().is_empty() {
+                    return Err("--allow-runner-command must not be empty".to_string());
+                }
+                if !allowed_runner_commands.contains(value) {
+                    allowed_runner_commands.push(value.clone());
+                }
+                index += 2;
+            }
+            "--requires-capability" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent live-preflight requires value after --requires-capability".to_string()
+                })?;
+                push_unique_capability(
+                    &mut required_capabilities,
+                    normalize_capability_flag("--requires-capability", value)?,
+                );
+                index += 2;
+            }
+            "--capability" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "subagent live-preflight requires value after --capability".to_string()
+                })?;
+                push_unique_capability(
+                    &mut worker_capabilities,
+                    normalize_capability_flag("--capability", value)?,
+                );
+                index += 2;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let runner = runner.unwrap_or_else(|| "command".to_string());
+    if runner != "command" {
+        return Err("subagent live-preflight only supports --runner command".to_string());
+    }
+    let runner_command = runner_command
+        .filter(|command| !command.trim().is_empty())
+        .ok_or_else(|| "subagent live-preflight requires --runner-command".to_string())?;
+    if allowed_runner_commands.is_empty() {
+        return Err("subagent live-preflight requires --allow-runner-command".to_string());
+    }
+
+    Ok(SubagentLivePreflightCliRequest {
+        output,
+        runner,
+        runner_command,
+        allowed_runner_commands,
+        required_capabilities,
+        worker_capabilities,
+    })
+}
+
 struct ParsedSubagentRunnerArgs {
     options: CliOptions,
     output: ControlOutputFormat,
