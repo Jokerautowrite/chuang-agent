@@ -35,10 +35,52 @@ control = "fake_local"
     config_path
 }
 
+fn write_watchdog_report(root: &std::path::Path) -> PathBuf {
+    let report_path = root.join("latest-watchdog-report.json");
+    fs::write(
+        &report_path,
+        serde_json::json!({
+            "schema_version": 1,
+            "generated_at": "2026-05-07T10:00:00+08:00",
+            "readonly": true,
+            "project_root": "/home/user/projects/chuang-agent",
+            "session": "chuang-goal",
+            "tmux_session_present": true,
+            "pane": {
+                "bytes": 2048,
+                "panes": ["pane=%1 active=1 pid=123 current_command=codex"]
+            },
+            "codex_processes": {
+                "count": 2,
+                "processes": ["123 1 00:01 codex --no-alt-screen"]
+            },
+            "git": {
+                "dirty": true,
+                "status_short": [" M src/cli_console.rs", " M tests/cli_console_tests.rs"]
+            },
+            "takeover": {
+                "next_action": "review_git_status_and_diff",
+                "attach_command": "tmux attach -t chuang-goal",
+                "review_command": "git -C /home/user/projects/chuang-agent status --short"
+            },
+            "boundaries": {
+                "dispatches_tasks": false,
+                "modifies_repo": false,
+                "restarts_worker": false,
+                "touches_services": false
+            }
+        })
+        .to_string(),
+    )
+    .expect("watchdog report should write");
+    report_path
+}
+
 #[test]
 fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     let root = temp_root("json");
     let config_path = write_config(&root);
+    let watchdog_report = write_watchdog_report(&root);
 
     let output = Command::new("cargo")
         .args([
@@ -51,6 +93,7 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
             config_path.to_str().expect("config path should be utf8"),
             "--json",
         ])
+        .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &watchdog_report)
         .output()
         .expect("cargo run should execute");
 
@@ -131,12 +174,36 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         .expect("control units should be array")
         .iter()
         .any(|unit| unit["display_name"] == "小创"));
+    assert_eq!(parsed["terminal_watchdog"]["available"], true);
+    assert_eq!(
+        parsed["terminal_watchdog"]["report_file"],
+        watchdog_report.display().to_string()
+    );
+    assert_eq!(parsed["terminal_watchdog"]["readonly"], true);
+    assert_eq!(parsed["terminal_watchdog"]["session"], "chuang-goal");
+    assert_eq!(parsed["terminal_watchdog"]["tmux_session_present"], true);
+    assert_eq!(parsed["terminal_watchdog"]["codex_process_count"], 2);
+    assert_eq!(parsed["terminal_watchdog"]["git_dirty"], true);
+    assert_eq!(parsed["terminal_watchdog"]["git_status_count"], 2);
+    assert_eq!(
+        parsed["terminal_watchdog"]["next_action"],
+        "review_git_status_and_diff"
+    );
+    assert_eq!(
+        parsed["terminal_watchdog"]["attach_command"],
+        "tmux attach -t chuang-goal"
+    );
+    assert_eq!(parsed["terminal_watchdog"]["dispatches_tasks"], false);
+    assert_eq!(parsed["terminal_watchdog"]["modifies_repo"], false);
+    assert_eq!(parsed["terminal_watchdog"]["restarts_worker"], false);
+    assert_eq!(parsed["terminal_watchdog"]["touches_services"], false);
 }
 
 #[test]
 fn cli_console_snapshot_outputs_compact_text_summary() {
     let root = temp_root("text");
     let config_path = write_config(&root);
+    let missing_watchdog_report = root.join("missing-watchdog-report.json");
 
     let output = Command::new("cargo")
         .args([
@@ -148,6 +215,7 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
             "--config",
             config_path.to_str().expect("config path should be utf8"),
         ])
+        .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &missing_watchdog_report)
         .output()
         .expect("cargo run should execute");
 
@@ -180,5 +248,8 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));
+    assert!(stdout.contains(
+        "terminal_watchdog: available=false readonly=true session=unknown tmux_session_present=unknown codex_process_count=unknown git_dirty=unknown next_action=run_watchdog_once_before_console_review"
+    ));
     assert!(stdout.contains("plugin_registry: available=true ok=true plugin_count=5"));
 }

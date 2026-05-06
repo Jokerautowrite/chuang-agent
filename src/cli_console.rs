@@ -2,12 +2,16 @@ use chuang_agent::control_workflow::{build_unit_views, ControlUnitView};
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::plugin_registry::{load_plugin_registry, PluginKind, PluginManifest};
 use chuang_agent::slot_registry::build_runtime_slots;
-use serde::Serialize;
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::cli_args::{effective_config_source, parse_status_cli_options, parse_status_output};
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::kernel_config_from_runtime;
+
+const DEFAULT_TERMINAL_WATCHDOG_REPORT_SUFFIX: &str =
+    ".codex/chuang-goal-interactive/latest-watchdog-report.json";
+const TERMINAL_WATCHDOG_REPORT_ENV: &str = "CHUANG_GOAL_WATCHDOG_REPORT_FILE";
 
 pub(crate) fn console_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -31,6 +35,7 @@ fn console_snapshot_command(args: &[String]) -> Result<(), String> {
             .map_err(|err| format!("console_control_list_failed: {err:?}"))?,
     );
     let plugins = load_console_plugins()?;
+    let terminal_watchdog = load_terminal_watchdog_status();
 
     let snapshot = ConsoleSnapshot {
         ok: true,
@@ -38,6 +43,7 @@ fn console_snapshot_command(args: &[String]) -> Result<(), String> {
         status,
         control_units,
         plugins,
+        terminal_watchdog,
     };
 
     match output {
@@ -116,6 +122,16 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     println!("control_units: {}", snapshot.control_units.len());
     println!("plugins: {}", snapshot.plugins.len());
     println!(
+        "terminal_watchdog: available={} readonly={} session={} tmux_session_present={} codex_process_count={} git_dirty={} next_action={}",
+        snapshot.terminal_watchdog.available,
+        snapshot.terminal_watchdog.readonly,
+        optional_text(&snapshot.terminal_watchdog.session),
+        optional_bool(snapshot.terminal_watchdog.tmux_session_present),
+        optional_usize(snapshot.terminal_watchdog.codex_process_count),
+        optional_bool(snapshot.terminal_watchdog.git_dirty),
+        optional_text(&snapshot.terminal_watchdog.next_action)
+    );
+    println!(
         "plugin_registry: available={} ok={} plugin_count={} enabled_count={} issue_count={}",
         snapshot.status.plugin_registry.available,
         snapshot.status.plugin_registry.ok,
@@ -132,6 +148,7 @@ struct ConsoleSnapshot {
     status: ChuangMvpStatus,
     control_units: Vec<ControlUnitView>,
     plugins: Vec<PluginOverview>,
+    terminal_watchdog: TerminalWatchdogStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -151,6 +168,22 @@ fn format_name_list(names: &[String]) -> String {
     }
 }
 
+fn optional_text(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or("unknown")
+}
+
+fn optional_bool(value: Option<bool>) -> String {
+    value
+        .map(|inner| inner.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn optional_usize(value: Option<usize>) -> String {
+    value
+        .map(|inner| inner.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 fn load_console_plugins() -> Result<Vec<PluginOverview>, String> {
     let path = PathBuf::from("plugins/registry.example.json");
     if !path.exists() {
@@ -168,4 +201,182 @@ fn load_console_plugins() -> Result<Vec<PluginOverview>, String> {
             capabilities: plugin.capabilities,
         })
         .collect())
+}
+
+fn load_terminal_watchdog_status() -> TerminalWatchdogStatus {
+    let report_file = terminal_watchdog_report_file();
+    TerminalWatchdogStatus::from_report_file(&report_file)
+}
+
+fn terminal_watchdog_report_file() -> PathBuf {
+    if let Some(path) = std::env::var_os(TERMINAL_WATCHDOG_REPORT_ENV) {
+        return PathBuf::from(path);
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+        .join(DEFAULT_TERMINAL_WATCHDOG_REPORT_SUFFIX)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct TerminalWatchdogStatus {
+    available: bool,
+    report_file: String,
+    error: Option<String>,
+    schema_version: Option<u64>,
+    generated_at: Option<String>,
+    readonly: bool,
+    project_root: Option<String>,
+    session: Option<String>,
+    tmux_session_present: Option<bool>,
+    pane_bytes: Option<u64>,
+    codex_process_count: Option<usize>,
+    git_dirty: Option<bool>,
+    git_status_count: Option<usize>,
+    next_action: Option<String>,
+    attach_command: Option<String>,
+    review_command: Option<String>,
+    dispatches_tasks: bool,
+    modifies_repo: bool,
+    restarts_worker: bool,
+    touches_services: bool,
+}
+
+impl TerminalWatchdogStatus {
+    fn from_report_file(path: &Path) -> Self {
+        let report_file = path.display().to_string();
+        let content = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Self::unavailable(report_file, "report_missing");
+            }
+            Err(_) => {
+                return Self::unavailable(report_file, "report_read_failed");
+            }
+        };
+        let report = match serde_json::from_str::<TerminalWatchdogReport>(&content) {
+            Ok(report) => report,
+            Err(_) => {
+                return Self::unavailable(report_file, "report_parse_failed");
+            }
+        };
+
+        Self {
+            available: true,
+            report_file,
+            error: None,
+            schema_version: report.schema_version,
+            generated_at: report.generated_at,
+            readonly: report.readonly.unwrap_or(false),
+            project_root: report.project_root,
+            session: report.session,
+            tmux_session_present: report.tmux_session_present,
+            pane_bytes: report.pane.and_then(|pane| pane.bytes),
+            codex_process_count: report.codex_processes.and_then(|processes| processes.count),
+            git_dirty: report.git.as_ref().and_then(|git| git.dirty),
+            git_status_count: report
+                .git
+                .and_then(|git| git.status_short)
+                .map(|status_short| status_short.len()),
+            next_action: report
+                .takeover
+                .as_ref()
+                .and_then(|takeover| takeover.next_action.clone()),
+            attach_command: report
+                .takeover
+                .as_ref()
+                .and_then(|takeover| takeover.attach_command.clone()),
+            review_command: report.takeover.and_then(|takeover| takeover.review_command),
+            dispatches_tasks: report
+                .boundaries
+                .as_ref()
+                .and_then(|boundaries| boundaries.dispatches_tasks)
+                .unwrap_or(false),
+            modifies_repo: report
+                .boundaries
+                .as_ref()
+                .and_then(|boundaries| boundaries.modifies_repo)
+                .unwrap_or(false),
+            restarts_worker: report
+                .boundaries
+                .as_ref()
+                .and_then(|boundaries| boundaries.restarts_worker)
+                .unwrap_or(false),
+            touches_services: report
+                .boundaries
+                .and_then(|boundaries| boundaries.touches_services)
+                .unwrap_or(false),
+        }
+    }
+
+    fn unavailable(report_file: String, error: &str) -> Self {
+        Self {
+            available: false,
+            report_file,
+            error: Some(error.to_string()),
+            schema_version: None,
+            generated_at: None,
+            readonly: true,
+            project_root: None,
+            session: None,
+            tmux_session_present: None,
+            pane_bytes: None,
+            codex_process_count: None,
+            git_dirty: None,
+            git_status_count: None,
+            next_action: Some("run_watchdog_once_before_console_review".to_string()),
+            attach_command: None,
+            review_command: None,
+            dispatches_tasks: false,
+            modifies_repo: false,
+            restarts_worker: false,
+            touches_services: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogReport {
+    schema_version: Option<u64>,
+    generated_at: Option<String>,
+    readonly: Option<bool>,
+    project_root: Option<String>,
+    session: Option<String>,
+    tmux_session_present: Option<bool>,
+    pane: Option<TerminalWatchdogPaneReport>,
+    codex_processes: Option<TerminalWatchdogProcessReport>,
+    git: Option<TerminalWatchdogGitReport>,
+    takeover: Option<TerminalWatchdogTakeoverReport>,
+    boundaries: Option<TerminalWatchdogBoundaryReport>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogPaneReport {
+    bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogProcessReport {
+    count: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogGitReport {
+    dirty: Option<bool>,
+    status_short: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogTakeoverReport {
+    next_action: Option<String>,
+    attach_command: Option<String>,
+    review_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TerminalWatchdogBoundaryReport {
+    dispatches_tasks: Option<bool>,
+    modifies_repo: Option<bool>,
+    restarts_worker: Option<bool>,
+    touches_services: Option<bool>,
 }
