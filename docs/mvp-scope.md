@@ -91,6 +91,7 @@
 - `cargo run -- experiment show --experiment-id ID`：只读查看某个实验的计划和报告内容，不修改文件。
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录、stub provider 和示例 command control，不触碰真实服务。
 - `sh scripts/chuang-second-test-smoke.sh`：第二测试版本验收入口，复用同一安全 smoke，并输出 `second_test_smoke_ok`。
+- `sh scripts/chuang-live-readonly-preflight.sh`：只读 live readiness 总入口，先看 watchdog 一次性快照，再跑 status/doctor/app-server/console 诊断和 complete-local smoke，最终输出 `live_readiness_preflight_ok`。
 
 ## 当前明确不做
 
