@@ -81,6 +81,8 @@
 - 日志目录：`/home/user/.codex/chuang-goal-interactive`
 - watchdog 日志：`/home/user/.codex/chuang-goal-interactive/watchdog.log`
 - 最近 pane 截图：`/home/user/.codex/chuang-goal-interactive/last-pane.txt`
+- 最新结构化状态：`/home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json`
+- 最新 pane/process/git 只读快照：`latest-panes.txt`、`latest-codex-processes.txt`、`latest-git-status.txt`
 
 每轮记录：
 
@@ -88,8 +90,23 @@
 - pane 列表、当前命令和最近 120 行 pane 内容。
 - 当前 Codex 相关进程。
 - 仓库 `git status --short`。
+- JSON 状态摘要里的 `takeover.next_action`、tmux 是否存在、Codex 进程数量、git dirty 状态和只读边界。
 
 watchdog 的职责是让终端进度一直可见。它不应该自动修复、自动提交、自动清理或自动重启 worker。
+
+一次性状态检查可用：
+
+```bash
+./scripts/chuang-goal-watchdog.sh --once
+```
+
+或：
+
+```bash
+WATCHDOG_ONCE=1 ./scripts/chuang-goal-watchdog.sh
+```
+
+一次性模式只记录一轮状态后退出，适合主控接管前检查或未来只读控制台读取。它和循环模式一样只观察，不派活、不修改仓库、不重启 worker、不触碰服务。
 
 ## 查看进度
 
@@ -99,6 +116,7 @@ watchdog 的职责是让终端进度一直可见。它不应该自动修复、�
 tmux attach -t chuang-goal
 tail -n 120 /home/user/.codex/chuang-goal-interactive/watchdog.log
 tail -n 120 /home/user/.codex/chuang-goal-interactive/last-pane.txt
+jq . /home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json
 git status --short
 ```
 
@@ -156,7 +174,7 @@ tmux attach -t chuang-goal
 - 自动重启：除非有明确失败分类和防重复执行策略。
 - Chuang 内部真实 worker adapter：除非本地协议、治理、报告和 live gate 都已经验收。
 
-后续如果要产品化，应该先补一层只读状态摘要，而不是直接让飞书下发执行命令。最小下一步可以是把 watchdog 最近状态整理成结构化 report，仍保持只读。
+后续如果要产品化，应该继续沿着只读状态摘要推进，而不是直接让飞书下发执行命令。当前 `latest-watchdog-report.json` 已经提供最小接管面；下一步可以让桌面控制台或 Feishu 报告只读展示它，但仍不能让通道直接派活、重启或修改仓库。
 
 ## 安全规则
 

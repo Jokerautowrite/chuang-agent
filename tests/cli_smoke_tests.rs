@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn write_fake_config(root: &std::path::Path) -> PathBuf {
     let config_path = root.join("config.toml");
@@ -30,6 +31,56 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
     assert!(!wrapper.contains("rm "));
     assert!(!wrapper.contains("systemctl"));
+}
+
+#[test]
+fn goal_watchdog_once_writes_readonly_status_report() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let log_dir = std::env::temp_dir().join(format!(
+        "chuang-goal-watchdog-smoke-{}-{nanos}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&log_dir).expect("watchdog log dir should be created");
+
+    let output = Command::new("bash")
+        .arg(manifest_dir.join("scripts/chuang-goal-watchdog.sh"))
+        .arg("--once")
+        .env("ROOT", &manifest_dir)
+        .env("SESSION", format!("chuang-goal-missing-{nanos}"))
+        .env("LOG_DIR", &log_dir)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("watchdog should execute once");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report_path = log_dir.join("latest-watchdog-report.json");
+    let report = fs::read_to_string(&report_path).expect("watchdog report should be readable");
+    let data: serde_json::Value =
+        serde_json::from_str(&report).expect("watchdog report should be valid json");
+
+    assert_eq!(data["schema_version"], 1);
+    assert_eq!(data["readonly"], true);
+    assert_eq!(data["project_root"], manifest_dir.display().to_string());
+    assert_eq!(data["tmux_session_present"], false);
+    assert_eq!(
+        data["takeover"]["next_action"],
+        "start_or_attach_worker_after_operator_review"
+    );
+    assert_eq!(data["boundaries"]["dispatches_tasks"], false);
+    assert_eq!(data["boundaries"]["modifies_repo"], false);
+    assert_eq!(data["boundaries"]["restarts_worker"], false);
+    assert_eq!(data["boundaries"]["touches_services"], false);
+    assert!(data["git"]["status_short"].is_array());
+    assert!(log_dir.join("watchdog.log").exists());
 }
 
 #[test]

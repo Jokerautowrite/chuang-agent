@@ -1,6 +1,9 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 本轮把终端 worker watchdog 从纯文本日志推进到只读结构化状态快照：`scripts/chuang-goal-watchdog.sh` 现在每轮写 `latest-watchdog-report.json`，同时维护 pane/process/git 的最新文件路径与摘要，报告里给出 `takeover.next_action`，方便主控判断 attach、review diff 或继续观察。
+- 新增 watchdog `--once` / `WATCHDOG_ONCE=1` 一次性模式，专门用于人工接管检查、smoke 和未来只读控制台读取；报告明确声明 `readonly=true`，并把 `dispatches_tasks / modifies_repo / restarts_worker / touches_services` 全部标为 `false`，没有增加飞书命令层、常驻服务、自动修复或自动重启。
+- 已补 `tests/cli_smoke_tests.rs` 回归锁定一次性 watchdog 会生成有效 JSON 状态报告，并验证只读边界字段；已通过 `bash -n scripts/chuang-goal-watchdog.sh`、手动 `--once` JSON 解析、`cargo fmt --all --check`、`cargo test -q --test cli_smoke_tests`、`git diff --check`、`sh scripts/chuang-second-test-smoke.sh`。
 - 2026-05-07 本轮确认昨天已经写过终端长跑脚本：`scripts/start-codex-goal-terminal.sh`、`scripts/run-chuang-goal-overnight.sh`、`scripts/chuang-goal-watchdog.sh`。补充 `docs/terminal-goal-watchdog-sop.md`，把已跑通方案收口为“真实终端 Codex worker + watchdog 可视化日志”的最小 SOP，并明确它不是 Chuang 内部子代理自动执行、不是飞书命令层、不是常驻服务。
 - 2026-05-07 本轮按老爸选择推进后续清单第 3/4 项：新增 `src/live_adapter_gate.rs`，把 subagent runner、control apply、actuator operation 的 live adapter 启用门禁收成统一结构，默认全部 disabled，只认精确 env 值 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1`，并暴露 audit label。
 - `status` / `doctor` 现在新增 `live_adapter_gates` JSON 与文本输出，明确 gate_count、enabled/disabled 数量、required_env、audit_label 和 next_action；这只增加启用前门禁和诊断面，没有打开真实桌面、控制面或 live worker。
