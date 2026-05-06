@@ -203,8 +203,11 @@ pub struct LiveAdapterGateLayerStatus {
     pub state: String,
     pub enabled: bool,
     pub default_enabled: bool,
+    pub env_value_state: String,
     pub required_env: String,
     pub audit_label: String,
+    pub preflight_checks: Vec<String>,
+    pub must_reject_capabilities: Vec<String>,
     pub reason: String,
     pub next_action: String,
 }
@@ -754,15 +757,21 @@ fn build_live_adapter_gate_status() -> LiveAdapterGateStatus {
             },
             enabled: gate.enabled,
             default_enabled: gate.default_enabled,
+            env_value_state: gate.env_value_state,
             required_env: gate.required_env.to_string(),
             audit_label: gate.audit_label.to_string(),
+            preflight_checks: gate
+                .preflight_checks
+                .iter()
+                .map(|check| check.to_string())
+                .collect(),
+            must_reject_capabilities: gate
+                .must_reject_capabilities
+                .iter()
+                .map(|capability| capability.to_string())
+                .collect(),
             reason: gate.reason,
-            next_action: if gate.enabled {
-                "verify allowlist, approval, and audit receipt before running live adapter work"
-                    .to_string()
-            } else {
-                "keep disabled until the operator approves exact live adapter targets".to_string()
-            },
+            next_action: gate.next_action,
         }
     })
     .collect::<Vec<_>>();

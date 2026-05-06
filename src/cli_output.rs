@@ -377,13 +377,16 @@ pub fn print_status(status: &ChuangMvpStatus) {
     );
     for gate in &status.live_adapter_gates.gates {
         println!(
-            "live_adapter_gate name={} state={} enabled={} default_enabled={} required_env={} audit_label={} reason={} next={}",
+            "live_adapter_gate name={} state={} enabled={} default_enabled={} env_value_state={} required_env={} audit_label={} preflight={} must_reject={} reason={} next={}",
             gate.name,
             gate.state,
             gate.enabled,
             gate.default_enabled,
+            gate.env_value_state,
             gate.required_env,
             gate.audit_label,
+            format_text_list(&gate.preflight_checks),
+            format_text_list(&gate.must_reject_capabilities),
             gate.reason,
             gate.next_action
         );

@@ -54,6 +54,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=memory_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=channel_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=subagent_readiness ok=true"));
+    assert!(stdout.contains("doctor_check name=live_adapter_preflight ok=true"));
     assert!(stdout.contains("doctor_check name=external_ai_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
     assert!(stdout.contains("doctor_check name=atomic_tools ok=true"));
@@ -107,8 +108,11 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
     assert!(stdout.contains(
-        "live_adapter_gate name=subagent_runner state=disabled enabled=false default_enabled=false required_env=CHUANG_CODEX_RUNNER_ENABLE audit_label=subagent.runner.live"
+        "live_adapter_gate name=subagent_runner state=disabled enabled=false default_enabled=false env_value_state=unset required_env=CHUANG_CODEX_RUNNER_ENABLE audit_label=subagent.runner.live"
     ));
+    assert!(stdout.contains("preflight=confirm CHUANG_CODEX_RUNNER_ENABLE=1"));
+    assert!(stdout.contains("must_reject=unscoped external worker pool"));
+    assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
@@ -158,7 +162,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 19);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 20);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -209,6 +213,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .expect("checks array")
         .iter()
         .any(|check| check["name"] == "subagent_readiness"));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "live_adapter_preflight"
+            && check["detail"]
+                .as_str()
+                .expect("live adapter preflight detail")
+                .contains("next_actions=")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -369,7 +382,24 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .any(|gate| gate["name"] == "control_apply"
             && gate["required_env"] == "CHUANG_REAL_CONTROL_ENABLE"
             && gate["audit_label"] == "control.apply.live"
-            && gate["enabled"] == false));
+            && gate["enabled"] == false
+            && gate["env_value_state"] == "unset"
+            && gate["preflight_checks"]
+                .as_array()
+                .expect("preflight checks")
+                .iter()
+                .any(|check| check
+                    .as_str()
+                    .expect("check")
+                    .contains("Chuang-only unit allowlist"))
+            && gate["must_reject_capabilities"]
+                .as_array()
+                .expect("must reject capabilities")
+                .iter()
+                .any(|capability| capability
+                    .as_str()
+                    .expect("capability")
+                    .contains("Codex or Hermes service control"))));
     assert!(parsed["status"]["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers array")

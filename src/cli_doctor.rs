@@ -107,6 +107,24 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
             status.subagent_readiness.blocked_count
         ),
     ));
+    let live_adapter_next_actions = status
+        .live_adapter_gates
+        .gates
+        .iter()
+        .map(|gate| format!("{}:{}", gate.name, gate.next_action))
+        .collect::<Vec<_>>()
+        .join(";");
+    checks.push(pass(
+        "live_adapter_preflight",
+        &format!(
+            "state={} gates={} enabled={} disabled={} next_actions={}",
+            status.live_adapter_gates.overall_state,
+            status.live_adapter_gates.gate_count,
+            status.live_adapter_gates.enabled_count,
+            status.live_adapter_gates.disabled_count,
+            live_adapter_next_actions
+        ),
+    ));
     if !status.external_ai_readiness.ok {
         return Err(format!(
             "doctor_external_ai_readiness_failed state={} blocked={}",
@@ -693,13 +711,16 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     );
     for gate in &doctor.status.live_adapter_gates.gates {
         println!(
-            "live_adapter_gate name={} state={} enabled={} default_enabled={} required_env={} audit_label={} reason={} next={}",
+            "live_adapter_gate name={} state={} enabled={} default_enabled={} env_value_state={} required_env={} audit_label={} preflight={} must_reject={} reason={} next={}",
             gate.name,
             gate.state,
             gate.enabled,
             gate.default_enabled,
+            gate.env_value_state,
             gate.required_env,
             gate.audit_label,
+            format_text_list(&gate.preflight_checks),
+            format_text_list(&gate.must_reject_capabilities),
             gate.reason,
             gate.next_action
         );

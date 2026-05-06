@@ -145,8 +145,11 @@ fn cli_status_prints_mvp_health_summary() {
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
     assert!(stdout.contains(
-        "live_adapter_gate name=control_apply state=disabled enabled=false default_enabled=false required_env=CHUANG_REAL_CONTROL_ENABLE audit_label=control.apply.live"
+        "live_adapter_gate name=control_apply state=disabled enabled=false default_enabled=false env_value_state=unset required_env=CHUANG_REAL_CONTROL_ENABLE audit_label=control.apply.live"
     ));
+    assert!(stdout.contains("preflight=confirm CHUANG_REAL_CONTROL_ENABLE=1"));
+    assert!(stdout.contains("must_reject=arbitrary systemd unit or process control"));
+    assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
@@ -439,7 +442,24 @@ fn cli_status_can_render_json_without_secret_leak() {
             && gate["required_env"] == "CHUANG_REAL_ACTUATOR_ENABLE"
             && gate["audit_label"] == "actuator.operation.live"
             && gate["enabled"] == false
-            && gate["default_enabled"] == false));
+            && gate["default_enabled"] == false
+            && gate["env_value_state"] == "unset"
+            && gate["preflight_checks"]
+                .as_array()
+                .expect("preflight checks")
+                .iter()
+                .any(|check| check
+                    .as_str()
+                    .expect("check")
+                    .contains("CHUANG_REAL_ACTUATOR_ENABLE=1"))
+            && gate["must_reject_capabilities"]
+                .as_array()
+                .expect("must reject capabilities")
+                .iter()
+                .any(|capability| capability
+                    .as_str()
+                    .expect("capability")
+                    .contains("verification-code entry"))));
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);

@@ -42,6 +42,18 @@ Codex and Hermes services must not be included unless 老爸 explicitly asks for
 - The adapter must never execute shell text from stdin.
 - The adapter must never delete files, logs, queues, reports, claims, memories, or credentials.
 
+## Preflight Audit Surface
+
+`status` and `doctor` expose the live adapter preflight gates before any real adapter is used:
+
+- `CHUANG_CODEX_RUNNER_ENABLE` gates live subagent runner execution.
+- `CHUANG_REAL_CONTROL_ENABLE` gates live control apply execution.
+- `CHUANG_REAL_ACTUATOR_ENABLE` gates live actuator operation execution.
+
+Each gate reports `env_value_state`, `preflight_checks`, `must_reject_capabilities`, `audit_label`, and `next_action`. Setting an env value to `1` opens only the preflight gate; it does not override the allowlist, governance approval, audit receipt, or forbidden-capability rejection rules.
+
+Capabilities that still must be rejected include arbitrary service/process control, Codex or Hermes service control unless explicitly requested, deletion of logs/queues/reports/memories/credentials/claims, unscoped external worker pools, direct core-memory writes by subagents, real desktop/browser operations without an action allowlist, credential/login-state mutation, and verification-code entry without operator-provided code and approval.
+
 ## First Real Integration Steps
 
 1. Create a Chuang-only service allowlist file.

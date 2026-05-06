@@ -247,6 +247,16 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && gate.audit_label == "control.apply.live"
             && !gate.enabled
             && !gate.default_enabled
+            && gate.env_value_state == "unset"
+            && gate
+                .preflight_checks
+                .iter()
+                .any(|check| check.contains("Chuang-only unit allowlist"))
+            && gate
+                .must_reject_capabilities
+                .iter()
+                .any(|capability| capability.contains("Codex or Hermes service control"))
+            && gate.next_action.contains("preflight evidence")
     }));
     assert!(status.external_ai_readiness.ok);
     assert_eq!(status.external_ai_readiness.overall_state, "ready");
