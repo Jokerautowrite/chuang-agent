@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 本轮确认昨天已经写过终端长跑脚本：`scripts/start-codex-goal-terminal.sh`、`scripts/run-chuang-goal-overnight.sh`、`scripts/chuang-goal-watchdog.sh`。补充 `docs/terminal-goal-watchdog-sop.md`，把已跑通方案收口为“真实终端 Codex worker + watchdog 可视化日志”的最小 SOP，并明确它不是 Chuang 内部子代理自动执行、不是飞书命令层、不是常驻服务。
 - 2026-05-07 本轮按老爸选择推进后续清单第 3/4 项：新增 `src/live_adapter_gate.rs`，把 subagent runner、control apply、actuator operation 的 live adapter 启用门禁收成统一结构，默认全部 disabled，只认精确 env 值 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1`，并暴露 audit label。
 - `status` / `doctor` 现在新增 `live_adapter_gates` JSON 与文本输出，明确 gate_count、enabled/disabled 数量、required_env、audit_label 和 next_action；这只增加启用前门禁和诊断面，没有打开真实桌面、控制面或 live worker。
 - ContextEngine 第一版继续收口：`PackedContext` 现在记录 `normalize_tokens -> trim -> rank -> reserve_working -> merge_under_budget` 的 `trace`，并由 `PackedContext::render_prompt()` 统一渲染 prompt 诊断，runtime 不再保留私有重复渲染逻辑。
