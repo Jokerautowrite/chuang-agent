@@ -1,6 +1,8 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 App-server `health` 现在会在 JSON/text 里一起输出 `diagnostic_status`、`diagnostic_summary` 和 `next_actions`，直接把运行态里的 provider env 缺失和 placeholder warnings 翻成可执行的排障提示；诊断模式仍然不失败，只是不再只给原始 config 块。
+- 这条诊断面复用了 runtime config summary 的 placeholder warnings 和 api_key 状态，新增回归已覆盖正常 workspace health 和 `--diagnostic` 缺 env 两条路径；验证通过 `cargo test -q --test app_server_tests`、`sh scripts/chuang-complete-local-smoke.sh`、`git diff --check`。
 - 2026-05-07 本轮再补一个只读 live readiness preflight 总入口 `scripts/chuang-live-readonly-preflight.sh`：它先跑 watchdog `--once` 只读快照，再串起临时 stub config 的 `status/doctor/app-server health/console snapshot` 诊断，最后再过一遍 complete-local smoke，最终输出 `live_readiness_preflight_ok`。
 - 这个 preflight 仍然只用临时目录和 stub provider，执行前会 unset live adapter gate env；它不连接真实 Feishu、不读取真实 secret、不控制真实服务。
 - 2026-05-07 Worker J 本轮补真实外部 subagent runner 启用前 rehearsal：新增只读 `subagent live-preflight`，检查 `CHUANG_CODEX_RUNNER_ENABLE` live gate、runner command 显式 allowlist、required/worker capability routing、ReportAdmission 证据，以及 unscoped external worker pool、直接写核心记忆、登录态/session mutation 等 forbidden capability 是否仍拒绝。

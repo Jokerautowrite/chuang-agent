@@ -13,8 +13,8 @@ use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
-    IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig,
-    RulesConfig, RuntimeConfig, SubagentQueueConfig,
+    ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
+    ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -172,6 +172,9 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
     let status = build_chuang_mvp_status(&runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
     let config_summary = runtime.summary();
+    let diagnostic_status = app_server_health_diagnostic_status(&config_summary);
+    let diagnostic_summary = app_server_health_diagnostic_summary(&config_summary, diagnostic);
+    let next_actions = app_server_health_next_actions(&config_summary);
     let identity_memory_root = runtime
         .identity_memory
         .build_dual_file_config()
@@ -186,6 +189,9 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "workspace_root": normalized_workspace_root,
         "model": provider_summary_model_name(&runtime),
         "diagnostic_mode": diagnostic,
+        "diagnostic_status": diagnostic_status,
+        "diagnostic_summary": diagnostic_summary.clone(),
+        "next_actions": next_actions.clone(),
         "api_key_state": config_summary.api_key_state,
         "placeholder_warnings": config_summary.placeholder_warnings,
         "project_readiness": status.project_readiness,
@@ -209,11 +215,30 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
     } else {
         println!("app_server_ok: true");
         println!("diagnostic_mode: {diagnostic}");
+        println!("diagnostic_status: {}", diagnostic_status);
+        println!("diagnostic_summary: {}", diagnostic_summary);
         println!(
             "workspace_root: {}",
             result["workspace_root"].as_str().unwrap_or("")
         );
         println!("model: {}", result["model"].as_str().unwrap_or(""));
+        println!(
+            "api_key_state: {}",
+            result["api_key_state"].as_str().unwrap_or("none")
+        );
+        if config_summary.placeholder_warnings.is_empty() {
+            println!("placeholder_warnings: none");
+        } else {
+            println!(
+                "placeholder_warnings: {}",
+                config_summary.placeholder_warnings.join(";")
+            );
+        }
+        if next_actions.is_empty() {
+            println!("next_actions: none");
+        } else {
+            println!("next_actions: {}", next_actions.join(";"));
+        }
         println!(
             "release_readiness: ok={} name={} state={}",
             status.release_readiness.ok,
@@ -959,6 +984,113 @@ fn provider_summary_model_name(runtime: &RuntimeConfig) -> String {
             provider_config_model_name(primary),
             provider_config_model_name(fallback)
         ),
+    }
+}
+
+fn app_server_health_diagnostic_status(summary: &ConfigSummary) -> &'static str {
+    if summary.placeholder_warnings.is_empty() {
+        "ready"
+    } else {
+        "warning"
+    }
+}
+
+fn app_server_health_diagnostic_summary(summary: &ConfigSummary, diagnostic_mode: bool) -> String {
+    if summary.placeholder_warnings.is_empty() {
+        if diagnostic_mode {
+            "app-server workspace config is ready in diagnostic mode; no live provider request was made."
+                .to_string()
+        } else {
+            "app-server workspace config is ready; no live provider request was made.".to_string()
+        }
+    } else {
+        let mode = if diagnostic_mode {
+            "diagnostic mode"
+        } else {
+            "workspace config"
+        };
+        format!(
+            "app-server {mode} loaded with {} local warning(s).",
+            summary.placeholder_warnings.len()
+        )
+    }
+}
+
+fn app_server_health_next_actions(summary: &ConfigSummary) -> Vec<String> {
+    let mut actions = Vec::new();
+
+    if let Some(api_key_state) = &summary.api_key_state {
+        if let Some(env_name) = api_key_state
+            .strip_prefix("<missing:")
+            .and_then(|value| value.strip_suffix('>'))
+        {
+            push_unique_action(
+                &mut actions,
+                format!(
+                    "set {env_name} in the workspace environment before switching app-server out of diagnostic mode"
+                ),
+            );
+        }
+    }
+
+    if summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("provider=fake"))
+    {
+        push_unique_action(
+            &mut actions,
+            "configure an openai_compatible provider for real conversation".to_string(),
+        );
+    }
+    if summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("transport=stub"))
+    {
+        push_unique_action(
+            &mut actions,
+            "switch provider transport to native or curl for real calls".to_string(),
+        );
+    }
+    if summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("actuator=fake"))
+    {
+        push_unique_action(
+            &mut actions,
+            "configure command-backed actuator before expecting desktop/browser operation"
+                .to_string(),
+        );
+    }
+    if summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("subagent=fake"))
+    {
+        push_unique_action(
+            &mut actions,
+            "configure queued_external subagents before expecting live worker dispatch".to_string(),
+        );
+    }
+    if summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("control_plane=fake_local"))
+    {
+        push_unique_action(
+            &mut actions,
+            "configure command control before expecting real service control".to_string(),
+        );
+    }
+
+    actions
+}
+
+fn push_unique_action(actions: &mut Vec<String>, action: String) {
+    if !actions.iter().any(|existing| existing == &action) {
+        actions.push(action);
     }
 }
 

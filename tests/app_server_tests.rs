@@ -475,7 +475,28 @@ transport = "stub"
     assert_eq!(parsed["server"], "chuang-agent-app-server");
     assert_eq!(parsed["model"], "gpt-app-server-health");
     assert_eq!(parsed["diagnostic_mode"], false);
+    assert_eq!(parsed["diagnostic_status"], "warning");
+    assert!(parsed["diagnostic_summary"]
+        .as_str()
+        .expect("diagnostic summary")
+        .contains("local warning"));
     assert_eq!(parsed["api_key_state"], "<set>");
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions array")
+        .iter()
+        .any(|action| action
+            .as_str()
+            .expect("next action")
+            .contains("switch provider transport to native or curl")));
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions array")
+        .iter()
+        .any(|action| action
+            .as_str()
+            .expect("next action")
+            .contains("configure command-backed actuator")));
     assert_eq!(parsed["release_readiness"]["ok"], true);
     assert_eq!(
         parsed["release_readiness"]["overall_state"],
@@ -582,6 +603,11 @@ transport = "stub"
 
     assert_eq!(parsed["ok"], true);
     assert_eq!(parsed["diagnostic_mode"], true);
+    assert_eq!(parsed["diagnostic_status"], "warning");
+    assert!(parsed["diagnostic_summary"]
+        .as_str()
+        .expect("diagnostic summary")
+        .contains("diagnostic mode"));
     assert_eq!(
         parsed["api_key_state"],
         "<missing:CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY>"
@@ -594,6 +620,14 @@ transport = "stub"
             .as_str()
             .expect("warning")
             .contains("provider api_key_env missing")));
+    assert!(parsed["next_actions"]
+        .as_array()
+        .expect("next actions array")
+        .iter()
+        .any(|action| action
+            .as_str()
+            .expect("next action")
+            .contains("set CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY")));
     assert_eq!(
         parsed["release_readiness"]["overall_state"],
         "second_test_version_ready_with_partial_modules"
@@ -602,4 +636,74 @@ transport = "stub"
         parsed["release_readiness"]["connects_real_external_services"],
         false
     );
+}
+
+#[test]
+fn app_server_health_text_reports_diagnostic_summary_and_next_actions() {
+    let workspace = temp_workspace("health-text");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang health soul\n")
+        .expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang health story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang health first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+    fs::write(
+        workspace.join("config.toml"),
+        r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-health-openai"
+base_url = "https://api.example.com/v1"
+model = "gpt-app-server-health"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"
+transport = "stub"
+"#,
+    )
+    .expect("config should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "app-server",
+            "health",
+            "--workspace-root",
+            workspace.to_str().expect("workspace path should be utf8"),
+            "--diagnostic",
+        ])
+        .env_remove("CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY")
+        .output()
+        .expect("app-server health should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("app_server_ok: true"));
+    assert!(stdout.contains("diagnostic_status: warning"));
+    assert!(stdout.contains("diagnostic_summary:"));
+    assert!(stdout.contains("next_actions:"));
+    assert!(stdout.contains("set CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"));
 }
