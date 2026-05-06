@@ -21,6 +21,7 @@
 | 能力 | 当前判定 | 验收命令 | 风险边界 |
 | --- | --- | --- | --- |
 | 第二测试版本地合同 | ready | `sh scripts/chuang-second-test-smoke.sh` | 不连接真实外部服务，不证明 live Feishu/桌面/wiki |
+| 完整本地可用闭环 | ready | `sh scripts/chuang-complete-local-smoke.sh` | 串联本地 smoke、watchdog 只读快照和诊断读面，仍不连接真实 Feishu、不读真实 secret、不控制真实服务 |
 | 项目 readiness/doctor | ready | `cargo run --quiet -- status --config config.toml --json` 和 `cargo run --quiet -- doctor --config config.toml --json` | `project_readiness=ready` 只代表本地模块合同绿 |
 | 主链 runtime/app-server/channel simulate | ready | `cargo run --quiet -- channel simulate --workspace-root . --message-id m --sender-id u --thread-id t --text "ping" --json` | channel simulate 不等于真实飞书在线 |
 | GoalRun 计划/checkpoint | ready | `cargo run --quiet -- goal show --goal-id mainline-mvp --json` | 只是计划和续接记录，不执行任务 |
@@ -28,7 +29,7 @@
 | 记忆人工批准写回 | ready | `cargo test -q --test memory_maintenance_cli_tests` | 只能 `--approve-writeback` 追加 LIM 候选，decay 仍只 review |
 | provider 满载/fallback 诊断 | ready | `cargo test -q --test slot_registry_tests --test runtime_report_tests` | fallback 必须显式配置，不能 silent fallback |
 | 子代理本地队列和 bounded run-loop | ready | `cargo run --quiet -- subagent run-loop --runner command --runner-command sh --runner-arg scripts/chuang-subagent-runner-example.sh --approve-exec --max-runs 1 --max-concurrency 1 --json` | 这是本地命令 runner，不是 live 外部 worker 池 |
-| 终端 Codex worker + watchdog | ready | `./scripts/chuang-goal-watchdog.sh --once` | watchdog 只读，不派活、不重启、不提交 |
+| 终端 Codex worker + watchdog | ready | `./scripts/chuang-goal-watchdog.sh --once` 和 `cargo run --quiet -- console snapshot --json` | watchdog/console 只读，不派活、不重启、不提交 |
 | live adapter gate | ready | `cargo test -q --test live_adapter_gate_tests --test cli_status_tests --test cli_doctor_tests` | env=1 只开 preflight，不绕过 allowlist/审批/审计 |
 | command control/actuator 示例 | ready | `cargo test -q --test control_actuator_contract_tests` | 示例 adapter 不控制真实服务或桌面 |
 | Chuang Feishu 本地命令 | ready | `node scripts/chuang-feishu-command-smoke.js` | 本地命令不等于真实飞书连接健康 |
@@ -72,14 +73,14 @@
    验证：`git diff --check -- docs/acceptance-next-matrix.md`。
    边界：只给主控排程，不改变 runtime。
 
-6. 下一步：`feat(console): surface readonly terminal watchdog state`
+6. 已完成：`feat(console): surface readonly terminal watchdog state`
    文件范围建议：`src/cli_console.rs`、`tests/cli_console_tests.rs`，必要时加一个小 reader。
    验证：`./scripts/chuang-goal-watchdog.sh --once`、`cargo test -q --test cli_console_tests`。
    边界：只读 `latest-watchdog-report.json`，不派活、不重启。
 
-7. 下一步：`test(smoke): add complete local acceptance wrapper`
-   文件范围建议：新增 `scripts/chuang-complete-local-smoke.sh` 和一个轻量 wrapper test。
-   验证内容：second-test smoke、watchdog `--once`、Feishu command smoke、provider fallback fixture、memory apply dry-run。
+7. 已完成：`test(smoke): add complete local acceptance wrapper`
+   文件范围：新增 `scripts/chuang-complete-local-smoke.sh` 和 `tests/cli_smoke_tests.rs` 轻量 wrapper 合同测试。
+   验证内容：second-test smoke、watchdog `--once`、Feishu command/session/rich smoke、status/doctor/app-server/console 诊断读面。
    边界：仍使用临时目录/stub/local fixtures，不连接 live services。
 
 8. 下一步：`docs: refresh readiness after complete local acceptance`
@@ -94,7 +95,7 @@
 - Worker C：live adapter gate，只碰 live gate/status/doctor/output 和对应 tests/control safety doc。
 - Worker D：Feishu 本地命令，只碰 `scripts/chuang-feishu-bridge-commands.js`、command smoke、channel docs。
 - Worker E：验收矩阵，只碰本文件。
-- Worker F：complete local smoke wrapper，等 A/B/C/D 合入或至少 diff 稳定后再做。
+- Worker F：console 只读展示 terminal watchdog 状态，只碰 console、console tests 和本项文档。
 
 ## 避免冲突文件
 

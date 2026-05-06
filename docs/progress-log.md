@@ -1,6 +1,10 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 Worker F 本轮把 terminal watchdog 只读状态接入 `console snapshot`：console 现在默认读取 `/home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json`，JSON 输出 `terminal_watchdog` 摘要，文本输出显示 available/readonly/session/tmux/codex process/git dirty/next_action。
+- 该接入只读已有 report，不执行 `chuang-goal-watchdog.sh`、不派活、不重启、不修改仓库、不触碰服务；测试通过 `CHUANG_GOAL_WATCHDOG_REPORT_FILE` 指向临时 report 覆盖，真实路径仍按 SOP 默认读取。
+- 2026-05-07 Worker G 本轮新增完整本地可用闭环验收入口 `scripts/chuang-complete-local-smoke.sh`：它串起第二测试 smoke、watchdog `--once` 只读报告、临时 stub config 下的 `status/doctor/app-server health/console snapshot` 诊断读面，以及 Feishu 本地 command/session/rich message smoke，最终输出 `complete_local_smoke_ok`。
+- 该 wrapper 明确保持 local-only：使用临时目录和 stub provider，主动 unset live adapter gate env，不连接真实 Feishu、不读取真实 secret、不控制真实服务；新增 `tests/cli_smoke_tests.rs` 合同测试锁定复用安全 smoke、watchdog 一次性模式和稳定 marker。
 - 2026-05-07 Worker D 本轮补 Chuang 专用 Feishu 通道真实使用面：bridge 新增 `/session` 与 `/health`/`/status` 本地命令，分别查看 chat->thread 绑定和 bridge/app-server/workspace/env/provider-env 诊断；命令只读本地状态，不连接真实飞书、不打印 secret。
 - 本轮继续补强 `/session` 和 `/health` 的可读诊断：`/session` 现在明确显示当前飞书聊天是否已绑定，`/health` 在未绑定时显示默认 thread、在已绑定时显示 chat binding，并把 provider env 拆成 `CHUANG_PROVIDER_ENV_FILE=<set|missing>` 与 `CODEX_PPTOKEN_API_KEY=<set|missing>`；command event log 也会带 thread id，便于排查真实聊天路由。
 - 本轮 Feishu/channel 验证已通过 `node --check scripts/chuang-feishu-bridge.js`、`node scripts/chuang-feishu-command-smoke.js`、`node scripts/chuang-feishu-session-smoke.js`、`node scripts/chuang-feishu-rich-message-smoke.js`、`cargo test -q --test cli_channel_tests`、`git diff --check`。
