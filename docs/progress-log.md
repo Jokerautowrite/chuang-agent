@@ -1,6 +1,17 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-06 本轮把 Chuang Feishu `\/new` 从静态说明升级为真会话切换：bridge 现在会为当前 Feishu chat 创建新的 app-server thread，并把 chat->thread 绑定写到本地 session state 文件，后续同一 chat 的普通消息会路由到这个新 thread，不再沿用旧上下文。
+- 已新增 `scripts/chuang-feishu-session-store.js` 与 `scripts/chuang-feishu-session-smoke.js`，并把 session smoke 纳入 `scripts/chuang-mvp-smoke.sh`；验证通过 `node scripts/chuang-feishu-command-smoke.js`、`node scripts/chuang-feishu-session-smoke.js`、`cargo test -q --test cli_status_tests --test cli_doctor_tests --test kernel_status_tests`、`cargo test -q`、`sh scripts/chuang-second-test-smoke.sh`。
+- 2026-05-06 本轮继续推进 subagent readiness 可诊断性：`SubagentReadinessStatus` 和 `SubagentLayerStatus` 新增 `local_contract_reason` / `live_adapter_reason`，`status` / `doctor` 文本输出也会直接展示本地合同已 ready 与 live adapter 尚未接入的结构化原因，避免 UI 或值守脚本只能解析状态字符串。
+- 已补 `kernel_status_tests`、`cli_status_tests`、`cli_doctor_tests` 回归锁定这些原因字段；验证通过 `cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests`，随后已跑 `cargo fmt --all`。
+- 已重新确认本轮门禁：`cargo fmt --all --check`、`cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests`、`sh scripts/chuang-second-test-smoke.sh` 均通过，second-test smoke 输出 `second_test_smoke_ok`。
+- 老爸看到的 `Selected model is at capacity` 属于上游模型/provider 满载，不是本地 Rust 测试或第二测试 smoke 失败；后续可考虑给真实对话入口配置备用模型或 fallback provider。
+- 2026-05-06 Worker B 推进 memory maintenance dry-run 闭环：`memory maintenance report` 支持多次 `--query` 批量 batches，输出 `explicit_writeback_required=true`、LIM 候选和 decay review candidates；decay 只作为人工审查建议，不允许写回。
+- `memory maintenance apply --dry-run` 已补为只预检/选择 LIM 候选、不写 `experiences.md`；真实写回仍必须显式 `--approve-writeback`，且 decay 候选会稳定拒绝为 `memory_maintenance_apply_candidate_not_writeback_candidate`。新增 `tests/memory_maintenance_cli_tests.rs`，验证通过 `cargo test -q --test memory_maintenance_cli_tests`、`cargo test -q --test cli_identity_memory_tests`、`cargo test -q --test memory_policy_tests --test memory_recall_tests --test memory_store_tests --test memory_store_sqlite_tests --test memory_admission_tests`。
+- 2026-05-06 Worker C 本轮只推进 control/actuator/Genesis 边界：`control_plane` 新增显式 `ControlCommandContract` / allowlisted action 校验 / reusable receipt 校验，`actuator` 新增 command contract / action allowlist / audit label 校验，`GenesisCommandSpec` 暴露稳定 `audit_label()` 并在 AutoCLI runner 入口校验 program/timeout。
+- 已补 `tests/control_actuator_contract_tests.rs` 覆盖 control allowlist 拒绝、receipt 模型不匹配、actuator action allowlist/audit label、Genesis userDataDir/CDP 审计标签；相关验证通过 `cargo test -q --test control_actuator_contract_tests`、`cargo test -q --test control_plane_tests --test control_workflow_tests --test control_intent_tests --test control_surface_tests --test cli_control_tests --test control_actuator_contract_tests`、`cargo test -q --test actuator_tests --test genesis_actuator_tests`。
+- 本轮没有接真实桌面/浏览器执行，没有改飞书/Hermes，也没有把 fake 标成真实控制；`cargo fmt --all --check` 仍被既有 `tests/memory_maintenance_cli_tests.rs` 格式漂移挡住，Worker C 未触碰该文件。
 - 2026-05-06 本轮把 `workspace adapter` / `tool_runtime` / `app_server` 的路径归一化收成共享模块 `src/path_utils.rs`，同一套 lexical-normalize / symlink-parent resolve 现在由三处共用，减少路径边界分叉。
 - 已补回归覆盖共享路径解析后的 `write_file` / `apply_patch Add File` / `execute_tool_call(WriteFile ...)` 三条路径；验证通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q --test tool_runtime_tests workspace_file_adapter`、`cargo test -q --test tool_runtime_tests symlink_parent`。
 - 2026-05-06 本轮把 workspace path 逃逸防护收成单一共享模块 `src/path_utils.rs`，`tool_runtime` 与 `workspace_file_adapter` 现在共用同一套“canonicalize 已存在父路径 + 拼回缺失尾部”的解析逻辑，避免以后两处路径边界分叉。
@@ -23,7 +34,7 @@
 - `goal_run` readiness 现在透出 `checkpoint_log_complete`、`last_checkpoint_summary` 和 `incomplete_reasons`；旧弱 checkpoint 仍可加载，但缺完成者/验证证据会显式显示为不完整，不再静默看起来完全可续接。
 - 子代理文件队列已加 `run_id` 路径安全约束：dispatch/report/claim/release 等文件入口只接受 ASCII 字母、数字、`-`、`_`，CLI `subagent report --run-id ../escape` 会拒绝，不会越出 queue root。
 - `subagent report/collect` 现在先读取 raw report 并生成 `ReportAdmission`：坏 JSON、缺字段等 report 文件会稳定返回 `Rejected` 和 `reason_code`，不再直接把 CLI 命令打成 Decode 失败；完整 report 仍保留 collect 身份校验。
-- `subagent_readiness` 已拆出 `local_contract_ready` / `live_adapter_ready`：第二测试版可以明确表达本地队列、runner、multi-worker、external-AI downstream 合同可验收，但真实外部 worker/live adapter 仍未接入。
+- `subagent_readiness` 已拆出 `local_contract_ready` / `local_contract_state` 与 `live_adapter_ready` / `live_adapter_state`：第二测试版可以明确表达本地队列、runner、multi-worker、external-AI downstream 合同可验收，但真实外部 worker/live adapter 仍未接入。
 - `ReportAdmission` 新增可选 `upstream_reason_code`：command runner 协议报告被包装成 `command_protocol_report_rejected` 时，会保留底层 `missing_required_field`、`agent_id_mismatch` 等稳定原因，UI 不需要再解析 stderr 文本。
 - 最新 `goal checkpoint` 已写入 `checkpoint-report-admission-upstream-reason-code-20260505`，checkpoint count 到 68。
 - 最新 `goal checkpoint` 已写入 `checkpoint-subagent-readiness-contract-live-split-20260505`，checkpoint count 到 67。
