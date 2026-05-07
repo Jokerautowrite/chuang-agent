@@ -143,6 +143,28 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
             status.external_ai_readiness.blocked_count
         ),
     ));
+    if !status.local_contract_readiness.ok {
+        return Err(format!(
+            "doctor_local_contract_readiness_failed state={} blocked={}",
+            status.local_contract_readiness.overall_state,
+            status.local_contract_readiness.blocked_count
+        ));
+    }
+    checks.push(pass(
+        "local_contract_readiness",
+        &format!(
+            "state={} contracts={} ready={} partial={} deferred={} blocked={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
+            status.local_contract_readiness.overall_state,
+            status.local_contract_readiness.contract_count,
+            status.local_contract_readiness.ready_count,
+            status.local_contract_readiness.partial_count,
+            status.local_contract_readiness.deferred_count,
+            status.local_contract_readiness.blocked_count,
+            status.local_contract_readiness.connects_real_external_services,
+            status.local_contract_readiness.writes_core_memory,
+            status.local_contract_readiness.executes_plugins
+        ),
+    ));
 
     let mut slots = build_runtime_slots(runtime)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -651,6 +673,22 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.project_readiness.partial_count,
         doctor.status.project_readiness.deferred_count,
         doctor.status.project_readiness.blocked_count
+    );
+    println!(
+        "local_contract_readiness: ok={} state={} contracts={} ready={} partial={} deferred={} blocked={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
+        doctor.status.local_contract_readiness.ok,
+        doctor.status.local_contract_readiness.overall_state,
+        doctor.status.local_contract_readiness.contract_count,
+        doctor.status.local_contract_readiness.ready_count,
+        doctor.status.local_contract_readiness.partial_count,
+        doctor.status.local_contract_readiness.deferred_count,
+        doctor.status.local_contract_readiness.blocked_count,
+        doctor
+            .status
+            .local_contract_readiness
+            .connects_real_external_services,
+        doctor.status.local_contract_readiness.writes_core_memory,
+        doctor.status.local_contract_readiness.executes_plugins
     );
     println!(
         "release_readiness: ok={} name={} state={} ready={} partial={} deferred={} blocked={}",

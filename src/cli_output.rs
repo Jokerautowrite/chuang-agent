@@ -291,6 +291,34 @@ pub fn print_status(status: &ChuangMvpStatus) {
         format_name_list(&status.plugin_registry.capabilities)
     );
     println!(
+        "local_contract_readiness: ok={} state={} contracts={} ready={} partial={} deferred={} blocked={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
+        status.local_contract_readiness.ok,
+        status.local_contract_readiness.overall_state,
+        status.local_contract_readiness.contract_count,
+        status.local_contract_readiness.ready_count,
+        status.local_contract_readiness.partial_count,
+        status.local_contract_readiness.deferred_count,
+        status.local_contract_readiness.blocked_count,
+        status.local_contract_readiness.connects_real_external_services,
+        status.local_contract_readiness.writes_core_memory,
+        status.local_contract_readiness.executes_plugins
+    );
+    for contract in &status.local_contract_readiness.contracts {
+        println!(
+            "local_contract name={} state={} boundary={} read_only={} dry_run={} connects_real_service={} writes_core_memory={} writes_repo_files={} executes_plugins={} next={}",
+            contract.name,
+            contract.state,
+            contract.boundary,
+            contract.read_only,
+            contract.dry_run,
+            contract.connects_real_service,
+            contract.writes_core_memory,
+            contract.writes_repo_files,
+            contract.executes_plugins,
+            contract.next_action
+        );
+    }
+    println!(
         "project_readiness: ok={} state={} ready={} partial={} deferred={} blocked={}",
         status.project_readiness.ok,
         status.project_readiness.overall_state,

@@ -20,6 +20,7 @@ pub struct ChuangMvpStatus {
     pub slots: RuntimeSlotsSummary,
     pub kernel: ChuangKernelSnapshot,
     pub plugin_registry: PluginRegistrySummary,
+    pub local_contract_readiness: LocalContractReadinessStatus,
     pub project_readiness: ProjectReadinessStatus,
     pub memory_readiness: MemoryReadinessStatus,
     pub channel_readiness: ChannelReadinessStatus,
@@ -43,6 +44,36 @@ pub struct ProjectReadinessStatus {
     pub deferred_count: usize,
     pub blocked_count: usize,
     pub modules: Vec<ProjectModuleStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LocalContractReadinessStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub contract_count: usize,
+    pub ready_count: usize,
+    pub partial_count: usize,
+    pub deferred_count: usize,
+    pub blocked_count: usize,
+    pub connects_real_external_services: bool,
+    pub writes_core_memory: bool,
+    pub executes_plugins: bool,
+    pub contracts: Vec<LocalContractStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LocalContractStatus {
+    pub name: String,
+    pub state: String,
+    pub evidence: String,
+    pub boundary: String,
+    pub next_action: String,
+    pub read_only: bool,
+    pub dry_run: bool,
+    pub connects_real_service: bool,
+    pub writes_core_memory: bool,
+    pub writes_repo_files: bool,
+    pub executes_plugins: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -315,6 +346,7 @@ pub fn build_chuang_mvp_status(
     let goal_mode = goal_mode_status();
     let goal_run = summarize_goal_run_readiness(Path::new("./context/goal-runs"), "mainline-mvp");
     let plugin_registry = summarize_plugin_registry(Path::new("plugins/registry.example.json"));
+    let local_contract_readiness = build_local_contract_readiness();
     let slots = summarize_runtime_slots(config);
     let config_summary = config.summary();
     let atomic_tools = AtomicToolSurfaceStatus {
@@ -440,6 +472,7 @@ pub fn build_chuang_mvp_status(
                 .map(|snapshot| snapshot.agents_registry_exists),
         },
         plugin_registry,
+        local_contract_readiness,
         project_readiness,
         memory_readiness,
         channel_readiness,
@@ -627,6 +660,134 @@ fn build_release_readiness(
         current: "second test version is checkpoint-continuable: readiness, smoke, goal/run, and subagent protocol surfaces are visible while partial modules remain adapter/plugin boundaries".to_string(),
         next_action: "keep readiness/smoke/goal-run/subagent protocol green while hardening real adapters without reopening core".to_string(),
         acceptance,
+    }
+}
+
+fn build_local_contract_readiness() -> LocalContractReadinessStatus {
+    let contracts = vec![
+        local_contract(
+            "knowledge_context_preview",
+            "ready",
+            "memory knowledge preview-context and run --enable-knowledge-context-preview expose local readonly context evidence",
+            "local_markdown_text_preview_only",
+            "wire live wiki/GBrain retrieval only after audited readonly adapters are configured",
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ),
+        local_contract(
+            "skill_proposal_review",
+            "ready",
+            "skill propose emits dry-run proposals with provenance and no solidify/write path",
+            "dry_run_review_only",
+            "add approval-backed solidify only after proposal review contracts stay stable",
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+        ),
+        local_contract(
+            "plugin_registry_evidence",
+            "ready",
+            "plugin list/check and status expose evidence, capabilities, check-only, and no-execution boundaries",
+            "manifest_check_only",
+            "enable real plugins only through explicit manifests, allowlists, and separate credentials",
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+        ),
+        local_contract(
+            "external_knowledge_source_contracts",
+            "ready",
+            "memory knowledge source-contract --source wiki|gbrain documents readonly adapter contracts",
+            "adapter_contract_only",
+            "connect live source adapters only after manual env/provider verification and provenance review",
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+        ),
+    ];
+
+    let ready_count = contracts
+        .iter()
+        .filter(|contract| contract.state == "ready")
+        .count();
+    let partial_count = contracts
+        .iter()
+        .filter(|contract| contract.state == "partial")
+        .count();
+    let deferred_count = contracts
+        .iter()
+        .filter(|contract| contract.state == "deferred")
+        .count();
+    let blocked_count = contracts
+        .iter()
+        .filter(|contract| contract.state == "blocked")
+        .count();
+    let connects_real_external_services = contracts
+        .iter()
+        .any(|contract| contract.connects_real_service);
+    let writes_core_memory = contracts.iter().any(|contract| contract.writes_core_memory);
+    let executes_plugins = contracts.iter().any(|contract| contract.executes_plugins);
+    let overall_state = if blocked_count > 0 {
+        "blocked"
+    } else if partial_count > 0 || deferred_count > 0 {
+        "ready_with_partial_contracts"
+    } else {
+        "ready"
+    };
+
+    LocalContractReadinessStatus {
+        ok: blocked_count == 0,
+        overall_state: overall_state.to_string(),
+        contract_count: contracts.len(),
+        ready_count,
+        partial_count,
+        deferred_count,
+        blocked_count,
+        connects_real_external_services,
+        writes_core_memory,
+        executes_plugins,
+        contracts,
+    }
+}
+
+fn local_contract(
+    name: &str,
+    state: &str,
+    evidence: &str,
+    boundary: &str,
+    next_action: &str,
+    read_only: bool,
+    dry_run: bool,
+    connects_real_service: bool,
+    writes_core_memory: bool,
+    writes_repo_files: bool,
+    executes_plugins: bool,
+) -> LocalContractStatus {
+    LocalContractStatus {
+        name: name.to_string(),
+        state: state.to_string(),
+        evidence: evidence.to_string(),
+        boundary: boundary.to_string(),
+        next_action: next_action.to_string(),
+        read_only,
+        dry_run,
+        connects_real_service,
+        writes_core_memory,
+        writes_repo_files,
+        executes_plugins,
     }
 }
 

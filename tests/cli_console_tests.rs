@@ -170,6 +170,27 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         parsed["status"]["third_test_candidate"]["real_live_ready"],
         false
     );
+    assert_eq!(parsed["status"]["local_contract_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["overall_state"],
+        "ready"
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["contract_count"],
+        4
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["executes_plugins"],
+        false
+    );
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
         serde_json::json!(["file_read", "file_write", "code_execute"])
@@ -301,6 +322,9 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("channel_readiness: ok=true state=ready"));
     assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
+    assert!(stdout.contains(
+        "local_contract_readiness: ok=true state=ready contracts=4 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+    ));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
     ));

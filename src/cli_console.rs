@@ -110,6 +110,18 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.external_ai_readiness.overall_state
     );
     println!(
+        "local_contract_readiness: ok={} state={} contracts={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
+        snapshot.status.local_contract_readiness.ok,
+        snapshot.status.local_contract_readiness.overall_state,
+        snapshot.status.local_contract_readiness.contract_count,
+        snapshot
+            .status
+            .local_contract_readiness
+            .connects_real_external_services,
+        snapshot.status.local_contract_readiness.writes_core_memory,
+        snapshot.status.local_contract_readiness.executes_plugins
+    );
+    println!(
         "release_readiness: ok={} name={} state={}",
         snapshot.status.release_readiness.ok,
         snapshot.status.release_readiness.release_name,

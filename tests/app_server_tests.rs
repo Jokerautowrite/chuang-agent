@@ -544,6 +544,21 @@ transport = "stub"
         true
     );
     assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
+    assert_eq!(parsed["local_contract_readiness"]["ok"], true);
+    assert_eq!(parsed["local_contract_readiness"]["overall_state"], "ready");
+    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 4);
+    assert_eq!(
+        parsed["local_contract_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["local_contract_readiness"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(
+        parsed["local_contract_readiness"]["executes_plugins"],
+        false
+    );
     assert_eq!(
         parsed["project_readiness"]["overall_state"],
         "mvp_ready_with_partial_modules"
@@ -669,6 +684,11 @@ transport = "stub"
         false
     );
     assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
+    assert_eq!(parsed["local_contract_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["local_contract_readiness"]["connects_real_external_services"],
+        false
+    );
 }
 
 #[test]
@@ -740,6 +760,9 @@ transport = "stub"
     assert!(stdout.contains("next_actions:"));
     assert!(stdout.contains(
         "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
+    ));
+    assert!(stdout.contains(
+        "local_contract_readiness: ok=true state=ready contracts=4 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains("set CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"));
 }

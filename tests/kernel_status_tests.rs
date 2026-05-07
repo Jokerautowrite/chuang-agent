@@ -105,6 +105,45 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(!status.plugin_registry.executes_plugins);
     assert!(!status.plugin_registry.reads_secret);
     assert!(status.plugin_registry.capability_count >= 5);
+    assert!(status.local_contract_readiness.ok);
+    assert_eq!(status.local_contract_readiness.overall_state, "ready");
+    assert_eq!(status.local_contract_readiness.contract_count, 4);
+    assert_eq!(status.local_contract_readiness.ready_count, 4);
+    assert!(
+        !status
+            .local_contract_readiness
+            .connects_real_external_services
+    );
+    assert!(!status.local_contract_readiness.writes_core_memory);
+    assert!(!status.local_contract_readiness.executes_plugins);
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(|contract| contract.name == "knowledge_context_preview"
+            && contract.state == "ready"
+            && contract.read_only
+            && !contract.connects_real_service));
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(|contract| contract.name == "skill_proposal_review"
+            && contract.dry_run
+            && !contract.writes_core_memory));
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(|contract| contract.name == "plugin_registry_evidence" && !contract.executes_plugins));
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(
+            |contract| contract.name == "external_knowledge_source_contracts"
+                && contract.boundary == "adapter_contract_only"
+        ));
     assert!(status.project_readiness.ok);
     assert_eq!(
         status.project_readiness.overall_state,

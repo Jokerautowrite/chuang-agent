@@ -66,6 +66,17 @@ assert isinstance(data["goal_run"]["checkpoint_count"], int)
 assert data["goal_run"]["path"].endswith("/context/goal-runs/mainline-mvp.json")
 assert data["plugin_registry"]["available"] is True
 assert data["plugin_registry"]["ok"] is True
+assert data["local_contract_readiness"]["ok"] is True
+assert data["local_contract_readiness"]["overall_state"] == "ready"
+assert data["local_contract_readiness"]["contract_count"] == 4
+assert data["local_contract_readiness"]["connects_real_external_services"] is False
+assert data["local_contract_readiness"]["writes_core_memory"] is False
+assert data["local_contract_readiness"]["executes_plugins"] is False
+local_contracts = {item["name"]: item for item in data["local_contract_readiness"]["contracts"]}
+assert local_contracts["knowledge_context_preview"]["read_only"] is True
+assert local_contracts["skill_proposal_review"]["dry_run"] is True
+assert local_contracts["plugin_registry_evidence"]["executes_plugins"] is False
+assert local_contracts["external_knowledge_source_contracts"]["boundary"] == "adapter_contract_only"
 assert data["project_readiness"]["ok"] is True
 assert data["project_readiness"]["overall_state"] == "ready"
 assert data["release_readiness"]["ok"] is True
@@ -159,6 +170,7 @@ for name in [
     "channel_readiness",
     "subagent_readiness",
     "external_ai_readiness",
+    "local_contract_readiness",
     "slots",
     "atomic_tools",
     "goal_mode",
@@ -180,6 +192,11 @@ assert status["atomic_tools"]["mapped_atomic_tool_names"] == ["file_read", "file
 assert status["atomic_tools"]["interface_only_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "wait", "human_suspend"]
 assert status["project_readiness"]["ok"] is True
 assert status["project_readiness"]["overall_state"] == "ready"
+assert status["local_contract_readiness"]["ok"] is True
+assert status["local_contract_readiness"]["overall_state"] == "ready"
+assert status["local_contract_readiness"]["connects_real_external_services"] is False
+assert status["local_contract_readiness"]["writes_core_memory"] is False
+assert status["local_contract_readiness"]["executes_plugins"] is False
 assert status["release_readiness"]["ok"] is True
 assert status["release_readiness"]["overall_state"] == "second_test_version_ready"
 assert status["release_readiness"]["connects_real_external_services"] is False

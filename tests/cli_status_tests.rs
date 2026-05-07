@@ -111,6 +111,21 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("goal_id=mainline-mvp"));
     assert!(stdout.contains("checkpoints="));
     assert!(stdout.contains("plugin_registry: available=true ok=true"));
+    assert!(stdout.contains(
+        "local_contract_readiness: ok=true state=ready contracts=4 ready=4 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=knowledge_context_preview state=ready boundary=local_markdown_text_preview_only read_only=true dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=skill_proposal_review state=ready boundary=dry_run_review_only read_only=false dry_run=true connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=plugin_registry_evidence state=ready boundary=manifest_check_only"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=external_knowledge_source_contracts state=ready boundary=adapter_contract_only"
+    ));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("project_module name=main_chain state=ready"));
     assert!(stdout.contains("project_module name=external_ai state=ready"));
@@ -233,6 +248,50 @@ fn cli_status_can_render_json_without_secret_leak() {
             .expect("capability count")
             >= 5
     );
+    assert_eq!(parsed["local_contract_readiness"]["ok"], true);
+    assert_eq!(parsed["local_contract_readiness"]["overall_state"], "ready");
+    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 4);
+    assert_eq!(parsed["local_contract_readiness"]["ready_count"], 4);
+    assert_eq!(
+        parsed["local_contract_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["local_contract_readiness"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(
+        parsed["local_contract_readiness"]["executes_plugins"],
+        false
+    );
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(|contract| contract["name"] == "knowledge_context_preview"
+            && contract["read_only"] == true
+            && contract["connects_real_service"] == false));
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(|contract| contract["name"] == "skill_proposal_review"
+            && contract["dry_run"] == true
+            && contract["writes_core_memory"] == false));
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(|contract| contract["name"] == "plugin_registry_evidence"
+            && contract["executes_plugins"] == false));
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(
+            |contract| contract["name"] == "external_knowledge_source_contracts"
+                && contract["boundary"] == "adapter_contract_only"
+        ));
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);

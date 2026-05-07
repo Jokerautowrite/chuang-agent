@@ -51,11 +51,12 @@
 - `cargo run -- channel simulate ... --goal TEXT`：本地演练通道目标上下文注入；真实飞书桥是否传 goal 仍由独立 channel adapter 决定。
 - `cargo run -- plugin list|check --registry PATH`：读取插件注册表，统一展示 channel、runner、control、actuator、genesis adapter，不执行插件。
 - `cargo run -- status`：查看 MVP 核心状态。
-- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、mapped/interface-only 原子工具名单、goal mode、goal_run readiness、identity bootstrap presence、provider request timeout、只读 `plugin_registry` 摘要。
+- `cargo run -- status --json`：给未来桌面壳和插件读取结构化状态，包含 execution slot、GA 原子工具 manifest/schema、mapped/interface-only 原子工具名单、goal mode、goal_run readiness、identity bootstrap presence、provider request timeout、只读 `plugin_registry` 摘要和本地 `local_contract_readiness`。
 - `status --json` / `doctor --json` 的 `project_readiness`：按主链模块给出 `ready / partial / deferred / blocked` 和下一步动作。当前正常状态是 `ready`，不是“全部真实外部服务都已接通”。
 - `status --json` / `doctor --json` 的 `release_readiness`：给出当前测试版本交付的顶层结论。当前正常状态是 `second_test_version_ready`，表示第二测试版本围绕 readiness、smoke、goal/run 续接和 subagent protocol 可回归验收；真实外部服务验证仍按 adapter 边界后置。
 - `status` / `doctor` / `config check|show` 会输出 `placeholder_warnings`，明确标出仍是占位的 adapter，避免把 fake 测试实现误认为真实能力；项目根配置当前应显示 `placeholder_warnings: none`。
 - `status --json` / `doctor --json` 的 `memory_readiness`：按内部记忆、历史会话、LIM、外脑知识库、自动维护闭环给出 `ready / partial / deferred / blocked` 和下一步动作。当前五层本地第二测试版边界为 `ready`，但这不代表真实 wiki/GBrain 已接通，也不代表自动维护会自行写长期记忆。
+- `status --json` / `doctor --json` 的 `local_contract_readiness`：汇总外脑 context preview、skill proposal dry-run、plugin registry evidence、wiki/GBrain source contract 四个本地合同。当前正常状态是 `ready`，但字段会明确 `connects_real_external_services=false`、`writes_core_memory=false`、`executes_plugins=false`。
 - `status --json` / `doctor --json` 的 `channel_readiness`：按 app-server、channel simulate、Chuang 专用飞书桥、Codex/Hermes 隔离、rich messages 拆分状态。它只确认边界和脚本存在性，不代表真实飞书连接在线。
 - `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态，并显式区分 `local_contract_ready` 与 `live_adapter_ready`。当前 `queued_external` 里本地协议合同可验收，但真实外部 worker/live adapter 仍未接入，协议层也不是自动执行器。
 - `status --json` / `doctor --json` 的 `live_adapter_gates`：统一列出 live subagent runner、control apply、actuator operation 的启用门禁。默认全部关闭，必须分别设置 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1` 才视为 live enabled，并且仍需走 allowlist、审批和审计边界。

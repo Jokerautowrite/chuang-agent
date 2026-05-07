@@ -195,6 +195,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "api_key_state": config_summary.api_key_state,
         "placeholder_warnings": config_summary.placeholder_warnings,
         "project_readiness": status.project_readiness,
+        "local_contract_readiness": status.local_contract_readiness,
         "release_readiness": status.release_readiness,
         "third_test_candidate": status.third_test_candidate,
         "channel_readiness": status.channel_readiness,
@@ -240,6 +241,15 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         } else {
             println!("next_actions: {}", next_actions.join(";"));
         }
+        println!(
+            "local_contract_readiness: ok={} state={} contracts={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
+            status.local_contract_readiness.ok,
+            status.local_contract_readiness.overall_state,
+            status.local_contract_readiness.contract_count,
+            status.local_contract_readiness.connects_real_external_services,
+            status.local_contract_readiness.writes_core_memory,
+            status.local_contract_readiness.executes_plugins
+        );
         println!(
             "release_readiness: ok={} name={} state={}",
             status.release_readiness.ok,

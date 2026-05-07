@@ -56,6 +56,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=subagent_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=live_adapter_preflight ok=true"));
     assert!(stdout.contains("doctor_check name=external_ai_readiness ok=true"));
+    assert!(stdout.contains("doctor_check name=local_contract_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
     assert!(stdout.contains("doctor_check name=atomic_tools ok=true"));
     assert!(stdout.contains("doctor_check name=governance_readiness ok=true"));
@@ -90,6 +91,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
     assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
+    assert!(stdout.contains(
+        "local_contract_readiness: ok=true state=ready contracts=4 ready=4 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+    ));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
     ));
@@ -165,7 +169,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 21);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 22);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -235,6 +239,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .expect("checks array")
         .iter()
         .any(|check| check["name"] == "external_ai_readiness"));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "local_contract_readiness"
+            && check["detail"]
+                .as_str()
+                .expect("local contract readiness detail")
+                .contains("contracts=4")));
     assert_eq!(
         parsed["status"]["config"]["identity_experiences_path"],
         root.join("identity")
@@ -279,6 +292,35 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         parsed["status"]["project_readiness"]["overall_state"],
         "mvp_ready_with_partial_modules"
     );
+    assert_eq!(parsed["status"]["local_contract_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["overall_state"],
+        "ready"
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["contract_count"],
+        4
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["local_contract_readiness"]["executes_plugins"],
+        false
+    );
+    assert!(parsed["status"]["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts array")
+        .iter()
+        .any(
+            |contract| contract["name"] == "external_knowledge_source_contracts"
+                && contract["boundary"] == "adapter_contract_only"
+        ));
     assert_eq!(parsed["status"]["release_readiness"]["ok"], true);
     assert_eq!(
         parsed["status"]["release_readiness"]["release_name"],
