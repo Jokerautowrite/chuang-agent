@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 本轮继续补晚间人工 live 记录面：新增 `scripts/chuang-live-operator-receipt.sh`，只输出脱敏回执模板字段 `tested_at/operator/env_file/workspace_root/preflight_status/health_status/new_thread_status/session_status/runtime_report_id/provider_status/codex_hermes_isolation/notes/blockers/boundaries`，支持 `--json`，不连接 Feishu、不读 secret、不启动服务、不修改仓库。新增独立回归 `tests/live_operator_scripts_tests.rs` 锁定脚本仅是模板输出，并把 `docs/live-operator-test-runbook.md` 补上“测试后生成回执”入口。
 - 2026-05-07 本轮补晚上人工 live 测试包：新增 `scripts/chuang-live-operator-checklist.sh` 和 `docs/live-operator-test-runbook.md`，只读汇总 Chuang Feishu env、workspace、provider env 状态，输出 `<set>/<missing>`、本地预检命令和人工飞书测试步骤；它不连接 Feishu、不发送消息、不启动服务、不修改仓库、不打印 secret。`docs/feishu-dedicated-channel-checklist.md` 已链接该入口，`docs/acceptance-next-matrix.md` 将 live cutover runbook 从下一步推进到进行中。
 - 本轮验证通过：`bash -n scripts/chuang-live-operator-checklist.sh`、默认本机 checklist JSON 脱敏输出检查、`cargo test -q --test cli_smoke_tests live_operator_checklist_reports_redacted_manual_live_steps`、`cargo test -q --test cli_smoke_tests`、`git diff --check`。默认本机检查当前显示 `blocked` 且 `CODEX_PPTOKEN_API_KEY=<missing>`，这是晚间人工 live 前要确认的 operator env 状态，不是本地合同回归。
 - Feishu bridge 本地命令新增 `/live-check` / `/live`：只显示人工 live 测试步骤和本地预检命令，不进入 Agent 主链、不执行 checklist、不读取密钥、不连接外部服务。验证通过 `node --check scripts/chuang-feishu-bridge-commands.js`、`node scripts/chuang-feishu-command-smoke.js`、`cargo test -q --test cli_smoke_tests`、`git diff --check`。
