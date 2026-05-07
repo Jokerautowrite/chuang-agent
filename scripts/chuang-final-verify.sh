@@ -13,7 +13,7 @@ if [ -n "$status_short" ]; then
 fi
 
 printf '%s\n' "[final-verify] complete local smoke"
-sh "$root_dir/scripts/chuang-complete-local-smoke.sh"
+sh scripts/chuang-complete-local-smoke.sh
 
 printf '%s\n' "[final-verify] final diff check"
 git diff --check

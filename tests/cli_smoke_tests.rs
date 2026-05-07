@@ -68,14 +68,23 @@ fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-final-verify.sh"))
         .expect("final verify wrapper should be readable");
 
-    assert!(wrapper.contains("git status --short"));
+    let clean_tree_check = wrapper
+        .find("git status --short")
+        .expect("final verify should check for a clean tree first");
+    let complete_local_smoke = wrapper
+        .find("sh scripts/chuang-complete-local-smoke.sh")
+        .expect("final verify should run complete-local smoke");
+    let final_diff_check = wrapper
+        .find("git diff --check")
+        .expect("final verify should run a final diff check");
+
+    assert!(clean_tree_check < complete_local_smoke);
+    assert!(complete_local_smoke < final_diff_check);
     assert!(wrapper.contains("working tree must be clean before final verify"));
     assert!(wrapper.contains("exit 2"));
-    assert!(wrapper.contains("scripts/chuang-complete-local-smoke.sh"));
-    assert!(wrapper.contains("git diff --check"));
     assert!(wrapper.contains("chuang_final_verify_ok"));
     assert!(!wrapper.contains("rm "));
-    assert!(!wrapper.contains("git reset"));
+    assert!(!wrapper.contains("reset"));
     assert!(!wrapper.contains("git checkout"));
     assert!(!wrapper.contains("systemctl"));
 }
