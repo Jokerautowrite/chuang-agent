@@ -171,6 +171,127 @@ fn overnight_runner_writes_structured_status_without_restart_or_cleanup() {
 }
 
 #[test]
+fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-goal-run-status.sh");
+    let script = fs::read_to_string(&script_path).expect("goal run status script should be readable");
+
+    assert!(script.contains("Readonly status view for Chuang terminal goal workers"));
+    assert!(script.contains("CHUANG_GOAL_WATCHDOG_REPORT_FILE"));
+    assert!(script.contains("CHUANG_GOAL_RUN_ROOT"));
+    assert!(script.contains("CHUANG_GOAL_OVERNIGHT_STATUS_FILE"));
+    assert!(script.contains("\"dispatches_tasks\": False"));
+    assert!(script.contains("\"starts_worker\": False"));
+    assert!(script.contains("\"restarts_worker\": False"));
+    assert!(script.contains("\"modifies_repo\": False"));
+    assert!(script.contains("\"deletes_logs\": False"));
+    assert!(script.contains("\"touches_services\": False"));
+    assert!(!script.contains("tmux new"));
+    assert!(!script.contains("tmux send-keys"));
+    assert!(!script.contains("codex exec"));
+    assert!(!script.contains("systemctl"));
+    assert!(!script.contains("git reset"));
+    assert!(!script.contains("git checkout"));
+    assert!(!script.contains("rm "));
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-goal-run-status-smoke-{}-{nanos}",
+        std::process::id()
+    ));
+    let watchdog_dir = root.join("watchdog");
+    let run_root = root.join("runs");
+    let latest_run = run_root.join("20260507-010203");
+    fs::create_dir_all(&watchdog_dir).expect("watchdog dir should be created");
+    fs::create_dir_all(&latest_run).expect("latest run dir should be created");
+
+    let watchdog_report = watchdog_dir.join("latest-watchdog-report.json");
+    fs::write(
+        &watchdog_report,
+        serde_json::json!({
+            "schema_version": 1,
+            "generated_at": "2026-05-07T01:02:03+08:00",
+            "readonly": true,
+            "project_root": manifest_dir.display().to_string(),
+            "session": "chuang-goal",
+            "tmux_session_present": true,
+            "pane": {"bytes": 128, "panes": ["pane=%1 active=1 pid=123 current_command=codex"]},
+            "codex_processes": {"count": 1, "processes": ["123 1 00:01 codex --no-alt-screen"]},
+            "git": {"dirty": false, "status_short": []},
+            "takeover": {"next_action": "monitor_or_attach_if_human_review_needed"},
+            "boundaries": {
+                "dispatches_tasks": false,
+                "modifies_repo": false,
+                "restarts_worker": false,
+                "touches_services": false
+            }
+        })
+        .to_string(),
+    )
+    .expect("watchdog report should write");
+    fs::write(
+        latest_run.join("summary.md"),
+        "# Chuang Overnight Goal Run\n\n- run_id: 20260507-010203\n- status: running\n- iterations: 3\n",
+    )
+    .expect("summary should write");
+    fs::write(latest_run.join("status.json"), r#"{"status":"running","iteration":3}"#)
+        .expect("overnight status should write");
+    fs::write(latest_run.join("run.log"), "iteration 3 still running\n")
+        .expect("run log should write");
+    fs::write(latest_run.join("last-message.md"), "continuing goal work\n")
+        .expect("last message should write");
+
+    let output = Command::new("bash")
+        .arg(script_path)
+        .arg("--json")
+        .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &watchdog_report)
+        .env("CHUANG_GOAL_RUN_ROOT", &run_root)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("goal run status script should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let data: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status output should be json");
+    assert_eq!(data["ok"], true);
+    assert_eq!(data["schema_version"], 1);
+    assert_eq!(data["readonly_boundaries"]["readonly"], true);
+    assert_eq!(data["readonly_boundaries"]["dispatches_tasks"], false);
+    assert_eq!(data["readonly_boundaries"]["starts_worker"], false);
+    assert_eq!(data["readonly_boundaries"]["restarts_worker"], false);
+    assert_eq!(data["readonly_boundaries"]["modifies_repo"], false);
+    assert_eq!(data["readonly_boundaries"]["deletes_logs"], false);
+    assert_eq!(data["readonly_boundaries"]["touches_services"], false);
+    assert_eq!(data["watchdog"]["available"], true);
+    assert_eq!(data["watchdog"]["readonly"], true);
+    assert_eq!(data["watchdog"]["session"], "chuang-goal");
+    assert_eq!(data["watchdog"]["tmux_session_present"], true);
+    assert_eq!(data["watchdog"]["codex_process_count"], 1);
+    assert_eq!(data["watchdog"]["git_dirty"], false);
+    assert_eq!(
+        data["watchdog"]["next_action"],
+        "monitor_or_attach_if_human_review_needed"
+    );
+    assert_eq!(
+        data["overnight"]["latest_run_dir"],
+        latest_run.display().to_string()
+    );
+    assert_eq!(data["overnight"]["status_json"]["available"], true);
+    assert_eq!(data["overnight"]["status_json"]["data"]["status"], "running");
+    assert_eq!(data["overnight"]["summary"]["fields"]["status"], "running");
+    assert_eq!(data["overnight"]["summary"]["fields"]["iterations"], "3");
+    assert_eq!(data["overall_status"], "terminal_worker_observed");
+}
+
+#[test]
 fn cli_run_command_boots_and_returns_structured_response() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;
