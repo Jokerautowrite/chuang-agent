@@ -16,7 +16,7 @@ memory knowledge search --root PATH --query TEXT [--limit N]
 
 当前只接本地 markdown/text 根目录的只读检索，不连接真实 wiki/GBrain，不做自动写回，不注入 runtime。
 
-`memory knowledge search` 输出 `source/path/line/score/preview`，用于验证 provenance-bearing search contract。它会跳过隐藏路径和疑似 secret/token/password/private/credential 文件，只作为外脑检索入口的本地 contract，不代表真实外部知识库已接通。
+`memory knowledge search` 输出 `source/path/line/score/preview`，并在每条 hit 上附带稳定的 `provenance` 与 `evidence` 对象，用于验证 provenance-bearing search contract。当前 evidence 固定来自本地文件行匹配，字段包含 `local_file`、`line`、`score`、`query`、`read_only=true`、`connects_real_service=false`；hit provenance 也固定声明 `source=local_file`、`adapter=local_external_knowledge`、`writes_automatically=false`。它会跳过隐藏路径和疑似 secret/token/password/private/credential 文件，只作为外脑检索入口的本地 contract，不代表真实外部知识库已接通。
 
 ## 约束
 

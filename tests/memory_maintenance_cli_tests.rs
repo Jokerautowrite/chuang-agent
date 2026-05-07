@@ -54,6 +54,70 @@ fn seed_session_summary(config_path: &Path, session_id: &str, text: &str) {
 }
 
 #[test]
+fn memory_knowledge_search_json_hits_include_auditable_provenance_and_evidence() {
+    let root = temp_root("knowledge-provenance");
+    let knowledge_root = root.join("knowledge");
+    std::fs::create_dir_all(&knowledge_root).expect("knowledge root should be created");
+    std::fs::write(
+        knowledge_root.join("adapter.md"),
+        "外脑 provenance evidence 边界\n无关内容\n",
+    )
+    .expect("knowledge fixture should write");
+
+    let output = run_chuang(&[
+        "memory",
+        "knowledge",
+        "search",
+        "--root",
+        knowledge_root
+            .to_str()
+            .expect("knowledge path should be utf8"),
+        "--query",
+        "provenance",
+        "--limit",
+        "1",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["read_only"], true);
+    assert_eq!(parsed["connects_real_service"], false);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["hit_count"], 1);
+
+    let hit = &parsed["hits"][0];
+    assert_eq!(hit["source"], "local_file");
+    assert_eq!(hit["path"], "adapter.md");
+    assert_eq!(hit["line"], 1);
+    assert_eq!(hit["score"], 15);
+    assert_eq!(hit["provenance"]["source"], "local_file");
+    assert_eq!(hit["provenance"]["adapter"], "local_external_knowledge");
+    assert_eq!(hit["provenance"]["local_file"], "adapter.md");
+    assert_eq!(hit["provenance"]["line"], 1);
+    assert_eq!(hit["provenance"]["score"], 15);
+    assert_eq!(hit["provenance"]["query"], "provenance");
+    assert_eq!(hit["provenance"]["read_only"], true);
+    assert_eq!(hit["provenance"]["connects_real_service"], false);
+    assert_eq!(hit["provenance"]["writes_automatically"], false);
+    assert_eq!(hit["evidence"]["kind"], "line_match");
+    assert_eq!(hit["evidence"]["local_file"], "adapter.md");
+    assert_eq!(hit["evidence"]["line"], 1);
+    assert_eq!(hit["evidence"]["score"], 15);
+    assert_eq!(hit["evidence"]["query"], "provenance");
+    assert_eq!(hit["evidence"]["read_only"], true);
+    assert_eq!(hit["evidence"]["connects_real_service"], false);
+    assert!(hit["evidence"]["preview"]
+        .as_str()
+        .expect("preview")
+        .contains("provenance"));
+}
+
+#[test]
 fn memory_maintenance_report_batches_multiple_queries_without_writing() {
     let root = temp_root("batch-report");
     let config_path = write_fake_config(&root);

@@ -95,8 +95,22 @@ fn memory_knowledge_search_command(args: &[String]) -> Result<(), String> {
             );
             for hit in &output.hits {
                 println!(
-                    "hit path={} line={} score={} source={}",
-                    hit.path, hit.line, hit.score, hit.source
+                    "hit path={} line={} score={} source={} query={} read_only={} connects_real_service={}",
+                    hit.path,
+                    hit.line,
+                    hit.score,
+                    hit.source,
+                    hit.provenance.query,
+                    hit.provenance.read_only,
+                    hit.provenance.connects_real_service
+                );
+                println!(
+                    "evidence local_file={} line={} score={} read_only={} connects_real_service={}",
+                    hit.evidence.local_file,
+                    hit.evidence.line,
+                    hit.evidence.score,
+                    hit.evidence.read_only,
+                    hit.evidence.connects_real_service
                 );
                 println!("{}", hit.preview);
             }
@@ -1149,12 +1163,36 @@ fn search_local_knowledge_root(
                     .unwrap_or(file.as_path())
                     .display()
                     .to_string();
+                let score = score_knowledge_line(&line_lower, &needle);
+                let line_number = line_index + 1;
+                let preview: String = line.trim().chars().take(240).collect();
                 hits.push(MemoryKnowledgeSearchHitOutput {
                     source: "local_file".to_string(),
-                    path: relative,
-                    line: line_index + 1,
-                    score: score_knowledge_line(&line_lower, &needle),
-                    preview: line.trim().chars().take(240).collect(),
+                    path: relative.clone(),
+                    line: line_number,
+                    score,
+                    preview: preview.clone(),
+                    provenance: MemoryKnowledgeSearchProvenanceOutput {
+                        source: "local_file".to_string(),
+                        adapter: "local_external_knowledge".to_string(),
+                        local_file: relative.clone(),
+                        line: line_number,
+                        score,
+                        query: query.to_string(),
+                        read_only: true,
+                        connects_real_service: false,
+                        writes_automatically: false,
+                    },
+                    evidence: MemoryKnowledgeSearchEvidenceOutput {
+                        kind: "line_match".to_string(),
+                        local_file: relative,
+                        line: line_number,
+                        score,
+                        query: query.to_string(),
+                        preview,
+                        read_only: true,
+                        connects_real_service: false,
+                    },
                 });
             }
         }
@@ -1625,6 +1663,33 @@ struct MemoryKnowledgeSearchHitOutput {
     line: usize,
     score: u32,
     preview: String,
+    provenance: MemoryKnowledgeSearchProvenanceOutput,
+    evidence: MemoryKnowledgeSearchEvidenceOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSearchProvenanceOutput {
+    source: String,
+    adapter: String,
+    local_file: String,
+    line: usize,
+    score: u32,
+    query: String,
+    read_only: bool,
+    connects_real_service: bool,
+    writes_automatically: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSearchEvidenceOutput {
+    kind: String,
+    local_file: String,
+    line: usize,
+    score: u32,
+    query: String,
+    preview: String,
+    read_only: bool,
+    connects_real_service: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
