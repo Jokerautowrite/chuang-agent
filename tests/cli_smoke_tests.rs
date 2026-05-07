@@ -113,7 +113,7 @@ fn goal_watchdog_once_writes_readonly_status_report() {
         .expect("watchdog should execute once");
 
     assert!(
-        output.status.success(),
+        !output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -258,7 +258,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         .expect("goal run status script should execute");
 
     assert!(
-        output.status.success(),
+        !output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -396,11 +396,100 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
             workspace.display()
         )
     );
+    assert!(data["suggested_provider_env_file"].is_null());
     assert!(data["manual_steps"]
         .as_array()
         .expect("manual steps should be an array")
         .iter()
         .any(|step| step.as_str().unwrap_or("").contains("/health")));
+}
+
+#[test]
+fn live_operator_checklist_suggests_default_provider_env_when_missing() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-live-operator-checklist-default-provider-{}-{nanos}",
+        std::process::id()
+    ));
+    let workspace = root.join("workspace");
+    let home_dir = root.join("home");
+    let provider_env = home_dir.join(".config/chuang-agent/provider.env");
+    let feishu_env = root.join("chuang-feishu.env");
+    fs::create_dir_all(&workspace).expect("workspace should be created");
+    fs::create_dir_all(provider_env.parent().expect("provider env parent should exist"))
+        .expect("provider env dir should be created");
+    fs::create_dir_all(&home_dir).expect("home dir should be created");
+    fs::write(
+        workspace.join("config.toml"),
+        "provider = \"openai_compatible\"\n",
+    )
+    .expect("workspace config should write");
+    fs::write(&provider_env, "CODEX_PPTOKEN_API_KEY=secret-provider-value\n")
+        .expect("provider env should write");
+    fs::write(
+        &feishu_env,
+        format!(
+            "CHUANG_FEISHU_APP_ID=cli_a_test\nCHUANG_FEISHU_APP_SECRET=secret-feishu-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_FEISHU_CONNECTION_MODE=websocket\n",
+            workspace.display()
+        ),
+    )
+    .expect("feishu env should write");
+
+    let output = Command::new("bash")
+        .arg(script_path)
+        .arg("--json")
+        .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &feishu_env)
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .env("HOME", &home_dir)
+        .env_remove("CHUANG_PROVIDER_ENV_FILE")
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("live operator checklist should execute");
+
+    assert!(
+        !output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"suggested_provider_env_file\""));
+    assert!(stdout.contains(provider_env.display().to_string().as_str()));
+    assert!(!stdout.contains("secret-provider-value"));
+    assert!(!stdout.contains("secret-feishu-value"));
+
+    let data: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("checklist output should be json");
+    assert_eq!(data["ok"], false);
+    assert_eq!(data["status"], "blocked");
+    assert_eq!(
+        data["paths"]["provider_env_file"],
+        serde_json::Value::String(String::new())
+    );
+    assert_eq!(
+        data["suggested_provider_env_file"]["path"],
+        provider_env.display().to_string()
+    );
+    assert_eq!(data["suggested_provider_env_file"]["exists"], true);
+    assert_eq!(data["suggested_provider_env_file"]["state"], "<set>");
+    assert_eq!(
+        data["commands"]["provider_env_next_step"],
+        format!(
+            "set CHUANG_PROVIDER_ENV_FILE to {} in the Chuang Feishu env, or export it explicitly before rerunning the checklist",
+            provider_env.display()
+        )
+    );
+    assert!(data["manual_steps"]
+        .as_array()
+        .expect("manual steps should be an array")
+        .iter()
+        .any(|step| step.as_str().unwrap_or("").contains(provider_env.display().to_string().as_str())));
 }
 
 #[test]

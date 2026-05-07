@@ -126,6 +126,14 @@ workspace_root = Path(
 ).expanduser()
 provider_env_file = env_values.get("CHUANG_PROVIDER_ENV_FILE") or os.environ.get("CHUANG_PROVIDER_ENV_FILE", "")
 provider_values, provider_error = parse_provider_env(provider_env_file)
+suggested_provider_env_file = None
+if not provider_env_file:
+    candidate_provider_env_file = Path("~/.config/chuang-agent/provider.env").expanduser()
+    suggested_provider_env_file = {
+        "path": str(candidate_provider_env_file),
+        "exists": candidate_provider_env_file.is_file(),
+        "state": state(candidate_provider_env_file if candidate_provider_env_file.is_file() else ""),
+    }
 connection_mode = env_values.get("CHUANG_FEISHU_CONNECTION_MODE", "websocket")
 
 feishu_required_states = {name: state(env_values.get(name)) for name in FEISHU_REQUIRED}
@@ -173,16 +181,29 @@ commands = {
     "bridge_session_command": "send /session to the Chuang Feishu bot",
     "new_thread_command": "send /new to the Chuang Feishu bot",
 }
-manual_steps = [
-    "run local_preflight and confirm status is ready or only expected warnings",
-    "start or confirm the Chuang-only Feishu bridge outside this checklist",
-    "send /health to the Chuang bot and confirm secrets show only <set>/<missing>",
-    "send /new, then send one normal text message",
-    "send /session and confirm the active chat binding changed after /new",
-    "confirm the reply is not fake-responder and includes a runtime report id when applicable",
-    "confirm Codex Feishu and Hermes channels still operate independently",
-    "after the test, run final_verify before committing any follow-up changes",
-]
+if suggested_provider_env_file is not None:
+    commands["provider_env_next_step"] = (
+        "set CHUANG_PROVIDER_ENV_FILE to "
+        f"{suggested_provider_env_file['path']} in the Chuang Feishu env, "
+        "or export it explicitly before rerunning the checklist"
+    )
+manual_steps = ["run local_preflight and confirm status is ready or only expected warnings"]
+if suggested_provider_env_file is not None:
+    manual_steps.append(
+        "if CHUANG_PROVIDER_ENV_FILE is missing, point it at "
+        f"{suggested_provider_env_file['path']} or set it explicitly, then rerun this checklist"
+    )
+manual_steps.extend(
+    [
+        "start or confirm the Chuang-only Feishu bridge outside this checklist",
+        "send /health to the Chuang bot and confirm secrets show only <set>/<missing>",
+        "send /new, then send one normal text message",
+        "send /session and confirm the active chat binding changed after /new",
+        "confirm the reply is not fake-responder and includes a runtime report id when applicable",
+        "confirm Codex Feishu and Hermes channels still operate independently",
+        "after the test, run final_verify before committing any follow-up changes",
+    ]
+)
 
 result = {
     "schema_version": 1,
@@ -221,6 +242,7 @@ result = {
     "warnings": warnings,
     "commands": commands,
     "manual_steps": manual_steps,
+    "suggested_provider_env_file": suggested_provider_env_file,
 }
 
 if FORMAT == "json":
@@ -230,6 +252,11 @@ else:
     print(f"env_file={ENV_FILE}")
     print(f"workspace_root={workspace_root}")
     print(f"provider_env_file={provider_env_file or '<missing>'}")
+    if suggested_provider_env_file is not None:
+        print(
+            "suggested_provider_env_file="
+            f"{suggested_provider_env_file['path']} state={suggested_provider_env_file['state']}"
+        )
     for name, value in feishu_required_states.items():
         print(f"feishu_required {name}={value}")
     for name, value in provider_required_states.items():
