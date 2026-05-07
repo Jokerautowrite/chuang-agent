@@ -139,6 +139,7 @@ assert status["release_readiness"]["verifies_real_external_services"] is False
 
 printf '%s\n' "[complete] feishu local command smokes"
 node scripts/chuang-feishu-command-smoke.js >/dev/null
+node scripts/chuang-feishu-turn-summary-smoke.js >/dev/null
 node scripts/chuang-feishu-session-smoke.js >/dev/null
 node scripts/chuang-feishu-rich-message-smoke.js >/dev/null
 

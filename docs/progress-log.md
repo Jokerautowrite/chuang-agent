@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 继续把 Feishu 普通消息的收尾摘要收窄：`chuang-feishu-bridge` 现在用纯 helper 生成更短的 footer/process summary，不再把整段 trace 原文塞进飞书回复；`runtime report id` 也会在完成态 footer 里直接出现，便于人工复查和消息对齐。
 - 2026-05-07 到家前继续推进本地可验收状态面：新增顶层 `local_contract_readiness`，把已完成的外脑 context preview、skill proposal dry-run、plugin registry evidence、wiki/GBrain source contract 统一暴露到 `status` / `doctor` / `console snapshot` / `app-server health`。该状态只代表本地合同 ready，显式保持 `connects_real_external_services=false`、`writes_core_memory=false`、`executes_plugins=false`，不替代人工 Feishu live 验收。
 - 2026-05-07 第七批继续推进除人工 Feishu live 之外的模块：`run` 新增显式 `--enable-knowledge-context-preview --knowledge-context-root PATH --knowledge-context-query TEXT`，默认关闭，开启后只把本地外脑 preview segment 注入本轮 context，并输出 `knowledge_context_*` 边界 metadata；新增 `skill propose` 审阅入口，只生成 dry-run skill proposal，不写 skill、不接 LLM；`plugin_registry` 摘要现在把 evidence/check-only/capability 边界汇总进 `status`/`console`；`memory knowledge source-contract --source wiki|gbrain` 固化 wiki/GBrain 只读 adapter 合同。
 - 本批仍不接真实 wiki/GBrain、不读取外部 secret、不写核心记忆、不 solidify skill、不执行插件；新增 smoke 覆盖外脑 context preview、source contract、runtime opt-in 和 skill proposal dry-run。主控复验已通过 `cargo fmt --all --check`、`git diff --check`、`cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`，最终干净工作树复跑 `sh scripts/chuang-third-test-smoke.sh` 输出 `third_test_candidate_smoke_ok`；operator checklist 仍按预期显示人工 env `blocked`。

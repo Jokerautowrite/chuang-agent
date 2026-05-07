@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+
+const assert = require("assert");
+const {
+  buildProcessSection,
+  buildStatusFooter,
+} = require("./chuang-feishu-turn-summary");
+
+const footer = buildStatusFooter({
+  status: "completed",
+  elapsedMs: 2200,
+  modelName: "gpt-5.5",
+  prompt_tokens: 462,
+  completion_tokens: 44,
+  packedTokenCount: 335,
+  contextMaxTokens: 512,
+  recallHitCount: 0,
+  apiCallCount: 1,
+  runtimeReportId: "report-turn-1",
+});
+assert(footer.includes("已完成"));
+assert(footer.includes("耗时 2.2s"));
+assert(footer.includes("gpt-5.5"));
+assert(footer.includes("上下文 335/512"));
+assert(footer.includes("API 1 次"));
+assert(footer.includes("报告 report-turn-1"));
+
+const process = buildProcessSection({
+  status: "completed",
+  providerMeta: {
+    response_kind: "chat.completion",
+    response_finish_reason: "stop",
+    tool_call_count: 0,
+    tool_trace: "trace transport=openai-compatible provider=local-openai-compatible model=gpt-5.5 base_url=https://api.pptoken.org/v1 api_key=len:67",
+  },
+  toolCallCount: 0,
+});
+assert(process.startsWith("过程摘要"));
+assert(process.includes("当前轮未触发工具调用"));
+assert(process.includes("provider chat.completion / finish stop"));
+assert(!process.includes("trace transport="));
+assert(!process.includes("api_key=len:67"));
+
+console.log("chuang_feishu_turn_summary_smoke_ok");
