@@ -6,6 +6,9 @@ Chuang provider fallback is explicit only. A fallback provider runs only when co
 
 Provider failures expose stable metadata:
 
+- `provider_response_ok`: `true` only when the primary provider returned usable
+  assistant content; `false` for structured HTTP failures and successful HTTP
+  responses that still lack assistant content.
 - `provider_retryable`: whether the primary failure is retryable.
 - `provider_error_class`: coarse source such as `http_status`, `transport`, `tls`, `protocol`, `config`, or `missing_content`.
 - `provider_failure_reason_code`: stable reason such as `model_capacity`, `rate_limited`, `quota_or_billing`, `auth_failed`, `upstream_unavailable`, or `transport_failure`.
@@ -41,6 +44,45 @@ provider_fallback_used=false
 ```
 
 That is the intentional boundary: visible failure, no silent fallback.
+
+## Acceptance Examples
+
+Successful provider response:
+
+```text
+provider_response_ok=true
+```
+
+The same successful turn should not include
+`provider_failure_reason_code` or `provider_failure_category`.
+
+HTTP failure:
+
+```text
+provider_response_ok=false
+provider_error_class=http_status
+provider_failure_reason_code=rate_limited
+provider_failure_category=rate_limit
+```
+
+Successful HTTP status with no usable assistant content:
+
+```text
+PROVIDER_MISSING_CONTENT
+provider_response_ok=false
+provider_error_class=missing_content
+provider_failure_reason_code=missing_content
+provider_failure_category=response
+```
+
+Fallback hit after an explicit fallback configuration:
+
+```text
+provider_fallback_configured=true
+provider_fallback_used=true
+provider_fallback_primary_failure_reason_code=model_capacity
+provider_fallback_primary_failure_category=capacity
+```
 
 ## Operator Setup
 

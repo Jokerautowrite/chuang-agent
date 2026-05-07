@@ -964,6 +964,9 @@ fn provider_failure_reason(
     if message.contains("quota") || message.contains("billing") {
         return ("quota_or_billing", "quota");
     }
+    if error_class == "missing_content" {
+        return ("missing_content", "response");
+    }
 
     if let Some(status_code) = status_code {
         return match status_code {

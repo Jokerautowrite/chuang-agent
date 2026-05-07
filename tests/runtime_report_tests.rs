@@ -384,6 +384,7 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
 #[test]
 fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     let mut extra = BTreeMap::new();
+    extra.insert("provider_response_ok".to_string(), "true".to_string());
     extra.insert("provider_fallback_used".to_string(), "true".to_string());
     extra.insert(
         "provider_fallback_from".to_string(),
@@ -446,6 +447,10 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     };
 
     let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("provider_response_ok"),
+        Some(&"true".to_string())
+    );
     assert_eq!(
         observability.get("provider_fallback_configured"),
         Some(&"true".to_string())

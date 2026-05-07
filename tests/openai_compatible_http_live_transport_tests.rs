@@ -441,6 +441,18 @@ fn openai_compatible_http_transport_surfaces_success_metadata_when_server_reacha
             .map(String::as_str),
         Some("true")
     );
+    assert!(
+        !response
+            .extra_meta
+            .contains_key("provider_failure_reason_code"),
+        "successful provider responses must not carry failure reason metadata"
+    );
+    assert!(
+        !response
+            .extra_meta
+            .contains_key("provider_failure_category"),
+        "successful provider responses must not carry failure category metadata"
+    );
     assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     assert_eq!(
         response
@@ -539,6 +551,20 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
             .map(String::as_str),
         Some("rate limit hit")
     );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("rate_limited")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("rate_limit")
+    );
 }
 
 #[test]
@@ -606,6 +632,20 @@ fn openai_compatible_http_transport_marks_200_missing_content_as_structured_prov
             .get("provider_retryable")
             .map(String::as_str),
         Some("false")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("missing_content")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("response")
     );
 }
 

@@ -136,6 +136,7 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "transport",
         "transport_mode",
         "status_code",
+        "provider_response_ok",
         "provider_retryable",
         "provider_error_class",
         "provider_failure_reason_code",
