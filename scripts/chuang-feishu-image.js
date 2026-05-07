@@ -52,6 +52,54 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function buildOcrLanguageCandidates({ availableLanguages = [], override = "" } = {}) {
+  const explicitCandidates = parseLanguageCandidateList(override);
+  if (explicitCandidates.length > 0) {
+    return explicitCandidates;
+  }
+
+  const available = new Set(
+    (Array.isArray(availableLanguages) ? availableLanguages : [])
+      .map(normalizeText)
+      .filter(Boolean)
+  );
+  const candidates = [];
+  const addCandidate = (candidate) => {
+    const normalized = normalizeText(candidate);
+    if (!normalized || candidates.includes(normalized)) {
+      return;
+    }
+    const languages = normalized.split("+").map(normalizeText).filter(Boolean);
+    if (languages.length === 0) {
+      return;
+    }
+    if (languages.every((language) => available.has(language))) {
+      candidates.push(normalized);
+    }
+  };
+
+  addCandidate("chi_sim+eng");
+  addCandidate("chi_sim");
+  addCandidate("chi_tra+eng");
+  addCandidate("chi_tra");
+  addCandidate("eng");
+
+  if (candidates.length === 0 && available.has("eng")) {
+    candidates.push("eng");
+  }
+  if (candidates.length === 0) {
+    candidates.push("eng");
+  }
+  return candidates;
+}
+
+function parseLanguageCandidateList(value) {
+  return normalizeText(value)
+    .split(/[\n,;|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function parseJsonLike(rawContent) {
   if (!rawContent) {
     return null;
@@ -68,5 +116,6 @@ function parseJsonLike(rawContent) {
 
 module.exports = {
   buildImagePrompt,
+  buildOcrLanguageCandidates,
   parseFeishuImageContent,
 };

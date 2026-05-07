@@ -32,6 +32,7 @@ const {
 } = require("./chuang-feishu-bridge-commands");
 const {
   buildImagePrompt,
+  buildOcrLanguageCandidates,
   parseFeishuImageContent,
 } = require("./chuang-feishu-image");
 const {
@@ -53,6 +54,7 @@ const FEISHU_SDK_MODULES =
   "/home/user/.codex/codex-feishu-bridge/node_modules";
 const EVENT_LOG_FILE =
   process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
+let cachedTesseractLanguages = null;
 
 loadEnv();
 
@@ -513,7 +515,10 @@ class ChuangFeishuBridge {
       maxBuffer: 4 * 1024 * 1024,
     });
     const ocrInputPath = convertResult.status === 0 ? preprocessedPath : imagePath;
-    const languageCandidates = ["eng"];
+    const languageCandidates = buildOcrLanguageCandidates({
+      availableLanguages: listAvailableTesseractLanguages(),
+      override: process.env.CHUANG_FEISHU_OCR_LANGS || "",
+    });
     for (const language of languageCandidates) {
       const result = spawnSync("tesseract", [ocrInputPath, "stdout", "-l", language], {
         encoding: "utf8",
@@ -533,6 +538,25 @@ class ChuangFeishuBridge {
       status: "failed",
     };
   }
+}
+
+function listAvailableTesseractLanguages() {
+  if (Array.isArray(cachedTesseractLanguages)) {
+    return cachedTesseractLanguages;
+  }
+  const result = spawnSync("tesseract", ["--list-langs"], {
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    cachedTesseractLanguages = [];
+    return cachedTesseractLanguages;
+  }
+  cachedTesseractLanguages = result.stdout
+    .split(/\r?\n/)
+    .map((line) => normalizeText(line))
+    .filter((line) => line && !line.startsWith("List of available languages"));
+  return cachedTesseractLanguages;
 }
 
 function normalizeFeishuInboundEvent(data) {

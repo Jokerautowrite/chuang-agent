@@ -1,6 +1,8 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 继续补 Feishu 图片 OCR 的可用性：`chuang-feishu-bridge` 现在会自动探测本机 tesseract 已安装语言，并按候选顺序尝试 `chi_sim+eng` / `chi_sim` / `chi_tra+eng` / `chi_tra` / `eng`；也支持 `CHUANG_FEISHU_OCR_LANGS` 显式覆盖候选顺序。当前机器只装了 `eng` 和 `osd`，所以本地行为不变，但以后装中文包就能直接吃到。
+- 新回归已补 `scripts/chuang-feishu-image-smoke.js`，锁定候选顺序和显式 override；桥本身仍然只做下载 + OCR + 文本上下文注入，不碰真实多模态模型接入。
 - 2026-05-07 继续把 Feishu 图片消息接入主链：bridge 现在会下载 `image_key`、落本地临时文件、跑 OCR，再把图片上下文作为文本块送进 app-server，不再只提示“暂不支持图片”。帮助命令也同步说明图片会先下载并 OCR。
 - 2026-05-07 继续把 Feishu 普通消息的收尾摘要收窄：`chuang-feishu-bridge` 现在用纯 helper 生成更短的 footer/process summary，不再把整段 trace 原文塞进飞书回复；`runtime report id` 也会在完成态 footer 里直接出现，便于人工复查和消息对齐。
 - 2026-05-07 到家前继续推进本地可验收状态面：新增顶层 `local_contract_readiness`，把已完成的外脑 context preview、skill proposal dry-run、plugin registry evidence、wiki/GBrain source contract 统一暴露到 `status` / `doctor` / `console snapshot` / `app-server health`。该状态只代表本地合同 ready，显式保持 `connects_real_external_services=false`、`writes_core_memory=false`、`executes_plugins=false`，不替代人工 Feishu live 验收。

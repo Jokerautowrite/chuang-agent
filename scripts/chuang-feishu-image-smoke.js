@@ -3,6 +3,7 @@
 const assert = require("assert");
 const {
   buildImagePrompt,
+  buildOcrLanguageCandidates,
   parseFeishuImageContent,
 } = require("./chuang-feishu-image");
 
@@ -32,6 +33,19 @@ assert(prompt.includes("local_path: /tmp/chuang-feishu-images/abc.bin"));
 assert(prompt.includes("ocr_status: ok"));
 assert(prompt.includes("[OCR 文本]"));
 assert(prompt.includes("Hello world"));
+
+assert.deepStrictEqual(
+  buildOcrLanguageCandidates({ availableLanguages: ["eng", "osd"] }),
+  ["eng"]
+);
+assert.deepStrictEqual(
+  buildOcrLanguageCandidates({ availableLanguages: ["chi_sim", "eng"] }),
+  ["chi_sim+eng", "chi_sim", "eng"]
+);
+assert.deepStrictEqual(
+  buildOcrLanguageCandidates({ override: "chi_sim+eng,eng;chi_tra" }),
+  ["chi_sim+eng", "eng", "chi_tra"]
+);
 
 const emptyPrompt = buildImagePrompt({
   imageKey: "",
