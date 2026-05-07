@@ -49,9 +49,47 @@ pub struct PluginCheckItem {
     pub id: String,
     pub kind: PluginKind,
     pub enabled: bool,
+    pub capabilities: Vec<String>,
+    pub dry_run_default: bool,
+    pub executes_plugin: bool,
+    pub reads_secret: bool,
     pub command_state: String,
     pub config_state: String,
+    pub readiness: PluginReadinessEvidence,
+    pub boundary: PluginCheckBoundary,
+    pub evidence: PluginCheckEvidence,
     pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginReadinessEvidence {
+    pub state: String,
+    pub blocking: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginCheckBoundary {
+    pub check_only: bool,
+    pub executes_plugin: bool,
+    pub reads_secret: bool,
+    pub connects_external_service: bool,
+    pub writes_files: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginCheckEvidence {
+    pub manifest_loaded: bool,
+    pub manifest_fields_checked: Vec<String>,
+    pub path_checks: Vec<PluginPathEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginPathEvidence {
+    pub field: String,
+    pub configured: bool,
+    pub state: String,
+    pub resolved_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -142,26 +180,62 @@ pub fn summarize_plugin_registry(path: &Path) -> PluginRegistrySummary {
 
 fn check_plugin(base_dir: &Path, plugin: &PluginManifest) -> PluginCheckItem {
     let mut issues = Vec::new();
+    let mut path_checks = Vec::new();
     if plugin.id.trim().is_empty() {
         issues.push("id_empty".to_string());
     }
     if plugin.display_name.trim().is_empty() {
         issues.push("display_name_empty".to_string());
     }
-    let command_state =
-        check_optional_path(base_dir, plugin.command.as_deref(), "command", &mut issues);
+    let command_state = check_optional_path(
+        base_dir,
+        plugin.command.as_deref(),
+        "command",
+        &mut issues,
+        &mut path_checks,
+    );
     let config_state = check_optional_path(
         base_dir,
         plugin.config_path.as_deref(),
         "config_path",
         &mut issues,
+        &mut path_checks,
     );
+    let readiness = plugin_readiness(plugin.enabled, &issues);
+    let boundary = PluginCheckBoundary {
+        check_only: true,
+        executes_plugin: false,
+        reads_secret: false,
+        connects_external_service: false,
+        writes_files: false,
+    };
+    let evidence = PluginCheckEvidence {
+        manifest_loaded: true,
+        manifest_fields_checked: vec![
+            "id".to_string(),
+            "kind".to_string(),
+            "display_name".to_string(),
+            "command".to_string(),
+            "config_path".to_string(),
+            "capabilities".to_string(),
+            "enabled".to_string(),
+            "dry_run_default".to_string(),
+        ],
+        path_checks,
+    };
     PluginCheckItem {
         id: plugin.id.clone(),
         kind: plugin.kind.clone(),
         enabled: plugin.enabled,
+        capabilities: plugin.capabilities.clone(),
+        dry_run_default: plugin.dry_run_default,
+        executes_plugin: boundary.executes_plugin,
+        reads_secret: boundary.reads_secret,
         command_state,
         config_state,
+        readiness,
+        boundary,
+        evidence,
         issues,
     }
 }
@@ -171,21 +245,69 @@ fn check_optional_path(
     raw: Option<&str>,
     field: &str,
     issues: &mut Vec<String>,
+    path_checks: &mut Vec<PluginPathEvidence>,
 ) -> String {
     let Some(raw) = raw else {
+        path_checks.push(PluginPathEvidence {
+            field: field.to_string(),
+            configured: false,
+            state: "none".to_string(),
+            resolved_path: None,
+        });
         return "none".to_string();
     };
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         issues.push(format!("{field}_empty"));
+        path_checks.push(PluginPathEvidence {
+            field: field.to_string(),
+            configured: true,
+            state: "empty".to_string(),
+            resolved_path: None,
+        });
         return "empty".to_string();
     }
     let path = resolve_path(base_dir, trimmed);
     if path.exists() {
+        path_checks.push(PluginPathEvidence {
+            field: field.to_string(),
+            configured: true,
+            state: "exists".to_string(),
+            resolved_path: Some(path.display().to_string()),
+        });
         "exists".to_string()
     } else {
         issues.push(format!("{field}_missing:{}", path.display()));
+        path_checks.push(PluginPathEvidence {
+            field: field.to_string(),
+            configured: true,
+            state: "missing".to_string(),
+            resolved_path: Some(path.display().to_string()),
+        });
         "missing".to_string()
+    }
+}
+
+fn plugin_readiness(enabled: bool, issues: &[String]) -> PluginReadinessEvidence {
+    if !enabled {
+        return PluginReadinessEvidence {
+            state: "disabled".to_string(),
+            blocking: false,
+            reason: "plugin_disabled_manifest_only".to_string(),
+        };
+    }
+    if issues.is_empty() {
+        PluginReadinessEvidence {
+            state: "ready".to_string(),
+            blocking: false,
+            reason: "enabled_manifest_paths_checked".to_string(),
+        }
+    } else {
+        PluginReadinessEvidence {
+            state: "blocked".to_string(),
+            blocking: true,
+            reason: "enabled_manifest_has_issues".to_string(),
+        }
     }
 }
 

@@ -73,6 +73,41 @@ fn plugin_registry_check_reports_missing_command_without_executing() {
 
     assert!(!check.ok);
     assert_eq!(check.plugins[0].command_state, "missing");
+    assert_eq!(check.plugins[0].capabilities, Vec::<String>::new());
+    assert!(!check.plugins[0].dry_run_default);
+    assert!(!check.plugins[0].executes_plugin);
+    assert!(!check.plugins[0].reads_secret);
+    assert_eq!(check.plugins[0].readiness.state, "blocked");
+    assert!(check.plugins[0].readiness.blocking);
+    assert_eq!(
+        check.plugins[0].readiness.reason,
+        "enabled_manifest_has_issues"
+    );
+    assert!(check.plugins[0].boundary.check_only);
+    assert!(!check.plugins[0].boundary.executes_plugin);
+    assert!(!check.plugins[0].boundary.reads_secret);
+    assert!(!check.plugins[0].boundary.connects_external_service);
+    assert!(!check.plugins[0].boundary.writes_files);
+    assert!(check.plugins[0].evidence.manifest_loaded);
+    assert!(check.plugins[0]
+        .evidence
+        .manifest_fields_checked
+        .contains(&"capabilities".to_string()));
+    assert!(check.plugins[0].evidence.path_checks.iter().any(|path| {
+        path.field == "command"
+            && path.configured
+            && path.state == "missing"
+            && path
+                .resolved_path
+                .as_deref()
+                .expect("resolved command path")
+                .ends_with("missing.sh")
+    }));
+    assert!(check.plugins[0]
+        .evidence
+        .path_checks
+        .iter()
+        .any(|path| { path.field == "config_path" && !path.configured && path.state == "none" }));
     assert!(check.plugins[0].issues[0].starts_with("command_missing:"));
 }
 
@@ -102,6 +137,15 @@ fn plugin_registry_check_keeps_disabled_manifest_issues_non_blocking() {
     assert!(check.ok);
     assert_eq!(check.plugins[0].command_state, "missing");
     assert_eq!(check.plugins[0].config_state, "missing");
+    assert_eq!(check.plugins[0].readiness.state, "disabled");
+    assert!(!check.plugins[0].readiness.blocking);
+    assert_eq!(
+        check.plugins[0].readiness.reason,
+        "plugin_disabled_manifest_only"
+    );
+    assert!(!check.plugins[0].executes_plugin);
+    assert!(!check.plugins[0].reads_secret);
+    assert!(check.plugins[0].boundary.check_only);
     assert!(check.plugins[0]
         .issues
         .iter()

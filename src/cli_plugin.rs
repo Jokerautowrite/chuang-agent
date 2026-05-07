@@ -54,12 +54,23 @@ fn plugin_check_command(args: &[String]) -> Result<(), String> {
             );
             for plugin in &output.plugins {
                 println!(
-                    "plugin_check id={} kind={:?} enabled={} command={} config={} issues={}",
+                    "plugin_check id={} kind={:?} enabled={} readiness={} reason={} capabilities={} dry_run_default={} command={} config={} executes_plugin={} reads_secret={} boundary_check_only={} issues={}",
                     plugin.id,
                     plugin.kind,
                     plugin.enabled,
+                    plugin.readiness.state,
+                    plugin.readiness.reason,
+                    if plugin.capabilities.is_empty() {
+                        "none".to_string()
+                    } else {
+                        plugin.capabilities.join(",")
+                    },
+                    plugin.dry_run_default,
                     plugin.command_state,
                     plugin.config_state,
+                    plugin.executes_plugin,
+                    plugin.reads_secret,
+                    plugin.boundary.check_only,
                     if plugin.issues.is_empty() {
                         "none".to_string()
                     } else {
