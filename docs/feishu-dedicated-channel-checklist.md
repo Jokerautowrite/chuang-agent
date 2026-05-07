@@ -62,6 +62,17 @@ modify services, or print secret values. For a fixture-backed contract test, run
 node scripts/chuang-feishu-live-preflight-smoke.js
 ```
 
+Expected live preflight evidence:
+
+- Top-level `evidence.operation_mode=local_readonly_preflight`.
+- Top-level `evidence.live_feishu_connection_attempted=false`.
+- Top-level `evidence.live_feishu_message_send_attempted=false`.
+- Top-level `evidence.session_store_write_attempted=false`.
+- Top-level `evidence.service_modify_attempted=false`.
+- `env_source_isolation` shows no Codex/Hermes Feishu credential names in the Chuang env file and reports inherited forbidden env names only as `<set_ignored>` or `<unset>`.
+- `provider_env_file` reports provider secret variable states as `<set>/<missing>` only, and must not contain `CHUANG_FEISHU_*` credential names.
+- `session_store_access.method=fs_access_only_no_write`; if a state file exists, the preflight may read only shape metadata such as version and binding count.
+
 Expected root status:
 
 - provider: `openai_compatible`

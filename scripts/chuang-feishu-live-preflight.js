@@ -27,6 +27,7 @@ function main() {
 
   const checks = [];
   checks.push(checkEnvFile(envFile, envValues));
+  checks.push(checkEnvIsolation(envFile, envValues.values));
   checks.push(runFeishuCheck(envFile));
   checks.push(checkWorkspace(workspaceRoot));
   checks.push(runAppServerDiagnostic(workspaceRoot));
@@ -44,6 +45,18 @@ function main() {
     env_file: envFile,
     workspace_root: workspaceRoot,
     session_state_file: stateFile,
+    evidence: {
+      schema_version: 1,
+      purpose: "chuang_feishu_live_readiness_without_live_feishu_connection",
+      operation_mode: "local_readonly_preflight",
+      live_feishu_connection_attempted: false,
+      live_feishu_message_send_attempted: false,
+      session_store_write_attempted: false,
+      service_modify_attempted: false,
+      secret_values_redacted: true,
+      local_commands: checks.flatMap((check) => check.local_commands || []),
+      filesystem_methods: checks.flatMap((check) => check.filesystem_methods || []),
+    },
     checks,
     next_actions: nextActions,
     boundaries: {
@@ -123,7 +136,7 @@ function checkEnvFile(envFile, envValues) {
     nextActions.push(`set_missing_chuang_env_vars:${missing.join(",")}`);
   }
   const legacy = Object.keys(envValues.values).filter((name) =>
-    ["FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_BOT_ID", "HERMES_FEISHU_APP_ID"].includes(name)
+    forbiddenCredentialEnvNames().includes(name)
   );
   if (legacy.length) {
     nextActions.push("remove_legacy_feishu_env_names");
@@ -141,6 +154,45 @@ function checkEnvFile(envFile, envValues) {
       ])
     ),
     legacy_var_names: legacy,
+    filesystem_methods: [`readFileSync:${envFile}`],
+    next_actions: nextActions,
+  };
+}
+
+function checkEnvIsolation(envFile, values) {
+  const forbiddenInFile = Object.keys(values).filter((name) => forbiddenCredentialEnvNames().includes(name));
+  const inheritedForbiddenStates = Object.fromEntries(
+    forbiddenCredentialEnvNames().map((name) => [name, process.env[name] ? "<set_ignored>" : "<unset>"])
+  );
+  const pathWarnings = envFileScopeWarnings(envFile);
+  const nextActions = [];
+  if (forbiddenInFile.length) {
+    nextActions.push("remove_codex_or_hermes_feishu_env_names_from_chuang_env");
+  }
+  if (pathWarnings.length) {
+    nextActions.push("move_env_file_to_chuang_dedicated_path");
+  }
+  return {
+    name: "env_source_isolation",
+    status: nextActions.length ? "fail" : "pass",
+    summary: nextActions.length
+      ? "env source isolation is not clean"
+      : "preflight uses only Chuang-scoped Feishu env names and ignores inherited Codex/Hermes Feishu credentials",
+    env_file: envFile,
+    env_file_scope_warnings: pathWarnings,
+    accepted_feishu_env_names: [
+      "CHUANG_FEISHU_APP_ID",
+      "CHUANG_FEISHU_APP_SECRET",
+      "CHUANG_FEISHU_BOT_ID",
+      "CHUANG_FEISHU_VERIFICATION_TOKEN",
+      "CHUANG_FEISHU_ENCRYPT_KEY",
+      "CHUANG_FEISHU_CONNECTION_MODE",
+    ],
+    forbidden_credential_env_names_in_file: forbiddenInFile,
+    inherited_forbidden_credential_env_states: inheritedForbiddenStates,
+    inherited_forbidden_credentials_used: false,
+    codex_feishu_bridge_env_used: false,
+    hermes_feishu_env_used: false,
     next_actions: nextActions,
   };
 }
@@ -184,6 +236,8 @@ function runFeishuCheck(envFile) {
     workspace_config_exists: Boolean(parsed.workspace_config_exists),
     connection_mode: parsed.connection_mode || "",
     connection_mode_ok: Boolean(parsed.connection_mode_ok),
+    live_feishu_call_made: false,
+    local_commands: ["cargo channel feishu-check --json"],
     next_actions: [],
   };
 }
@@ -204,7 +258,11 @@ function checkWorkspace(workspaceRoot) {
     summary: nextActions.length ? "workspace/config is not ready" : "workspace and config.toml are present",
     workspace_root: workspaceRoot,
     workspace_root_exists: exists,
+    workspace_root_realpath: exists ? safeRealpath(workspaceRoot) : "",
+    config_path: configPath,
     workspace_config_exists: configExists,
+    config_realpath: configExists ? safeRealpath(configPath) : "",
+    filesystem_methods: [`statSync:${workspaceRoot}`, `statSync:${configPath}`],
     next_actions: nextActions,
   };
 }
@@ -250,6 +308,10 @@ function runAppServerDiagnostic(workspaceRoot) {
     api_key_state: parsed.api_key_state || "unknown",
     release_readiness_state: parsed.release_readiness?.overall_state || "unknown",
     channel_readiness_state: parsed.channel_readiness?.overall_state || "unknown",
+    provider_kind: parsed.config?.provider || parsed.provider || "unknown",
+    provider_transport: parsed.config?.transport || parsed.transport || "unknown",
+    live_provider_call_made: false,
+    local_commands: ["cargo app-server health --diagnostic --json"],
     next_actions: parsed.ok ? [] : ["fix_app_server_workspace_diagnostics"],
   };
 }
@@ -270,6 +332,8 @@ function runNodeSmoke(name, scriptName) {
     status: "pass",
     summary: `${scriptName} passed locally without a live Feishu call`,
     marker: sanitize((result.stdout || "").trim()),
+    live_feishu_call_made: false,
+    local_commands: [`node scripts/${scriptName}`],
     next_actions: [],
   };
 }
@@ -282,6 +346,7 @@ function checkSessionStoreAccess(stateFile) {
   const nearestWritable = nearest ? canAccess(nearest, fs.constants.R_OK | fs.constants.W_OK) : false;
   const fileExists = fs.existsSync(stateFile);
   const fileWritable = fileExists ? canAccess(stateFile, fs.constants.R_OK | fs.constants.W_OK) : null;
+  const stateSummary = summarizeSessionStore(stateFile);
   const pass = fileExists ? fileWritable : parentExists ? parentWritable : nearestWritable;
   return {
     name: "session_store_access",
@@ -299,6 +364,13 @@ function checkSessionStoreAccess(stateFile) {
     nearest_existing_parent_writable: nearestWritable,
     file_exists: fileExists,
     file_writable: fileWritable,
+    parsed_state: stateSummary,
+    filesystem_methods: [
+      `existsSync:${stateFile}`,
+      `accessSync:${fileExists ? stateFile : parentExists ? parent : nearest || parent}`,
+      ...(fileExists ? [`readFileSync:${stateFile}`] : []),
+    ],
+    writes_attempted: false,
     next_actions: pass ? [] : ["fix_chuang_feishu_session_state_path_permissions"],
   };
 }
@@ -311,17 +383,78 @@ function checkProviderEnv(providerEnvFile) {
       status: "warn",
       summary: "CHUANG_PROVIDER_ENV_FILE is not set in the Chuang Feishu env",
       provider_env_file_state: "<unset>",
+      provider_env_file: "",
+      provider_secret_var_states: {},
+      forbidden_feishu_credential_names_in_provider_env: [],
       next_actions: ["set_chuang_provider_env_file_if_live_provider_is_required"],
     };
   }
   const exists = fs.existsSync(file);
+  const parsed = exists ? readEnvFile(file) : { values: {}, error: "" };
+  const forbiddenFeishuNames = Object.keys(parsed.values).filter((name) => name.startsWith("CHUANG_FEISHU_"));
+  const nextActions = [];
+  if (!exists) {
+    nextActions.push("create_or_fix_chuang_provider_env_file");
+  }
+  if (parsed.error) {
+    nextActions.push("fix_chuang_provider_env_file_syntax");
+  }
+  if (forbiddenFeishuNames.length) {
+    nextActions.push("remove_feishu_credentials_from_provider_env_file");
+  }
+  const status = !exists ? "warn" : nextActions.length ? "fail" : "pass";
   return {
     name: "provider_env_file",
-    status: exists ? "pass" : "warn",
-    summary: exists ? "provider env file path exists" : "provider env file path is set but missing",
+    status,
+    summary: exists
+      ? parsed.error
+        ? "provider env file exists but could not be parsed"
+        : forbiddenFeishuNames.length
+          ? "provider env file exists but contains Feishu credential names"
+          : "provider env file path exists and secret values are redacted"
+      : "provider env file path is set but missing",
+    provider_env_file: file,
     provider_env_file_state: exists ? "<set>" : "<missing_file>",
-    next_actions: exists ? [] : ["create_or_fix_chuang_provider_env_file"],
+    provider_env_parse_status: parsed.error ? `parse_error:${sanitize(parsed.error)}` : exists ? "ok" : "missing",
+    provider_secret_var_states: exists
+      ? Object.fromEntries(Object.keys(parsed.values).map((name) => [name, parsed.values[name] ? "<set>" : "<missing>"]))
+      : {},
+    forbidden_feishu_credential_names_in_provider_env: forbiddenFeishuNames,
+    filesystem_methods: exists ? [`readFileSync:${file}`] : [`existsSync:${file}`],
+    next_actions: nextActions,
   };
+}
+
+function summarizeSessionStore(stateFile) {
+  if (!fs.existsSync(stateFile)) {
+    return {
+      readable: false,
+      parse_status: "missing",
+      version: null,
+      binding_count: 0,
+      has_workspace_roots: false,
+    };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    const bindings = parsed && typeof parsed.bindings === "object" && parsed.bindings ? parsed.bindings : {};
+    const bindingValues = Object.values(bindings).filter((value) => value && typeof value === "object");
+    return {
+      readable: true,
+      parse_status: "ok",
+      version: parsed.version || null,
+      binding_count: bindingValues.length,
+      has_workspace_roots: bindingValues.some((binding) => Boolean(binding.workspaceRoot)),
+    };
+  } catch (error) {
+    return {
+      readable: false,
+      parse_status: `parse_error:${sanitize(error.message)}`,
+      version: null,
+      binding_count: 0,
+      has_workspace_roots: false,
+    };
+  }
 }
 
 function readEnvFile(envFile) {
@@ -367,6 +500,47 @@ function canAccess(target, mode) {
   }
 }
 
+function safeRealpath(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return "";
+  }
+}
+
+function forbiddenCredentialEnvNames() {
+  return [
+    "FEISHU_APP_ID",
+    "FEISHU_APP_SECRET",
+    "FEISHU_BOT_ID",
+    "FEISHU_VERIFICATION_TOKEN",
+    "FEISHU_ENCRYPT_KEY",
+    "HERMES_FEISHU_APP_ID",
+    "HERMES_FEISHU_APP_SECRET",
+    "CODEX_FEISHU_APP_ID",
+    "CODEX_FEISHU_APP_SECRET",
+  ];
+}
+
+function envFileScopeWarnings(envFile) {
+  const normalized = envFile.split(path.sep).join("/");
+  const basename = path.basename(envFile);
+  const warnings = [];
+  if (basename === ".env") {
+    warnings.push("generic_dotenv_path");
+  }
+  if (/hermes/i.test(normalized)) {
+    warnings.push("hermes_path_segment");
+  }
+  if (/codex-feishu/i.test(normalized)) {
+    warnings.push("codex_feishu_path_segment");
+  }
+  if (!/chuang/i.test(normalized)) {
+    warnings.push("missing_chuang_path_marker");
+  }
+  return warnings;
+}
+
 function parseJson(text) {
   try {
     return JSON.parse(text);
@@ -397,6 +571,9 @@ function printText(result) {
   console.log(`status: ${result.status}`);
   console.log(`readonly: ${result.readonly}`);
   console.log(`connects_real_feishu: ${result.connects_real_feishu}`);
+  console.log(`evidence.operation_mode: ${result.evidence.operation_mode}`);
+  console.log(`evidence.live_feishu_connection_attempted: ${result.evidence.live_feishu_connection_attempted}`);
+  console.log(`evidence.session_store_write_attempted: ${result.evidence.session_store_write_attempted}`);
   console.log(`env_file: ${result.env_file}`);
   console.log(`workspace_root: ${result.workspace_root}`);
   console.log(`session_state_file: ${result.session_state_file}`);
