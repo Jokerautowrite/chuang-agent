@@ -36,6 +36,16 @@ fn plugin_registry_summary_counts_enabled_plugins_and_issues() {
     assert_eq!(summary.plugin_count, 5);
     assert_eq!(summary.enabled_count, 0);
     assert_eq!(summary.issue_count, 0);
+    assert!(summary.evidence_available);
+    assert!(summary.check_only);
+    assert!(!summary.executes_plugins);
+    assert!(!summary.reads_secret);
+    assert!(!summary.connects_external_service);
+    assert!(!summary.writes_files);
+    assert!(summary.capability_count >= 5);
+    assert!(summary
+        .capabilities
+        .contains(&"service-control".to_string()));
 }
 
 #[test]
@@ -47,6 +57,10 @@ fn plugin_registry_summary_tolerates_missing_registry() {
     assert!(!summary.ok);
     assert_eq!(summary.plugin_count, 0);
     assert_eq!(summary.issue_count, 0);
+    assert!(!summary.evidence_available);
+    assert!(summary.check_only);
+    assert!(!summary.executes_plugins);
+    assert!(!summary.reads_secret);
 }
 
 #[test]

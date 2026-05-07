@@ -166,12 +166,17 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         }
     );
     println!(
-        "plugin_registry: available={} ok={} plugin_count={} enabled_count={} issue_count={}",
+        "plugin_registry: available={} ok={} plugin_count={} enabled_count={} issue_count={} evidence_available={} check_only={} executes_plugins={} reads_secret={} capability_count={}",
         snapshot.status.plugin_registry.available,
         snapshot.status.plugin_registry.ok,
         snapshot.status.plugin_registry.plugin_count,
         snapshot.status.plugin_registry.enabled_count,
-        snapshot.status.plugin_registry.issue_count
+        snapshot.status.plugin_registry.issue_count,
+        snapshot.status.plugin_registry.evidence_available,
+        snapshot.status.plugin_registry.check_only,
+        snapshot.status.plugin_registry.executes_plugins,
+        snapshot.status.plugin_registry.reads_secret,
+        snapshot.status.plugin_registry.capability_count
     );
 }
 

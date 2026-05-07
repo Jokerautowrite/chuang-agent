@@ -100,6 +100,14 @@ pub struct PluginRegistrySummary {
     pub plugin_count: usize,
     pub enabled_count: usize,
     pub issue_count: usize,
+    pub evidence_available: bool,
+    pub check_only: bool,
+    pub executes_plugins: bool,
+    pub reads_secret: bool,
+    pub connects_external_service: bool,
+    pub writes_files: bool,
+    pub capability_count: usize,
+    pub capabilities: Vec<String>,
 }
 
 pub fn load_plugin_registry(path: &Path) -> Result<PluginRegistry, String> {
@@ -150,23 +158,51 @@ pub fn summarize_plugin_registry(path: &Path) -> PluginRegistrySummary {
             plugin_count: 0,
             enabled_count: 0,
             issue_count: 0,
+            evidence_available: false,
+            check_only: true,
+            executes_plugins: false,
+            reads_secret: false,
+            connects_external_service: false,
+            writes_files: false,
+            capability_count: 0,
+            capabilities: Vec::new(),
         };
     }
 
     match check_plugin_registry(path) {
-        Ok(check) => PluginRegistrySummary {
-            registry_path: check.registry_path,
-            available: true,
-            ok: check.ok,
-            plugin_count: check.plugin_count,
-            enabled_count: check.plugins.iter().filter(|plugin| plugin.enabled).count(),
-            issue_count: check
-                .plugins
-                .iter()
-                .filter(|plugin| plugin.enabled)
-                .map(|plugin| plugin.issues.len())
-                .sum(),
-        },
+        Ok(check) => {
+            let capabilities = summarize_capabilities(&check.plugins);
+            PluginRegistrySummary {
+                registry_path: check.registry_path,
+                available: true,
+                ok: check.ok,
+                plugin_count: check.plugin_count,
+                enabled_count: check.plugins.iter().filter(|plugin| plugin.enabled).count(),
+                issue_count: check
+                    .plugins
+                    .iter()
+                    .filter(|plugin| plugin.enabled)
+                    .map(|plugin| plugin.issues.len())
+                    .sum(),
+                evidence_available: true,
+                check_only: check
+                    .plugins
+                    .iter()
+                    .all(|plugin| plugin.boundary.check_only),
+                executes_plugins: check.plugins.iter().any(|plugin| plugin.executes_plugin),
+                reads_secret: check.plugins.iter().any(|plugin| plugin.reads_secret),
+                connects_external_service: check
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.boundary.connects_external_service),
+                writes_files: check
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.boundary.writes_files),
+                capability_count: capabilities.len(),
+                capabilities,
+            }
+        }
         Err(_) => PluginRegistrySummary {
             registry_path: path.display().to_string(),
             available: true,
@@ -174,8 +210,28 @@ pub fn summarize_plugin_registry(path: &Path) -> PluginRegistrySummary {
             plugin_count: 0,
             enabled_count: 0,
             issue_count: 1,
+            evidence_available: false,
+            check_only: true,
+            executes_plugins: false,
+            reads_secret: false,
+            connects_external_service: false,
+            writes_files: false,
+            capability_count: 0,
+            capabilities: Vec::new(),
         },
     }
+}
+
+fn summarize_capabilities(plugins: &[PluginCheckItem]) -> Vec<String> {
+    let mut capabilities = std::collections::BTreeSet::new();
+    for plugin in plugins {
+        for capability in &plugin.capabilities {
+            if !capability.trim().is_empty() {
+                capabilities.insert(capability.clone());
+            }
+        }
+    }
+    capabilities.into_iter().collect()
 }
 
 fn check_plugin(base_dir: &Path, plugin: &PluginManifest) -> PluginCheckItem {

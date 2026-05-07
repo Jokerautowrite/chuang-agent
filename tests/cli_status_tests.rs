@@ -223,6 +223,16 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["plugin_registry"]["available"], true);
     assert_eq!(parsed["plugin_registry"]["ok"], true);
     assert_eq!(parsed["plugin_registry"]["plugin_count"], 5);
+    assert_eq!(parsed["plugin_registry"]["evidence_available"], true);
+    assert_eq!(parsed["plugin_registry"]["check_only"], true);
+    assert_eq!(parsed["plugin_registry"]["executes_plugins"], false);
+    assert_eq!(parsed["plugin_registry"]["reads_secret"], false);
+    assert!(
+        parsed["plugin_registry"]["capability_count"]
+            .as_u64()
+            .expect("capability count")
+            >= 5
+    );
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);

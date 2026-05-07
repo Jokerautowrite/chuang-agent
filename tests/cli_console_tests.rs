@@ -199,6 +199,15 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     );
     assert_eq!(parsed["status"]["plugin_registry"]["plugin_count"], 5);
     assert_eq!(
+        parsed["status"]["plugin_registry"]["evidence_available"],
+        true
+    );
+    assert_eq!(parsed["status"]["plugin_registry"]["check_only"], true);
+    assert_eq!(
+        parsed["status"]["plugin_registry"]["executes_plugins"],
+        false
+    );
+    assert_eq!(
         parsed["plugins"]
             .as_array()
             .expect("plugins should be array")

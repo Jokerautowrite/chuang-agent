@@ -100,6 +100,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.plugin_registry.available);
     assert!(status.plugin_registry.ok);
     assert_eq!(status.plugin_registry.plugin_count, 5);
+    assert!(status.plugin_registry.evidence_available);
+    assert!(status.plugin_registry.check_only);
+    assert!(!status.plugin_registry.executes_plugins);
+    assert!(!status.plugin_registry.reads_secret);
+    assert!(status.plugin_registry.capability_count >= 5);
     assert!(status.project_readiness.ok);
     assert_eq!(
         status.project_readiness.overall_state,
