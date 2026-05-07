@@ -499,6 +499,7 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
         remember_experience: false,
         dispatch_subagent: false,
         goal_spec: None,
+        knowledge_context: None,
     })
     .map(|_| ())
 }

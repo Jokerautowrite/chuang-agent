@@ -27,6 +27,7 @@ use chuang_agent::tool_runtime::{
 };
 use chuang_agent::{common::AgentId, common::TaskId};
 
+use crate::cli_memory::{preview_local_knowledge_context, MemoryKnowledgePreviewContextOutput};
 use crate::cli_types::{CliOptions, RememberedRecords, RunCliRequest};
 
 pub(crate) fn run_with_options(
@@ -68,6 +69,12 @@ pub(crate) fn run_with_options(
     let tool_workspace_root = request.workspace_root.clone().map(Ok).unwrap_or_else(|| {
         std::env::current_dir().map_err(|e| format!("workspace_root_discovery_failed: {e}"))
     })?;
+    let mut runtime_context = goal_context_segments(request.goal_spec.as_ref())?;
+    let knowledge_preview = knowledge_context_preview(request)?;
+    if let Some(preview) = &knowledge_preview {
+        runtime_context.extend(knowledge_preview_context_segments(preview));
+    }
+
     run_governed_turn_with_tools(
         &mut kernel,
         &mut slots.governance,
@@ -85,10 +92,13 @@ pub(crate) fn run_with_options(
             actuator: Some(runtime.actuator.clone()),
         },
         request.user_input.clone(),
-        goal_context_segments(request.goal_spec.as_ref())?,
+        runtime_context,
     )
     .map_err(|e| format!("runtime_failed: {e:?}"))
-    .and_then(|turn| remember_turn_if_requested(&request.options, &mut kernel, turn, request))
+    .and_then(|mut turn| {
+        insert_knowledge_context_metadata(&mut turn, knowledge_preview.as_ref())?;
+        remember_turn_if_requested(&request.options, &mut kernel, turn, request)
+    })
 }
 
 pub(crate) fn kernel_config_from_runtime(
@@ -307,6 +317,115 @@ fn goal_context_segments(goal_spec: Option<&GoalSpec>) -> Result<Vec<ContextSegm
                 .map_err(|e| format!("goal_spec_invalid: {}: {}", e.field, e.message))
         })
         .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn knowledge_context_preview(
+    request: &RunCliRequest,
+) -> Result<Option<MemoryKnowledgePreviewContextOutput>, String> {
+    let Some(knowledge) = &request.knowledge_context else {
+        return Ok(None);
+    };
+    if !knowledge.enabled {
+        return Ok(None);
+    }
+    preview_local_knowledge_context(&knowledge.root, &knowledge.query, knowledge.limit).map(Some)
+}
+
+fn knowledge_preview_context_segments(
+    preview: &MemoryKnowledgePreviewContextOutput,
+) -> Vec<ContextSegment> {
+    let now = chrono::Utc::now();
+    preview
+        .segments
+        .iter()
+        .map(|segment| ContextSegment {
+            id: format!("external-knowledge-{}", segment.segment_id),
+            source: SegmentSource::Memory,
+            content: format!(
+                "[external_knowledge_preview]\npath={}:{}\nscore={}\npreview={}",
+                segment.path, segment.line, segment.score, segment.preview
+            ),
+            tokens: Some(segment.token_estimate.min(u16::MAX as usize) as u16),
+            priority: 170,
+            created_at: now,
+            last_accessed: now,
+            metadata: std::collections::HashMap::from([
+                ("kind".to_string(), "external_knowledge_preview".to_string()),
+                ("adapter".to_string(), preview.adapter.clone()),
+                ("path".to_string(), segment.path.clone()),
+                ("line".to_string(), segment.line.to_string()),
+                ("read_only".to_string(), segment.read_only.to_string()),
+                (
+                    "connects_real_service".to_string(),
+                    segment.connects_real_service.to_string(),
+                ),
+                (
+                    "writes_automatically".to_string(),
+                    segment.writes_automatically.to_string(),
+                ),
+                ("runtime_injection_applied".to_string(), "true".to_string()),
+                (
+                    "runtime_retrieval_wired".to_string(),
+                    segment.runtime_retrieval_wired.to_string(),
+                ),
+            ]),
+        })
+        .collect()
+}
+
+fn insert_knowledge_context_metadata(
+    turn: &mut ChuangKernelTurn,
+    preview: Option<&MemoryKnowledgePreviewContextOutput>,
+) -> Result<(), String> {
+    let extra = &mut turn.result.response.meta.extra;
+    let Some(preview) = preview else {
+        extra.insert(
+            "knowledge_context_preview_enabled".to_string(),
+            "false".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_injected".to_string(),
+            "false".to_string(),
+        );
+        return Ok(());
+    };
+
+    extra.insert(
+        "knowledge_context_preview_enabled".to_string(),
+        "true".to_string(),
+    );
+    extra.insert(
+        "knowledge_context_injected".to_string(),
+        (!preview.segments.is_empty()).to_string(),
+    );
+    extra.insert(
+        "knowledge_context_segment_count".to_string(),
+        preview.segment_count.to_string(),
+    );
+    extra.insert("knowledge_context_root".to_string(), preview.root.clone());
+    extra.insert("knowledge_context_query".to_string(), preview.query.clone());
+    extra.insert(
+        "knowledge_context_read_only".to_string(),
+        preview.read_only.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_connects_real_service".to_string(),
+        preview.connects_real_service.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_writes_automatically".to_string(),
+        preview.writes_automatically.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_runtime_retrieval_wired".to_string(),
+        preview.runtime_retrieval_wired.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_preview_json".to_string(),
+        serde_json::to_string(preview)
+            .map_err(|e| format!("knowledge_context_preview_json_failed: {e}"))?,
+    );
+    Ok(())
 }
 
 fn insert_tool_metadata(
@@ -876,6 +995,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should succeed");
@@ -962,6 +1082,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: Some(GoalSpec::mainline_mvp("通过 CLI 注入 goal context")),
+            knowledge_context: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -998,6 +1119,88 @@ mod tests {
     }
 
     #[test]
+    fn run_with_options_can_inject_readonly_knowledge_context_when_enabled() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-runtime-knowledge-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let knowledge_root = temp_dir.join("knowledge");
+        fs::create_dir_all(&knowledge_root).expect("knowledge root should be created");
+        fs::write(
+            knowledge_root.join("wiki.md"),
+            "runtime knowledge context marker should enter preview only\n",
+        )
+        .expect("knowledge doc should write");
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        runtime.context_budget = goal_context_test_budget();
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "检查外脑上下文".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: Some(crate::cli_types::KnowledgeContextCliRequest {
+                root: knowledge_root,
+                query: "marker".to_string(),
+                limit: 2,
+                enabled: true,
+            }),
+        };
+
+        let (result, _) = run_with_options(&request).expect("run should succeed");
+
+        assert!(result
+            .packed_context_preview
+            .contains("external-knowledge-knowledge-segment-1"));
+        assert!(result
+            .packed_context_preview
+            .contains("runtime knowledge context marker"));
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_preview_enabled")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_injected")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_connects_real_service")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_runtime_retrieval_wired")
+                .map(String::as_str),
+            Some("false")
+        );
+    }
+
+    #[test]
     fn run_with_options_can_remember_experience_with_provenance() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-experience-memory-test-{}",
@@ -1018,6 +1221,7 @@ mod tests {
             remember_experience: true,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
 
         let (_, records) = run_with_options(&request).expect("run should succeed");
@@ -1059,6 +1263,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
         let (_, first_records) = run_with_options(&first).expect("first run should succeed");
         assert!(first_records
@@ -1080,6 +1285,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
         let (same_session, _) = run_with_options(&second).expect("second run should succeed");
         assert_eq!(same_session.recall_hit_count, 1);
@@ -1134,6 +1340,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
         let (beta_written, beta_records) =
             run_with_options(&beta_write).expect("beta run should succeed");
@@ -1168,6 +1375,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
         assert_eq!(other_session.recall_hit_count, 0);
@@ -1203,6 +1411,7 @@ mod tests {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         };
 
         let error = run_with_options(&request).expect_err("run should reject missing session id");

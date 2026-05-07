@@ -574,6 +574,7 @@ fn run_turn_with_tools(
         remember_experience: false,
         dispatch_subagent: false,
         goal_spec,
+        knowledge_context: None,
     };
 
     let (result, records) = run_with_options(&request)?;

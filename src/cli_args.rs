@@ -279,6 +279,10 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
     let mut remember_experience = false;
     let mut dispatch_subagent = false;
     let mut goal_spec: Option<GoalSpec> = None;
+    let mut knowledge_context_root: Option<PathBuf> = None;
+    let mut knowledge_context_query: Option<String> = None;
+    let mut knowledge_context_limit = 3usize;
+    let mut knowledge_context_enabled = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -325,9 +329,60 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
                 goal_spec = Some(GoalSpec::mainline_mvp(value.clone()));
                 index += 2;
             }
+            "--knowledge-context-root" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                knowledge_context_root = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--knowledge-context-query" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                if value.trim().is_empty() {
+                    return Err("--knowledge-context-query requires non-empty value".to_string());
+                }
+                knowledge_context_query = Some(value.clone());
+                index += 2;
+            }
+            "--knowledge-context-limit" => {
+                let value = args.get(index + 1).ok_or_else(usage)?;
+                knowledge_context_limit = value
+                    .parse::<usize>()
+                    .map_err(|_| "--knowledge-context-limit requires numeric value".to_string())?;
+                if knowledge_context_limit == 0 {
+                    return Err("--knowledge-context-limit must be greater than zero".to_string());
+                }
+                index += 2;
+            }
+            "--enable-knowledge-context-preview" => {
+                knowledge_context_enabled = true;
+                index += 1;
+            }
             _ => return Err(usage()),
         }
     }
+
+    let knowledge_context = if knowledge_context_enabled {
+        Some(KnowledgeContextCliRequest {
+            root: knowledge_context_root.ok_or_else(|| {
+                "--enable-knowledge-context-preview requires --knowledge-context-root".to_string()
+            })?,
+            query: knowledge_context_query.ok_or_else(|| {
+                "--enable-knowledge-context-preview requires --knowledge-context-query".to_string()
+            })?,
+            limit: knowledge_context_limit,
+            enabled: true,
+        })
+    } else {
+        if knowledge_context_root.is_some()
+            || knowledge_context_query.is_some()
+            || knowledge_context_limit != 3
+        {
+            return Err(
+                "knowledge context preview is disabled by default; pass --enable-knowledge-context-preview"
+                    .to_string(),
+            );
+        }
+        None
+    };
 
     Ok(RunCliRequest {
         options,
@@ -340,6 +395,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         remember_experience,
         dispatch_subagent,
         goal_spec,
+        knowledge_context,
     })
 }
 
@@ -911,8 +967,13 @@ fn parse_cli_options_with_options(
             "--session-id" => index += 2,
             "--remember-session" => index += 1,
             "--remember-identity" => index += 1,
+            "--remember-experience" => index += 1,
             "--dispatch-subagent" => index += 1,
             "--goal" => index += 2,
+            "--knowledge-context-root" => index += 2,
+            "--knowledge-context-query" => index += 2,
+            "--knowledge-context-limit" => index += 2,
+            "--enable-knowledge-context-preview" => index += 1,
             "--provider-base-url" => {
                 provider_base_url = Some(take_value_or_usage(args, &mut index)?);
             }
@@ -1244,6 +1305,56 @@ mod tests {
         let error = parse_run_request(&args).expect_err("empty goal should fail");
 
         assert_eq!(error, "--goal requires non-empty value");
+    }
+
+    #[test]
+    fn parse_run_request_accepts_explicit_knowledge_context_preview() {
+        let config_path = fake_config_path("knowledge-context");
+        let args = vec![
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--input".to_string(),
+            "检查外脑".to_string(),
+            "--enable-knowledge-context-preview".to_string(),
+            "--knowledge-context-root".to_string(),
+            "/tmp/knowledge".to_string(),
+            "--knowledge-context-query".to_string(),
+            "marker".to_string(),
+            "--knowledge-context-limit".to_string(),
+            "2".to_string(),
+        ];
+
+        let request = parse_run_request(&args).expect("run request should parse");
+
+        let knowledge = request
+            .knowledge_context
+            .expect("knowledge context should be present");
+        assert!(knowledge.enabled);
+        assert_eq!(knowledge.root, PathBuf::from("/tmp/knowledge"));
+        assert_eq!(knowledge.query, "marker");
+        assert_eq!(knowledge.limit, 2);
+    }
+
+    #[test]
+    fn parse_run_request_rejects_knowledge_context_without_enable_flag() {
+        let config_path = fake_config_path("knowledge-context-disabled");
+        let args = vec![
+            "--config".to_string(),
+            config_path.display().to_string(),
+            "--input".to_string(),
+            "检查外脑".to_string(),
+            "--knowledge-context-root".to_string(),
+            "/tmp/knowledge".to_string(),
+            "--knowledge-context-query".to_string(),
+            "marker".to_string(),
+        ];
+
+        let error = parse_run_request(&args).expect_err("disabled preview should fail");
+
+        assert_eq!(
+            error,
+            "knowledge context preview is disabled by default; pass --enable-knowledge-context-preview"
+        );
     }
 
     fn fake_config_path(name: &str) -> PathBuf {

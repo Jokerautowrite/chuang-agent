@@ -64,6 +64,7 @@ fn knowledge_memory_command(args: &[String]) -> Result<(), String> {
         Some("status") => memory_knowledge_status_command(&args[1..]),
         Some("search") => memory_knowledge_search_command(&args[1..]),
         Some("preview-context") => memory_knowledge_preview_context_command(&args[1..]),
+        Some("source-contract") => memory_knowledge_source_contract_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -124,22 +125,7 @@ fn memory_knowledge_search_command(args: &[String]) -> Result<(), String> {
 
 fn memory_knowledge_preview_context_command(args: &[String]) -> Result<(), String> {
     let request = parse_memory_knowledge_preview_context(args)?;
-    let hits = search_local_knowledge_root(&request.root, &request.query, request.limit)?;
-    let segments = build_memory_knowledge_context_segments(hits);
-    let output = MemoryKnowledgePreviewContextOutput {
-        adapter: "local_external_knowledge".to_string(),
-        preview: true,
-        read_only: true,
-        connects_real_service: false,
-        writes_automatically: false,
-        runtime_injection_applied: false,
-        runtime_retrieval_wired: false,
-        root: request.root.display().to_string(),
-        query: request.query,
-        limit: request.limit,
-        segment_count: segments.len(),
-        segments,
-    };
+    let output = preview_local_knowledge_context(&request.root, &request.query, request.limit)?;
 
     match request.output {
         ControlOutputFormat::Text => {
@@ -190,6 +176,29 @@ fn memory_knowledge_preview_context_command(args: &[String]) -> Result<(), Strin
     }
 
     Ok(())
+}
+
+pub(crate) fn preview_local_knowledge_context(
+    root: &std::path::Path,
+    query: &str,
+    limit: usize,
+) -> Result<MemoryKnowledgePreviewContextOutput, String> {
+    let hits = search_local_knowledge_root(root, query, limit)?;
+    let segments = build_memory_knowledge_context_segments(hits);
+    Ok(MemoryKnowledgePreviewContextOutput {
+        adapter: "local_external_knowledge".to_string(),
+        preview: true,
+        read_only: true,
+        connects_real_service: false,
+        writes_automatically: false,
+        runtime_injection_applied: false,
+        runtime_retrieval_wired: false,
+        root: root.display().to_string(),
+        query: query.to_string(),
+        limit,
+        segment_count: segments.len(),
+        segments,
+    })
 }
 
 fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
@@ -248,6 +257,43 @@ fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
             }
         }
         ControlOutputFormat::Json => print_json(&status)?,
+    }
+
+    Ok(())
+}
+
+fn memory_knowledge_source_contract_command(args: &[String]) -> Result<(), String> {
+    let request = parse_memory_knowledge_source_contract(args)?;
+    let output = build_memory_knowledge_source_contract(&request.source);
+
+    match request.output {
+        ControlOutputFormat::Json => print_json(&output)?,
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_knowledge_source_contract source={} adapter={} read_only={} live_adapter_configured={} connects_real_service={} writes_automatically={} runtime_retrieval_wired={}",
+                output.source,
+                output.adapter,
+                output.read_only,
+                output.live_adapter_configured,
+                output.connects_real_service,
+                output.writes_automatically,
+                output.runtime_retrieval_wired
+            );
+            println!(
+                "boundary requires_operator_credentials={} stores_secret_in_repo={} writes_core_memory={} requires_provenance={} requires_evidence={}",
+                output.boundary.requires_operator_credentials,
+                output.boundary.stores_secret_in_repo,
+                output.boundary.writes_core_memory,
+                output.boundary.requires_provenance,
+                output.boundary.requires_evidence
+            );
+            for field in &output.request_fields {
+                println!("request_field: {field}");
+            }
+            for field in &output.response_fields {
+                println!("response_field: {field}");
+            }
+        }
     }
 
     Ok(())
@@ -1170,6 +1216,66 @@ fn parse_memory_knowledge_preview_context(
     parse_memory_knowledge_query(args, "preview-context")
 }
 
+fn parse_memory_knowledge_source_contract(
+    args: &[String],
+) -> Result<MemoryKnowledgeSourceContractRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut source: Option<String> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--source" => {
+                source = Some(take_local_value(args, &mut index, "--source")?);
+            }
+            _ => return Err(usage()),
+        }
+    }
+    let source =
+        source.ok_or_else(|| "memory knowledge source-contract requires --source".to_string())?;
+    if !matches!(source.as_str(), "wiki" | "gbrain") {
+        return Err("memory knowledge source-contract supports --source wiki|gbrain".to_string());
+    }
+    Ok(MemoryKnowledgeSourceContractRequest { output, source })
+}
+
+fn build_memory_knowledge_source_contract(source: &str) -> MemoryKnowledgeSourceContractOutput {
+    MemoryKnowledgeSourceContractOutput {
+        source: source.to_string(),
+        adapter: format!("{source}_readonly_external_knowledge"),
+        read_only: true,
+        live_adapter_configured: false,
+        connects_real_service: false,
+        writes_automatically: false,
+        runtime_retrieval_wired: false,
+        request_fields: vec![
+            "query".to_string(),
+            "limit".to_string(),
+            "operator_scope".to_string(),
+            "audit_label".to_string(),
+        ],
+        response_fields: vec![
+            "hits[].source".to_string(),
+            "hits[].path_or_url".to_string(),
+            "hits[].score".to_string(),
+            "hits[].preview".to_string(),
+            "hits[].provenance".to_string(),
+            "hits[].evidence".to_string(),
+        ],
+        boundary: MemoryKnowledgeSourceContractBoundary {
+            requires_operator_credentials: true,
+            stores_secret_in_repo: false,
+            writes_core_memory: false,
+            requires_provenance: true,
+            requires_evidence: true,
+            approval_required_for_writeback: true,
+        },
+    }
+}
+
 fn parse_memory_knowledge_query(
     args: &[String],
     command_name: &str,
@@ -1758,6 +1864,11 @@ struct MemoryKnowledgeSearchRequest {
     limit: usize,
 }
 
+struct MemoryKnowledgeSourceContractRequest {
+    output: ControlOutputFormat,
+    source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct MemoryKnowledgeSearchOutput {
     adapter: String,
@@ -1774,37 +1885,37 @@ struct MemoryKnowledgeSearchOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct MemoryKnowledgePreviewContextOutput {
-    adapter: String,
-    preview: bool,
-    read_only: bool,
-    connects_real_service: bool,
-    writes_automatically: bool,
-    runtime_injection_applied: bool,
-    runtime_retrieval_wired: bool,
-    root: String,
-    query: String,
-    limit: usize,
-    segment_count: usize,
-    segments: Vec<MemoryKnowledgeContextSegmentOutput>,
+pub(crate) struct MemoryKnowledgePreviewContextOutput {
+    pub(crate) adapter: String,
+    pub(crate) preview: bool,
+    pub(crate) read_only: bool,
+    pub(crate) connects_real_service: bool,
+    pub(crate) writes_automatically: bool,
+    pub(crate) runtime_injection_applied: bool,
+    pub(crate) runtime_retrieval_wired: bool,
+    pub(crate) root: String,
+    pub(crate) query: String,
+    pub(crate) limit: usize,
+    pub(crate) segment_count: usize,
+    pub(crate) segments: Vec<MemoryKnowledgeContextSegmentOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct MemoryKnowledgeContextSegmentOutput {
-    segment_id: String,
-    source: String,
-    path: String,
-    line: usize,
-    score: u32,
-    preview: String,
-    token_estimate: usize,
-    read_only: bool,
-    connects_real_service: bool,
-    writes_automatically: bool,
-    runtime_injection_applied: bool,
-    runtime_retrieval_wired: bool,
-    provenance: MemoryKnowledgeSearchProvenanceOutput,
-    evidence: MemoryKnowledgeSearchEvidenceOutput,
+pub(crate) struct MemoryKnowledgeContextSegmentOutput {
+    pub(crate) segment_id: String,
+    pub(crate) source: String,
+    pub(crate) path: String,
+    pub(crate) line: usize,
+    pub(crate) score: u32,
+    pub(crate) preview: String,
+    pub(crate) token_estimate: usize,
+    pub(crate) read_only: bool,
+    pub(crate) connects_real_service: bool,
+    pub(crate) writes_automatically: bool,
+    pub(crate) runtime_injection_applied: bool,
+    pub(crate) runtime_retrieval_wired: bool,
+    pub(crate) provenance: MemoryKnowledgeSearchProvenanceOutput,
+    pub(crate) evidence: MemoryKnowledgeSearchEvidenceOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1819,28 +1930,52 @@ struct MemoryKnowledgeSearchHitOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct MemoryKnowledgeSearchProvenanceOutput {
-    source: String,
-    adapter: String,
-    local_file: String,
-    line: usize,
-    score: u32,
-    query: String,
-    read_only: bool,
-    connects_real_service: bool,
-    writes_automatically: bool,
+pub(crate) struct MemoryKnowledgeSearchProvenanceOutput {
+    pub(crate) source: String,
+    pub(crate) adapter: String,
+    pub(crate) local_file: String,
+    pub(crate) line: usize,
+    pub(crate) score: u32,
+    pub(crate) query: String,
+    pub(crate) read_only: bool,
+    pub(crate) connects_real_service: bool,
+    pub(crate) writes_automatically: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct MemoryKnowledgeSearchEvidenceOutput {
-    kind: String,
-    local_file: String,
-    line: usize,
-    score: u32,
-    query: String,
-    preview: String,
+pub(crate) struct MemoryKnowledgeSearchEvidenceOutput {
+    pub(crate) kind: String,
+    pub(crate) local_file: String,
+    pub(crate) line: usize,
+    pub(crate) score: u32,
+    pub(crate) query: String,
+    pub(crate) preview: String,
+    pub(crate) read_only: bool,
+    pub(crate) connects_real_service: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSourceContractOutput {
+    source: String,
+    adapter: String,
     read_only: bool,
+    live_adapter_configured: bool,
     connects_real_service: bool,
+    writes_automatically: bool,
+    runtime_retrieval_wired: bool,
+    request_fields: Vec<String>,
+    response_fields: Vec<String>,
+    boundary: MemoryKnowledgeSourceContractBoundary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeSourceContractBoundary {
+    requires_operator_credentials: bool,
+    stores_secret_in_repo: bool,
+    writes_core_memory: bool,
+    requires_provenance: bool,
+    requires_evidence: bool,
+    approval_required_for_writeback: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

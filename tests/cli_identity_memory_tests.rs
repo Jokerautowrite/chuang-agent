@@ -686,6 +686,48 @@ fn cli_memory_knowledge_preview_context_is_read_only_preview_contract() {
 }
 
 #[test]
+fn cli_memory_knowledge_source_contract_documents_wiki_gbrain_boundary() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "knowledge",
+            "source-contract",
+            "--source",
+            "wiki",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["source"], "wiki");
+    assert_eq!(parsed["adapter"], "wiki_readonly_external_knowledge");
+    assert_eq!(parsed["read_only"], true);
+    assert_eq!(parsed["live_adapter_configured"], false);
+    assert_eq!(parsed["connects_real_service"], false);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["runtime_retrieval_wired"], false);
+    assert_eq!(parsed["boundary"]["requires_operator_credentials"], true);
+    assert_eq!(parsed["boundary"]["stores_secret_in_repo"], false);
+    assert_eq!(parsed["boundary"]["writes_core_memory"], false);
+    assert_eq!(parsed["boundary"]["requires_provenance"], true);
+    assert_eq!(parsed["boundary"]["requires_evidence"], true);
+    assert!(parsed["response_fields"]
+        .as_array()
+        .expect("response fields")
+        .iter()
+        .any(|field| field == "hits[].provenance"));
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);

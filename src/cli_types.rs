@@ -30,6 +30,15 @@ pub(crate) struct RunCliRequest {
     pub(crate) remember_experience: bool,
     pub(crate) dispatch_subagent: bool,
     pub(crate) goal_spec: Option<GoalSpec>,
+    pub(crate) knowledge_context: Option<KnowledgeContextCliRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KnowledgeContextCliRequest {
+    pub(crate) root: PathBuf,
+    pub(crate) query: String,
+    pub(crate) limit: usize,
+    pub(crate) enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
