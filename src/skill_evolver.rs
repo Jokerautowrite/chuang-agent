@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
+mod dry_run;
 mod noop;
 
+pub use dry_run::DryRunProposalEvolver;
 pub use noop::NoopEvolver;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +38,19 @@ pub struct SkillProposal {
     pub trigger: String,
     pub procedure: Vec<String>,
     pub evidence_event_ids: Vec<String>,
+    pub dry_run: bool,
+    pub writes_skills: bool,
+    pub requires_approval: bool,
+    pub provenance: Vec<SkillProposalProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillProposalProvenance {
+    pub source_event_id: String,
+    pub source_task_id: String,
+    pub source_kind: RuntimeEventKind,
+    pub source_summary: String,
+    pub source_metadata: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +82,22 @@ pub trait SkillEvolver {
     fn propose(&self, scope: EvolutionScope) -> Result<Vec<SkillProposal>, EvolutionError>;
     fn validate(&self, proposal: &SkillProposal) -> Result<ValidationReport, EvolutionError>;
     fn solidify(&mut self, proposal: SkillProposal) -> Result<SkillId, EvolutionError>;
+}
+
+fn validate_scope(scope: &EvolutionScope) -> Result<(), EvolutionError> {
+    if scope.max_proposals == 0 {
+        return Err(EvolutionError::InvalidScope(
+            "max_proposals must be greater than zero".to_string(),
+        ));
+    }
+
+    if scope.agent_id.trim().is_empty() {
+        return Err(EvolutionError::InvalidScope(
+            "agent_id must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_event(event: &RuntimeEvent) -> Result<(), EvolutionError> {
@@ -113,6 +144,12 @@ fn validate_proposal(proposal: &SkillProposal) -> Result<(), EvolutionError> {
     if proposal.procedure.is_empty() {
         return Err(EvolutionError::InvalidProposal(
             "procedure must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.evidence_event_ids.is_empty() {
+        return Err(EvolutionError::InvalidProposal(
+            "evidence_event_ids must not be empty".to_string(),
         ));
     }
 

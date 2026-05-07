@@ -1,6 +1,6 @@
 use super::{
-    validate_event, validate_proposal, EvolutionError, EvolutionReceipt, EvolutionScope,
-    RuntimeEvent, SkillEvolver, SkillId, SkillProposal, ValidationReport,
+    validate_event, validate_proposal, validate_scope, EvolutionError, EvolutionReceipt,
+    EvolutionScope, RuntimeEvent, SkillEvolver, SkillId, SkillProposal, ValidationReport,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -30,18 +30,7 @@ impl SkillEvolver for NoopEvolver {
     }
 
     fn propose(&self, scope: EvolutionScope) -> Result<Vec<SkillProposal>, EvolutionError> {
-        if scope.max_proposals == 0 {
-            return Err(EvolutionError::InvalidScope(
-                "max_proposals must be greater than zero".to_string(),
-            ));
-        }
-
-        if scope.agent_id.trim().is_empty() {
-            return Err(EvolutionError::InvalidScope(
-                "agent_id must not be empty".to_string(),
-            ));
-        }
-
+        validate_scope(&scope)?;
         Ok(Vec::new())
     }
 

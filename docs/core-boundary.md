@@ -48,7 +48,7 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 - `subagent_spawner` 主文件保留协议类型、trait、slot 转发和共用校验；fake / queued 实现已拆到子模块。
 - `control_plane` 主文件保留控制面协议、治理/审计辅助函数和共用校验；fake 与 command-backed 实现已拆到子模块。真实 systemd/桌面控制必须单独作为 adapter 或外部 command bridge。
 - `actuator` 主文件保留人类级操作面协议；fake 与 command-backed 实现已拆到子模块。真实桌面、浏览器、微信、ADB 控制必须单独作为外部 command adapter，不写死进 core。
-- `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现已拆到子模块。真实技能提炼/固化必须单独作为 evolver adapter。
+- `skill_evolver` 主文件保留进化层事件、proposal、trait 和共用校验；noop 占位实现与 dry-run proposal adapter 已拆到子模块。dry-run 只能生成带 `dry_run=true / writes_skills=false / requires_approval=true` 和 provenance 的候选，不得写 skill；真实技能提炼/固化必须单独作为 evolver adapter。
 - `memory_store` 主文件保留记忆记录、查询、命中、trait 和错误类型；in-memory 测试/开发实现已拆到子模块。SQLite、Hermes 双文件、未来向量/远程记忆都必须作为独立实现。
 - `hermes_memory` 主文件保留 Hermes 双文件记忆配置、快照、条目、错误和 trait；真实文件读写实现已拆到子模块。
 - `context_engine` 主文件保留 segment、budget、packed context、packer 算法、trait 和错误类型；deterministic 与 summary_compression 策略包装已拆到子模块。未来真实摘要压缩/优先级/对话树策略必须作为独立 engine。
