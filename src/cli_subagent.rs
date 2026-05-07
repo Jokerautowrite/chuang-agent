@@ -53,16 +53,16 @@ fn subagent_live_preflight_command(args: &[String]) -> Result<(), String> {
     match request.output {
         ControlOutputFormat::Text => {
             println!(
-                "subagent_live_preflight ok={} ready_for_live={} readonly={} starts_external_worker={} gate_enabled={} runner_allowlist_ok={} capability_routing_ok={} report_admission_ok={} forbidden_capabilities_ok={} next={}",
+                "subagent_live_preflight ok={} ready_for_live={} readonly={} starts_external_worker={} gate_enabled={} runner_allowlist_ok={} capability_routing_ok={} report_admission_ok={} forbidden_capabilities_ok={} next_action={}",
                 output.rehearsal.ok,
                 output.rehearsal.ready_for_live,
                 output.rehearsal.readonly,
                 output.rehearsal.starts_external_worker,
-                output.rehearsal.gate.enabled,
-                output.rehearsal.runner_allowlist.ok,
-                output.rehearsal.capability_routing.ok,
-                output.rehearsal.report_admission.ok,
-                output.rehearsal.forbidden_capabilities.ok,
+                output.rehearsal.gate_enabled,
+                output.rehearsal.runner_allowlist_ok,
+                output.rehearsal.capability_routing_ok,
+                output.rehearsal.report_admission_ok,
+                output.rehearsal.forbidden_capabilities_ok,
                 output.rehearsal.next_action
             );
         }

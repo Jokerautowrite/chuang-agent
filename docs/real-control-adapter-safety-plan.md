@@ -67,6 +67,21 @@ cargo run -- subagent live-preflight \
 
 The rehearsal is read-only. It reports the `CHUANG_CODEX_RUNNER_ENABLE` gate, exact runner command allowlist, capability routing, controller-side `ReportAdmission` evidence, and forbidden live subagent capabilities without starting an external worker.
 
+For both JSON and text output, the subagent runner rehearsal summary uses the same stable field names:
+
+```text
+ready_for_live
+readonly
+gate_enabled
+runner_allowlist_ok
+capability_routing_ok
+report_admission_ok
+forbidden_capabilities_ok
+next_action
+```
+
+`ready_for_live` may be true only when `CHUANG_CODEX_RUNNER_ENABLE=1` is set for that command and all read-only checks pass. Any unset or non-enabling gate value must keep `ready_for_live=false`.
+
 ## First Real Integration Steps
 
 1. Create a Chuang-only service allowlist file.

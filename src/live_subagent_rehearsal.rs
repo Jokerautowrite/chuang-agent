@@ -16,6 +16,11 @@ pub struct LiveSubagentRehearsalReport {
     pub ready_for_live: bool,
     pub readonly: bool,
     pub starts_external_worker: bool,
+    pub gate_enabled: bool,
+    pub runner_allowlist_ok: bool,
+    pub capability_routing_ok: bool,
+    pub report_admission_ok: bool,
+    pub forbidden_capabilities_ok: bool,
     pub gate: LiveSubagentGateCheck,
     pub runner_allowlist: LiveSubagentRunnerAllowlistCheck,
     pub capability_routing: LiveSubagentCapabilityRoutingCheck,
@@ -104,11 +109,16 @@ where
         next_action: gate.next_action,
     };
 
-    let ready_for_live = gate_check.ok
-        && runner_allowlist.ok
-        && capability_routing.ok
-        && report_admission.ok
-        && forbidden_capabilities.ok;
+    let gate_enabled = gate_check.enabled;
+    let runner_allowlist_ok = runner_allowlist.ok;
+    let capability_routing_ok = capability_routing.ok;
+    let report_admission_ok = report_admission.ok;
+    let forbidden_capabilities_ok = forbidden_capabilities.ok;
+    let ready_for_live = gate_enabled
+        && runner_allowlist_ok
+        && capability_routing_ok
+        && report_admission_ok
+        && forbidden_capabilities_ok;
     let ok = runner_allowlist.ok
         && capability_routing.ok
         && report_admission.ok
@@ -126,6 +136,11 @@ where
         ready_for_live,
         readonly: true,
         starts_external_worker: false,
+        gate_enabled,
+        runner_allowlist_ok,
+        capability_routing_ok,
+        report_admission_ok,
+        forbidden_capabilities_ok,
         gate: gate_check,
         runner_allowlist,
         capability_routing,
