@@ -63,6 +63,24 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
 }
 
 #[test]
+fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-final-verify.sh"))
+        .expect("final verify wrapper should be readable");
+
+    assert!(wrapper.contains("git status --short"));
+    assert!(wrapper.contains("working tree must be clean before final verify"));
+    assert!(wrapper.contains("exit 2"));
+    assert!(wrapper.contains("scripts/chuang-complete-local-smoke.sh"));
+    assert!(wrapper.contains("git diff --check"));
+    assert!(wrapper.contains("chuang_final_verify_ok"));
+    assert!(!wrapper.contains("rm "));
+    assert!(!wrapper.contains("git reset"));
+    assert!(!wrapper.contains("git checkout"));
+    assert!(!wrapper.contains("systemctl"));
+}
+
+#[test]
 fn goal_watchdog_once_writes_readonly_status_report() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nanos = SystemTime::now()
