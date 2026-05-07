@@ -53,15 +53,52 @@ fn cli_subagent_live_preflight_is_readonly_and_reports_disabled_gate() {
     assert_eq!(rehearsal["capability_routing_ok"], true);
     assert_eq!(rehearsal["report_admission_ok"], true);
     assert_eq!(rehearsal["forbidden_capabilities_ok"], true);
+    assert_eq!(rehearsal["approval_audit_prerequisites_ok"], true);
     assert_eq!(rehearsal["gate"]["enabled"], false);
     assert_eq!(
         rehearsal["gate"]["required_env"],
         "CHUANG_CODEX_RUNNER_ENABLE"
     );
+    assert_eq!(rehearsal["gate"]["default_enabled"], false);
+    assert!(rehearsal["gate"]["preflight_checks"]
+        .as_array()
+        .expect("preflight checks")
+        .iter()
+        .any(|check| check
+            .as_str()
+            .expect("preflight check")
+            .contains("runner command allowlist")));
     assert_eq!(rehearsal["runner_allowlist"]["ok"], true);
+    assert_eq!(
+        rehearsal["runner_allowlist"]["matched_runner_command"],
+        "scripts/chuang-codex-runner.py"
+    );
     assert_eq!(rehearsal["capability_routing"]["ok"], true);
+    assert_eq!(
+        rehearsal["capability_routing"]["matched_capabilities"][0],
+        "rust"
+    );
     assert_eq!(rehearsal["report_admission"]["ok"], true);
+    assert!(rehearsal["report_admission"]["covered_commands"]
+        .as_array()
+        .expect("covered commands")
+        .iter()
+        .any(|command| command == "run-once"));
+    assert!(rehearsal["report_admission"]["stable_reason_codes"]
+        .as_array()
+        .expect("stable reason codes")
+        .iter()
+        .any(|code| code == "command_protocol_report_rejected"));
     assert_eq!(rehearsal["forbidden_capabilities"]["ok"], true);
+    assert_eq!(rehearsal["approval_audit_prerequisites"]["ok"], true);
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["audit_label"],
+        "subagent.runner.live"
+    );
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["audit_receipt_required"],
+        true
+    );
 }
 
 #[test]
@@ -105,6 +142,7 @@ fn cli_subagent_live_preflight_is_ready_only_when_gate_is_explicitly_enabled() {
     assert_eq!(rehearsal["capability_routing_ok"], true);
     assert_eq!(rehearsal["report_admission_ok"], true);
     assert_eq!(rehearsal["forbidden_capabilities_ok"], true);
+    assert_eq!(rehearsal["approval_audit_prerequisites_ok"], true);
     assert_eq!(rehearsal["gate"]["env_value_state"], "enabled");
 }
 
@@ -182,6 +220,18 @@ fn cli_subagent_live_preflight_text_uses_stable_gate_field_names() {
     assert!(stdout.contains("capability_routing_ok=true"));
     assert!(stdout.contains("report_admission_ok=true"));
     assert!(stdout.contains("forbidden_capabilities_ok=true"));
+    assert!(stdout.contains("approval_audit_prerequisites_ok=true"));
+    assert!(stdout.contains("gate enabled=false env_value_state=unset"));
+    assert!(stdout.contains("runner_allowlist ok=true"));
+    assert!(stdout.contains("exact_match_required=true"));
+    assert!(stdout.contains("capability_routing ok=true"));
+    assert!(stdout.contains("matched_capabilities=rust"));
+    assert!(stdout.contains("report_admission ok=true"));
+    assert!(stdout.contains("covered_commands=run-once,run-loop,report,collect"));
+    assert!(stdout.contains("forbidden_capabilities ok=true"));
+    assert!(stdout.contains("checked_capability_sources=dispatch required_capabilities"));
+    assert!(stdout.contains("approval_audit_prerequisites ok=true"));
+    assert!(stdout.contains("audit_receipt_required=true"));
     assert!(stdout.contains("next_action="));
 }
 

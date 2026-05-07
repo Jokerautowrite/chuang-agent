@@ -83,10 +83,12 @@ cargo run -- subagent live-preflight \
 This command does not claim dispatches, start runner processes, write reports, touch services, or open external sessions. It only reports whether the live subagent adapter would pass the current preflight surface:
 
 - `CHUANG_CODEX_RUNNER_ENABLE` gate status and audit label.
+- Gate default state, exact required env value, and live preflight checks.
 - Exact runner command allowlist match.
-- Dispatch `required_capabilities` satisfied by worker `--capability` values.
-- `ReportAdmission` boundary present for controller acceptance/rejection evidence.
+- Dispatch `required_capabilities` satisfied by worker `--capability` values, including matched and missing capability lists.
+- `ReportAdmission` boundary present for controller acceptance/rejection evidence, covered CLI commands, and stable reason-code examples.
 - Forbidden live subagent capabilities still rejected, including unscoped external worker pools, direct core-memory writes, and platform login/session mutation.
+- Approval and audit prerequisites for any later live run, including explicit operator approval, governance evidence, dispatch/worker evidence, and audit receipt requirements.
 
 The stable JSON and text summary fields are:
 
@@ -98,10 +100,11 @@ runner_allowlist_ok
 capability_routing_ok
 report_admission_ok
 forbidden_capabilities_ok
+approval_audit_prerequisites_ok
 next_action
 ```
 
-JSON also keeps the detailed nested checks under `gate`, `runner_allowlist`, `capability_routing`, `report_admission`, and `forbidden_capabilities`. Text output uses the same stable field names for the summary line.
+JSON also keeps the detailed nested checks under `gate`, `runner_allowlist`, `capability_routing`, `report_admission`, `forbidden_capabilities`, and `approval_audit_prerequisites`. Text output uses the same stable field names for the summary line and then prints one evidence line per check.
 
 `ok=true` means the read-only rehearsal contract passed. `ready_for_live=true` additionally requires `CHUANG_CODEX_RUNNER_ENABLE=1`, so it must remain `false` when the gate env is unset or set to any non-enabling value. `ready_for_live=true` should only appear after explicit operator approval for the exact runner command and target dispatch.
 

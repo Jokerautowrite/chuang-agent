@@ -21,11 +21,13 @@ pub struct LiveSubagentRehearsalReport {
     pub capability_routing_ok: bool,
     pub report_admission_ok: bool,
     pub forbidden_capabilities_ok: bool,
+    pub approval_audit_prerequisites_ok: bool,
     pub gate: LiveSubagentGateCheck,
     pub runner_allowlist: LiveSubagentRunnerAllowlistCheck,
     pub capability_routing: LiveSubagentCapabilityRoutingCheck,
     pub report_admission: LiveSubagentReportAdmissionCheck,
     pub forbidden_capabilities: LiveSubagentForbiddenCapabilityCheck,
+    pub approval_audit_prerequisites: LiveSubagentApprovalAuditPrerequisitesCheck,
     pub next_action: String,
 }
 
@@ -36,6 +38,8 @@ pub struct LiveSubagentGateCheck {
     pub env_value_state: String,
     pub required_env: String,
     pub audit_label: String,
+    pub default_enabled: bool,
+    pub preflight_checks: Vec<String>,
     pub reason: String,
     pub next_action: String,
 }
@@ -46,6 +50,8 @@ pub struct LiveSubagentRunnerAllowlistCheck {
     pub runner: String,
     pub runner_command: String,
     pub allowed_runner_commands: Vec<String>,
+    pub exact_match_required: bool,
+    pub matched_runner_command: Option<String>,
     pub reason: String,
 }
 
@@ -54,6 +60,7 @@ pub struct LiveSubagentCapabilityRoutingCheck {
     pub ok: bool,
     pub required_capabilities: Vec<String>,
     pub worker_capabilities: Vec<String>,
+    pub matched_capabilities: Vec<String>,
     pub missing_capabilities: Vec<String>,
     pub reason: String,
 }
@@ -62,6 +69,8 @@ pub struct LiveSubagentCapabilityRoutingCheck {
 pub struct LiveSubagentReportAdmissionCheck {
     pub ok: bool,
     pub required: bool,
+    pub covered_commands: Vec<String>,
+    pub stable_reason_codes: Vec<String>,
     pub evidence: String,
 }
 
@@ -70,6 +79,19 @@ pub struct LiveSubagentForbiddenCapabilityCheck {
     pub ok: bool,
     pub must_reject_capabilities: Vec<String>,
     pub requested_forbidden_capabilities: Vec<String>,
+    pub checked_capability_sources: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveSubagentApprovalAuditPrerequisitesCheck {
+    pub ok: bool,
+    pub explicit_operator_approval_required: bool,
+    pub audit_receipt_required: bool,
+    pub dispatch_evidence_required: bool,
+    pub governance_approval_required: bool,
+    pub prerequisites: Vec<String>,
+    pub audit_label: String,
     pub reason: String,
 }
 
@@ -92,12 +114,27 @@ where
     let report_admission = LiveSubagentReportAdmissionCheck {
         ok: true,
         required: true,
+        covered_commands: vec![
+            "run-once".to_string(),
+            "run-loop".to_string(),
+            "report".to_string(),
+            "collect".to_string(),
+        ],
+        stable_reason_codes: vec![
+            "report_validated".to_string(),
+            "missing_required_field".to_string(),
+            "invalid_json".to_string(),
+            "invalid_timestamp_format".to_string(),
+            "invalid_timestamp_order".to_string(),
+            "command_protocol_report_rejected".to_string(),
+        ],
         evidence:
             "run-once, run-loop, report, and collect expose ReportAdmission status and reason_code"
                 .to_string(),
     };
     let forbidden_capabilities =
         build_forbidden_capability_check(&input, &gate.must_reject_capabilities);
+    let approval_audit_prerequisites = build_approval_audit_prerequisites_check(gate.audit_label);
 
     let gate_check = LiveSubagentGateCheck {
         ok: gate.enabled,
@@ -105,6 +142,12 @@ where
         env_value_state: gate.env_value_state,
         required_env: gate.required_env.to_string(),
         audit_label: gate.audit_label.to_string(),
+        default_enabled: gate.default_enabled,
+        preflight_checks: gate
+            .preflight_checks
+            .iter()
+            .map(|check| check.to_string())
+            .collect(),
         reason: gate.reason,
         next_action: gate.next_action,
     };
@@ -114,15 +157,18 @@ where
     let capability_routing_ok = capability_routing.ok;
     let report_admission_ok = report_admission.ok;
     let forbidden_capabilities_ok = forbidden_capabilities.ok;
+    let approval_audit_prerequisites_ok = approval_audit_prerequisites.ok;
     let ready_for_live = gate_enabled
         && runner_allowlist_ok
         && capability_routing_ok
         && report_admission_ok
-        && forbidden_capabilities_ok;
+        && forbidden_capabilities_ok
+        && approval_audit_prerequisites_ok;
     let ok = runner_allowlist.ok
         && capability_routing.ok
         && report_admission.ok
-        && forbidden_capabilities.ok;
+        && forbidden_capabilities.ok
+        && approval_audit_prerequisites.ok;
     let next_action = if ready_for_live {
         "operator may run one approved live runner rehearsal with the exact allowlisted command and dispatch evidence".to_string()
     } else if !gate_check.enabled {
@@ -141,11 +187,13 @@ where
         capability_routing_ok,
         report_admission_ok,
         forbidden_capabilities_ok,
+        approval_audit_prerequisites_ok,
         gate: gate_check,
         runner_allowlist,
         capability_routing,
         report_admission,
         forbidden_capabilities,
+        approval_audit_prerequisites,
         next_action,
     }
 }
@@ -174,6 +222,8 @@ fn build_runner_allowlist_check(
         runner: input.runner.clone(),
         runner_command: input.runner_command.clone(),
         allowed_runner_commands: input.allowed_runner_commands.clone(),
+        exact_match_required: true,
+        matched_runner_command: ok.then(|| input.runner_command.clone()),
         reason,
     }
 }
@@ -192,6 +242,17 @@ fn build_capability_routing_check(
         })
         .cloned()
         .collect::<Vec<_>>();
+    let matched_capabilities = input
+        .required_capabilities
+        .iter()
+        .filter(|required| {
+            input
+                .worker_capabilities
+                .iter()
+                .any(|capability| capability == *required)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let ok = missing_capabilities.is_empty();
     let reason = if ok {
         "worker capabilities satisfy dispatch required_capabilities".to_string()
@@ -203,6 +264,7 @@ fn build_capability_routing_check(
         ok,
         required_capabilities: input.required_capabilities.clone(),
         worker_capabilities: input.worker_capabilities.clone(),
+        matched_capabilities,
         missing_capabilities,
         reason,
     }
@@ -239,7 +301,32 @@ fn build_forbidden_capability_check(
             .map(|capability| capability.to_string())
             .collect(),
         requested_forbidden_capabilities,
+        checked_capability_sources: vec![
+            "dispatch required_capabilities".to_string(),
+            "worker declared capabilities".to_string(),
+        ],
         reason,
+    }
+}
+
+fn build_approval_audit_prerequisites_check(
+    audit_label: &str,
+) -> LiveSubagentApprovalAuditPrerequisitesCheck {
+    LiveSubagentApprovalAuditPrerequisitesCheck {
+        ok: true,
+        explicit_operator_approval_required: true,
+        audit_receipt_required: true,
+        dispatch_evidence_required: true,
+        governance_approval_required: true,
+        prerequisites: vec![
+            "operator approves the exact runner command and target dispatch before live execution"
+                .to_string(),
+            "governance records why an external runner process may start".to_string(),
+            "audit receipt includes dispatch id, worker id, runner command, capability route, and ReportAdmission result".to_string(),
+            "runner remains bounded to the allowlisted command and declared capabilities".to_string(),
+        ],
+        audit_label: audit_label.to_string(),
+        reason: "live runner execution still requires operator approval, governance evidence, and an audit receipt after this read-only preflight".to_string(),
     }
 }
 

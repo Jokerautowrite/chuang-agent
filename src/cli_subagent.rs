@@ -53,7 +53,7 @@ fn subagent_live_preflight_command(args: &[String]) -> Result<(), String> {
     match request.output {
         ControlOutputFormat::Text => {
             println!(
-                "subagent_live_preflight ok={} ready_for_live={} readonly={} starts_external_worker={} gate_enabled={} runner_allowlist_ok={} capability_routing_ok={} report_admission_ok={} forbidden_capabilities_ok={} next_action={}",
+                "subagent_live_preflight ok={} ready_for_live={} readonly={} starts_external_worker={} gate_enabled={} runner_allowlist_ok={} capability_routing_ok={} report_admission_ok={} forbidden_capabilities_ok={} approval_audit_prerequisites_ok={} next_action={}",
                 output.rehearsal.ok,
                 output.rehearsal.ready_for_live,
                 output.rehearsal.readonly,
@@ -63,7 +63,101 @@ fn subagent_live_preflight_command(args: &[String]) -> Result<(), String> {
                 output.rehearsal.capability_routing_ok,
                 output.rehearsal.report_admission_ok,
                 output.rehearsal.forbidden_capabilities_ok,
+                output.rehearsal.approval_audit_prerequisites_ok,
                 output.rehearsal.next_action
+            );
+            println!(
+                "gate enabled={} env_value_state={} required_env={} default_enabled={} audit_label={} preflight_checks={} reason={}",
+                output.rehearsal.gate.enabled,
+                output.rehearsal.gate.env_value_state,
+                output.rehearsal.gate.required_env,
+                output.rehearsal.gate.default_enabled,
+                output.rehearsal.gate.audit_label,
+                output.rehearsal.gate.preflight_checks.join("|"),
+                output.rehearsal.gate.reason
+            );
+            println!(
+                "runner_allowlist ok={} runner={} runner_command={} exact_match_required={} allowed_runner_commands={} matched_runner_command={} reason={}",
+                output.rehearsal.runner_allowlist.ok,
+                output.rehearsal.runner_allowlist.runner,
+                output.rehearsal.runner_allowlist.runner_command,
+                output.rehearsal.runner_allowlist.exact_match_required,
+                output
+                    .rehearsal
+                    .runner_allowlist
+                    .allowed_runner_commands
+                    .join(","),
+                output
+                    .rehearsal
+                    .runner_allowlist
+                    .matched_runner_command
+                    .as_deref()
+                    .unwrap_or("none"),
+                output.rehearsal.runner_allowlist.reason
+            );
+            println!(
+                "capability_routing ok={} required_capabilities={} worker_capabilities={} matched_capabilities={} missing_capabilities={} reason={}",
+                output.rehearsal.capability_routing.ok,
+                output.rehearsal.capability_routing.required_capabilities.join(","),
+                output.rehearsal.capability_routing.worker_capabilities.join(","),
+                output.rehearsal.capability_routing.matched_capabilities.join(","),
+                output.rehearsal.capability_routing.missing_capabilities.join(","),
+                output.rehearsal.capability_routing.reason
+            );
+            println!(
+                "report_admission ok={} required={} covered_commands={} stable_reason_codes={} evidence={}",
+                output.rehearsal.report_admission.ok,
+                output.rehearsal.report_admission.required,
+                output.rehearsal.report_admission.covered_commands.join(","),
+                output.rehearsal.report_admission.stable_reason_codes.join(","),
+                output.rehearsal.report_admission.evidence
+            );
+            println!(
+                "forbidden_capabilities ok={} must_reject_capabilities={} requested_forbidden_capabilities={} checked_capability_sources={} reason={}",
+                output.rehearsal.forbidden_capabilities.ok,
+                output
+                    .rehearsal
+                    .forbidden_capabilities
+                    .must_reject_capabilities
+                    .join("|"),
+                output
+                    .rehearsal
+                    .forbidden_capabilities
+                    .requested_forbidden_capabilities
+                    .join(","),
+                output
+                    .rehearsal
+                    .forbidden_capabilities
+                    .checked_capability_sources
+                    .join("|"),
+                output.rehearsal.forbidden_capabilities.reason
+            );
+            println!(
+                "approval_audit_prerequisites ok={} explicit_operator_approval_required={} governance_approval_required={} audit_receipt_required={} dispatch_evidence_required={} audit_label={} prerequisites={} reason={}",
+                output.rehearsal.approval_audit_prerequisites.ok,
+                output
+                    .rehearsal
+                    .approval_audit_prerequisites
+                    .explicit_operator_approval_required,
+                output
+                    .rehearsal
+                    .approval_audit_prerequisites
+                    .governance_approval_required,
+                output
+                    .rehearsal
+                    .approval_audit_prerequisites
+                    .audit_receipt_required,
+                output
+                    .rehearsal
+                    .approval_audit_prerequisites
+                    .dispatch_evidence_required,
+                output.rehearsal.approval_audit_prerequisites.audit_label,
+                output
+                    .rehearsal
+                    .approval_audit_prerequisites
+                    .prerequisites
+                    .join("|"),
+                output.rehearsal.approval_audit_prerequisites.reason
             );
         }
         ControlOutputFormat::Json => print_json(&output)?,
