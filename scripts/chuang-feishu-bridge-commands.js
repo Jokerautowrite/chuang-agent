@@ -9,6 +9,9 @@ function parseBridgeCommand(text) {
   if (normalized === "/health" || normalized === "/status") {
     return buildHealthCommandReply();
   }
+  if (normalized === "/receipt" || normalized === "/live-receipt") {
+    return buildReceiptCommandReply();
+  }
   if (normalized === "/live-check" || normalized === "/live") {
     return buildLiveCheckCommandReply();
   }
@@ -104,6 +107,44 @@ function buildHealthCommandReply(diagnostics = {}) {
   };
 }
 
+function buildReceiptCommandReply() {
+  return {
+    commandName: "receipt",
+    threadId: "",
+    modelName: "chuang-feishu-bridge",
+    replyText: [
+      "Chuang 人工 live 回执模板入口：",
+      "",
+      "这条命令只显示静态模板，不执行脚本、不读取 secret、不进入 Agent 主链。",
+      "",
+      "实际回执脚本：",
+      "",
+      "`scripts/chuang-live-operator-receipt.sh --json`",
+      "",
+      "需要填写的字段：",
+      "",
+      "- `tested_at`：现场回执时间。",
+      "- `operator`：人工操作人。",
+      "- `env_file`：本次检查使用的 Chuang Feishu env 文件。",
+      "- `workspace_root`：Chuang 仓库根目录。",
+      "- `preflight_status`：`ready` / `blocked` / `warning` / 现场结论。",
+      "- `health_status`：`ready` / `blocked` / `warning` / 现场结论。",
+      "- `new_thread_status`：`ready` / `blocked` / `warning` / 现场结论。",
+      "- `session_status`：`ready` / `blocked` / `warning` / 现场结论。",
+      "- `runtime_report_id`：对应本次 live 回复的 runtime report id。",
+      "- `provider_status`：provider 侧现场结论。",
+      "- `codex_hermes_isolation`：保持 Codex/Hermes 隔离的简短说明。",
+      "- `notes`：人工备注。",
+      "- `blockers`：阻塞项列表。",
+      "- `boundaries`：保密和只读边界。",
+      "",
+      "环境变量只用于本地写模板时补默认值：`CHUANG_LIVE_OPERATOR`、`CHUANG_AGENT_ROOT`、`CHUANG_LIVE_ENV_FILE`。",
+      "",
+      "保密边界：不要把 secret、token、app_secret、api_key、完整 env 内容或 Hermes/Codex 凭据写进回执；只记录 `<set>/<missing>`、现场状态和必要的脱敏说明。",
+    ].join("\n"),
+  };
+}
+
 function buildBridgeErrorReply({ operation = "turn", error = null, threadId = "", runtimeReportId = "" } = {}) {
   const safeMessage = sanitizeErrorMessage(error?.message || String(error || ""));
   const lines = [
@@ -171,6 +212,7 @@ function buildHelpCommandReply() {
       "- `/new`：开新窗口/新上下文入口；不会进入 Agent 主链。",
       "- `/session`：查看当前飞书聊天绑定的 Chuang 会话。",
       "- `/health`：查看本地 bridge/app-server/provider env 诊断。",
+      "- `/receipt` / `/live-receipt`：显示人工 live 回执模板入口；不会进入 Agent 主链。",
       "- `/live-check`：显示人工 live 检查步骤；不会进入 Agent 主链。",
       "- `/help`：显示这条帮助；不会进入 Agent 主链。",
       "",
@@ -198,6 +240,7 @@ module.exports = {
   buildHelpCommandReply,
   buildHealthCommandReply,
   buildLiveCheckCommandReply,
+  buildReceiptCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
   parseBridgeCommand,

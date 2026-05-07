@@ -6,6 +6,7 @@ const {
   buildHelpCommandReply,
   buildHealthCommandReply,
   buildLiveCheckCommandReply,
+  buildReceiptCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
   parseBridgeCommand,
@@ -32,10 +33,26 @@ assert.strictEqual(help.commandName, "help");
 assert(help.replyText.includes("/new"));
 assert(help.replyText.includes("/session"));
 assert(help.replyText.includes("/health"));
+assert(help.replyText.includes("/receipt"));
 assert(help.replyText.includes("/live-check"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
 assert(help.replyText.includes("普通文本会转发到 Chuang app-server"));
 assert.strictEqual(buildHelpCommandReply().commandName, "help");
+
+const receipt = parseBridgeCommand("/receipt");
+assert(receipt, "/receipt should be handled as a bridge command");
+assert.strictEqual(receipt.commandName, "receipt");
+assert(receipt.replyText.includes("chuang-live-operator-receipt.sh --json"));
+assert(receipt.replyText.includes("tested_at"));
+assert(receipt.replyText.includes("runtime_report_id"));
+assert(receipt.replyText.includes("CHUANG_LIVE_OPERATOR"));
+assert(receipt.replyText.includes("不要把 secret"));
+assert.strictEqual(buildReceiptCommandReply().commandName, "receipt");
+
+const liveReceipt = parseBridgeCommand("/live-receipt");
+assert(liveReceipt, "/live-receipt should be handled as a bridge command");
+assert.strictEqual(liveReceipt.commandName, "receipt");
+assert(liveReceipt.replyText.includes("静态模板"));
 
 const liveCheck = parseBridgeCommand("/live-check");
 assert(liveCheck, "/live-check should be handled as a bridge command");
