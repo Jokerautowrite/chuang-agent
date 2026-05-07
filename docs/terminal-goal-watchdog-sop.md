@@ -63,8 +63,19 @@
 - `prompt.md`：本轮投给 Codex exec 的完整任务。
 - `last-message.md`：Codex 本轮最后回复。
 - `summary.md`：run 基本信息和结束状态。
+- `status.json`：外层 runner 每轮写入的结构化心跳。
 - `events.jsonl`：Codex exec JSONL 输出。
 - `run.log`：外层循环和错误摘要。
+
+`status.json` 用于主控快速判断批处理 worker 停在哪一步，不需要先翻完整日志。字段包括 `run_id`、`iteration`、`deadline`、`last_iteration_exit_status`、`last_message_file`、`jsonl_log`、`plain_log`、`status` 和 `next_action`。脚本只写状态，不自动重启 Codex、不清理旧日志、不触碰 systemd/timer。
+
+可选 dry-run：
+
+```bash
+CHUANG_OVERNIGHT_DRY_RUN=1 CHUANG_OVERNIGHT_MAX_ITERATIONS=1 SLEEP_SECONDS=0 ./scripts/run-chuang-goal-overnight.sh
+```
+
+dry-run 只用于测试外层状态写入路径，不会调用真实 Codex；默认行为仍是正常执行 Codex。
 
 这个入口适合无人值守批处理，但它仍只是本地终端脚本，不是 Chuang runtime 内部调度器。
 
@@ -124,9 +135,21 @@ git status --short
 
 ```bash
 ls -1 /home/user/.codex/chuang-goal-runs
+jq . /home/user/.codex/chuang-goal-runs/<run-id>/status.json
 tail -n 160 /home/user/.codex/chuang-goal-runs/<run-id>/run.log
 tail -n 160 /home/user/.codex/chuang-goal-runs/<run-id>/last-message.md
 ```
+
+先看 `status.json`：`status=running` 表示外层循环仍在跑或最后一次心跳停在运行态，`status=finished` 表示外层脚本已经到达截止时间或达到显式最大轮次；`next_action` 给出主控下一步应查看日志、等待下一轮、还是人工复核。`last_iteration_exit_status` 是上一轮 Codex exec 的退出码，`null` 表示尚未完成任何一轮。
+
+统一只读状态入口：
+
+```bash
+./scripts/chuang-goal-run-status.sh
+./scripts/chuang-goal-run-status.sh --json
+```
+
+这个入口只读取 watchdog JSON、overnight `status.json` 和最新 run 目录摘要，方便主控快速判断终端 worker 或 overnight runner 是否仍在推进。它不启动 worker、不重启、不修改仓库、不删除日志、不触碰服务；需要临时查看其他位置时，用 `CHUANG_GOAL_WATCHDOG_REPORT_FILE`、`CHUANG_GOAL_RUN_ROOT` 或 `CHUANG_GOAL_OVERNIGHT_STATUS_FILE` 覆盖读取路径。
 
 查看时不要把日志里的 secret 值、完整私有配置或 token 贴回聊天。需要确认密钥状态时只说变量名和 `<set>`。
 

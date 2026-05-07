@@ -140,6 +140,37 @@ fn goal_watchdog_once_writes_readonly_status_report() {
 }
 
 #[test]
+fn overnight_runner_writes_structured_status_without_restart_or_cleanup() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runner = fs::read_to_string(manifest_dir.join("scripts/run-chuang-goal-overnight.sh"))
+        .expect("overnight runner should be readable");
+
+    assert!(runner.contains("STATUS_FILE=\"${STATUS_FILE:-$LOG_DIR/status.json}\""));
+    assert!(runner.contains("write_status \"running\" \"start_first_iteration\""));
+    assert!(runner.contains("write_status \"running\" \"invoke_codex_exec\""));
+    assert!(runner.contains("write_status \"finished\" \"operator_review_status_and_logs\""));
+    assert!(runner.contains("\"run_id\": os.environ[\"RUN_ID\"]"));
+    assert!(runner.contains("\"iteration\": int(os.environ[\"ITERATION\"])"));
+    assert!(runner.contains("\"deadline\": deadline_epoch"));
+    assert!(runner.contains("\"last_iteration_exit_status\": last_status"));
+    assert!(runner.contains("\"last_message_file\": os.environ[\"LAST_MESSAGE\"]"));
+    assert!(runner.contains("\"jsonl_log\": os.environ[\"JSONL_LOG\"]"));
+    assert!(runner.contains("\"plain_log\": os.environ[\"PLAIN_LOG\"]"));
+    assert!(runner.contains("\"status\": os.environ[\"RUN_STATUS\"]"));
+    assert!(runner.contains("\"next_action\": os.environ[\"NEXT_ACTION\"]"));
+    assert!(runner.contains("CHUANG_OVERNIGHT_DRY_RUN"));
+    assert!(runner.contains("CHUANG_OVERNIGHT_MAX_ITERATIONS"));
+    assert!(runner.contains("\"restarts_codex\": False"));
+    assert!(runner.contains("\"cleans_logs\": False"));
+    assert!(runner.contains("\"touches_services\": False"));
+    assert!(!runner.contains("systemctl"));
+    assert!(!runner.contains("\nrm "));
+    assert!(!runner.contains(" rm -"));
+    assert!(!runner.contains("git reset"));
+    assert!(!runner.contains("git checkout"));
+}
+
+#[test]
 fn cli_run_command_boots_and_returns_structured_response() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;
