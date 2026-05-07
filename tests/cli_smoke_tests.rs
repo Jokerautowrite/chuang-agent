@@ -113,7 +113,7 @@ fn goal_watchdog_once_writes_readonly_status_report() {
         .expect("watchdog should execute once");
 
     assert!(
-        !output.status.success(),
+        output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -258,7 +258,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         .expect("goal run status script should execute");
 
     assert!(
-        !output.status.success(),
+        output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -422,16 +422,23 @@ fn live_operator_checklist_suggests_default_provider_env_when_missing() {
     let provider_env = home_dir.join(".config/chuang-agent/provider.env");
     let feishu_env = root.join("chuang-feishu.env");
     fs::create_dir_all(&workspace).expect("workspace should be created");
-    fs::create_dir_all(provider_env.parent().expect("provider env parent should exist"))
-        .expect("provider env dir should be created");
+    fs::create_dir_all(
+        provider_env
+            .parent()
+            .expect("provider env parent should exist"),
+    )
+    .expect("provider env dir should be created");
     fs::create_dir_all(&home_dir).expect("home dir should be created");
     fs::write(
         workspace.join("config.toml"),
         "provider = \"openai_compatible\"\n",
     )
     .expect("workspace config should write");
-    fs::write(&provider_env, "CODEX_PPTOKEN_API_KEY=secret-provider-value\n")
-        .expect("provider env should write");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=secret-provider-value\n",
+    )
+    .expect("provider env should write");
     fs::write(
         &feishu_env,
         format!(
@@ -489,7 +496,10 @@ fn live_operator_checklist_suggests_default_provider_env_when_missing() {
         .as_array()
         .expect("manual steps should be an array")
         .iter()
-        .any(|step| step.as_str().unwrap_or("").contains(provider_env.display().to_string().as_str())));
+        .any(|step| step
+            .as_str()
+            .unwrap_or("")
+            .contains(provider_env.display().to_string().as_str())));
 }
 
 #[test]

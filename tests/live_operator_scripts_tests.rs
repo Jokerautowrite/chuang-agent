@@ -73,7 +73,10 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
     assert_eq!(data["session_status"], "<fill_after_test>");
     assert_eq!(data["runtime_report_id"], "<fill_after_test>");
     assert_eq!(data["provider_status"], "<fill_after_test>");
-    assert_eq!(data["codex_hermes_isolation"], "<keep_codex_and_hermes_separate>");
+    assert_eq!(
+        data["codex_hermes_isolation"],
+        "<keep_codex_and_hermes_separate>"
+    );
     assert_eq!(data["notes"], serde_json::json!([]));
     assert_eq!(data["blockers"], serde_json::json!([]));
     assert_eq!(data["boundaries"]["readonly"], true);
@@ -83,6 +86,9 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
     assert_eq!(data["boundaries"]["stops_services"], false);
     assert_eq!(data["boundaries"]["modifies_repo"], false);
     assert_eq!(data["boundaries"]["deletes_files"], false);
-    assert_eq!(data["boundaries"]["reuses_codex_or_hermes_credentials"], false);
+    assert_eq!(
+        data["boundaries"]["reuses_codex_or_hermes_credentials"],
+        false
+    );
     assert!(!stdout.contains("CHUANG_LIVE_PLACEHOLDER=1"));
 }
