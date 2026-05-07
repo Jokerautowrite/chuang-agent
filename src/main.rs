@@ -16,6 +16,7 @@ mod cli_memory;
 mod cli_output;
 mod cli_plugin;
 mod cli_runtime;
+mod cli_skill;
 mod cli_subagent;
 mod cli_types;
 
@@ -34,6 +35,7 @@ use cli_memory::memory_command;
 use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
 use cli_plugin::plugin_command;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
+use cli_skill::skill_command;
 use cli_subagent::subagent_command;
 use cli_types::*;
 
@@ -60,6 +62,7 @@ fn run_cli() -> Result<(), String> {
         Some("goal") => goal_command(&args[2..]),
         Some("memory") => memory_command(&args[2..]),
         Some("plugin") => plugin_command(&args[2..]),
+        Some("skill") => skill_command(&args[2..]),
         Some("experiment") => experiment_command(&args[2..]),
         Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),
@@ -124,6 +127,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             remember_experience: false,
             dispatch_subagent: false,
             goal_spec: None,
+            knowledge_context: None,
         })?;
         if verbose {
             print_runtime_result(&result);
