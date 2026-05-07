@@ -42,8 +42,12 @@ assert(liveCheck, "/live-check should be handled as a bridge command");
 assert.strictEqual(liveCheck.commandName, "live-check");
 assert(liveCheck.replyText.includes("chuang-live-operator-checklist.sh --json"));
 assert(liveCheck.replyText.includes("chuang-live-readonly-preflight.sh"));
+assert(liveCheck.replyText.includes("不执行任何本地命令或 checklist"));
 assert(liveCheck.replyText.includes("不连接外部服务"));
-assert(!liveCheck.replyText.includes("secret"));
+assert(liveCheck.replyText.includes("ready"));
+assert(liveCheck.replyText.includes("blocked"));
+assert(liveCheck.replyText.includes("warning"));
+assert(liveCheck.replyText.includes("不要把 secret"));
 assert.strictEqual(buildLiveCheckCommandReply().commandName, "live-check");
 
 const session = parseBridgeCommand("/session");

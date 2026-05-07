@@ -147,7 +147,15 @@ function buildLiveCheckCommandReply() {
       "`晚上人工 live check：请回复当前 thread、runtime report id 和 provider 状态`",
       "`/session`",
       "",
-      "边界：这条命令只显示步骤，不连接外部服务、不读取密钥、不启动服务、不修改仓库。",
+      "边界：这条命令只显示静态步骤，不执行任何本地命令或 checklist，不连接外部服务、不读取密钥、不启动服务、不修改仓库。",
+      "",
+      "结果判断：",
+      "",
+      "- ready：所有本地检查通过，Feishu/provider env 只显示 `<set>`，没有 blocker。",
+      "- blocked：必需 env、workspace/config、app-server、session state 或只读检查失败；先修复再 live。",
+      "- warning：可继续人工判断的非阻断项，例如可选 env 缺失、已有 session state 只读元数据异常或需要复核的隔离提示。",
+      "",
+      "不要把 secret、token、app_secret、api_key 或完整 env 内容发回聊天；只回传 `<set>/<missing>` 状态和必要的错误摘要。",
     ].join("\n"),
   };
 }
