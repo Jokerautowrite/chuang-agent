@@ -36,12 +36,19 @@ control = "fake_local"
 }
 
 fn write_watchdog_report(root: &std::path::Path) -> PathBuf {
+    write_watchdog_report_with_generated_at(
+        root,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    )
+}
+
+fn write_watchdog_report_with_generated_at(root: &std::path::Path, generated_at: &str) -> PathBuf {
     let report_path = root.join("latest-watchdog-report.json");
     fs::write(
         &report_path,
         serde_json::json!({
             "schema_version": 1,
-            "generated_at": "2026-05-07T10:00:00+08:00",
+            "generated_at": generated_at,
             "readonly": true,
             "project_root": "/home/user/projects/chuang-agent",
             "session": "chuang-goal",
@@ -175,6 +182,9 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         .iter()
         .any(|unit| unit["display_name"] == "小创"));
     assert_eq!(parsed["terminal_watchdog"]["available"], true);
+    assert_eq!(parsed["terminal_watchdog"]["readable"], true);
+    assert_eq!(parsed["terminal_watchdog"]["fresh"], true);
+    assert_eq!(parsed["terminal_watchdog"]["diagnostic_status"], "fresh");
     assert_eq!(
         parsed["terminal_watchdog"]["report_file"],
         watchdog_report.display().to_string()
@@ -261,10 +271,91 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));
-    assert!(stdout.contains(
-        "terminal_watchdog: available=false readonly=true session=unknown tmux_session_present=unknown codex_process_count=unknown git_dirty=unknown next_action=run_watchdog_once_before_console_review"
-    ));
+    assert!(stdout.contains("terminal_watchdog: available=false readable=false fresh=false diagnostic_status=missing readonly=true session=unknown tmux_session_present=unknown codex_process_count=unknown git_dirty=unknown next_action=run_watchdog_once_before_console_review"));
     assert!(stdout.contains("app_server_health: status=warning"));
     assert!(stdout.contains("configure an openai_compatible provider"));
     assert!(stdout.contains("plugin_registry: available=true ok=true plugin_count=5"));
+}
+
+#[test]
+fn cli_console_snapshot_diagnoses_invalid_watchdog_report_json() {
+    let root = temp_root("invalid-watchdog");
+    let config_path = write_config(&root);
+    let watchdog_report = root.join("latest-watchdog-report.json");
+    fs::write(&watchdog_report, "{not-json").expect("invalid watchdog report should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "console",
+            "snapshot",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &watchdog_report)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["terminal_watchdog"]["available"], true);
+    assert_eq!(parsed["terminal_watchdog"]["readable"], true);
+    assert_eq!(parsed["terminal_watchdog"]["fresh"], false);
+    assert_eq!(parsed["terminal_watchdog"]["diagnostic_status"], "invalid");
+    assert_eq!(parsed["terminal_watchdog"]["error"], "report_parse_failed");
+    assert_eq!(
+        parsed["terminal_watchdog"]["next_action"],
+        "inspect_or_regenerate_watchdog_report"
+    );
+}
+
+#[test]
+fn cli_console_snapshot_diagnoses_stale_watchdog_report() {
+    let root = temp_root("stale-watchdog");
+    let config_path = write_config(&root);
+    let watchdog_report = write_watchdog_report_with_generated_at(&root, "2026-01-01T00:00:00Z");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "console",
+            "snapshot",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &watchdog_report)
+        .env("CHUANG_GOAL_WATCHDOG_STALE_SECONDS", "60")
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["terminal_watchdog"]["available"], true);
+    assert_eq!(parsed["terminal_watchdog"]["readable"], true);
+    assert_eq!(parsed["terminal_watchdog"]["fresh"], false);
+    assert_eq!(parsed["terminal_watchdog"]["diagnostic_status"], "stale");
+    assert_eq!(parsed["terminal_watchdog"]["error"], "report_stale");
+    assert_eq!(
+        parsed["terminal_watchdog"]["next_action"],
+        "run_watchdog_once_before_console_review"
+    );
+    assert_eq!(parsed["terminal_watchdog"]["stale_after_seconds"], 60);
 }

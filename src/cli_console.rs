@@ -17,6 +17,8 @@ use crate::cli_runtime::kernel_config_from_runtime;
 const DEFAULT_TERMINAL_WATCHDOG_REPORT_SUFFIX: &str =
     ".codex/chuang-goal-interactive/latest-watchdog-report.json";
 const TERMINAL_WATCHDOG_REPORT_ENV: &str = "CHUANG_GOAL_WATCHDOG_REPORT_FILE";
+const TERMINAL_WATCHDOG_STALE_SECONDS_ENV: &str = "CHUANG_GOAL_WATCHDOG_STALE_SECONDS";
+const DEFAULT_TERMINAL_WATCHDOG_STALE_SECONDS: i64 = 3600;
 
 pub(crate) fn console_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -129,8 +131,11 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     println!("control_units: {}", snapshot.control_units.len());
     println!("plugins: {}", snapshot.plugins.len());
     println!(
-        "terminal_watchdog: available={} readonly={} session={} tmux_session_present={} codex_process_count={} git_dirty={} next_action={}",
+        "terminal_watchdog: available={} readable={} fresh={} diagnostic_status={} readonly={} session={} tmux_session_present={} codex_process_count={} git_dirty={} next_action={}",
         snapshot.terminal_watchdog.available,
+        snapshot.terminal_watchdog.readable,
+        snapshot.terminal_watchdog.fresh,
+        snapshot.terminal_watchdog.diagnostic_status,
         snapshot.terminal_watchdog.readonly,
         optional_text(&snapshot.terminal_watchdog.session),
         optional_bool(snapshot.terminal_watchdog.tmux_session_present),
@@ -230,7 +235,10 @@ fn load_console_plugins() -> Result<Vec<PluginOverview>, String> {
 
 fn load_terminal_watchdog_status() -> TerminalWatchdogStatus {
     let report_file = terminal_watchdog_report_file();
-    TerminalWatchdogStatus::from_report_file(&report_file)
+    TerminalWatchdogStatus::from_report_file(
+        &report_file,
+        terminal_watchdog_stale_threshold_seconds(),
+    )
 }
 
 fn build_app_server_health_snapshot(summary: &ConfigSummary) -> AppServerHealthSnapshot {
@@ -251,13 +259,26 @@ fn terminal_watchdog_report_file() -> PathBuf {
         .join(DEFAULT_TERMINAL_WATCHDOG_REPORT_SUFFIX)
 }
 
+fn terminal_watchdog_stale_threshold_seconds() -> i64 {
+    std::env::var(TERMINAL_WATCHDOG_STALE_SECONDS_ENV)
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_TERMINAL_WATCHDOG_STALE_SECONDS)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct TerminalWatchdogStatus {
     available: bool,
+    readable: bool,
+    fresh: bool,
+    diagnostic_status: String,
     report_file: String,
     error: Option<String>,
     schema_version: Option<u64>,
     generated_at: Option<String>,
+    age_seconds: Option<i64>,
+    stale_after_seconds: i64,
     readonly: bool,
     project_root: Option<String>,
     session: Option<String>,
@@ -276,30 +297,74 @@ struct TerminalWatchdogStatus {
 }
 
 impl TerminalWatchdogStatus {
-    fn from_report_file(path: &Path) -> Self {
+    fn from_report_file(path: &Path, stale_after_seconds: i64) -> Self {
         let report_file = path.display().to_string();
         let content = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Self::unavailable(report_file, "report_missing");
+                return Self::diagnostic(
+                    report_file,
+                    stale_after_seconds,
+                    "missing",
+                    "report_missing",
+                    "run_watchdog_once_before_console_review",
+                    false,
+                    false,
+                    false,
+                );
             }
             Err(_) => {
-                return Self::unavailable(report_file, "report_read_failed");
+                return Self::diagnostic(
+                    report_file,
+                    stale_after_seconds,
+                    "unreadable",
+                    "report_read_failed",
+                    "check_watchdog_report_file_permissions",
+                    true,
+                    false,
+                    false,
+                );
             }
         };
         let report = match serde_json::from_str::<TerminalWatchdogReport>(&content) {
             Ok(report) => report,
             Err(_) => {
-                return Self::unavailable(report_file, "report_parse_failed");
+                return Self::diagnostic(
+                    report_file,
+                    stale_after_seconds,
+                    "invalid",
+                    "report_parse_failed",
+                    "inspect_or_regenerate_watchdog_report",
+                    true,
+                    true,
+                    false,
+                );
             }
+        };
+        let freshness =
+            terminal_watchdog_freshness(report.generated_at.as_deref(), stale_after_seconds);
+        let diagnostic_status = if freshness.fresh { "fresh" } else { "stale" };
+        let next_action = if freshness.fresh {
+            report
+                .takeover
+                .as_ref()
+                .and_then(|takeover| takeover.next_action.clone())
+                .unwrap_or_else(|| "observe_watchdog_report".to_string())
+        } else {
+            "run_watchdog_once_before_console_review".to_string()
         };
 
         Self {
             available: true,
+            readable: true,
+            fresh: freshness.fresh,
+            diagnostic_status: diagnostic_status.to_string(),
             report_file,
-            error: None,
+            error: freshness.error,
             schema_version: report.schema_version,
             generated_at: report.generated_at,
+            age_seconds: freshness.age_seconds,
+            stale_after_seconds,
             readonly: report.readonly.unwrap_or(false),
             project_root: report.project_root,
             session: report.session,
@@ -311,10 +376,7 @@ impl TerminalWatchdogStatus {
                 .git
                 .and_then(|git| git.status_short)
                 .map(|status_short| status_short.len()),
-            next_action: report
-                .takeover
-                .as_ref()
-                .and_then(|takeover| takeover.next_action.clone()),
+            next_action: Some(next_action),
             attach_command: report
                 .takeover
                 .as_ref()
@@ -342,13 +404,27 @@ impl TerminalWatchdogStatus {
         }
     }
 
-    fn unavailable(report_file: String, error: &str) -> Self {
+    fn diagnostic(
+        report_file: String,
+        stale_after_seconds: i64,
+        diagnostic_status: &str,
+        error: &str,
+        next_action: &str,
+        available: bool,
+        readable: bool,
+        fresh: bool,
+    ) -> Self {
         Self {
-            available: false,
+            available,
+            readable,
+            fresh,
+            diagnostic_status: diagnostic_status.to_string(),
             report_file,
             error: Some(error.to_string()),
             schema_version: None,
             generated_at: None,
+            age_seconds: None,
+            stale_after_seconds,
             readonly: true,
             project_root: None,
             session: None,
@@ -357,7 +433,7 @@ impl TerminalWatchdogStatus {
             codex_process_count: None,
             git_dirty: None,
             git_status_count: None,
-            next_action: Some("run_watchdog_once_before_console_review".to_string()),
+            next_action: Some(next_action.to_string()),
             attach_command: None,
             review_command: None,
             dispatches_tasks: false,
@@ -365,6 +441,49 @@ impl TerminalWatchdogStatus {
             restarts_worker: false,
             touches_services: false,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TerminalWatchdogFreshness {
+    fresh: bool,
+    age_seconds: Option<i64>,
+    error: Option<String>,
+}
+
+fn terminal_watchdog_freshness(
+    generated_at: Option<&str>,
+    stale_after_seconds: i64,
+) -> TerminalWatchdogFreshness {
+    let Some(generated_at) = generated_at else {
+        return TerminalWatchdogFreshness {
+            fresh: false,
+            age_seconds: None,
+            error: Some("generated_at_missing".to_string()),
+        };
+    };
+    let generated_at = match chrono::DateTime::parse_from_rfc3339(generated_at) {
+        Ok(value) => value.with_timezone(&chrono::Utc),
+        Err(_) => {
+            return TerminalWatchdogFreshness {
+                fresh: false,
+                age_seconds: None,
+                error: Some("generated_at_invalid".to_string()),
+            };
+        }
+    };
+    let age_seconds = chrono::Utc::now()
+        .signed_duration_since(generated_at)
+        .num_seconds()
+        .max(0);
+    TerminalWatchdogFreshness {
+        fresh: age_seconds <= stale_after_seconds,
+        age_seconds: Some(age_seconds),
+        error: if age_seconds <= stale_after_seconds {
+            None
+        } else {
+            Some("report_stale".to_string())
+        },
     }
 }
 
