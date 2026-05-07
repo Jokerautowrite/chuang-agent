@@ -90,6 +90,59 @@ fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
 }
 
 #[test]
+fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-third-test-smoke.sh"))
+        .expect("third test smoke wrapper should be readable");
+
+    let clean_tree_check = wrapper
+        .find("git status --short")
+        .expect("third test smoke should check for a clean tree first");
+    let final_verify = wrapper
+        .find("sh scripts/chuang-final-verify.sh")
+        .expect("third test smoke should run final verify");
+    let live_preflight = wrapper
+        .find("sh scripts/chuang-live-readonly-preflight.sh")
+        .expect("third test smoke should run live readonly preflight");
+    let operator_checklist = wrapper
+        .find("bash scripts/chuang-live-operator-checklist.sh --json")
+        .expect("third test smoke should run live operator checklist readonly summary");
+    let goal_status = wrapper
+        .find("bash scripts/chuang-goal-run-status.sh --json")
+        .expect("third test smoke should run goal run status readonly summary");
+    let marker = wrapper
+        .find("third_test_candidate_smoke_ok")
+        .expect("third test smoke should print a stable success marker");
+
+    assert!(clean_tree_check < final_verify);
+    assert!(final_verify < live_preflight);
+    assert!(live_preflight < operator_checklist);
+    assert!(operator_checklist < goal_status);
+    assert!(goal_status < marker);
+    assert!(wrapper.contains("working tree must be clean before third test smoke"));
+    assert!(wrapper.contains("operator_status=0"));
+    assert!(wrapper.contains("operator_status=$?"));
+    assert!(wrapper.contains("[ \"$operator_status\" -ne 0 ] && [ \"$operator_status\" -ne 1 ]"));
+    assert!(wrapper.contains("live_operator_checklist_status="));
+    assert!(wrapper.contains("live_operator_checklist_blockers="));
+    assert!(wrapper.contains("goal_run_status_overall="));
+    assert!(wrapper.contains("third_test_candidate_smoke_ok"));
+    assert!(wrapper.contains("boundaries[\"connects_real_feishu\"] is False"));
+    assert!(wrapper.contains("boundaries[\"sends_feishu_messages\"] is False"));
+    assert!(wrapper.contains("boundaries[\"starts_services\"] is False"));
+    assert!(wrapper.contains("boundaries[\"touches_services\"] is False"));
+    assert!(!wrapper.contains("systemctl"));
+    assert!(!wrapper.contains("tmux new"));
+    assert!(!wrapper.contains("codex exec"));
+    assert!(!wrapper.contains("git reset"));
+    assert!(!wrapper.contains("git checkout"));
+    assert!(!wrapper.contains("\nrm "));
+    assert!(!wrapper.contains(" rm -"));
+    assert!(!wrapper.contains(".codex-im/.env"));
+    assert!(!wrapper.contains("hermes-gateway"));
+}
+
+#[test]
 fn goal_watchdog_once_writes_readonly_status_report() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nanos = SystemTime::now()

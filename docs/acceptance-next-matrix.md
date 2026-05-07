@@ -15,12 +15,15 @@ final verify 本地闭环通过
 + long-run observability 有只读状态入口
 ```
 
+第三测试版候选新增本地 wrapper：`sh scripts/chuang-third-test-smoke.sh`。它只串联 clean worktree gate、final verify、live-readiness 只读预检、operator checklist 只读摘要和 goal run status 只读摘要；operator env blocked 只作为状态输出，不作为本地合同失败。该 wrapper 不连接真实 Feishu、不读 secret、不启动服务，最终 marker 为 `third_test_candidate_smoke_ok`。
+
 第三测试版候选不是“所有 live adapter 全开”，而是 100% 前最后一跳：用最小真实链路证明老爸可以通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，并最终回到本地 verify 绿。真实 runner 池、桌面 mutation、服务控制、wiki/GBrain live 仍后置，不纳入第三测试版必须项。
 
 ## 第三测试版候选 Acceptance
 
 | 项目 | 判定 | 验收方式 | 100% 前是否必须人工验证 | 边界 |
 | --- | --- | --- | --- | --- |
+| third-test candidate wrapper | ready | `sh scripts/chuang-third-test-smoke.sh` -> `third_test_candidate_smoke_ok` | 否，自动复验即可 | 只串本地门禁和只读摘要；operator env blocked 可见但不让本地合同失败 |
 | final verify 本地门禁 | ready | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 否，自动复验即可 | 证明本地合同闭环，不证明 live Feishu 或真实 runner |
 | live-readiness 只读预检 | ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | 否，自动复验即可 | 只读预检，不连接真实 Feishu、不读 secret、不控制服务 |
 | 人工 Feishu live check | candidate | 老爸用 Chuang 专用 Feishu 通道发一条测试消息，确认 app-server/session/channel 有真实 receipt | 是 | 只用 Chuang 专用 bot 和 env；不碰 Codex Feishu、不碰 Hermes、不打印 token |
@@ -63,13 +66,14 @@ final verify 本地闭环通过
 ## 第三测试版执行顺序
 
 1. 先看 [第三测试版候选一页入口](./third-test-candidate.md)。
-2. 复跑 `sh scripts/chuang-final-verify.sh`，确认本地门禁绿。
-3. 复跑 `sh scripts/chuang-live-readonly-preflight.sh`，确认 live 只读预检绿。
-4. 人工确认 provider env 对齐，只报告变量名和 `<set>`。
-5. 人工执行 Chuang 专用 Feishu live check，采集 request/session/channel receipt。
-6. 人工执行 single subagent live rehearsal，采集 gate/allowlist/report receipt。
-7. 复跑 `sh scripts/chuang-final-verify.sh`，确认 live rehearsal 未破坏本地合同。
-8. 跑 `git diff --check -- docs/acceptance-next-matrix.md`，确认本文档格式干净。
+2. 在干净工作树上复跑 `sh scripts/chuang-third-test-smoke.sh`，确认本地候选 wrapper 输出 `third_test_candidate_smoke_ok`。
+3. 复跑 `sh scripts/chuang-final-verify.sh`，确认本地门禁绿。
+4. 复跑 `sh scripts/chuang-live-readonly-preflight.sh`，确认 live 只读预检绿。
+5. 人工确认 provider env 对齐，只报告变量名和 `<set>`。
+6. 人工执行 Chuang 专用 Feishu live check，采集 request/session/channel receipt。
+7. 人工执行 single subagent live rehearsal，采集 gate/allowlist/report receipt。
+8. 复跑 `sh scripts/chuang-final-verify.sh`，确认 live rehearsal 未破坏本地合同。
+9. 跑 `git diff --check -- docs/acceptance-next-matrix.md`，确认本文档格式干净。
 
 ## 非目标
 
