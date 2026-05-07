@@ -1,10 +1,15 @@
 use chuang_agent::control_workflow::{build_unit_views, ControlUnitView};
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::plugin_registry::{load_plugin_registry, PluginKind, PluginManifest};
+use chuang_agent::runtime_config::ConfigSummary;
 use chuang_agent::slot_registry::build_runtime_slots;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::app_server::{
+    app_server_health_diagnostic_status, app_server_health_diagnostic_summary,
+    app_server_health_next_actions,
+};
 use crate::cli_args::{effective_config_source, parse_status_cli_options, parse_status_output};
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 use crate::cli_runtime::kernel_config_from_runtime;
@@ -36,6 +41,7 @@ fn console_snapshot_command(args: &[String]) -> Result<(), String> {
     );
     let plugins = load_console_plugins()?;
     let terminal_watchdog = load_terminal_watchdog_status();
+    let app_server_health = build_app_server_health_snapshot(&status.config);
 
     let snapshot = ConsoleSnapshot {
         ok: true,
@@ -44,6 +50,7 @@ fn console_snapshot_command(args: &[String]) -> Result<(), String> {
         control_units,
         plugins,
         terminal_watchdog,
+        app_server_health,
     };
 
     match output {
@@ -132,6 +139,16 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         optional_text(&snapshot.terminal_watchdog.next_action)
     );
     println!(
+        "app_server_health: status={} summary={} next_actions={}",
+        snapshot.app_server_health.diagnostic_status,
+        snapshot.app_server_health.diagnostic_summary,
+        if snapshot.app_server_health.next_actions.is_empty() {
+            "none".to_string()
+        } else {
+            snapshot.app_server_health.next_actions.join(";")
+        }
+    );
+    println!(
         "plugin_registry: available={} ok={} plugin_count={} enabled_count={} issue_count={}",
         snapshot.status.plugin_registry.available,
         snapshot.status.plugin_registry.ok,
@@ -149,6 +166,14 @@ struct ConsoleSnapshot {
     control_units: Vec<ControlUnitView>,
     plugins: Vec<PluginOverview>,
     terminal_watchdog: TerminalWatchdogStatus,
+    app_server_health: AppServerHealthSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AppServerHealthSnapshot {
+    diagnostic_status: String,
+    diagnostic_summary: String,
+    next_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -206,6 +231,14 @@ fn load_console_plugins() -> Result<Vec<PluginOverview>, String> {
 fn load_terminal_watchdog_status() -> TerminalWatchdogStatus {
     let report_file = terminal_watchdog_report_file();
     TerminalWatchdogStatus::from_report_file(&report_file)
+}
+
+fn build_app_server_health_snapshot(summary: &ConfigSummary) -> AppServerHealthSnapshot {
+    AppServerHealthSnapshot {
+        diagnostic_status: app_server_health_diagnostic_status(summary).to_string(),
+        diagnostic_summary: app_server_health_diagnostic_summary(summary, false),
+        next_actions: app_server_health_next_actions(summary),
+    }
 }
 
 fn terminal_watchdog_report_file() -> PathBuf {

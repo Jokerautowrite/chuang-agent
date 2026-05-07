@@ -987,7 +987,7 @@ fn provider_summary_model_name(runtime: &RuntimeConfig) -> String {
     }
 }
 
-fn app_server_health_diagnostic_status(summary: &ConfigSummary) -> &'static str {
+pub(crate) fn app_server_health_diagnostic_status(summary: &ConfigSummary) -> &'static str {
     if summary.placeholder_warnings.is_empty() {
         "ready"
     } else {
@@ -995,7 +995,10 @@ fn app_server_health_diagnostic_status(summary: &ConfigSummary) -> &'static str 
     }
 }
 
-fn app_server_health_diagnostic_summary(summary: &ConfigSummary, diagnostic_mode: bool) -> String {
+pub(crate) fn app_server_health_diagnostic_summary(
+    summary: &ConfigSummary,
+    diagnostic_mode: bool,
+) -> String {
     if summary.placeholder_warnings.is_empty() {
         if diagnostic_mode {
             "app-server workspace config is ready in diagnostic mode; no live provider request was made."
@@ -1016,7 +1019,7 @@ fn app_server_health_diagnostic_summary(summary: &ConfigSummary, diagnostic_mode
     }
 }
 
-fn app_server_health_next_actions(summary: &ConfigSummary) -> Vec<String> {
+pub(crate) fn app_server_health_next_actions(summary: &ConfigSummary) -> Vec<String> {
     let mut actions = Vec::new();
 
     if let Some(api_key_state) = &summary.api_key_state {
@@ -1088,7 +1091,7 @@ fn app_server_health_next_actions(summary: &ConfigSummary) -> Vec<String> {
     actions
 }
 
-fn push_unique_action(actions: &mut Vec<String>, action: String) {
+pub(crate) fn push_unique_action(actions: &mut Vec<String>, action: String) {
     if !actions.iter().any(|existing| existing == &action) {
         actions.push(action);
     }

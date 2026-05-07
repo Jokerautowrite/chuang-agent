@@ -193,6 +193,19 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         parsed["terminal_watchdog"]["attach_command"],
         "tmux attach -t chuang-goal"
     );
+    assert_eq!(parsed["app_server_health"]["diagnostic_status"], "warning");
+    assert!(parsed["app_server_health"]["diagnostic_summary"]
+        .as_str()
+        .expect("app server diagnostic summary")
+        .contains("local warning"));
+    assert!(parsed["app_server_health"]["next_actions"]
+        .as_array()
+        .expect("app server next actions")
+        .iter()
+        .any(|action| action
+            .as_str()
+            .expect("next action")
+            .contains("configure an openai_compatible provider")));
     assert_eq!(parsed["terminal_watchdog"]["dispatches_tasks"], false);
     assert_eq!(parsed["terminal_watchdog"]["modifies_repo"], false);
     assert_eq!(parsed["terminal_watchdog"]["restarts_worker"], false);
@@ -251,5 +264,7 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains(
         "terminal_watchdog: available=false readonly=true session=unknown tmux_session_present=unknown codex_process_count=unknown git_dirty=unknown next_action=run_watchdog_once_before_console_review"
     ));
+    assert!(stdout.contains("app_server_health: status=warning"));
+    assert!(stdout.contains("configure an openai_compatible provider"));
     assert!(stdout.contains("plugin_registry: available=true ok=true plugin_count=5"));
 }

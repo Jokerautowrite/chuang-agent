@@ -1,6 +1,8 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 `console snapshot` 现在也会带上共享的 `app_server_health` 摘要，JSON/text 两条输出都能直接看到 `diagnostic_status`、`diagnostic_summary` 和 `next_actions`；它复用了 `app-server health` 的同一组 placeholder warning 逻辑，不再让主控单独跑 health 才知道 workspace 配置哪里还在用占位实现。
+- 新回归覆盖 console JSON 和 text 两条路径，验证通过 `cargo test -q --test cli_console_tests --test app_server_tests`、`sh scripts/chuang-complete-local-smoke.sh`、`git diff --check`。
 - 2026-05-07 App-server `health` 现在会在 JSON/text 里一起输出 `diagnostic_status`、`diagnostic_summary` 和 `next_actions`，直接把运行态里的 provider env 缺失和 placeholder warnings 翻成可执行的排障提示；诊断模式仍然不失败，只是不再只给原始 config 块。
 - 这条诊断面复用了 runtime config summary 的 placeholder warnings 和 api_key 状态，新增回归已覆盖正常 workspace health 和 `--diagnostic` 缺 env 两条路径；验证通过 `cargo test -q --test app_server_tests`、`sh scripts/chuang-complete-local-smoke.sh`、`git diff --check`。
 - 2026-05-07 本轮再补一个只读 live readiness preflight 总入口 `scripts/chuang-live-readonly-preflight.sh`：它先跑 watchdog `--once` 只读快照，再串起临时 stub config 的 `status/doctor/app-server health/console snapshot` 诊断，最后再过一遍 complete-local smoke，最终输出 `live_readiness_preflight_ok`。
