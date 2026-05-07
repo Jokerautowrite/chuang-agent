@@ -29,6 +29,7 @@ pub struct ChuangMvpStatus {
     pub atomic_tools: AtomicToolSurfaceStatus,
     pub governance: GovernanceReadinessStatus,
     pub release_readiness: ReleaseReadinessStatus,
+    pub third_test_candidate: ThirdTestCandidateReadinessStatus,
     pub goal_mode: GoalModeStatus,
     pub goal_run: GoalRunReadinessStatus,
 }
@@ -85,6 +86,23 @@ pub struct ReleaseAcceptanceStatus {
     pub read_only: bool,
     pub connects_real_service: bool,
     pub writes_repo_files: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ThirdTestCandidateReadinessStatus {
+    pub ok: bool,
+    pub candidate_name: String,
+    pub overall_state: String,
+    pub local_gate_ready: bool,
+    pub smoke_script: String,
+    pub marker: String,
+    pub requires_manual_live_check: bool,
+    pub connects_real_external_services: bool,
+    pub verifies_real_external_services: bool,
+    pub real_live_ready: bool,
+    pub operator_env_blocks_100_percent: bool,
+    pub current: String,
+    pub next_action: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -365,6 +383,7 @@ pub fn build_chuang_mvp_status(
         &goal_mode,
         &goal_run,
     );
+    let third_test_candidate = build_third_test_candidate_readiness();
 
     Ok(ChuangMvpStatus {
         config: config_summary,
@@ -430,6 +449,7 @@ pub fn build_chuang_mvp_status(
         atomic_tools,
         governance,
         release_readiness,
+        third_test_candidate,
         goal_mode,
         goal_run,
     })
@@ -627,6 +647,24 @@ fn release_acceptance(
         read_only,
         connects_real_service,
         writes_repo_files,
+    }
+}
+
+fn build_third_test_candidate_readiness() -> ThirdTestCandidateReadinessStatus {
+    ThirdTestCandidateReadinessStatus {
+        ok: true,
+        candidate_name: "third_test_candidate".to_string(),
+        overall_state: "local_gate_ready_requires_manual_live_check".to_string(),
+        local_gate_ready: true,
+        smoke_script: "scripts/chuang-third-test-smoke.sh".to_string(),
+        marker: "third_test_candidate_smoke_ok".to_string(),
+        requires_manual_live_check: true,
+        connects_real_external_services: false,
+        verifies_real_external_services: false,
+        real_live_ready: false,
+        operator_env_blocks_100_percent: true,
+        current: "third test candidate local gates are represented by the readonly smoke wrapper and status surfaces; real live service verification is still manual and not marked ready".to_string(),
+        next_action: "run scripts/chuang-third-test-smoke.sh for local gate evidence, then collect an operator live receipt before claiming live readiness".to_string(),
     }
 }
 

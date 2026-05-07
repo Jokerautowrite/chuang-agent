@@ -226,6 +226,20 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
             status.release_readiness.blocked_count
         ),
     ));
+    checks.push(pass(
+        "third_test_candidate",
+        &format!(
+            "state={} local_gate_ready={} smoke_script={} marker={} requires_manual_live_check={} connects_real_external_services={} operator_env_blocks_100_percent={} real_live_ready={}",
+            status.third_test_candidate.overall_state,
+            status.third_test_candidate.local_gate_ready,
+            status.third_test_candidate.smoke_script,
+            status.third_test_candidate.marker,
+            status.third_test_candidate.requires_manual_live_check,
+            status.third_test_candidate.connects_real_external_services,
+            status.third_test_candidate.operator_env_blocks_100_percent,
+            status.third_test_candidate.real_live_ready
+        ),
+    ));
 
     slots
         .actuator
@@ -657,6 +671,18 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.release_readiness.verifies_real_external_services,
         doctor.status.release_readiness.uses_stub_or_local_fixtures,
         doctor.status.release_readiness.writes_repo_files
+    );
+    println!(
+        "third_test_candidate: ok={} state={} local_gate_ready={} smoke_script={} marker={} requires_manual_live_check={} connects_real_external_services={} operator_env_blocks_100_percent={} real_live_ready={}",
+        doctor.status.third_test_candidate.ok,
+        doctor.status.third_test_candidate.overall_state,
+        doctor.status.third_test_candidate.local_gate_ready,
+        doctor.status.third_test_candidate.smoke_script,
+        doctor.status.third_test_candidate.marker,
+        doctor.status.third_test_candidate.requires_manual_live_check,
+        doctor.status.third_test_candidate.connects_real_external_services,
+        doctor.status.third_test_candidate.operator_env_blocks_100_percent,
+        doctor.status.third_test_candidate.real_live_ready
     );
     println!(
         "memory_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",

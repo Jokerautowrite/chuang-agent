@@ -128,6 +128,18 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
             .verifies_real_external_services,
         snapshot.status.release_readiness.uses_stub_or_local_fixtures
     );
+    println!(
+        "third_test_candidate: ok={} state={} local_gate_ready={} smoke_script={} marker={} requires_manual_live_check={} connects_real_external_services={} operator_env_blocks_100_percent={} real_live_ready={}",
+        snapshot.status.third_test_candidate.ok,
+        snapshot.status.third_test_candidate.overall_state,
+        snapshot.status.third_test_candidate.local_gate_ready,
+        snapshot.status.third_test_candidate.smoke_script,
+        snapshot.status.third_test_candidate.marker,
+        snapshot.status.third_test_candidate.requires_manual_live_check,
+        snapshot.status.third_test_candidate.connects_real_external_services,
+        snapshot.status.third_test_candidate.operator_env_blocks_100_percent,
+        snapshot.status.third_test_candidate.real_live_ready
+    );
     println!("control_units: {}", snapshot.control_units.len());
     println!("plugins: {}", snapshot.plugins.len());
     println!(

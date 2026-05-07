@@ -151,6 +151,29 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && item.state == "partial"
             && item.read_only
             && !item.connects_real_service));
+    assert!(status.third_test_candidate.ok);
+    assert_eq!(
+        status.third_test_candidate.candidate_name,
+        "third_test_candidate"
+    );
+    assert_eq!(
+        status.third_test_candidate.overall_state,
+        "local_gate_ready_requires_manual_live_check"
+    );
+    assert!(status.third_test_candidate.local_gate_ready);
+    assert_eq!(
+        status.third_test_candidate.smoke_script,
+        "scripts/chuang-third-test-smoke.sh"
+    );
+    assert_eq!(
+        status.third_test_candidate.marker,
+        "third_test_candidate_smoke_ok"
+    );
+    assert!(status.third_test_candidate.requires_manual_live_check);
+    assert!(!status.third_test_candidate.connects_real_external_services);
+    assert!(!status.third_test_candidate.verifies_real_external_services);
+    assert!(!status.third_test_candidate.real_live_ready);
+    assert!(status.third_test_candidate.operator_env_blocks_100_percent);
     assert!(status.memory_readiness.ok);
     assert_eq!(status.memory_readiness.overall_state, "ready");
     assert_eq!(status.memory_readiness.layer_count, 5);

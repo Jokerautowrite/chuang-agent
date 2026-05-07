@@ -196,6 +196,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "placeholder_warnings": config_summary.placeholder_warnings,
         "project_readiness": status.project_readiness,
         "release_readiness": status.release_readiness,
+        "third_test_candidate": status.third_test_candidate,
         "channel_readiness": status.channel_readiness,
         "subagent_readiness": status.subagent_readiness,
         "external_ai_readiness": status.external_ai_readiness,
@@ -251,6 +252,18 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.release_readiness.connects_real_external_services,
             status.release_readiness.verifies_real_external_services,
             status.release_readiness.uses_stub_or_local_fixtures
+        );
+        println!(
+            "third_test_candidate: ok={} state={} local_gate_ready={} smoke_script={} marker={} requires_manual_live_check={} connects_real_external_services={} operator_env_blocks_100_percent={} real_live_ready={}",
+            status.third_test_candidate.ok,
+            status.third_test_candidate.overall_state,
+            status.third_test_candidate.local_gate_ready,
+            status.third_test_candidate.smoke_script,
+            status.third_test_candidate.marker,
+            status.third_test_candidate.requires_manual_live_check,
+            status.third_test_candidate.connects_real_external_services,
+            status.third_test_candidate.operator_env_blocks_100_percent,
+            status.third_test_candidate.real_live_ready
         );
     }
 

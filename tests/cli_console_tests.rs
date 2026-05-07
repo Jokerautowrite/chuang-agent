@@ -141,6 +141,35 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         .expect("release acceptance should be array")
         .iter()
         .any(|item| item["name"] == "real_external_services" && item["state"] == "deferred"));
+    assert_eq!(parsed["status"]["third_test_candidate"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["overall_state"],
+        "local_gate_ready_requires_manual_live_check"
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["local_gate_ready"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["smoke_script"],
+        "scripts/chuang-third-test-smoke.sh"
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["marker"],
+        "third_test_candidate_smoke_ok"
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["operator_env_blocks_100_percent"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["third_test_candidate"]["real_live_ready"],
+        false
+    );
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
         serde_json::json!(["file_read", "file_write", "code_execute"])
@@ -268,6 +297,9 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     ));
     assert!(stdout.contains(
         "release_acceptance: count=7 connects_real_external_services=false verifies_real_external_services=false uses_stub_or_local_fixtures=true"
+    ));
+    assert!(stdout.contains(
+        "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
     ));
     assert!(stdout.contains("control_units: "));
     assert!(stdout.contains("plugins: 5"));

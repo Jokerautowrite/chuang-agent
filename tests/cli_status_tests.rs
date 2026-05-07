@@ -122,6 +122,9 @@ fn cli_status_prints_mvp_health_summary() {
         "connects_real_external_services=false verifies_real_external_services=false uses_stub_or_local_fixtures=true writes_repo_files=false"
     ));
     assert!(stdout.contains("release_acceptance_item name=real_external_services state=deferred"));
+    assert!(stdout.contains(
+        "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
+    ));
     assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("memory_layer name=internal_identity state=ready"));
     assert!(stdout.contains("memory_layer name=external_knowledge state=ready storage=docs/external-knowledge-adapter.md"));
@@ -344,6 +347,33 @@ fn cli_status_can_render_json_without_secret_leak() {
             && item["state"] == "partial"
             && item["read_only"] == true
             && item["connects_real_service"] == false));
+    assert_eq!(parsed["third_test_candidate"]["ok"], true);
+    assert_eq!(
+        parsed["third_test_candidate"]["overall_state"],
+        "local_gate_ready_requires_manual_live_check"
+    );
+    assert_eq!(parsed["third_test_candidate"]["local_gate_ready"], true);
+    assert_eq!(
+        parsed["third_test_candidate"]["smoke_script"],
+        "scripts/chuang-third-test-smoke.sh"
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["marker"],
+        "third_test_candidate_smoke_ok"
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["requires_manual_live_check"],
+        true
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["operator_env_blocks_100_percent"],
+        true
+    );
+    assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
     assert!(
         parsed["project_readiness"]["ready_count"]
             .as_u64()

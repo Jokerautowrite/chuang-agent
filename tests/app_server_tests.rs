@@ -517,6 +517,33 @@ transport = "stub"
         .any(|item| item["name"] == "real_external_services"
             && item["state"] == "deferred"
             && item["connects_real_service"] == false));
+    assert_eq!(parsed["third_test_candidate"]["ok"], true);
+    assert_eq!(
+        parsed["third_test_candidate"]["overall_state"],
+        "local_gate_ready_requires_manual_live_check"
+    );
+    assert_eq!(parsed["third_test_candidate"]["local_gate_ready"], true);
+    assert_eq!(
+        parsed["third_test_candidate"]["smoke_script"],
+        "scripts/chuang-third-test-smoke.sh"
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["marker"],
+        "third_test_candidate_smoke_ok"
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["requires_manual_live_check"],
+        true
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(
+        parsed["third_test_candidate"]["operator_env_blocks_100_percent"],
+        true
+    );
+    assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
     assert_eq!(
         parsed["project_readiness"]["overall_state"],
         "mvp_ready_with_partial_modules"
@@ -636,6 +663,12 @@ transport = "stub"
         parsed["release_readiness"]["connects_real_external_services"],
         false
     );
+    assert_eq!(parsed["third_test_candidate"]["local_gate_ready"], true);
+    assert_eq!(
+        parsed["third_test_candidate"]["connects_real_external_services"],
+        false
+    );
+    assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
 }
 
 #[test]
@@ -705,5 +738,8 @@ transport = "stub"
     assert!(stdout.contains("diagnostic_status: warning"));
     assert!(stdout.contains("diagnostic_summary:"));
     assert!(stdout.contains("next_actions:"));
+    assert!(stdout.contains(
+        "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
+    ));
     assert!(stdout.contains("set CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"));
 }
