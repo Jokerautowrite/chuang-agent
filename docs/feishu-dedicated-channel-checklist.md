@@ -117,6 +117,14 @@ The bridge handles `/new`, `/session`, `/health` and `/help` locally as bridge c
 
 ## First Live Test
 
+Before touching the live bot, generate the redacted operator checklist:
+
+```bash
+scripts/chuang-live-operator-checklist.sh --json
+```
+
+For the full manual sequence, use `docs/live-operator-test-runbook.md`.
+
 1. Send a text message to the new Chuang bot.
 2. Confirm the response does not contain `fake-responder`.
 3. Send `/session` and confirm the reported thread matches the active chat binding.

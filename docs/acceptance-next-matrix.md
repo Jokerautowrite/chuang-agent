@@ -132,10 +132,10 @@
    验证建议：`cargo test -q --test memory_maintenance_cli_tests`。
    边界：继续要求 `--approve-writeback`；不做自动调度，不自动压缩或覆盖热记忆。
 
-14. 下一步：`docs: define live cutover runbook`
-   文件范围建议：单独 runbook 文档和本矩阵少量链接。
-   验证建议：`git diff --check`。
-   边界：只定义人工步骤、回滚条件和证据采集；不启用真实 live adapter，不改服务。
+14. 进行中：`docs: define live cutover runbook`
+   文件范围建议：`scripts/chuang-live-operator-checklist.sh`、`docs/live-operator-test-runbook.md` 和少量 Feishu checklist 链接。
+   验证建议：`bash -n scripts/chuang-live-operator-checklist.sh`、fixture JSON 手动检查、`cargo test -q --test cli_smoke_tests live_operator_checklist_reports_redacted_manual_live_steps`、`git diff --check`。
+   边界：只定义人工步骤、回滚条件和证据采集；不启用真实 live adapter，不改服务，不打印 secret。
 
 ## 建议并行拆分
 

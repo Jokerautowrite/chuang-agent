@@ -174,7 +174,8 @@ fn overnight_runner_writes_structured_status_without_restart_or_cleanup() {
 fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-goal-run-status.sh");
-    let script = fs::read_to_string(&script_path).expect("goal run status script should be readable");
+    let script =
+        fs::read_to_string(&script_path).expect("goal run status script should be readable");
 
     assert!(script.contains("Readonly status view for Chuang terminal goal workers"));
     assert!(script.contains("CHUANG_GOAL_WATCHDOG_REPORT_FILE"));
@@ -237,8 +238,11 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         "# Chuang Overnight Goal Run\n\n- run_id: 20260507-010203\n- status: running\n- iterations: 3\n",
     )
     .expect("summary should write");
-    fs::write(latest_run.join("status.json"), r#"{"status":"running","iteration":3}"#)
-        .expect("overnight status should write");
+    fs::write(
+        latest_run.join("status.json"),
+        r#"{"status":"running","iteration":3}"#,
+    )
+    .expect("overnight status should write");
     fs::write(latest_run.join("run.log"), "iteration 3 still running\n")
         .expect("run log should write");
     fs::write(latest_run.join("last-message.md"), "continuing goal work\n")
@@ -285,10 +289,118 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         latest_run.display().to_string()
     );
     assert_eq!(data["overnight"]["status_json"]["available"], true);
-    assert_eq!(data["overnight"]["status_json"]["data"]["status"], "running");
+    assert_eq!(
+        data["overnight"]["status_json"]["data"]["status"],
+        "running"
+    );
     assert_eq!(data["overnight"]["summary"]["fields"]["status"], "running");
     assert_eq!(data["overnight"]["summary"]["fields"]["iterations"], "3");
     assert_eq!(data["overall_status"], "terminal_worker_observed");
+}
+
+#[test]
+fn live_operator_checklist_reports_redacted_manual_live_steps() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
+    let script =
+        fs::read_to_string(&script_path).expect("live operator checklist should be readable");
+
+    assert!(script.contains("Readonly operator checklist for the first manual Chuang live check"));
+    assert!(script.contains("CHUANG_LIVE_OPERATOR_ENV_FILE"));
+    assert!(script.contains("\"connects_real_feishu\": False"));
+    assert!(script.contains("\"sends_feishu_messages\": False"));
+    assert!(script.contains("\"starts_services\": False"));
+    assert!(script.contains("\"modifies_repo\": False"));
+    assert!(script.contains("\"prints_secret_values\": False"));
+    assert!(!script.contains("systemctl"));
+    assert!(!script.contains("tmux new"));
+    assert!(!script.contains("codex exec"));
+    assert!(!script.contains("git reset"));
+    assert!(!script.contains("git checkout"));
+    assert!(!script.contains("\nrm "));
+    assert!(!script.contains(" rm -"));
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-live-operator-checklist-smoke-{}-{nanos}",
+        std::process::id()
+    ));
+    let workspace = root.join("workspace");
+    let provider_env = root.join("provider.env");
+    let feishu_env = root.join("chuang-feishu.env");
+    fs::create_dir_all(&workspace).expect("workspace should be created");
+    fs::write(
+        workspace.join("config.toml"),
+        "provider = \"openai_compatible\"\n",
+    )
+    .expect("workspace config should write");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=secret-provider-value\n",
+    )
+    .expect("provider env should write");
+    fs::write(
+        &feishu_env,
+        format!(
+            "CHUANG_FEISHU_APP_ID=cli_a_test\nCHUANG_FEISHU_APP_SECRET=secret-feishu-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_PROVIDER_ENV_FILE={}\nCHUANG_FEISHU_CONNECTION_MODE=websocket\n",
+            workspace.display(),
+            provider_env.display()
+        ),
+    )
+    .expect("feishu env should write");
+
+    let output = Command::new("bash")
+        .arg(script_path)
+        .arg("--json")
+        .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &feishu_env)
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("live operator checklist should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("secret-provider-value"));
+    assert!(!stdout.contains("secret-feishu-value"));
+
+    let data: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("checklist output should be json");
+    assert_eq!(data["ok"], true);
+    assert_eq!(data["status"], "ready");
+    assert_eq!(data["readonly_boundaries"]["readonly"], true);
+    assert_eq!(data["readonly_boundaries"]["connects_real_feishu"], false);
+    assert_eq!(data["readonly_boundaries"]["sends_feishu_messages"], false);
+    assert_eq!(data["readonly_boundaries"]["starts_services"], false);
+    assert_eq!(data["readonly_boundaries"]["modifies_repo"], false);
+    assert_eq!(data["readonly_boundaries"]["prints_secret_values"], false);
+    assert_eq!(
+        data["checks"]["feishu_env_file"]["required"]["CHUANG_FEISHU_APP_SECRET"],
+        "<set>"
+    );
+    assert_eq!(
+        data["checks"]["provider_env_file"]["required"]["CODEX_PPTOKEN_API_KEY"],
+        "<set>"
+    );
+    assert_eq!(
+        data["commands"]["local_preflight"],
+        format!(
+            "node scripts/chuang-feishu-live-preflight.js --env-file {} --workspace-root {} --json",
+            feishu_env.display(),
+            workspace.display()
+        )
+    );
+    assert!(data["manual_steps"]
+        .as_array()
+        .expect("manual steps should be an array")
+        .iter()
+        .any(|step| step.as_str().unwrap_or("").contains("/health")));
 }
 
 #[test]
