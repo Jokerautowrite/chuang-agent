@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 最终本地验收已在干净工作树上通过：`sh scripts/chuang-final-verify.sh` 先确认 clean worktree，再跑 complete-local smoke 和最终 `git diff --check`，输出 `chuang_final_verify_ok`。这确认当前第二测试版本地闭环、watchdog 只读接管面、console/app-server health 诊断和 Feishu 本地命令 smoke 已经一起可复验。
 - 2026-05-07 并发 `/goal` 子代理推进后补一条主控验收约束：关键最终验证前必须先确认所有会写生产文件的子代理已经停写或已提交，再跑最终专项栈、complete-local smoke 和 `git diff --check`；否则主控验证可能短暂读到半写入工作树，造成一次性误报失败。
 - 本轮并发收口已落两条最新提交：`7a0a134 fix(provider): tighten fallback diagnostics` 修正 provider `status_code=200` 但缺 assistant content 时的 `missing_content/response` 归类，并提升 `provider_response_ok`；`3f74e77 feat(subagent): tighten live preflight gate` 补齐 subagent live-preflight 稳定 gate 字段，并锁定默认 gate 关闭时 `ready_for_live=false`。
 - 2026-05-07 `console snapshot` 现在也会带上共享的 `app_server_health` 摘要，JSON/text 两条输出都能直接看到 `diagnostic_status`、`diagnostic_summary` 和 `next_actions`；它复用了 `app-server health` 的同一组 placeholder warning 逻辑，不再让主控单独跑 health 才知道 workspace 配置哪里还在用占位实现。
