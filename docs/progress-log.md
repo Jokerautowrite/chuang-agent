@@ -1,6 +1,8 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-07 第二批并发 `/goal` worker 已收口并通过最终验证：`37a7e38 feat(memory): add knowledge search provenance evidence`、`ad7b00a feat(subagent): expand live preflight evidence`、`57ef912 feat(console): diagnose watchdog report freshness`、`9efbb9e feat(feishu): expand live preflight evidence`。本批把外脑检索 provenance、subagent live-preflight 证据、watchdog report freshness/missing/invalid 诊断、Feishu live preflight 只读 evidence 链补厚，但仍不连接真实 Feishu、不启动真实 runner、不控制服务。
+- 本批主控复验已通过：`cargo test -q --test cli_console_tests --test memory_maintenance_cli_tests --test cli_subagent_live_preflight_tests`、`node --check scripts/chuang-feishu-live-preflight.js && node scripts/chuang-feishu-live-preflight-smoke.js && node scripts/chuang-feishu-command-smoke.js`、`sh scripts/chuang-complete-local-smoke.sh`、`sh scripts/chuang-final-verify.sh`，最终输出 `chuang_final_verify_ok`。
 - 2026-05-07 最终本地验收已在干净工作树上通过：`sh scripts/chuang-final-verify.sh` 先确认 clean worktree，再跑 complete-local smoke 和最终 `git diff --check`，输出 `chuang_final_verify_ok`。这确认当前第二测试版本地闭环、watchdog 只读接管面、console/app-server health 诊断和 Feishu 本地命令 smoke 已经一起可复验。
 - 2026-05-07 并发 `/goal` 子代理推进后补一条主控验收约束：关键最终验证前必须先确认所有会写生产文件的子代理已经停写或已提交，再跑最终专项栈、complete-local smoke 和 `git diff --check`；否则主控验证可能短暂读到半写入工作树，造成一次性误报失败。
 - 本轮并发收口已落两条最新提交：`7a0a134 fix(provider): tighten fallback diagnostics` 修正 provider `status_code=200` 但缺 assistant content 时的 `missing_content/response` 归类，并提升 `provider_response_ok`；`3f74e77 feat(subagent): tighten live preflight gate` 补齐 subagent live-preflight 稳定 gate 字段，并锁定默认 gate 关闭时 `ready_for_live=false`。
