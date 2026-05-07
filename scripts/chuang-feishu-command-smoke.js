@@ -5,6 +5,7 @@ const {
   buildBridgeErrorReply,
   buildHelpCommandReply,
   buildHealthCommandReply,
+  buildLiveCheckCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
   parseBridgeCommand,
@@ -31,9 +32,19 @@ assert.strictEqual(help.commandName, "help");
 assert(help.replyText.includes("/new"));
 assert(help.replyText.includes("/session"));
 assert(help.replyText.includes("/health"));
+assert(help.replyText.includes("/live-check"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
 assert(help.replyText.includes("普通文本会转发到 Chuang app-server"));
 assert.strictEqual(buildHelpCommandReply().commandName, "help");
+
+const liveCheck = parseBridgeCommand("/live-check");
+assert(liveCheck, "/live-check should be handled as a bridge command");
+assert.strictEqual(liveCheck.commandName, "live-check");
+assert(liveCheck.replyText.includes("chuang-live-operator-checklist.sh --json"));
+assert(liveCheck.replyText.includes("chuang-live-readonly-preflight.sh"));
+assert(liveCheck.replyText.includes("不连接外部服务"));
+assert(!liveCheck.replyText.includes("secret"));
+assert.strictEqual(buildLiveCheckCommandReply().commandName, "live-check");
 
 const session = parseBridgeCommand("/session");
 assert(session, "/session should be handled as a bridge command");

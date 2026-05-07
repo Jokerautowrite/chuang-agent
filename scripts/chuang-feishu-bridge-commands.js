@@ -9,6 +9,9 @@ function parseBridgeCommand(text) {
   if (normalized === "/health" || normalized === "/status") {
     return buildHealthCommandReply();
   }
+  if (normalized === "/live-check" || normalized === "/live") {
+    return buildLiveCheckCommandReply();
+  }
   if (normalized === "/help" || normalized === "help") {
     return buildHelpCommandReply();
   }
@@ -122,6 +125,33 @@ function buildBridgeErrorReply({ operation = "turn", error = null, threadId = ""
   };
 }
 
+function buildLiveCheckCommandReply() {
+  return {
+    commandName: "live-check",
+    threadId: "",
+    modelName: "chuang-feishu-bridge",
+    replyText: [
+      "Chuang 人工 live 检查入口：",
+      "",
+      "先在本机终端跑：",
+      "",
+      "`scripts/chuang-live-operator-checklist.sh --json`",
+      "`node scripts/chuang-feishu-live-preflight.js --env-file /home/user/.codex-im/chuang-feishu-bridge.env --workspace-root /home/user/projects/chuang-agent --json`",
+      "`sh scripts/chuang-live-readonly-preflight.sh`",
+      "`scripts/chuang-goal-run-status.sh --json`",
+      "",
+      "然后在当前 Chuang bot 里依次发：",
+      "",
+      "`/health`",
+      "`/new`",
+      "`晚上人工 live check：请回复当前 thread、runtime report id 和 provider 状态`",
+      "`/session`",
+      "",
+      "边界：这条命令只显示步骤，不连接外部服务、不读取密钥、不启动服务、不修改仓库。",
+    ].join("\n"),
+  };
+}
+
 function buildHelpCommandReply() {
   return {
     commandName: "help",
@@ -133,6 +163,7 @@ function buildHelpCommandReply() {
       "- `/new`：开新窗口/新上下文入口；不会进入 Agent 主链。",
       "- `/session`：查看当前飞书聊天绑定的 Chuang 会话。",
       "- `/health`：查看本地 bridge/app-server/provider env 诊断。",
+      "- `/live-check`：显示人工 live 检查步骤；不会进入 Agent 主链。",
       "- `/help`：显示这条帮助；不会进入 Agent 主链。",
       "",
       "普通文本会转发到 Chuang app-server，由 Agent runtime 处理。",
@@ -158,6 +189,7 @@ module.exports = {
   buildBridgeErrorReply,
   buildHelpCommandReply,
   buildHealthCommandReply,
+  buildLiveCheckCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
   parseBridgeCommand,

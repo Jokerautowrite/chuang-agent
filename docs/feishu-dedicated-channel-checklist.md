@@ -113,7 +113,7 @@ The bridge script is a long-connection runtime. It validates the Chuang-only env
 
 The bridge also sources `CHUANG_PROVIDER_ENV_FILE` before it starts the Node process. Keep this provider env outside the repository, with file mode `600`, and store only variable assignments such as `CODEX_PPTOKEN_API_KEY=<set>`. Do not put provider keys into the Feishu env template or `config.toml`.
 
-The bridge handles `/new`, `/session`, `/health` and `/help` locally as bridge commands. `/new` starts a fresh app-server thread and binds the current Feishu chat to it; `/session` reports that binding; `/health` reports local bridge/app-server/provider-env status with secret values shown only as `<set>` or `<missing>`; `/help` lists the local commands. App-server failures during `/new` or normal `turn/start` are returned to Feishu as sanitized operational messages. These commands are not forwarded as user tasks to the Agent runtime.
+The bridge handles `/new`, `/session`, `/health`, `/live-check` and `/help` locally as bridge commands. `/new` starts a fresh app-server thread and binds the current Feishu chat to it; `/session` reports that binding; `/health` reports local bridge/app-server/provider-env status with secret values shown only as `<set>` or `<missing>`; `/live-check` shows the manual live test commands without running them; `/help` lists the local commands. App-server failures during `/new` or normal `turn/start` are returned to Feishu as sanitized operational messages. These commands are not forwarded as user tasks to the Agent runtime.
 
 ## First Live Test
 
