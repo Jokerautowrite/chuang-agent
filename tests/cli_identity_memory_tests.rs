@@ -594,6 +594,98 @@ fn cli_memory_knowledge_search_reads_local_docs_only() {
 }
 
 #[test]
+fn cli_memory_knowledge_preview_context_is_read_only_preview_contract() {
+    let root = temp_root("knowledge-preview");
+    std::fs::create_dir_all(root.join("wiki")).expect("wiki dir should be created");
+    std::fs::write(
+        root.join("wiki").join("memory.md"),
+        "外脑 preview-context 用于 future runtime injection candidates\n第二行不命中\n",
+    )
+    .expect("knowledge doc should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "knowledge",
+            "preview-context",
+            "--root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "preview-context",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["adapter"], "local_external_knowledge");
+    assert_eq!(parsed["preview"], true);
+    assert_eq!(parsed["read_only"], true);
+    assert_eq!(parsed["connects_real_service"], false);
+    assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(parsed["runtime_injection_applied"], false);
+    assert_eq!(parsed["runtime_retrieval_wired"], false);
+    assert_eq!(parsed["segment_count"], 1);
+    assert_eq!(parsed["segments"][0]["source"], "local_file");
+    assert_eq!(parsed["segments"][0]["path"], "wiki/memory.md");
+    assert_eq!(parsed["segments"][0]["line"], 1);
+    assert_eq!(parsed["segments"][0]["read_only"], true);
+    assert_eq!(parsed["segments"][0]["connects_real_service"], false);
+    assert_eq!(parsed["segments"][0]["writes_automatically"], false);
+    assert_eq!(parsed["segments"][0]["runtime_injection_applied"], false);
+    assert_eq!(parsed["segments"][0]["runtime_retrieval_wired"], false);
+    assert_eq!(
+        parsed["segments"][0]["provenance"]["adapter"],
+        "local_external_knowledge"
+    );
+    assert_eq!(parsed["segments"][0]["evidence"]["kind"], "line_match");
+    assert!(parsed["segments"][0]["preview"]
+        .as_str()
+        .expect("preview")
+        .contains("preview-context"));
+    assert!(
+        parsed["segments"][0]["token_estimate"]
+            .as_u64()
+            .expect("token estimate")
+            > 0
+    );
+
+    let text = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "memory",
+            "knowledge",
+            "preview-context",
+            "--root",
+            root.to_str().expect("temp path should be utf8"),
+            "--query",
+            "preview-context",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        text.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&text.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&text.stdout);
+    assert!(stdout.contains("memory_knowledge_preview_context"));
+    assert!(stdout.contains("preview=true"));
+    assert!(stdout.contains("runtime context preview only"));
+    assert!(stdout.contains("runtime_injection_applied=false"));
+}
+
+#[test]
 fn cli_identity_memory_write_memory_rejects_over_limit_without_mutation() {
     let root = temp_root("write-memory-limit");
     let config_path = write_fake_config(&root);

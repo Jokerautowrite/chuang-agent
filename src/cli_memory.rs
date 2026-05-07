@@ -63,6 +63,7 @@ fn knowledge_memory_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("status") => memory_knowledge_status_command(&args[1..]),
         Some("search") => memory_knowledge_search_command(&args[1..]),
+        Some("preview-context") => memory_knowledge_preview_context_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -113,6 +114,76 @@ fn memory_knowledge_search_command(args: &[String]) -> Result<(), String> {
                     hit.evidence.connects_real_service
                 );
                 println!("{}", hit.preview);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+fn memory_knowledge_preview_context_command(args: &[String]) -> Result<(), String> {
+    let request = parse_memory_knowledge_preview_context(args)?;
+    let hits = search_local_knowledge_root(&request.root, &request.query, request.limit)?;
+    let segments = build_memory_knowledge_context_segments(hits);
+    let output = MemoryKnowledgePreviewContextOutput {
+        adapter: "local_external_knowledge".to_string(),
+        preview: true,
+        read_only: true,
+        connects_real_service: false,
+        writes_automatically: false,
+        runtime_injection_applied: false,
+        runtime_retrieval_wired: false,
+        root: request.root.display().to_string(),
+        query: request.query,
+        limit: request.limit,
+        segment_count: segments.len(),
+        segments,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "memory_knowledge_preview_context adapter={} preview=true read_only=true root={} query={} segments={}",
+                output.adapter, output.root, output.query, output.segment_count
+            );
+            println!(
+                "preview_only=true connects_real_service=false writes_automatically=false runtime_injection_applied=false runtime_retrieval_wired=false"
+            );
+            println!(
+                "runtime context preview only; no runtime injection was applied and runtime retrieval is not wired"
+            );
+            for segment in &output.segments {
+                println!(
+                    "segment id={} source={} path={} line={} score={} token_estimate={} read_only={} connects_real_service={}",
+                    segment.segment_id,
+                    segment.source,
+                    segment.path,
+                    segment.line,
+                    segment.score,
+                    segment.token_estimate,
+                    segment.read_only,
+                    segment.connects_real_service
+                );
+                println!(
+                    "provenance source={} adapter={} local_file={} line={} score={} writes_automatically={}",
+                    segment.provenance.source,
+                    segment.provenance.adapter,
+                    segment.provenance.local_file,
+                    segment.provenance.line,
+                    segment.provenance.score,
+                    segment.provenance.writes_automatically
+                );
+                println!(
+                    "evidence kind={} local_file={} line={} score={} read_only={} connects_real_service={}",
+                    segment.evidence.kind,
+                    segment.evidence.local_file,
+                    segment.evidence.line,
+                    segment.evidence.score,
+                    segment.evidence.read_only,
+                    segment.evidence.connects_real_service
+                );
+                println!("{}", segment.preview);
             }
         }
         ControlOutputFormat::Json => print_json(&output)?,
@@ -1090,6 +1161,19 @@ fn parse_memory_knowledge_status(args: &[String]) -> Result<ControlOutputFormat,
 }
 
 fn parse_memory_knowledge_search(args: &[String]) -> Result<MemoryKnowledgeSearchRequest, String> {
+    parse_memory_knowledge_query(args, "search")
+}
+
+fn parse_memory_knowledge_preview_context(
+    args: &[String],
+) -> Result<MemoryKnowledgeSearchRequest, String> {
+    parse_memory_knowledge_query(args, "preview-context")
+}
+
+fn parse_memory_knowledge_query(
+    args: &[String],
+    command_name: &str,
+) -> Result<MemoryKnowledgeSearchRequest, String> {
     let mut output = ControlOutputFormat::Text;
     let mut root = None;
     let mut query = None;
@@ -1111,21 +1195,25 @@ fn parse_memory_knowledge_search(args: &[String]) -> Result<MemoryKnowledgeSearc
             }
             "--limit" => {
                 let value = take_local_value(args, &mut index, "--limit")?;
-                limit = value
-                    .parse::<usize>()
-                    .map_err(|_| "memory knowledge search requires numeric --limit".to_string())?;
+                limit = value.parse::<usize>().map_err(|_| {
+                    format!("memory knowledge {command_name} requires numeric --limit")
+                })?;
                 if limit == 0 {
-                    return Err("memory knowledge search requires --limit > 0".to_string());
+                    return Err(format!(
+                        "memory knowledge {command_name} requires --limit > 0"
+                    ));
                 }
             }
             _ => return Err(usage()),
         }
     }
 
-    let root = root.ok_or_else(|| "memory knowledge search requires --root".to_string())?;
-    let query = query.ok_or_else(|| "memory knowledge search requires --query".to_string())?;
+    let root = root.ok_or_else(|| format!("memory knowledge {command_name} requires --root"))?;
+    let query = query.ok_or_else(|| format!("memory knowledge {command_name} requires --query"))?;
     if query.trim().is_empty() {
-        return Err("memory knowledge search requires non-empty --query".to_string());
+        return Err(format!(
+            "memory knowledge {command_name} requires non-empty --query"
+        ));
     }
 
     Ok(MemoryKnowledgeSearchRequest {
@@ -1134,6 +1222,35 @@ fn parse_memory_knowledge_search(args: &[String]) -> Result<MemoryKnowledgeSearc
         query,
         limit,
     })
+}
+
+fn build_memory_knowledge_context_segments(
+    hits: Vec<MemoryKnowledgeSearchHitOutput>,
+) -> Vec<MemoryKnowledgeContextSegmentOutput> {
+    hits.into_iter()
+        .enumerate()
+        .map(|(index, hit)| MemoryKnowledgeContextSegmentOutput {
+            segment_id: format!("knowledge-segment-{}", index + 1),
+            source: hit.source,
+            path: hit.path,
+            line: hit.line,
+            score: hit.score,
+            preview: hit.preview.clone(),
+            token_estimate: estimate_tokenish_count(&hit.preview),
+            read_only: true,
+            connects_real_service: false,
+            writes_automatically: false,
+            runtime_injection_applied: false,
+            runtime_retrieval_wired: false,
+            provenance: hit.provenance,
+            evidence: hit.evidence,
+        })
+        .collect()
+}
+
+fn estimate_tokenish_count(text: &str) -> usize {
+    let chars = text.chars().count();
+    ((chars + 3) / 4).max(1)
 }
 
 fn search_local_knowledge_root(
@@ -1654,6 +1771,40 @@ struct MemoryKnowledgeSearchOutput {
     limit: usize,
     hit_count: usize,
     hits: Vec<MemoryKnowledgeSearchHitOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgePreviewContextOutput {
+    adapter: String,
+    preview: bool,
+    read_only: bool,
+    connects_real_service: bool,
+    writes_automatically: bool,
+    runtime_injection_applied: bool,
+    runtime_retrieval_wired: bool,
+    root: String,
+    query: String,
+    limit: usize,
+    segment_count: usize,
+    segments: Vec<MemoryKnowledgeContextSegmentOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryKnowledgeContextSegmentOutput {
+    segment_id: String,
+    source: String,
+    path: String,
+    line: usize,
+    score: u32,
+    preview: String,
+    token_estimate: usize,
+    read_only: bool,
+    connects_real_service: bool,
+    writes_automatically: bool,
+    runtime_injection_applied: bool,
+    runtime_retrieval_wired: bool,
+    provenance: MemoryKnowledgeSearchProvenanceOutput,
+    evidence: MemoryKnowledgeSearchEvidenceOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

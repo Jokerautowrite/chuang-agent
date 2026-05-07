@@ -12,11 +12,14 @@
 status / doctor
 memory knowledge status
 memory knowledge search --root PATH --query TEXT [--limit N]
+memory knowledge preview-context --root PATH --query TEXT [--limit N]
 ```
 
 当前只接本地 markdown/text 根目录的只读检索，不连接真实 wiki/GBrain，不做自动写回，不注入 runtime。
 
 `memory knowledge search` 输出 `source/path/line/score/preview`，并在每条 hit 上附带稳定的 `provenance` 与 `evidence` 对象，用于验证 provenance-bearing search contract。当前 evidence 固定来自本地文件行匹配，字段包含 `local_file`、`line`、`score`、`query`、`read_only=true`、`connects_real_service=false`；hit provenance 也固定声明 `source=local_file`、`adapter=local_external_knowledge`、`writes_automatically=false`。它会跳过隐藏路径和疑似 secret/token/password/private/credential 文件，只作为外脑检索入口的本地 contract，不代表真实外部知识库已接通。
+
+`memory knowledge preview-context` 复用同一批 search hit，但把它们包装成未来 runtime 注入前的 context segment candidates。它会显式标记 `read_only=true`、`connects_real_service=false`、`writes_automatically=false`、`runtime_injection_applied=false`、`runtime_retrieval_wired=false`，并为每个 segment 附带 `source/provenance/evidence/preview/score/token_estimate`。这个入口只做 preview，不代表 runtime 注入已经接线，也不会把外脑内容自动写入核心记忆。
 
 ## 约束
 
