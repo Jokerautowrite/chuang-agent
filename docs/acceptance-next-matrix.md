@@ -2,6 +2,8 @@
 
 更新时间：2026-05-07
 
+快速入口：见 [第三测试版候选一页入口](./third-test-candidate.md) 和 [Live Operator Test Runbook](./live-operator-test-runbook.md)。
+
 ## 结论
 
 当前基线已经达到第二测试版 `local-ready`：
@@ -60,13 +62,14 @@ final verify 本地闭环通过
 
 ## 第三测试版执行顺序
 
-1. 复跑 `sh scripts/chuang-final-verify.sh`，确认本地门禁绿。
-2. 复跑 `sh scripts/chuang-live-readonly-preflight.sh`，确认 live 只读预检绿。
-3. 人工确认 provider env 对齐，只报告变量名和 `<set>`。
-4. 人工执行 Chuang 专用 Feishu live check，采集 request/session/channel receipt。
-5. 人工执行 single subagent live rehearsal，采集 gate/allowlist/report receipt。
-6. 复跑 `sh scripts/chuang-final-verify.sh`，确认 live rehearsal 未破坏本地合同。
-7. 跑 `git diff --check -- docs/acceptance-next-matrix.md`，确认本文档格式干净。
+1. 先看 [第三测试版候选一页入口](./third-test-candidate.md)。
+2. 复跑 `sh scripts/chuang-final-verify.sh`，确认本地门禁绿。
+3. 复跑 `sh scripts/chuang-live-readonly-preflight.sh`，确认 live 只读预检绿。
+4. 人工确认 provider env 对齐，只报告变量名和 `<set>`。
+5. 人工执行 Chuang 专用 Feishu live check，采集 request/session/channel receipt。
+6. 人工执行 single subagent live rehearsal，采集 gate/allowlist/report receipt。
+7. 复跑 `sh scripts/chuang-final-verify.sh`，确认 live rehearsal 未破坏本地合同。
+8. 跑 `git diff --check -- docs/acceptance-next-matrix.md`，确认本文档格式干净。
 
 ## 非目标
 
