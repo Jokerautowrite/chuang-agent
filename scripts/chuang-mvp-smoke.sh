@@ -414,6 +414,9 @@ node scripts/chuang-feishu-command-smoke.js >/dev/null
 printf '%s\n' "[smoke] feishu turn summary"
 node scripts/chuang-feishu-turn-summary-smoke.js >/dev/null
 
+printf '%s\n' "[smoke] feishu image input"
+node scripts/chuang-feishu-image-smoke.js >/dev/null
+
 printf '%s\n' "[smoke] feishu session store"
 node scripts/chuang-feishu-session-smoke.js >/dev/null
 

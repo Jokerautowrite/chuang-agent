@@ -5,6 +5,7 @@ const os = require("os");
 const path = require("path");
 const readline = require("readline");
 const { spawn } = require("child_process");
+const { spawnSync } = require("child_process");
 
 const dotenv = require("dotenv");
 const {
@@ -29,6 +30,10 @@ const {
   buildSessionCommandReply,
   parseBridgeCommand,
 } = require("./chuang-feishu-bridge-commands");
+const {
+  buildImagePrompt,
+  parseFeishuImageContent,
+} = require("./chuang-feishu-image");
 const {
   buildProcessSection,
   buildStatusFooter,
@@ -254,7 +259,7 @@ class ChuangFeishuBridge {
   startLongConnection() {
     const dispatcher = new EventDispatcher({}).register({
       "im.message.receive_v1": (data) => {
-        this.enqueue(() => this.handleTextEvent(data)).catch((error) => {
+        this.enqueue(() => this.handleInboundEvent(data)).catch((error) => {
           console.error(`[chuang-feishu] failed to handle message: ${error.message}`);
         });
       },
@@ -268,8 +273,8 @@ class ChuangFeishuBridge {
     return this.queue;
   }
 
-  async handleTextEvent(data) {
-    const inbound = normalizeFeishuTextEvent(data);
+  async handleInboundEvent(data) {
+    const inbound = normalizeFeishuInboundEvent(data);
     if (!inbound) {
       return;
     }
@@ -279,57 +284,104 @@ class ChuangFeishuBridge {
       messageId: inbound.messageId,
       threadId: effectiveThreadId,
       senderId: inbound.senderId,
+      messageType: inbound.messageType,
       text: truncateText(inbound.text, 240),
+      imageKey: inbound.imageKey ? truncateText(inbound.imageKey, 80) : "",
     });
 
-    const command = parseBridgeCommand(inbound.text);
-    if (command) {
-      if (command.commandName === "new") {
-        try {
-          const thread = await this.appServer.startThread(
-            inbound.workspaceRoot,
-            buildNewThreadDisplayName(inbound)
-          );
-          if (thread && thread.id) {
-            this.sessionStore.bind(inbound.chatId, thread.id, inbound.workspaceRoot);
+    if (inbound.messageType === "text") {
+      const command = parseBridgeCommand(inbound.text);
+      if (command) {
+        if (command.commandName === "new") {
+          try {
+            const thread = await this.appServer.startThread(
+              inbound.workspaceRoot,
+              buildNewThreadDisplayName(inbound)
+            );
+            if (thread && thread.id) {
+              this.sessionStore.bind(inbound.chatId, thread.id, inbound.workspaceRoot);
+            }
+            await this.sendReply(inbound, {
+              ...buildNewSessionCommandReply(thread.id || ""),
+              threadId: thread.id || "",
+            });
+          } catch (error) {
+            await this.sendReply(inbound, buildBridgeErrorReply({
+              operation: "/new thread/start",
+              error,
+              threadId: effectiveThreadId,
+            }));
           }
-          await this.sendReply(inbound, {
-            ...buildNewSessionCommandReply(thread.id || ""),
-            threadId: thread.id || "",
-          });
-        } catch (error) {
-          await this.sendReply(inbound, buildBridgeErrorReply({
-            operation: "/new thread/start",
-            error,
-            threadId: effectiveThreadId,
-          }));
+        } else if (command.commandName === "session") {
+          await this.sendReply(
+            inbound,
+            buildSessionCommandReply(this.sessionStore.getBinding(inbound.chatId))
+          );
+        } else if (command.commandName === "health") {
+          await this.sendReply(
+            inbound,
+            buildHealthCommandReply(this.buildHealthDiagnostics(inbound, effectiveThreadId))
+          );
+        } else {
+          await this.sendReply(inbound, command);
         }
-      } else if (command.commandName === "session") {
-        await this.sendReply(
-          inbound,
-          buildSessionCommandReply(this.sessionStore.getBinding(inbound.chatId))
-        );
-      } else if (command.commandName === "health") {
-        await this.sendReply(
-          inbound,
-          buildHealthCommandReply(this.buildHealthDiagnostics(inbound, effectiveThreadId))
-        );
-      } else {
-        await this.sendReply(inbound, command);
+        appendEventLog("command", {
+          chatId: inbound.chatId,
+          messageId: inbound.messageId,
+          command: command.commandName,
+          threadId: this.sessionStore.getThreadId(inbound.chatId) || effectiveThreadId,
+        });
+        return;
       }
-      appendEventLog("command", {
-        chatId: inbound.chatId,
-        messageId: inbound.messageId,
-        command: command.commandName,
-        threadId: this.sessionStore.getThreadId(inbound.chatId) || effectiveThreadId,
-      });
-      return;
+    }
+
+    let promptText = inbound.text;
+    if (inbound.messageType === "image") {
+      try {
+        const imageContext = await this.prepareImageContext(inbound);
+        promptText = buildImagePrompt({
+          imageKey: imageContext.imageKey,
+          imagePath: imageContext.imagePath,
+          imageBytes: imageContext.imageBytes,
+          ocrText: imageContext.ocrText,
+          ocrLanguage: imageContext.ocrLanguage,
+          ocrStatus: imageContext.ocrStatus,
+          messageId: inbound.messageId,
+          threadId: effectiveThreadId,
+        });
+        appendEventLog("inbound_image", {
+          chatId: inbound.chatId,
+          messageId: inbound.messageId,
+          threadId: effectiveThreadId,
+          imageKey: truncateText(imageContext.imageKey, 80),
+          imagePath: imageContext.imagePath,
+          imageBytes: imageContext.imageBytes,
+          ocrChars: imageContext.ocrText.length,
+          ocrLanguage: imageContext.ocrLanguage,
+          ocrStatus: imageContext.ocrStatus,
+        });
+      } catch (error) {
+        const errorReply = buildBridgeErrorReply({
+          operation: "image/download",
+          error,
+          threadId: effectiveThreadId,
+        });
+        await this.sendReply(inbound, errorReply);
+        appendEventLog("image_error", {
+          chatId: inbound.chatId,
+          messageId: inbound.messageId,
+          threadId: effectiveThreadId,
+          reason: truncateText(error.message, 240),
+        });
+        return;
+      }
     }
 
     try {
       const turn = await this.appServer.turnStart({
         ...inbound,
         threadId: effectiveThreadId,
+        text: promptText,
       });
       if (turn.threadId) {
         this.sessionStore.bind(inbound.chatId, turn.threadId, inbound.workspaceRoot);
@@ -417,26 +469,86 @@ class ChuangFeishuBridge {
       content: textPayload.content,
     });
   }
+
+  async prepareImageContext(inbound) {
+    if (!inbound.imageKey) {
+      throw new Error("image message missing image_key");
+    }
+    const imageBuffer = await this.downloadImageBuffer(inbound.imageKey);
+    const imagePath = await this.writeImageTempFile(inbound, imageBuffer);
+    const ocrResult = this.runImageOcr(imagePath);
+    return {
+      imageKey: inbound.imageKey,
+      imagePath,
+      imageBytes: imageBuffer.length,
+      ocrText: ocrResult.text,
+      ocrLanguage: ocrResult.language,
+      ocrStatus: ocrResult.status,
+    };
+  }
+
+  async downloadImageBuffer(imageKey) {
+    const response = await this.client.im.v1.image.get({
+      path: {
+        image_key: imageKey,
+      },
+    });
+    return responseToBuffer(response);
+  }
+
+  async writeImageTempFile(inbound, imageBuffer) {
+    const imageDir = path.join(os.tmpdir(), "chuang-feishu-images");
+    await fs.promises.mkdir(imageDir, { recursive: true });
+    const safeMessageId = sanitizePathSegment(inbound.messageId);
+    const safeImageKey = sanitizePathSegment(inbound.imageKey);
+    const rawPath = path.join(imageDir, `${Date.now()}-${safeMessageId}-${safeImageKey}.bin`);
+    await fs.promises.writeFile(rawPath, imageBuffer);
+    return rawPath;
+  }
+
+  runImageOcr(imagePath) {
+    const preprocessedPath = `${imagePath}.ocr.png`;
+    const convertResult = spawnSync("convert", [imagePath, "-auto-orient", "-colorspace", "Gray", "-resize", "200%", preprocessedPath], {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const ocrInputPath = convertResult.status === 0 ? preprocessedPath : imagePath;
+    const languageCandidates = ["eng"];
+    for (const language of languageCandidates) {
+      const result = spawnSync("tesseract", [ocrInputPath, "stdout", "-l", language], {
+        encoding: "utf8",
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      if (result.status === 0) {
+        return {
+          text: normalizeText(result.stdout),
+          language,
+          status: normalizeText(result.stdout) ? "ok" : "empty",
+        };
+      }
+    }
+    return {
+      text: "",
+      language: "eng",
+      status: "failed",
+    };
+  }
 }
 
-function envState(name) {
-  return normalizeText(process.env[name]) ? "<set>" : "<missing>";
-}
-
-function providerEnvState() {
-  const providerFileState = fs.existsSync(PROVIDER_ENV_FILE) ? "<set>" : "<missing>";
-  return `CHUANG_PROVIDER_ENV_FILE=${providerFileState} CODEX_PPTOKEN_API_KEY=${envState("CODEX_PPTOKEN_API_KEY")}`;
-}
-
-function normalizeFeishuTextEvent(data) {
+function normalizeFeishuInboundEvent(data) {
   const event = data?.event || data || {};
   const message = event?.message || {};
   const sender = event?.sender || {};
-  if (message.message_type !== "text") {
+  const messageType = normalizeText(message.message_type);
+  if (messageType !== "text" && messageType !== "image") {
     return null;
   }
-  const text = parseFeishuTextContent(message.content);
-  if (!text) {
+  const text = messageType === "text" ? parseFeishuTextContent(message.content) : "";
+  const { imageKey } = messageType === "image" ? parseFeishuImageContent(message.content) : { imageKey: "" };
+  if (messageType === "text" && !text) {
+    return null;
+  }
+  if (messageType === "image" && !imageKey) {
     return null;
   }
   const chatId = normalizeText(message.chat_id);
@@ -453,7 +565,9 @@ function normalizeFeishuTextEvent(data) {
     senderId,
     threadId,
     workspaceRoot: WORKSPACE_ROOT,
+    messageType,
     text,
+    imageKey,
   };
 }
 
@@ -513,6 +627,52 @@ function appendEventLog(kind, payload) {
   } catch (error) {
     console.error(`[chuang-feishu] failed to write event log: ${error.message}`);
   }
+}
+
+function envState(name) {
+  return normalizeText(process.env[name]) ? "<set>" : "<missing>";
+}
+
+function providerEnvState() {
+  const providerFileState = fs.existsSync(PROVIDER_ENV_FILE) ? "<set>" : "<missing>";
+  return `CHUANG_PROVIDER_ENV_FILE=${providerFileState} CODEX_PPTOKEN_API_KEY=${envState("CODEX_PPTOKEN_API_KEY")}`;
+}
+
+function responseToBuffer(response) {
+  if (Buffer.isBuffer(response)) {
+    return response;
+  }
+  if (response instanceof Uint8Array) {
+    return Buffer.from(response);
+  }
+  if (response && typeof response.getReadableStream === "function") {
+    return new Promise((resolve, reject) => {
+      const stream = response.getReadableStream();
+      const chunks = [];
+      stream.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      stream.on("end", () => resolve(Buffer.concat(chunks)));
+      stream.on("error", reject);
+    });
+  }
+  if (response && response.data) {
+    if (Buffer.isBuffer(response.data)) {
+      return response.data;
+    }
+    if (response.data instanceof Uint8Array) {
+      return Buffer.from(response.data);
+    }
+  }
+  throw new Error("unexpected image download response type");
+}
+
+function sanitizePathSegment(value) {
+  const text = normalizeText(value);
+  if (!text) {
+    return "unknown";
+  }
+  return text.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 64);
 }
 
 function maskSecret(value) {

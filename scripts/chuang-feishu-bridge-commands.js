@@ -212,6 +212,7 @@ function buildHelpCommandReply() {
       "- `/new`：开新窗口/新上下文入口；不会进入 Agent 主链。",
       "- `/session`：查看当前飞书聊天绑定的 Chuang 会话。",
       "- `/health`：查看本地 bridge/app-server/provider env 诊断。",
+      "- 图片消息：会先下载、OCR，再进入 Chuang 主链。",
       "- `/receipt` / `/live-receipt`：显示人工 live 回执模板入口；不会进入 Agent 主链。",
       "- `/live-check`：显示人工 live 检查步骤；不会进入 Agent 主链。",
       "- `/help`：显示这条帮助；不会进入 Agent 主链。",

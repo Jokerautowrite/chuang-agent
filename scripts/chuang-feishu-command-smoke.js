@@ -33,6 +33,7 @@ assert.strictEqual(help.commandName, "help");
 assert(help.replyText.includes("/new"));
 assert(help.replyText.includes("/session"));
 assert(help.replyText.includes("/health"));
+assert(help.replyText.includes("图片消息：会先下载、OCR，再进入 Chuang 主链。"));
 assert(help.replyText.includes("/receipt"));
 assert(help.replyText.includes("/live-check"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
