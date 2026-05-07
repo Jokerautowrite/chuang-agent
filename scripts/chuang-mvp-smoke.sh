@@ -314,6 +314,47 @@ assert data["hits"][0]["source"] == "local_file"
 assert data["hits"][0]["path"] == "wiki/local.md"
 '
 
+printf '%s\n' "[smoke] memory knowledge context preview"
+knowledge_preview_output="$(cargo run --quiet -- memory knowledge preview-context --root "$knowledge_root" --query "provenance" --json)"
+printf '%s' "$knowledge_preview_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+assert data["adapter"] == "local_external_knowledge"
+assert data["read_only"] is True
+assert data["connects_real_service"] is False
+assert data["writes_automatically"] is False
+assert data["runtime_injection_applied"] is False
+assert data["runtime_retrieval_wired"] is False
+assert data["segment_count"] == 1
+assert data["segments"][0]["path"] == "wiki/local.md"
+'
+
+printf '%s\n' "[smoke] memory knowledge source contract"
+knowledge_contract_output="$(cargo run --quiet -- memory knowledge source-contract --source wiki --json)"
+printf '%s' "$knowledge_contract_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+assert data["source"] == "wiki"
+assert data["read_only"] is True
+assert data["live_adapter_configured"] is False
+assert data["connects_real_service"] is False
+assert data["writes_automatically"] is False
+assert data["runtime_retrieval_wired"] is False
+assert data["boundary"]["requires_provenance"] is True
+assert data["boundary"]["writes_core_memory"] is False
+'
+
+printf '%s\n' "[smoke] runtime knowledge context opt-in"
+knowledge_runtime_output="$(cargo run --quiet -- run --config "$config_path" --input "use knowledge context" --enable-knowledge-context-preview --knowledge-context-root "$knowledge_root" --knowledge-context-query "provenance")"
+printf '%s' "$knowledge_runtime_output" | python3 -c '
+import sys
+data = sys.stdin.read()
+assert "knowledge_context_preview_enabled: true" in data
+assert "knowledge_context_injected: true" in data
+assert "knowledge_context_connects_real_service: false" in data
+assert "knowledge_context_runtime_retrieval_wired: false" in data
+'
+
 printf '%s\n' "[smoke] channel simulate"
 channel_output="$(cargo run --quiet -- channel simulate --workspace-root "$work_dir" --message-id smoke-msg-1 --sender-id smoke-user --thread-id smoke-channel-thread --text "mvp smoke channel" --goal "mvp channel goal" --json)"
 printf '%s' "$channel_output" | python3 -c '
@@ -389,6 +430,19 @@ cargo run --quiet -- console snapshot --config "$config_path" --json >/dev/null
 
 printf '%s\n' "[smoke] plugin registry"
 cargo run --quiet -- plugin check --registry "$root_dir/plugins/registry.example.json" --json >/dev/null
+
+printf '%s\n' "[smoke] skill proposal dry-run"
+skill_output="$(cargo run --quiet -- skill propose --event-id smoke-event --task-id smoke-task --summary "smoke skill proposal" --json)"
+printf '%s' "$skill_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+assert data["dry_run"] is True
+assert data["writes_skills"] is False
+assert data["requires_approval"] is True
+assert data["proposal_count"] == 1
+assert data["boundary"]["writes_skill_files"] is False
+assert data["boundary"]["solidifies_skill"] is False
+'
 
 printf '%s\n' "[smoke] subagent queue"
 dispatch_output="$(cargo run --quiet -- subagent dispatch --config "$config_path" --task "mvp smoke subagent" --requires-capability smoke --json)"
