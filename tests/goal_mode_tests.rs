@@ -11,7 +11,10 @@ fn goal_spec_mainline_mvp_has_safe_defaults() {
     assert!(goal.allowed_slots.contains(&"governance".to_string()));
     assert_eq!(goal.budget.max_subtasks, Some(0));
     assert!(goal.checkpoint_policy.update_progress_log);
+    assert!(goal.checkpoint_policy.update_handoff);
+    assert!(goal.checkpoint_policy.commit_checkpoint);
     assert!(goal.final_report_policy.include_validation);
+    assert!(goal.final_report_policy.include_next_steps);
 }
 
 #[test]
@@ -60,6 +63,7 @@ fn goal_spec_renders_context_block_for_runtime_injection() {
     assert!(block.contains("allowed_slots: context,governance,execution,report,memory"));
     assert!(block.contains("max_subtasks=0"));
     assert!(block.contains("checkpoint_policy: progress_log=true handoff=true commit=true"));
+    assert!(block.contains("final_report_policy: validation=true next_steps=true"));
 }
 
 #[test]

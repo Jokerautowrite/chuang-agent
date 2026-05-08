@@ -151,7 +151,7 @@ tests/goal_mode_tests.rs
 tests/goal_run_tests.rs
 ```
 
-`GoalSpec` 目前只定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。`GoalRun` 负责把目标计划、worker plan、写入范围、验证计划和 checkpoint log 保存成 JSON；`goal show` 在读取时也会重新校验这些结构，避免坏文件伪装成可恢复状态。
+`GoalSpec` 目前定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。`GoalRun` 负责把目标计划、worker plan、写入范围、验证计划和 checkpoint log 保存成 JSON；`goal show` 在读取时也会重新校验这些结构，避免坏文件伪装成可恢复状态。现在 `status` / `doctor` / `console snapshot` / `app-server health` 也会把 goal policy 和最新 checkpoint 复盘证据显式暴露出来。
 
 第二测试版补强的验收面：
 
@@ -159,6 +159,7 @@ tests/goal_run_tests.rs
 - checkpoint 会校验 `completed_worker_ids` 不能为空且只能引用计划内 worker。
 - `goal show` 文本和 JSON 会输出 `goal_run_diagnostics`：worker scope 完整性、worker validation 完整性、validation plan 完整性、latest checkpoint 完整性、last checkpoint id/summary，以及 `executes_automatically=false` / `bypasses_governance=false`。
 - `GoalRun` checkpoint 会记录 RFC3339 `created_at`；旧 checkpoint 缺该字段仍可读取，但新写入和带字段的持久化记录必须是合法时间戳。
+- `goal_run` 只读状态会显式暴露最新 checkpoint 的 `created_at`、`completed_worker_ids` 和 `validation_notes`，方便操作者直接看复盘证据，不必再打开 JSON 文件。
 - `incomplete_reasons` 是结构化恢复提示：旧 checkpoint 缺完成者、缺验证备注、worker scope 不完整或 validation plan 不完整时，readiness/诊断面应直接暴露原因。
 - checkpoint 必须带至少一个 `completed_worker_id` 和至少一条 `validation_note`。缺 checkpoint 仍只用于提示续接风险，不会触发任务执行。
 

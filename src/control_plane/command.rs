@@ -59,12 +59,16 @@ impl CommandControlPlane {
         Self { config }
     }
 
-    fn list_args(&self) -> Vec<String> {
-        split_args(&self.config.list_args)
+    fn list_args(&self) -> Result<Vec<String>, ControlError> {
+        split_args(&self.config.list_args).map_err(|error| {
+            ControlError::InvalidRequest(format!("control list args parse failed: {error}"))
+        })
     }
 
-    fn apply_args(&self) -> Vec<String> {
-        split_args(&self.config.apply_args)
+    fn apply_args(&self) -> Result<Vec<String>, ControlError> {
+        split_args(&self.config.apply_args).map_err(|error| {
+            ControlError::InvalidRequest(format!("control apply args parse failed: {error}"))
+        })
     }
 
     fn run_command(
@@ -110,7 +114,7 @@ impl CommandControlPlane {
     }
 
     pub fn try_list_units(&self) -> Result<Vec<ManagedUnit>, ControlError> {
-        let result = self.run_command(&self.list_args(), None)?;
+        let result = self.run_command(&self.list_args()?, None)?;
         if result.status_code != Some(0) {
             return Err(ControlError::InvalidRequest(format!(
                 "control command failed: status={:?} stderr={}",
@@ -195,7 +199,7 @@ impl ControlPlane for CommandControlPlane {
         let stdin_json = serde_json::to_string(&request_record(&request)).map_err(|error| {
             ControlError::InvalidRequest(format!("control request serialization failed: {error}"))
         })?;
-        let result = self.run_command(&self.apply_args(), Some(&stdin_json))?;
+        let result = self.run_command(&self.apply_args()?, Some(&stdin_json))?;
         if result.status_code != Some(0) {
             return Err(ControlError::InvalidRequest(format!(
                 "control command failed: status={:?} stderr={}",
@@ -221,7 +225,7 @@ fn request_record(request: &ControlRequest) -> ControlRequestRecord {
     }
 }
 
-fn split_args(raw: &str) -> Vec<String> {
+fn split_args(raw: &str) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
@@ -251,13 +255,16 @@ fn split_args(raw: &str) -> Vec<String> {
     }
 
     if escaped {
-        current.push('\\');
+        return Err("trailing escape in command args".to_string());
+    }
+    if let Some(active) = quote {
+        return Err(format!("unterminated {active} quote in command args"));
     }
     if !current.is_empty() {
         args.push(current);
     }
 
-    args
+    Ok(args)
 }
 
 fn parse_kind(raw: &str) -> Result<ManagedUnitKind, ControlError> {

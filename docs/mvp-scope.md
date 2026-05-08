@@ -26,7 +26,7 @@
 - `./scripts/launch-chuang-agent-repl.sh`：启动本地交互 REPL，默认读取项目根 `config.toml`，并优先从仓库外 `CHUANG_PROVIDER_ENV_FILE`（默认 `~/.config/chuang-agent/provider.env`）加载 `CODEX_PPTOKEN_API_KEY`；缺失时只给出提示，不回落到 fake。设置 `CHUANG_REPL_STUB=1` 时只走 stub 链路验证。
 - `cargo run -- run --goal TEXT --input TEXT`：把长期目标作为额外 context segment 注入 runtime；不改写原始 `user_input`，不新增 slot，不绕过治理。
 - `cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID]`：创建本地 `GoalRun` 计划 JSON，用于 checkpoint-first continuation；只记录目标计划，不执行命令。
-- `cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]` 和 `cargo run -- goal show ...`：追加/读取 `GoalRun` checkpoint，用于下一轮恢复目标状态；不自动续跑、不调度子代理。
+- `cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]` 和 `cargo run -- goal show ...`：追加/读取 `GoalRun` checkpoint，用于下一轮恢复目标状态；文本和 JSON 会显式带出 latest checkpoint 的 `created_at`、completed workers 和 validation notes，但不自动续跑、不调度子代理。
 - `cargo run -- run --input TEXT --remember`：运行后写回普通 SQLite turn summary。
 - `cargo run -- run --input TEXT --session-id ID --remember-session`：写入带 session 范围的 turn summary；后续同 session recall 会带隔离诊断，不跨 session 召回。
 - `cargo run -- memory session search --query TEXT [--session-id ID] [--limit N]`：只读检索历史 `turn_summary`；带 `--session-id` 时按会话隔离过滤。

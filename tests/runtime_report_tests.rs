@@ -278,6 +278,22 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     extra.insert("goal_id".to_string(), "mainline-mvp".to_string());
     extra.insert("goal_objective".to_string(), "收尾可观测性".to_string());
     extra.insert("goal_context_injected".to_string(), "true".to_string());
+    extra.insert(
+        "knowledge_context_preview_count".to_string(),
+        "1".to_string(),
+    );
+    extra.insert(
+        "knowledge_context_injected_count".to_string(),
+        "0".to_string(),
+    );
+    extra.insert(
+        "knowledge_context_dropped_count".to_string(),
+        "1".to_string(),
+    );
+    extra.insert(
+        "knowledge_context_dropped_segment_ids".to_string(),
+        r#"["external-knowledge-knowledge-segment-1"]"#.to_string(),
+    );
     extra.insert("session_id".to_string(), "thread-a".to_string());
     extra.insert("session_memory_scope".to_string(), "session".to_string());
     extra.insert(
@@ -358,6 +374,22 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert_eq!(
         observability.get("governance_reason"),
         Some(&"read-only or draft action".to_string())
+    );
+    assert_eq!(
+        observability.get("knowledge_context_preview_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("knowledge_context_injected_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
+        observability.get("knowledge_context_dropped_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("knowledge_context_dropped_segment_ids"),
+        Some(&r#"["external-knowledge-knowledge-segment-1"]"#.to_string())
     );
     assert_eq!(
         observability.get("session_id"),

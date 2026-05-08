@@ -13,7 +13,7 @@ timeout_ms = 30000
 ```
 
 `list_args` is called without stdin. `apply_args` receives one JSON object on stdin.
-Arguments are split without a shell; token-leading single and double quotes can group values that contain spaces.
+Arguments are split without a shell; token-leading single and double quotes can group values that contain spaces. Malformed quoting or trailing escapes are rejected before spawn.
 `timeout_ms` is optional and defaults to 30000. Chuang terminates only the command process it started when the timeout expires.
 
 ## List Output

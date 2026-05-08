@@ -193,7 +193,21 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     run_goal_mode_check()?;
     checks.push(pass(
         "goal_mode",
-        "lightweight goal context wrapper is available",
+        &format!(
+            "entrypoint={} kind={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
+            status.goal_mode.cli_entrypoint,
+            status.goal_mode.kind,
+            status.goal_mode.context_source,
+            status.goal_mode.default_goal_id,
+            format_name_list(&status.goal_mode.default_allowed_slots),
+            status.goal_mode.checkpoint_policy.update_progress_log,
+            status.goal_mode.checkpoint_policy.update_handoff,
+            status.goal_mode.checkpoint_policy.commit_checkpoint,
+            status.goal_mode.final_report_policy.include_validation,
+            status.goal_mode.final_report_policy.include_next_steps,
+            status.goal_mode.bypasses_governance,
+            status.goal_mode.adds_core_slot
+        ),
     ));
     if !status.goal_run.ok {
         return Err(format!(
@@ -209,8 +223,41 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "goal_run_readiness",
         &format!(
-            "goal_id={} plan_exists={} checkpoint_count={}",
-            status.goal_run.goal_id, status.goal_run.plan_exists, status.goal_run.checkpoint_count
+            "goal_id={} plan_exists={} checkpoint_count={} worker_count={} validation_command_count={} checkpoint_log_complete={} last_checkpoint={} last_summary={} last_created_at={} last_completed_worker_ids={} last_validation_notes={} incomplete_reasons={}",
+            status.goal_run.goal_id,
+            status.goal_run.plan_exists,
+            status.goal_run.checkpoint_count,
+            status.goal_run.worker_count,
+            status.goal_run.validation_command_count,
+            status.goal_run.checkpoint_log_complete,
+            status
+                .goal_run
+                .last_checkpoint_id
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_summary
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_created_at
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_completed_worker_ids
+                .as_ref()
+                .map(|values| values.join(","))
+                .unwrap_or_else(|| "none".to_string()),
+            status
+                .goal_run
+                .last_checkpoint_validation_notes
+                .as_ref()
+                .map(|values| values.join(" | "))
+                .unwrap_or_else(|| "none".to_string()),
+            format_text_list(&status.goal_run.incomplete_reasons)
         ),
     ));
     if !status.project_readiness.ok {
@@ -626,17 +673,29 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         format_name_list(&doctor.status.atomic_tools.interface_only_atomic_tool_names)
     );
     println!(
-        "goal_mode_ok: {} entrypoint={} kind={}",
+        "goal_mode: ok={} entrypoint={} kind={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
         doctor.status.goal_mode.ok,
         doctor.status.goal_mode.cli_entrypoint,
-        doctor.status.goal_mode.kind
+        doctor.status.goal_mode.kind,
+        doctor.status.goal_mode.context_source,
+        doctor.status.goal_mode.default_goal_id,
+        format_name_list(&doctor.status.goal_mode.default_allowed_slots),
+        doctor.status.goal_mode.checkpoint_policy.update_progress_log,
+        doctor.status.goal_mode.checkpoint_policy.update_handoff,
+        doctor.status.goal_mode.checkpoint_policy.commit_checkpoint,
+        doctor.status.goal_mode.final_report_policy.include_validation,
+        doctor.status.goal_mode.final_report_policy.include_next_steps,
+        doctor.status.goal_mode.bypasses_governance,
+        doctor.status.goal_mode.adds_core_slot
     );
     println!(
-        "goal_run_ok: {} plan_exists={} goal_id={} checkpoints={} path={}",
+        "goal_run_ok: {} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} path={}",
         doctor.status.goal_run.ok,
         doctor.status.goal_run.plan_exists,
         doctor.status.goal_run.goal_id,
         doctor.status.goal_run.checkpoint_count,
+        doctor.status.goal_run.worker_count,
+        doctor.status.goal_run.validation_command_count,
         doctor.status.goal_run.path
     );
     println!(
@@ -660,6 +719,35 @@ fn print_doctor(doctor: &DoctorCliOutput) {
             .last_checkpoint_summary
             .as_deref()
             .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_created_at: {}",
+        doctor
+            .status
+            .goal_run
+            .last_checkpoint_created_at
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_completed_worker_ids: {}",
+        doctor
+            .status
+            .goal_run
+            .last_checkpoint_completed_worker_ids
+            .as_ref()
+            .map(|values| values.join(","))
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "goal_run_last_checkpoint_validation_notes: {}",
+        doctor
+            .status
+            .goal_run
+            .last_checkpoint_validation_notes
+            .as_ref()
+            .map(|values| values.join(" | "))
+            .unwrap_or_else(|| "none".to_string())
     );
     println!(
         "goal_run_incomplete_reasons: {}",

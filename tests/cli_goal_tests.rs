@@ -250,6 +250,16 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
         serde_json::from_slice(&checkpoint.stdout).expect("receipt should be json");
     assert_eq!(receipt["checkpoint_count"], 1);
     assert_eq!(receipt["last_checkpoint_id"], "checkpoint-1");
+    assert_eq!(receipt["checkpoint_writeback"]["manual_only"], true);
+    assert_eq!(
+        receipt["checkpoint_writeback"]["documentation_targets"]
+            .as_array()
+            .expect("writeback targets")
+            .iter()
+            .map(|value| value.as_str().expect("target string"))
+            .collect::<Vec<_>>(),
+        vec!["docs/progress-log.md", "docs/handoff-current.md"]
+    );
 
     let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
@@ -284,6 +294,14 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
             .expect("checkpoint created_at should be present"),
     );
     assert_eq!(
+        run["goal_run_diagnostics"]["checkpoint_writeback"]["manual_only"],
+        true
+    );
+    assert_eq!(
+        run["goal_run_diagnostics"]["checkpoint_writeback"]["documentation_targets"],
+        serde_json::json!(["docs/progress-log.md", "docs/handoff-current.md"])
+    );
+    assert_eq!(
         run["goal_run_diagnostics"]["checkpoint_log_complete"],
         serde_json::Value::Bool(true)
     );
@@ -309,6 +327,10 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
     assert!(stdout.contains("goal_checkpoint_log_complete: true"));
     assert!(stdout.contains("goal_last_checkpoint: checkpoint-1"));
     assert!(stdout.contains("goal_last_summary: diagnostics landed"));
+    assert!(stdout.contains("goal_checkpoint_writeback_manual_only: true"));
+    assert!(stdout.contains(
+        "goal_checkpoint_writeback_targets: docs/progress-log.md | docs/handoff-current.md"
+    ));
     assert!(stdout.contains("goal_incomplete_reasons: none"));
 }
 
@@ -456,6 +478,63 @@ fn cli_goal_checkpoint_rejects_duplicate_completed_worker_id() {
     let stderr = String::from_utf8_lossy(&checkpoint.stderr);
     assert!(stderr.contains("goal_run_invalid: checkpoint_log.completed_worker_ids"));
     assert!(stderr.contains("completed worker ids must be unique"));
+}
+
+#[test]
+fn cli_goal_checkpoint_text_output_includes_writeback_hints() {
+    let root = temp_goal_root("checkpoint-text-writeback");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "checkpoint-text-writeback",
+            "--objective",
+            "checkpoint text should show manual writeback hints",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let checkpoint = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "checkpoint",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "checkpoint-text-writeback",
+            "--checkpoint-id",
+            "checkpoint-text-1",
+            "--summary",
+            "text output should name writeback targets",
+            "--completed-worker-id",
+            "main-process",
+            "--validation-note",
+            "cargo test -q --test cli_goal_tests",
+        ])
+        .output()
+        .expect("goal checkpoint should execute");
+
+    assert!(
+        checkpoint.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&checkpoint.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&checkpoint.stdout);
+    assert!(stdout.contains("goal_checkpoint_summary: text output should name writeback targets"));
+    assert!(stdout.contains("goal_checkpoint_writeback_manual_only: true"));
+    assert!(stdout.contains(
+        "goal_checkpoint_writeback_targets: docs/progress-log.md | docs/handoff-current.md"
+    ));
 }
 
 fn assert_rfc3339_timestamp(value: &str) {

@@ -9,7 +9,7 @@ use chuang_agent::goal_run::{
     GoalWorkerPlan, GoalWriteScope,
 };
 use chuang_agent::kernel_status::{build_chuang_mvp_status, summarize_goal_run_readiness};
-use chuang_agent::runtime_config::RuntimeConfig;
+use chuang_agent::runtime_config::{IdentityBootstrapConfig, IdentityMemoryConfig, RuntimeConfig};
 
 #[test]
 fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
@@ -107,8 +107,8 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.plugin_registry.capability_count >= 5);
     assert!(status.local_contract_readiness.ok);
     assert_eq!(status.local_contract_readiness.overall_state, "ready");
-    assert_eq!(status.local_contract_readiness.contract_count, 4);
-    assert_eq!(status.local_contract_readiness.ready_count, 4);
+    assert_eq!(status.local_contract_readiness.contract_count, 5);
+    assert_eq!(status.local_contract_readiness.ready_count, 5);
     assert!(
         !status
             .local_contract_readiness
@@ -131,6 +131,14 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|contract| contract.name == "skill_proposal_review"
             && contract.dry_run
             && !contract.writes_core_memory));
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(|contract| contract.name == "skill_approval_flow"
+            && contract.dry_run
+            && !contract.writes_core_memory
+            && contract.boundary == "approval_receipt_only"));
     assert!(status
         .local_contract_readiness
         .contracts
@@ -221,6 +229,12 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.memory_readiness.ok);
     assert_eq!(status.memory_readiness.overall_state, "ready");
     assert_eq!(status.memory_readiness.layer_count, 5);
+    assert!(status.memory_maintenance_receipt.available);
+    assert!(status.memory_maintenance_receipt.readable);
+    assert_eq!(status.memory_maintenance_receipt.state, "missing");
+    assert_eq!(status.memory_maintenance_receipt.receipt_count, 0);
+    assert!(status.memory_maintenance_receipt.latest_entry_id.is_none());
+    assert!(status.memory_maintenance_receipt.error.is_none());
     assert!(status
         .memory_readiness
         .layers
@@ -278,7 +292,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status
         .subagent_readiness
         .live_adapter_reason
-        .contains("not yet connected"));
+        .contains("read-only live runner rehearsal is ready"));
     assert!(status
         .subagent_readiness
         .layers
@@ -293,6 +307,17 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && layer
                 .live_adapter_reason
                 .contains("live runner adapters remain deferred")));
+    assert!(status
+        .subagent_readiness
+        .layers
+        .iter()
+        .any(|layer| layer.name == "live_runner_rehearsal"
+            && layer.state == "ready"
+            && layer.local_contract_ready
+            && layer.local_contract_state == "ready"
+            && !layer.live_adapter_ready
+            && layer.live_adapter_state == "deferred"
+            && layer.boundary == "read_only_preflight"));
     assert!(status
         .subagent_readiness
         .layers
@@ -345,10 +370,112 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.goal_mode.ok);
     assert_eq!(status.goal_mode.cli_entrypoint, "run --goal TEXT");
     assert_eq!(status.goal_mode.default_goal_id, "mainline-mvp");
+    assert!(status.goal_mode.checkpoint_policy.update_progress_log);
+    assert!(status.goal_mode.checkpoint_policy.update_handoff);
+    assert!(status.goal_mode.checkpoint_policy.commit_checkpoint);
+    assert!(status.goal_mode.final_report_policy.include_validation);
+    assert!(status.goal_mode.final_report_policy.include_next_steps);
     assert!(!status.goal_mode.bypasses_governance);
     assert!(!status.goal_mode.adds_core_slot);
     assert_eq!(status.goal_run.goal_id, "mainline-mvp");
     assert!(status.goal_run.ok);
+}
+
+#[test]
+fn kernel_status_exposes_latest_memory_maintenance_receipt() {
+    let root = temp_root("maintenance-receipt");
+    let identity_root = root.join("identity");
+    let bootstrap_root = root.join("identity-bootstrap");
+    std::fs::create_dir_all(&identity_root).expect("identity root should exist");
+    std::fs::create_dir_all(&bootstrap_root).expect("bootstrap root should exist");
+    std::fs::write(
+        identity_root.join("experiences.md"),
+        r#"## lim-candidate-123
+writeback=memory_maintenance_apply
+approved_writeback=true
+approval_source=cli --approve-writeback
+approved_at=2026-05-07T12:34:56Z
+approval_note=老爸批准写入 LIM 候选
+provenance_preserved=true
+source=lim_dry_run
+source_record_id=turn-123
+created_at=2026-05-07T12:00:00Z
+lesson=测试 memory maintenance receipt
+"#,
+    )
+    .expect("experiences receipt should be written");
+
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.identity_memory = IdentityMemoryConfig::HermesDualFile {
+        root: identity_root,
+        user_max_chars: 1375,
+        memory_max_chars: DEFAULT_MEMORY_WRITE_MAX_CHARS,
+    };
+    config.identity_bootstrap = IdentityBootstrapConfig::new(&bootstrap_root);
+
+    let kernel = ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: config.recall_limit,
+        metadata: config.metadata.clone(),
+        context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
+    };
+
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    assert!(status.memory_maintenance_receipt.available);
+    assert!(status.memory_maintenance_receipt.readable);
+    assert_eq!(status.memory_maintenance_receipt.state, "ready");
+    assert_eq!(status.memory_maintenance_receipt.receipt_count, 1);
+    assert_eq!(
+        status.memory_maintenance_receipt.latest_entry_id.as_deref(),
+        Some("lim-candidate-123")
+    );
+    assert_eq!(
+        status
+            .memory_maintenance_receipt
+            .latest_source_record_id
+            .as_deref(),
+        Some("turn-123")
+    );
+    assert_eq!(
+        status
+            .memory_maintenance_receipt
+            .latest_approval_source
+            .as_deref(),
+        Some("cli --approve-writeback")
+    );
+    assert_eq!(
+        status
+            .memory_maintenance_receipt
+            .latest_approved_at
+            .as_deref(),
+        Some("2026-05-07T12:34:56Z")
+    );
+    assert_eq!(
+        status
+            .memory_maintenance_receipt
+            .latest_approval_note
+            .as_deref(),
+        Some("老爸批准写入 LIM 候选")
+    );
+    assert!(
+        status
+            .memory_maintenance_receipt
+            .latest_provenance_preserved
+    );
+    assert!(status
+        .memory_maintenance_receipt
+        .current
+        .contains("latest approved memory maintenance writeback"));
+    assert!(status
+        .memory_maintenance_receipt
+        .next_action
+        .contains("approve-writeback"));
 }
 
 #[test]
@@ -591,6 +718,13 @@ fn goal_run_readiness_reports_invalid_plan_read_error() {
 fn temp_goal_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "chuang-kernel-status-goal-{name}-{}",
+        std::process::id()
+    ))
+}
+
+fn temp_root(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "chuang-kernel-status-{name}-{}",
         std::process::id()
     ))
 }

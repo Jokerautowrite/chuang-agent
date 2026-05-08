@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use chuang_agent::skill_evolver::{
     DryRunProposalEvolver, EvolutionError, EvolutionScope, NoopEvolver, RuntimeEvent,
-    RuntimeEventKind, SkillEvolver, SkillProposal, SkillProposalProvenance,
+    RuntimeEventKind, SkillApprovalReceipt, SkillApprovalState, SkillEvolver, SkillProposal,
+    SkillProposalProvenance, SkillSolidifyTicket, ValidationReport,
 };
 
 fn event() -> RuntimeEvent {
@@ -42,6 +43,18 @@ fn proposal() -> SkillProposal {
                 ("task_kind".to_string(), "runtime".to_string()),
             ]),
         }],
+    }
+}
+
+fn validation_report(accepted: bool) -> ValidationReport {
+    ValidationReport {
+        proposal_id: "proposal-1".to_string(),
+        accepted,
+        reasons: if accepted {
+            vec!["approved by operator".to_string()]
+        } else {
+            vec!["approval still required".to_string()]
+        },
     }
 }
 
@@ -205,4 +218,144 @@ fn dry_run_evolver_rejects_unsafe_proposal_markers() {
         .reasons
         .iter()
         .any(|reason| reason.contains("preserve provenance")));
+}
+
+#[test]
+fn skill_approval_receipt_helpers_validate_state_and_serialize() {
+    let pending =
+        SkillApprovalReceipt::pending_receipt("proposal-1".to_string(), validation_report(false));
+
+    assert!(pending.is_pending());
+    assert_eq!(pending.approval_state(), SkillApprovalState::Pending);
+    assert!(pending.validate_consistency().is_ok());
+
+    let pending_json = serde_json::to_value(&pending).expect("pending receipt should serialize");
+    assert_eq!(pending_json["approved"], false);
+    assert_eq!(pending_json["approval_source"], "pending_operator_approval");
+    assert_eq!(
+        pending_json["validation_report"]["proposal_id"],
+        "proposal-1"
+    );
+
+    let approved = SkillApprovalReceipt::approved_receipt(
+        "proposal-1".to_string(),
+        validation_report(true),
+        "manual_review".to_string(),
+        Some("2026-05-08T10:00:00+08:00".to_string()),
+        Some("approval granted".to_string()),
+    );
+
+    assert!(approved.is_approved());
+    assert_eq!(approved.approval_state(), SkillApprovalState::Approved);
+    assert!(approved.validate_consistency().is_ok());
+
+    let approved_json = serde_json::to_value(&approved).expect("approved receipt should serialize");
+    assert_eq!(approved_json["approved"], true);
+    assert_eq!(approved_json["approval_source"], "manual_review");
+    assert_eq!(approved_json["approved_at"], "2026-05-08T10:00:00+08:00");
+}
+
+#[test]
+fn skill_approval_helpers_reject_inconsistent_state() {
+    let mut approved = SkillApprovalReceipt::approved_receipt(
+        "proposal-1".to_string(),
+        validation_report(false),
+        "manual_review".to_string(),
+        None,
+        Some("approval granted".to_string()),
+    );
+
+    assert!(approved.validate_consistency().is_err());
+
+    approved.validation_report = validation_report(true);
+    assert!(approved.validate_consistency().is_ok());
+
+    let mut ticket = SkillSolidifyTicket::approved_ticket(
+        &proposal(),
+        validation_report(true),
+        "manual_review".to_string(),
+        None,
+        Some("approval granted".to_string()),
+    );
+
+    assert!(ticket.is_approved_review());
+    assert_eq!(ticket.approval_state(), SkillApprovalState::Approved);
+    assert!(ticket.validate_consistency().is_ok());
+
+    ticket.local_only = false;
+
+    let err = ticket
+        .validate_consistency()
+        .expect_err("mutated ticket should fail validation");
+
+    assert!(err.contains("local_only=true"));
+    assert_eq!(
+        serde_json::to_value(&ticket).unwrap()["ticket_id"],
+        "approved-solidify-proposal-1"
+    );
+}
+
+#[test]
+fn skill_solidify_ticket_helpers_validate_pending_and_approved_forms() {
+    let proposal = proposal();
+    let pending = SkillSolidifyTicket::pending_ticket(&proposal, validation_report(false));
+
+    assert!(pending.is_pending_review());
+    assert_eq!(pending.approval_state(), SkillApprovalState::Pending);
+    assert!(pending.validate_consistency().is_ok());
+
+    let pending_json = serde_json::to_value(&pending).expect("pending ticket should serialize");
+    assert_eq!(pending_json["dry_run"], true);
+    assert_eq!(pending_json["writes_skills"], false);
+    assert_eq!(pending_json["solidifies_skill"], false);
+    assert_eq!(pending_json["local_only"], true);
+    assert_eq!(pending_json["approval_receipt"]["approved"], false);
+
+    let approved = SkillSolidifyTicket::approved_ticket(
+        &proposal,
+        validation_report(true),
+        "manual_review".to_string(),
+        Some("2026-05-08T10:00:00+08:00".to_string()),
+        Some("approval granted".to_string()),
+    );
+
+    assert!(approved.is_approved_review());
+    assert_eq!(approved.approval_state(), SkillApprovalState::Approved);
+    assert!(approved.validate_consistency().is_ok());
+
+    let approved_json = serde_json::to_value(&approved).expect("approved ticket should serialize");
+    assert_eq!(approved_json["ticket_id"], "approved-solidify-proposal-1");
+    assert_eq!(approved_json["approval_receipt"]["approved"], true);
+    assert_eq!(
+        approved_json["approval_receipt"]["approval_source"],
+        "manual_review"
+    );
+}
+
+#[test]
+fn skill_solidify_ticket_receipt_aliases_remain_local_only() {
+    let proposal = proposal();
+    let approval_receipt = SkillSolidifyTicket::approval_receipt(
+        &proposal,
+        validation_report(true),
+        "manual_review".to_string(),
+        None,
+        Some("approval granted".to_string()),
+    );
+    let refusal_receipt = SkillSolidifyTicket::solidify_refusal_receipt(
+        &proposal,
+        validation_report(true),
+        "manual_review".to_string(),
+        None,
+        Some("approval granted".to_string()),
+    );
+
+    assert!(approval_receipt.is_approved_review());
+    assert!(refusal_receipt.is_approved_review());
+    assert!(approval_receipt.validate_consistency().is_ok());
+    assert!(refusal_receipt.validate_consistency().is_ok());
+    assert!(approval_receipt.local_only);
+    assert!(refusal_receipt.local_only);
+    assert_eq!(approval_receipt.ticket_id, "approved-solidify-proposal-1");
+    assert_eq!(refusal_receipt.ticket_id, "approved-solidify-proposal-1");
 }

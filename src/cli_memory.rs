@@ -387,7 +387,7 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         request.session_id.as_deref(),
         request.limit,
     )?;
-    let selected_candidate_ids = if request.candidate_ids.is_empty() {
+    let requested_candidate_ids = if request.candidate_ids.is_empty() {
         plan.lim_candidates
             .iter()
             .map(|candidate| candidate.candidate_id.clone())
@@ -395,12 +395,16 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
     } else {
         request.candidate_ids.clone()
     };
+    let requested_candidate_count = requested_candidate_ids.len();
 
     let mut unique_selected_candidate_ids = Vec::new();
+    let mut duplicate_candidate_ids = Vec::new();
     let mut seen = BTreeSet::new();
-    for candidate_id in selected_candidate_ids {
+    for candidate_id in requested_candidate_ids {
         if seen.insert(candidate_id.clone()) {
             unique_selected_candidate_ids.push(candidate_id);
+        } else {
+            duplicate_candidate_ids.push(candidate_id);
         }
     }
 
@@ -428,6 +432,25 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         ));
     }
 
+    let selection_state = if unique_selected_candidate_ids.is_empty() {
+        "empty".to_string()
+    } else if !duplicate_candidate_ids.is_empty() {
+        "deduplicated".to_string()
+    } else {
+        "selected".to_string()
+    };
+    let selection_reason = if unique_selected_candidate_ids.is_empty() {
+        "no_lim_candidates".to_string()
+    } else if !request.candidate_ids.is_empty() {
+        if !duplicate_candidate_ids.is_empty() {
+            "duplicate_candidate_ids_deduplicated".to_string()
+        } else {
+            "explicit_candidate_ids".to_string()
+        }
+    } else {
+        "plan_candidates".to_string()
+    };
+
     let approval = MemoryMaintenanceApprovalOutput {
         required: true,
         approved: request.approve_writeback,
@@ -444,7 +467,7 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
 
     let mut applied_candidate_ids = Vec::new();
     let mut skipped_candidate_ids = Vec::new();
-    if request.approve_writeback {
+    if request.approve_writeback && !selected_candidates.is_empty() {
         let mut store = open_identity_memory_store(&request.runtime_args)?;
         for candidate in &selected_candidates {
             match store.append_experience(HotMemoryEntry {
@@ -474,6 +497,11 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         batches: plan.batches,
         lim_candidate_count: plan.lim_candidate_count,
         decay_candidate_count: plan.decay_candidate_count,
+        requested_candidate_count,
+        duplicate_candidate_count: duplicate_candidate_ids.len(),
+        duplicate_candidate_ids,
+        selection_state,
+        selection_reason,
         selected_candidates,
         selected_candidate_ids: unique_selected_candidate_ids,
         approval,
@@ -485,11 +513,16 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
     match request.output {
         ControlOutputFormat::Text => {
             println!(
-                "memory_maintenance_apply dry_run={} writes_automatically=false approved_writeback={} query={} session_id={} applied={} skipped={}",
+                "memory_maintenance_apply dry_run={} writes_automatically=false approved_writeback={} query={} session_id={} requested={} unique={} duplicates={} selection_state={} selection_reason={} applied={} skipped={}",
                 output.dry_run,
                 output.approved_writeback,
                 output.query,
                 output.session_id.as_deref().unwrap_or("any"),
+                output.requested_candidate_count,
+                output.selected_candidate_ids.len(),
+                output.duplicate_candidate_count,
+                output.selection_state,
+                output.selection_reason,
                 output.applied_candidate_ids.len(),
                 output.skipped_candidate_ids.len()
             );
@@ -501,6 +534,9 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
                 output.approval.writeback_scope,
                 output.approval.writes_automatically
             );
+            for candidate_id in &output.duplicate_candidate_ids {
+                println!("duplicate_candidate_id: {candidate_id}");
+            }
             for candidate_id in &output.applied_candidate_ids {
                 println!("applied_candidate_id: {candidate_id}");
             }
@@ -1817,6 +1853,11 @@ struct MemoryMaintenanceApplyOutput {
     batches: Vec<MemoryMaintenanceBatchOutput>,
     lim_candidate_count: usize,
     decay_candidate_count: usize,
+    requested_candidate_count: usize,
+    duplicate_candidate_count: usize,
+    duplicate_candidate_ids: Vec<String>,
+    selection_state: String,
+    selection_reason: String,
     selected_candidates: Vec<LimExtractionCandidateOutput>,
     selected_candidate_ids: Vec<String>,
     approval: MemoryMaintenanceApprovalOutput,

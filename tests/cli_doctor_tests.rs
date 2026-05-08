@@ -83,16 +83,23 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains(
         "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
     ));
-    assert!(stdout.contains("goal_mode_ok: true entrypoint=run --goal TEXT"));
-    assert!(stdout.contains("goal_run_ok: true"));
+    assert!(stdout.contains(
+        "goal_mode: ok=true entrypoint=run --goal TEXT kind=lightweight_runtime_context context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
+    ));
+    assert!(stdout.contains("goal_run_ok: true plan_exists=true goal_id=mainline-mvp checkpoints="));
+    assert!(stdout.contains("workers="));
+    assert!(stdout.contains("validation_commands="));
     assert!(stdout.contains("goal_id=mainline-mvp"));
     assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
     assert!(stdout.contains("goal_run_last_checkpoint:"));
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_completed_worker_ids:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_validation_notes:"));
     assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=4 ready=4 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=5 ready=5 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
@@ -179,7 +186,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .as_array()
         .expect("checks array")
         .iter()
-        .any(|check| check["name"] == "goal_mode"));
+        .any(|check| check["name"] == "goal_mode"
+            && check["detail"]
+                .as_str()
+                .expect("goal mode detail")
+                .contains("default_goal_id=mainline-mvp")
+            && check["detail"]
+                .as_str()
+                .expect("goal mode detail")
+                .contains("allowed_slots=context,governance,execution,report,memory")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -189,7 +204,19 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .as_array()
         .expect("checks array")
         .iter()
-        .any(|check| check["name"] == "goal_run_readiness"));
+        .any(|check| check["name"] == "goal_run_readiness"
+            && check["detail"]
+                .as_str()
+                .expect("goal run detail")
+                .contains("checkpoint_log_complete=")
+            && check["detail"]
+                .as_str()
+                .expect("goal run detail")
+                .contains("last_checkpoint=")
+            && check["detail"]
+                .as_str()
+                .expect("goal run detail")
+                .contains("incomplete_reasons=")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -247,7 +274,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
             && check["detail"]
                 .as_str()
                 .expect("local contract readiness detail")
-                .contains("contracts=4")));
+                .contains("contracts=5")));
     assert_eq!(
         parsed["status"]["config"]["identity_experiences_path"],
         root.join("identity")
@@ -276,6 +303,26 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         parsed["status"]["goal_mode"]["cli_entrypoint"],
         "run --goal TEXT"
     );
+    assert_eq!(
+        parsed["status"]["goal_mode"]["checkpoint_policy"]["update_progress_log"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["goal_mode"]["checkpoint_policy"]["update_handoff"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["goal_mode"]["checkpoint_policy"]["commit_checkpoint"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["goal_mode"]["final_report_policy"]["include_validation"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["goal_mode"]["final_report_policy"]["include_next_steps"],
+        true
+    );
     assert_eq!(parsed["status"]["goal_run"]["ok"], true);
     assert_eq!(parsed["status"]["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["status"]["goal_run"]["plan_exists"].is_boolean());
@@ -299,7 +346,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["contract_count"],
-        4
+        5
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
@@ -439,9 +486,9 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         parsed["status"]["subagent_readiness"]["live_adapter_reason"]
             .as_str()
             .expect("subagent live adapter reason")
-            .contains("not yet connected")
+            .contains("read-only live runner rehearsal is ready")
     );
-    assert_eq!(parsed["status"]["subagent_readiness"]["layer_count"], 5);
+    assert_eq!(parsed["status"]["subagent_readiness"]["layer_count"], 6);
     assert!(parsed["status"]["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers array")

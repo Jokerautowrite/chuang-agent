@@ -102,6 +102,26 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         "session"
     );
     assert_eq!(parsed["runtime_observability"]["tool_call_count"], "0");
+    assert_eq!(
+        parsed["runtime_observability"]["knowledge_context_preview_enabled"],
+        "false"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["knowledge_context_preview_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["knowledge_context_injected_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["knowledge_context_dropped_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["knowledge_context_dropped_segment_ids"],
+        "[]"
+    );
     assert_eq!(parsed["tool_trace"], "");
     assert!(parsed["tool_report"].is_null());
     assert_eq!(parsed["tool_surface"]["available"], true);

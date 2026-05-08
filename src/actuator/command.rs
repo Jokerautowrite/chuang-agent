@@ -41,8 +41,9 @@ impl CommandActuator {
         Self { config }
     }
 
-    fn args(&self) -> Vec<String> {
+    fn args(&self) -> Result<Vec<String>, ActuatorError> {
         split_args(&self.config.args)
+            .map_err(|error| actuator_error(format!("actuator args parse failed: {error}")))
     }
 
     fn run(
@@ -54,7 +55,7 @@ impl CommandActuator {
         })?;
         let mut command = Command::new(&self.config.program);
         command
-            .args(self.args())
+            .args(self.args()?)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -215,7 +216,7 @@ fn wait_with_timeout(
     }
 }
 
-fn split_args(raw: &str) -> Vec<String> {
+fn split_args(raw: &str) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
@@ -245,11 +246,14 @@ fn split_args(raw: &str) -> Vec<String> {
     }
 
     if escaped {
-        current.push('\\');
+        return Err("trailing escape in command args".to_string());
+    }
+    if let Some(active) = quote {
+        return Err(format!("unterminated {active} quote in command args"));
     }
     if !current.is_empty() {
         args.push(current);
     }
 
-    args
+    Ok(args)
 }

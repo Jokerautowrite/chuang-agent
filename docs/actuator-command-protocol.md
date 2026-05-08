@@ -48,6 +48,7 @@ Rules:
 - Do not implement broad arbitrary shell passthrough. The adapter must own an explicit allowlist of tools/actions.
 - Real click/type/browser/desktop control belongs in the adapter, not in core runtime.
 - GA 原子工具里的 `mouse` / `keyboard` / `screenshot` / `locate` / `wait` / `human_suspend` 仍然是接口态工具；核心 `status` / `doctor` 会把它们明确列为 `interface_only`，不会误报成已映射可执行工具。
+- Malformed quoting or trailing escapes in `actuator_args` are rejected before spawn instead of being normalized.
 - Non-zero exit, timeout, malformed JSON, or missing required response fields are treated as actuator errors.
 - The checked-in example script is a safe fixture. It does not operate the real desktop.
 

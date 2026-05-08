@@ -150,6 +150,21 @@ fn command_actuator_reports_malformed_adapter_output() {
 }
 
 #[test]
+fn command_actuator_rejects_malformed_args_before_spawn() {
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "printf".to_string(),
+        args: r#"unterminated ""#.to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = actuator
+        .observe(ObserveTarget::Screen)
+        .expect_err("malformed args should fail before spawn");
+
+    assert!(err.message.contains("actuator args parse failed"));
+}
+
+#[test]
 fn command_actuator_rejects_unknown_response_fields() {
     let mut actuator = CommandActuator::new(ActuatorCommandConfig {
         program: "printf".to_string(),

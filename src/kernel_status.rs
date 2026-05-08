@@ -1,6 +1,6 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
-use crate::goal_mode::GoalSpec;
+use crate::goal_mode::{GoalCheckpointPolicy, GoalFinalReportPolicy, GoalSpec};
 use crate::goal_run::GoalRunStore;
 use crate::governance::{
     risk_decision_parts, ActionKind, Governance, MarkdownRuleSet, ProposedAction,
@@ -23,6 +23,7 @@ pub struct ChuangMvpStatus {
     pub local_contract_readiness: LocalContractReadinessStatus,
     pub project_readiness: ProjectReadinessStatus,
     pub memory_readiness: MemoryReadinessStatus,
+    pub memory_maintenance_receipt: MemoryMaintenanceReceiptStatus,
     pub channel_readiness: ChannelReadinessStatus,
     pub subagent_readiness: SubagentReadinessStatus,
     pub external_ai_readiness: ExternalAiReadinessStatus,
@@ -146,6 +147,24 @@ pub struct MemoryReadinessStatus {
     pub deferred_count: usize,
     pub blocked_count: usize,
     pub layers: Vec<MemoryLayerStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemoryMaintenanceReceiptStatus {
+    pub available: bool,
+    pub readable: bool,
+    pub state: String,
+    pub experiences_path: String,
+    pub receipt_count: usize,
+    pub latest_entry_id: Option<String>,
+    pub latest_source_record_id: Option<String>,
+    pub latest_approval_source: Option<String>,
+    pub latest_approved_at: Option<String>,
+    pub latest_approval_note: Option<String>,
+    pub latest_provenance_preserved: bool,
+    pub current: String,
+    pub next_action: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -305,6 +324,8 @@ pub struct GoalModeStatus {
     pub context_source: String,
     pub default_goal_id: String,
     pub default_allowed_slots: Vec<String>,
+    pub checkpoint_policy: GoalCheckpointPolicy,
+    pub final_report_policy: GoalFinalReportPolicy,
     pub bypasses_governance: bool,
     pub adds_core_slot: bool,
 }
@@ -322,6 +343,9 @@ pub struct GoalRunReadinessStatus {
     pub checkpoint_log_complete: bool,
     pub last_checkpoint_id: Option<String>,
     pub last_checkpoint_summary: Option<String>,
+    pub last_checkpoint_created_at: Option<String>,
+    pub last_checkpoint_completed_worker_ids: Option<Vec<String>>,
+    pub last_checkpoint_validation_notes: Option<Vec<String>>,
     pub incomplete_reasons: Vec<String>,
     pub read_error: Option<String>,
 }
@@ -400,6 +424,7 @@ pub fn build_chuang_mvp_status(
         &goal_run,
     );
     let memory_readiness = build_memory_readiness(&config_summary);
+    let memory_maintenance_receipt = build_memory_maintenance_receipt(&config_summary);
     let channel_readiness = build_channel_readiness();
     let subagent_readiness = build_subagent_readiness(&slots, &config_summary);
     let external_ai_readiness = build_external_ai_readiness();
@@ -475,6 +500,7 @@ pub fn build_chuang_mvp_status(
         local_contract_readiness,
         project_readiness,
         memory_readiness,
+        memory_maintenance_receipt,
         channel_readiness,
         subagent_readiness,
         external_ai_readiness,
@@ -681,9 +707,22 @@ fn build_local_contract_readiness() -> LocalContractReadinessStatus {
         local_contract(
             "skill_proposal_review",
             "ready",
-            "skill propose emits dry-run proposals with provenance and no solidify/write path",
+            "skill propose emits dry-run proposals with provenance and validation reports, with no solidify/write path",
             "dry_run_review_only",
             "add approval-backed solidify only after proposal review contracts stay stable",
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+        ),
+        local_contract(
+            "skill_approval_flow",
+            "ready",
+            "skill approve emits local approval tickets and structured approval receipts without writing skills",
+            "approval_receipt_only",
+            "wire approved tickets into a later solidify boundary after proposal review stays stable",
             false,
             true,
             false,
@@ -997,6 +1036,8 @@ fn build_subagent_readiness(
     config: &ConfigSummary,
 ) -> SubagentReadinessStatus {
     let queued = slots.subagent == "queued_external";
+    let live_runner_rehearsal_ready = Path::new("docs/subagent-runner-protocol.md").exists()
+        && Path::new("src/live_subagent_rehearsal.rs").exists();
     let layers =
         vec![
         subagent_layer(
@@ -1028,6 +1069,16 @@ fn build_subagent_readiness(
             "connect additional real runners through the same report-admission boundary",
             "adapter",
             "local command-runner contract is ready; live runner adapters remain deferred until a real backend is connected",
+        ),
+        subagent_layer(
+            "live_runner_rehearsal",
+            if live_runner_rehearsal_ready { "ready" } else { "partial" },
+            live_runner_rehearsal_ready,
+            false,
+            "subagent live-preflight rehearses live runner gate, command allowlist, capability routing, ReportAdmission, forbidden capabilities, and audit prerequisites without starting a worker",
+            "run one approved live runner rehearsal only after operator enables CHUANG_CODEX_RUNNER_ENABLE=1 for an exact allowlisted command",
+            "read_only_preflight",
+            "read-only live runner rehearsal is ready; real worker execution remains gated and deferred",
         ),
         subagent_layer(
             "multi_worker",
@@ -1114,7 +1165,7 @@ fn build_subagent_readiness(
         } else if layers.iter().any(|layer| layer.state == "blocked") {
             "one or more live subagent adapters are blocked".to_string()
         } else {
-            "live adapters are not yet connected for the subagent layers".to_string()
+            "live adapters are not yet connected for the subagent layers; read-only live runner rehearsal is ready".to_string()
         },
         layer_count: layers.len(),
         ready_count,
@@ -1371,6 +1422,177 @@ fn build_memory_readiness(config: &ConfigSummary) -> MemoryReadinessStatus {
     }
 }
 
+fn build_memory_maintenance_receipt(config: &ConfigSummary) -> MemoryMaintenanceReceiptStatus {
+    let experiences_path = Path::new(&config.identity_experiences_path).to_path_buf();
+    let experiences_path_text = experiences_path.display().to_string();
+    match std::fs::read_to_string(&experiences_path) {
+        Ok(content) => {
+            let entries = parse_experience_entries(&content);
+            let mut receipt_count = 0usize;
+            let mut latest_receipt = None;
+
+            for entry in entries.into_iter().rev() {
+                let fields = parse_key_value_lines(&entry.body);
+                if fields
+                    .get("writeback")
+                    .is_some_and(|value| value == "memory_maintenance_apply")
+                    && fields
+                        .get("approved_writeback")
+                        .is_some_and(|value| value == "true")
+                {
+                    receipt_count += 1;
+                    if latest_receipt.is_none() {
+                        latest_receipt = Some((entry.id, fields));
+                    }
+                }
+            }
+
+            if let Some((entry_id, fields)) = latest_receipt {
+                MemoryMaintenanceReceiptStatus {
+                    available: true,
+                    readable: true,
+                    state: "ready".to_string(),
+                    experiences_path: experiences_path_text,
+                    receipt_count,
+                    latest_entry_id: Some(entry_id),
+                    latest_source_record_id: fields.get("source_record_id").cloned(),
+                    latest_approval_source: fields.get("approval_source").cloned(),
+                    latest_approved_at: fields.get("approved_at").cloned(),
+                    latest_approval_note: fields.get("approval_note").cloned(),
+                    latest_provenance_preserved: fields
+                        .get("provenance_preserved")
+                        .is_some_and(|value| value == "true"),
+                    current: "latest approved memory maintenance writeback is visible in experiences.md".to_string(),
+                    next_action: "keep using memory maintenance apply --approve-writeback for future receipts".to_string(),
+                    error: None,
+                }
+            } else {
+                MemoryMaintenanceReceiptStatus {
+                    available: true,
+                    readable: true,
+                    state: "missing".to_string(),
+                    experiences_path: experiences_path_text,
+                    receipt_count: 0,
+                    latest_entry_id: None,
+                    latest_source_record_id: None,
+                    latest_approval_source: None,
+                    latest_approved_at: None,
+                    latest_approval_note: None,
+                    latest_provenance_preserved: false,
+                    current: "no approved memory maintenance writeback found in experiences.md".to_string(),
+                    next_action: "run memory maintenance apply --approve-writeback after operator review".to_string(),
+                    error: None,
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            MemoryMaintenanceReceiptStatus {
+                available: false,
+                readable: false,
+                state: "missing".to_string(),
+                experiences_path: experiences_path_text,
+                receipt_count: 0,
+                latest_entry_id: None,
+                latest_source_record_id: None,
+                latest_approval_source: None,
+                latest_approved_at: None,
+                latest_approval_note: None,
+                latest_provenance_preserved: false,
+                current: "experiences.md is missing, so no memory maintenance receipt can be summarized".to_string(),
+                next_action: "create the identity memory root and append an approved memory maintenance receipt".to_string(),
+                error: Some("experiences.md missing".to_string()),
+            }
+        }
+        Err(error) => MemoryMaintenanceReceiptStatus {
+            available: false,
+            readable: false,
+            state: "unreadable".to_string(),
+            experiences_path: experiences_path_text,
+            receipt_count: 0,
+            latest_entry_id: None,
+            latest_source_record_id: None,
+            latest_approval_source: None,
+            latest_approved_at: None,
+            latest_approval_note: None,
+            latest_provenance_preserved: false,
+            current: "experiences.md could not be read for receipt summary".to_string(),
+            next_action: "fix identity memory permissions before checking the receipt summary".to_string(),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn parse_experience_entries(content: &str) -> Vec<ExperienceEntry> {
+    let mut entries = Vec::new();
+    let mut current_id: Option<String> = None;
+    let mut current_body = String::new();
+
+    for line in content.lines() {
+        if let Some(id) = line.strip_prefix("## ") {
+            push_experience_entry(
+                &mut entries,
+                current_id.take().or_else(|| {
+                    if current_body.trim().is_empty() {
+                        None
+                    } else {
+                        Some("experiences.preamble".to_string())
+                    }
+                }),
+                &current_body,
+            );
+            current_id = Some(id.trim().to_string());
+            current_body.clear();
+        } else {
+            if !current_body.is_empty() {
+                current_body.push('\n');
+            }
+            current_body.push_str(line);
+        }
+    }
+
+    push_experience_entry(
+        &mut entries,
+        current_id.or_else(|| {
+            if current_body.trim().is_empty() {
+                None
+            } else {
+                Some("experiences.preamble".to_string())
+            }
+        }),
+        &current_body,
+    );
+
+    entries
+}
+
+fn push_experience_entry(entries: &mut Vec<ExperienceEntry>, id: Option<String>, body: &str) {
+    if let Some(id) = id {
+        let body = body.trim();
+        if !body.is_empty() {
+            entries.push(ExperienceEntry {
+                id,
+                body: body.to_string(),
+            });
+        }
+    }
+}
+
+fn parse_key_value_lines(body: &str) -> std::collections::BTreeMap<String, String> {
+    let mut fields = std::collections::BTreeMap::new();
+    for line in body.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            fields.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    fields
+}
+
+#[derive(Debug, Clone)]
+struct ExperienceEntry {
+    id: String,
+    body: String,
+}
+
 fn memory_layer(
     name: &str,
     state: &str,
@@ -1621,6 +1843,8 @@ fn goal_mode_status() -> GoalModeStatus {
         context_source: "goal".to_string(),
         default_goal_id: default_goal.goal_id,
         default_allowed_slots: default_goal.allowed_slots,
+        checkpoint_policy: default_goal.checkpoint_policy,
+        final_report_policy: default_goal.final_report_policy,
         bypasses_governance: false,
         adds_core_slot: false,
     }
@@ -1647,6 +1871,9 @@ pub fn summarize_goal_run_readiness(
                 checkpoint_log_complete: false,
                 last_checkpoint_id: None,
                 last_checkpoint_summary: None,
+                last_checkpoint_created_at: None,
+                last_checkpoint_completed_worker_ids: None,
+                last_checkpoint_validation_notes: None,
                 incomplete_reasons: vec!["goal path could not be resolved".to_string()],
                 read_error: Some(format!("{}: {}", error.field, error.message)),
             };
@@ -1666,6 +1893,9 @@ pub fn summarize_goal_run_readiness(
             checkpoint_log_complete: false,
             last_checkpoint_id: None,
             last_checkpoint_summary: None,
+            last_checkpoint_created_at: None,
+            last_checkpoint_completed_worker_ids: None,
+            last_checkpoint_validation_notes: None,
             incomplete_reasons: Vec::new(),
             read_error: None,
         };
@@ -1686,6 +1916,10 @@ pub fn summarize_goal_run_readiness(
                 checkpoint_log_complete: diagnostics.checkpoint_log_complete,
                 last_checkpoint_id: diagnostics.last_checkpoint_id,
                 last_checkpoint_summary: diagnostics.last_checkpoint_summary,
+                last_checkpoint_created_at: diagnostics.last_checkpoint_created_at,
+                last_checkpoint_completed_worker_ids: diagnostics
+                    .last_checkpoint_completed_worker_ids,
+                last_checkpoint_validation_notes: diagnostics.last_checkpoint_validation_notes,
                 incomplete_reasons: diagnostics.incomplete_reasons,
                 read_error: None,
             }
@@ -1702,6 +1936,9 @@ pub fn summarize_goal_run_readiness(
             checkpoint_log_complete: false,
             last_checkpoint_id: None,
             last_checkpoint_summary: None,
+            last_checkpoint_created_at: None,
+            last_checkpoint_completed_worker_ids: None,
+            last_checkpoint_validation_notes: None,
             incomplete_reasons: vec!["goal run could not be loaded".to_string()],
             read_error: Some(format!("{}: {}", error.field, error.message)),
         },

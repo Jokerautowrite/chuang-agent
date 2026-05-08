@@ -194,6 +194,8 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "next_actions": next_actions.clone(),
         "api_key_state": config_summary.api_key_state,
         "placeholder_warnings": config_summary.placeholder_warnings,
+        "goal_mode": status.goal_mode,
+        "goal_run": status.goal_run,
         "project_readiness": status.project_readiness,
         "local_contract_readiness": status.local_contract_readiness,
         "release_readiness": status.release_readiness,
@@ -241,6 +243,131 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         } else {
             println!("next_actions: {}", next_actions.join(";"));
         }
+        println!(
+            "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
+            status.goal_mode.ok,
+            status.goal_mode.kind,
+            status.goal_mode.cli_entrypoint,
+            status.goal_mode.context_source,
+            status.goal_mode.default_goal_id,
+            status.goal_mode.default_allowed_slots.join(","),
+            status.goal_mode.checkpoint_policy.update_progress_log,
+            status.goal_mode.checkpoint_policy.update_handoff,
+            status.goal_mode.checkpoint_policy.commit_checkpoint,
+            status.goal_mode.final_report_policy.include_validation,
+            status.goal_mode.final_report_policy.include_next_steps,
+            status.goal_mode.bypasses_governance,
+            status.goal_mode.adds_core_slot
+        );
+        println!(
+            "goal_run: ok={} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} path={}",
+            status.goal_run.ok,
+            status.goal_run.plan_exists,
+            status.goal_run.goal_id,
+            status.goal_run.checkpoint_count,
+            status.goal_run.worker_count,
+            status.goal_run.validation_command_count,
+            status.goal_run.path
+        );
+        println!(
+            "goal_run_readiness: ok={} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} checkpoint_log_complete={} last_checkpoint={} last_summary={} last_created_at={} last_completed_worker_ids={} last_validation_notes={} incomplete_reasons={}",
+            status.goal_run.ok,
+            status.goal_run.plan_exists,
+            status.goal_run.goal_id,
+            status.goal_run.checkpoint_count,
+            status.goal_run.worker_count,
+            status.goal_run.validation_command_count,
+            status.goal_run.checkpoint_log_complete,
+            status
+                .goal_run
+                .last_checkpoint_id
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_summary
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_created_at
+                .as_deref()
+                .unwrap_or("none"),
+            status
+                .goal_run
+                .last_checkpoint_completed_worker_ids
+                .as_ref()
+                .map(|values| values.join(","))
+                .unwrap_or_else(|| "none".to_string()),
+            status
+                .goal_run
+                .last_checkpoint_validation_notes
+                .as_ref()
+                .map(|values| values.join(" | "))
+                .unwrap_or_else(|| "none".to_string()),
+            if status.goal_run.incomplete_reasons.is_empty() {
+                "none".to_string()
+            } else {
+                status.goal_run.incomplete_reasons.join(";")
+            }
+        );
+        println!(
+            "goal_run_checkpoint_log_complete: {}",
+            status.goal_run.checkpoint_log_complete
+        );
+        println!(
+            "goal_run_last_checkpoint: {}",
+            status
+                .goal_run
+                .last_checkpoint_id
+                .as_deref()
+                .unwrap_or("none")
+        );
+        println!(
+            "goal_run_last_checkpoint_summary: {}",
+            status
+                .goal_run
+                .last_checkpoint_summary
+                .as_deref()
+                .unwrap_or("none")
+        );
+        println!(
+            "goal_run_last_checkpoint_created_at: {}",
+            status
+                .goal_run
+                .last_checkpoint_created_at
+                .as_deref()
+                .unwrap_or("none")
+        );
+        println!(
+            "goal_run_last_checkpoint_completed_worker_ids: {}",
+            status
+                .goal_run
+                .last_checkpoint_completed_worker_ids
+                .as_ref()
+                .map(|values| values.join(","))
+                .unwrap_or_else(|| "none".to_string())
+        );
+        println!(
+            "goal_run_last_checkpoint_validation_notes: {}",
+            status
+                .goal_run
+                .last_checkpoint_validation_notes
+                .as_ref()
+                .map(|values| values.join(" | "))
+                .unwrap_or_else(|| "none".to_string())
+        );
+        if let Some(read_error) = &status.goal_run.read_error {
+            println!("goal_run_read_error: {read_error}");
+        }
+        println!(
+            "goal_run_incomplete_reasons: {}",
+            if status.goal_run.incomplete_reasons.is_empty() {
+                "none".to_string()
+            } else {
+                status.goal_run.incomplete_reasons.join(";")
+            }
+        );
         println!(
             "local_contract_readiness: ok={} state={} contracts={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
             status.local_contract_readiness.ok,

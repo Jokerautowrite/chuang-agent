@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::goal_run::{
-    GoalCheckpoint, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics, GoalRunStore,
-    GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
+    GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 use serde::Serialize;
 
@@ -91,6 +91,7 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                     .as_deref()
                     .unwrap_or("none")
             );
+            print_goal_checkpoint_writeback("goal", &diagnostics.checkpoint_writeback);
             println!(
                 "goal_incomplete_reasons: {}",
                 format_text_list(&diagnostics.incomplete_reasons)
@@ -134,6 +135,11 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
             println!("goal_checkpoint_recorded: {}", receipt.goal_id);
             println!("goal_path: {}", receipt.path);
             println!("goal_checkpoint_count: {}", receipt.checkpoint_count);
+            println!(
+                "goal_checkpoint_summary: {}",
+                receipt.last_checkpoint_summary.as_deref().unwrap_or("none")
+            );
+            print_goal_checkpoint_writeback("goal", &receipt.checkpoint_writeback);
         }
         ControlOutputFormat::Json => print_json(&receipt)?,
     }
@@ -388,4 +394,27 @@ fn format_text_list(values: &[String]) -> String {
     } else {
         values.join(" | ")
     }
+}
+
+fn print_goal_checkpoint_writeback(prefix: &str, writeback: &GoalCheckpointWriteback) {
+    println!(
+        "{prefix}_checkpoint_writeback_manual_only: {}",
+        writeback.manual_only
+    );
+    println!(
+        "{prefix}_checkpoint_writeback_update_progress_log: {}",
+        writeback.update_progress_log
+    );
+    println!(
+        "{prefix}_checkpoint_writeback_update_handoff: {}",
+        writeback.update_handoff
+    );
+    println!(
+        "{prefix}_checkpoint_writeback_commit_checkpoint: {}",
+        writeback.commit_checkpoint
+    );
+    println!(
+        "{prefix}_checkpoint_writeback_targets: {}",
+        format_text_list(&writeback.documentation_targets)
+    );
 }

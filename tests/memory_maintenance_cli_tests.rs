@@ -209,6 +209,10 @@ fn memory_maintenance_apply_dry_run_previews_selected_candidates_without_writeba
     assert_eq!(parsed["approval"]["required"], true);
     assert_eq!(parsed["approval"]["approved"], false);
     assert_eq!(parsed["approval"]["writes_automatically"], false);
+    assert_eq!(parsed["requested_candidate_count"], 1);
+    assert_eq!(parsed["duplicate_candidate_count"], 0);
+    assert_eq!(parsed["selection_state"], "selected");
+    assert_eq!(parsed["selection_reason"], "plan_candidates");
     assert_eq!(
         parsed["selected_candidate_ids"]
             .as_array()
@@ -283,6 +287,10 @@ fn memory_maintenance_apply_approved_writeback_records_approval_and_provenance()
     assert_eq!(parsed["approval"]["approval_note"], "老爸批准写入 LIM 候选");
     assert_eq!(parsed["approval"]["writeback_scope"], "experiences");
     assert_eq!(parsed["approval"]["writes_automatically"], false);
+    assert_eq!(parsed["requested_candidate_count"], 1);
+    assert_eq!(parsed["duplicate_candidate_count"], 0);
+    assert_eq!(parsed["selection_state"], "selected");
+    assert_eq!(parsed["selection_reason"], "plan_candidates");
     assert!(parsed["approval"]["approved_at"]
         .as_str()
         .expect("approved_at")
@@ -311,6 +319,215 @@ fn memory_maintenance_apply_approved_writeback_records_approval_and_provenance()
     assert!(experiences.contains("provenance_preserved=true"));
     assert!(experiences.contains("source=lim_dry_run"));
     assert!(experiences.contains("source_record_id="));
+}
+
+#[test]
+fn memory_maintenance_apply_repeated_writeback_skips_existing_candidate() {
+    let root = temp_root("repeat-writeback");
+    let config_path = write_fake_config(&root);
+    seed_session_summary(&config_path, "maintenance", "重复写回应跳过已存在候选");
+
+    let first = run_chuang(&[
+        "memory",
+        "maintenance",
+        "apply",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "重复写回",
+        "--session-id",
+        "maintenance",
+        "--approve-writeback",
+        "--json",
+    ]);
+    assert!(
+        first.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = run_chuang(&[
+        "memory",
+        "maintenance",
+        "apply",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "重复写回",
+        "--session-id",
+        "maintenance",
+        "--approve-writeback",
+        "--json",
+    ]);
+    assert!(
+        second.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&second.stdout)).expect("stdout json");
+    assert_eq!(parsed["approved_writeback"], true);
+    assert_eq!(parsed["selection_state"], "selected");
+    assert_eq!(parsed["selection_reason"], "plan_candidates");
+    assert_eq!(
+        parsed["applied_candidate_ids"]
+            .as_array()
+            .expect("applied candidate ids")
+            .len(),
+        0
+    );
+    assert_eq!(
+        parsed["skipped_candidate_ids"]
+            .as_array()
+            .expect("skipped candidate ids")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn memory_maintenance_apply_deduplicates_repeated_candidate_ids_and_tracks_selection_metrics() {
+    let root = temp_root("dedupe-request");
+    let config_path = write_fake_config(&root);
+    seed_session_summary(&config_path, "maintenance", "重复候选应去重且只写一次");
+
+    let report = run_chuang(&[
+        "memory",
+        "maintenance",
+        "report",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "重复候选",
+        "--session-id",
+        "maintenance",
+        "--json",
+    ]);
+    assert!(
+        report.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let report_parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&report.stdout)).expect("stdout json");
+    let candidate_id = report_parsed["lim_candidates"][0]["candidate_id"]
+        .as_str()
+        .expect("candidate id")
+        .to_string();
+
+    let output = run_chuang(&[
+        "memory",
+        "maintenance",
+        "apply",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "重复候选",
+        "--session-id",
+        "maintenance",
+        "--candidate-id",
+        &candidate_id,
+        "--candidate-id",
+        &candidate_id,
+        "--approve-writeback",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["requested_candidate_count"], 2);
+    assert_eq!(parsed["duplicate_candidate_count"], 1);
+    assert_eq!(parsed["selection_state"], "deduplicated");
+    assert_eq!(
+        parsed["selection_reason"],
+        "duplicate_candidate_ids_deduplicated"
+    );
+    assert_eq!(
+        parsed["duplicate_candidate_ids"]
+            .as_array()
+            .expect("duplicate candidate ids")
+            .len(),
+        1
+    );
+    assert_eq!(
+        parsed["selected_candidate_ids"]
+            .as_array()
+            .expect("selected candidate ids")
+            .len(),
+        1
+    );
+    assert_eq!(
+        parsed["applied_candidate_ids"]
+            .as_array()
+            .expect("applied")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn memory_maintenance_apply_noops_when_no_lim_candidates_exist() {
+    let root = temp_root("empty-selection");
+    let config_path = write_fake_config(&root);
+
+    let output = run_chuang(&[
+        "memory",
+        "maintenance",
+        "apply",
+        "--config",
+        config_path.to_str().expect("config path should be utf8"),
+        "--identity-memory-root",
+        root.to_str().expect("temp path should be utf8"),
+        "--query",
+        "no-match-for-lim",
+        "--session-id",
+        "maintenance",
+        "--approve-writeback",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["requested_candidate_count"], 0);
+    assert_eq!(parsed["duplicate_candidate_count"], 0);
+    assert_eq!(parsed["selection_state"], "empty");
+    assert_eq!(parsed["selection_reason"], "no_lim_candidates");
+    assert_eq!(
+        parsed["selected_candidate_ids"]
+            .as_array()
+            .expect("selected candidate ids")
+            .len(),
+        0
+    );
+    assert_eq!(
+        parsed["applied_candidate_ids"]
+            .as_array()
+            .expect("applied candidate ids")
+            .len(),
+        0
+    );
+    assert!(
+        !root.join("experiences.md").exists()
+            || std::fs::read_to_string(root.join("experiences.md"))
+                .expect("experiences file")
+                .is_empty()
+    );
 }
 
 #[test]

@@ -112,6 +112,28 @@ transport = "stub"
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_report_id"],
         "report-turn-1"
     );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["knowledge_context_preview_enabled"],
+        "false"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["knowledge_context_preview_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["knowledge_context_injected_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["knowledge_context_dropped_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["knowledge_context_dropped_segment_ids"],
+        "[]"
+    );
     assert_eq!(turn_response["result"]["turn"]["toolProtocolErrorCount"], 0);
     assert_eq!(
         turn_response["result"]["turn"]["toolCalls"]
@@ -481,6 +503,30 @@ transport = "stub"
         .expect("diagnostic summary")
         .contains("local warning"));
     assert_eq!(parsed["api_key_state"], "<set>");
+    assert_eq!(parsed["goal_mode"]["ok"], true);
+    assert_eq!(parsed["goal_mode"]["cli_entrypoint"], "run --goal TEXT");
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_progress_log"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_handoff"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["commit_checkpoint"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_validation"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_next_steps"],
+        true
+    );
+    assert_eq!(parsed["goal_run"]["ok"], true);
+    assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["next_actions"]
         .as_array()
         .expect("next actions array")
@@ -546,7 +592,7 @@ transport = "stub"
     assert_eq!(parsed["third_test_candidate"]["real_live_ready"], false);
     assert_eq!(parsed["local_contract_readiness"]["ok"], true);
     assert_eq!(parsed["local_contract_readiness"]["overall_state"], "ready");
-    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 4);
+    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 5);
     assert_eq!(
         parsed["local_contract_readiness"]["connects_real_external_services"],
         false
@@ -654,6 +700,30 @@ transport = "stub"
         parsed["api_key_state"],
         "<missing:CHUANG_AGENT_APP_SERVER_MISSING_TEST_API_KEY>"
     );
+    assert_eq!(parsed["goal_mode"]["ok"], true);
+    assert_eq!(parsed["goal_mode"]["cli_entrypoint"], "run --goal TEXT");
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_progress_log"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_handoff"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["commit_checkpoint"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_validation"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_next_steps"],
+        true
+    );
+    assert_eq!(parsed["goal_run"]["ok"], true);
+    assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["placeholder_warnings"]
         .as_array()
         .expect("placeholder warnings")
@@ -759,10 +829,22 @@ transport = "stub"
     assert!(stdout.contains("diagnostic_summary:"));
     assert!(stdout.contains("next_actions:"));
     assert!(stdout.contains(
+        "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
+    ));
+    assert!(stdout.contains("goal_run: ok=true"));
+    assert!(stdout.contains("goal_run_readiness: ok=true plan_exists=true goal_id=mainline-mvp"));
+    assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
+    assert!(stdout.contains("goal_run_last_checkpoint:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_completed_worker_ids:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_validation_notes:"));
+    assert!(stdout.contains("goal_run_incomplete_reasons:"));
+    assert!(stdout.contains(
         "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
     ));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=4 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=5 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains("set CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"));
 }

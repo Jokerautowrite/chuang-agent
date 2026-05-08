@@ -217,6 +217,46 @@ exit 2
 }
 
 #[test]
+fn command_control_plane_rejects_malformed_list_args_before_spawn() {
+    let _guard = command_control_test_guard();
+    let plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: r#"unterminated ""#.to_string(),
+        apply_args: "apply".to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .try_list_units()
+        .expect_err("malformed list args should fail before spawn");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("list args parse failed"));
+}
+
+#[test]
+fn command_control_plane_rejects_malformed_apply_args_before_spawn() {
+    let _guard = command_control_test_guard();
+    let mut plane = CommandControlPlane::new(ControlPlaneCommandConfig {
+        program: "printf".to_string(),
+        list_args: "list".to_string(),
+        apply_args: r#"unterminated ""#.to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let err = plane
+        .apply(ControlRequest {
+            unit_id: "service-1".to_string(),
+            action: ControlAction::Start,
+            reason: "test malformed apply args".to_string(),
+        })
+        .expect_err("malformed apply args should fail before spawn");
+
+    assert!(matches!(err, ControlError::InvalidRequest(_)));
+    assert!(format!("{err:?}").contains("apply args parse failed"));
+}
+
+#[test]
 fn command_control_plane_reports_list_command_failure() {
     let _guard = command_control_test_guard();
     let plane = CommandControlPlane::new(ControlPlaneCommandConfig {

@@ -247,6 +247,22 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.goal_run.path
     );
     println!(
+        "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
+        status.goal_mode.ok,
+        status.goal_mode.kind,
+        status.goal_mode.cli_entrypoint,
+        status.goal_mode.context_source,
+        status.goal_mode.default_goal_id,
+        format_name_list(&status.goal_mode.default_allowed_slots),
+        status.goal_mode.checkpoint_policy.update_progress_log,
+        status.goal_mode.checkpoint_policy.update_handoff,
+        status.goal_mode.checkpoint_policy.commit_checkpoint,
+        status.goal_mode.final_report_policy.include_validation,
+        status.goal_mode.final_report_policy.include_next_steps,
+        status.goal_mode.bypasses_governance,
+        status.goal_mode.adds_core_slot
+    );
+    println!(
         "goal_run_checkpoint_log_complete: {}",
         status.goal_run.checkpoint_log_complete
     );
@@ -265,6 +281,32 @@ pub fn print_status(status: &ChuangMvpStatus) {
             .last_checkpoint_summary
             .as_deref()
             .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_created_at: {}",
+        status
+            .goal_run
+            .last_checkpoint_created_at
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_completed_worker_ids: {}",
+        status
+            .goal_run
+            .last_checkpoint_completed_worker_ids
+            .as_ref()
+            .map(|values| values.join(","))
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "goal_run_last_checkpoint_validation_notes: {}",
+        status
+            .goal_run
+            .last_checkpoint_validation_notes
+            .as_ref()
+            .map(|values| values.join(" | "))
+            .unwrap_or_else(|| "none".to_string())
     );
     if let Some(read_error) = &status.goal_run.read_error {
         println!("goal_run_read_error: {read_error}");
@@ -348,6 +390,40 @@ pub fn print_status(status: &ChuangMvpStatus) {
             "memory_layer name={} state={} storage={} writes_automatically={} next={}",
             layer.name, layer.state, layer.storage, layer.writes_automatically, layer.next_action
         );
+    }
+    println!(
+        "memory_maintenance_receipt: available={} readable={} state={} receipts={} latest_entry_id={} latest_source_record_id={} latest_approval_source={} latest_approved_at={} latest_provenance_preserved={}",
+        status.memory_maintenance_receipt.available,
+        status.memory_maintenance_receipt.readable,
+        status.memory_maintenance_receipt.state,
+        status.memory_maintenance_receipt.receipt_count,
+        status
+            .memory_maintenance_receipt
+            .latest_entry_id
+            .as_deref()
+            .unwrap_or("none"),
+        status
+            .memory_maintenance_receipt
+            .latest_source_record_id
+            .as_deref()
+            .unwrap_or("none"),
+        status
+            .memory_maintenance_receipt
+            .latest_approval_source
+            .as_deref()
+            .unwrap_or("none"),
+        status
+            .memory_maintenance_receipt
+            .latest_approved_at
+            .as_deref()
+            .unwrap_or("none"),
+        status.memory_maintenance_receipt.latest_provenance_preserved
+    );
+    if let Some(note) = &status.memory_maintenance_receipt.latest_approval_note {
+        println!("memory_maintenance_receipt_note: {note}");
+    }
+    if let Some(error) = &status.memory_maintenance_receipt.error {
+        println!("memory_maintenance_receipt_error: {error}");
     }
     println!(
         "channel_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
@@ -609,7 +685,7 @@ pub fn print_runtime_result(result: &RuntimeResult) {
 }
 
 pub fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|skill|experiment|external-ai|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--enable-knowledge-context-preview --knowledge-context-root PATH --knowledge-context-query TEXT [--knowledge-context-limit N]] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | repl [--verbose] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..8] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent live-preflight --runner-command PATH --allow-runner-command PATH [--requires-capability NAME] [--capability NAME] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | memory knowledge preview-context --root PATH --query TEXT [--limit N] [--json] | memory knowledge source-contract --source wiki|gbrain [--json] | plugin list|check [--registry PATH] [--json] | skill propose --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--json] | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
+    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|memory|plugin|skill|experiment|external-ai|app-server> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--enable-knowledge-context-preview --knowledge-context-root PATH --knowledge-context-query TEXT [--knowledge-context-limit N]] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | repl [--verbose] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..8] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent live-preflight --runner-command PATH --allow-runner-command PATH [--requires-capability NAME] [--capability NAME] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform NAME --task TEXT --context TEXT --dry-run [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | memory knowledge preview-context --root PATH --query TEXT [--limit N] [--json] | memory knowledge source-contract --source wiki|gbrain [--json] | plugin list|check [--registry PATH] [--json] | skill propose --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--json] | skill approve --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--json] | skill solidify --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--json] | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json]".to_string()
 }
 
 fn format_drop_reasons(reasons: &[DropReason]) -> String {

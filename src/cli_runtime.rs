@@ -387,8 +387,55 @@ fn insert_knowledge_context_metadata(
             "knowledge_context_injected".to_string(),
             "false".to_string(),
         );
+        extra.insert(
+            "knowledge_context_segment_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_preview_segment_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_preview_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_injected_segment_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_injected_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_dropped_segment_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_dropped_count".to_string(),
+            "0".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_dropped_segment_ids".to_string(),
+            "[]".to_string(),
+        );
         return Ok(());
     };
+
+    let preview_segment_count = preview.segment_count;
+    let preview_runtime_segment_ids = knowledge_preview_runtime_segment_ids(preview);
+    let dropped_preview_segment_ids: Vec<String> = preview_runtime_segment_ids
+        .into_iter()
+        .filter(|segment_id| {
+            turn.result
+                .dropped_segment_ids
+                .iter()
+                .any(|dropped_id| dropped_id == segment_id)
+        })
+        .collect();
+    let dropped_preview_segment_count = dropped_preview_segment_ids.len();
+    let injected_segment_count =
+        preview_segment_count.saturating_sub(dropped_preview_segment_count);
 
     extra.insert(
         "knowledge_context_preview_enabled".to_string(),
@@ -396,11 +443,40 @@ fn insert_knowledge_context_metadata(
     );
     extra.insert(
         "knowledge_context_injected".to_string(),
-        (!preview.segments.is_empty()).to_string(),
+        (injected_segment_count > 0).to_string(),
     );
     extra.insert(
         "knowledge_context_segment_count".to_string(),
-        preview.segment_count.to_string(),
+        preview_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_preview_segment_count".to_string(),
+        preview_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_preview_count".to_string(),
+        preview_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_injected_segment_count".to_string(),
+        injected_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_injected_count".to_string(),
+        injected_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_dropped_segment_count".to_string(),
+        dropped_preview_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_dropped_count".to_string(),
+        dropped_preview_segment_count.to_string(),
+    );
+    extra.insert(
+        "knowledge_context_dropped_segment_ids".to_string(),
+        serde_json::to_string(&dropped_preview_segment_ids)
+            .map_err(|e| format!("knowledge_context_dropped_segment_ids_json_failed: {e}"))?,
     );
     extra.insert("knowledge_context_root".to_string(), preview.root.clone());
     extra.insert("knowledge_context_query".to_string(), preview.query.clone());
@@ -426,6 +502,16 @@ fn insert_knowledge_context_metadata(
             .map_err(|e| format!("knowledge_context_preview_json_failed: {e}"))?,
     );
     Ok(())
+}
+
+fn knowledge_preview_runtime_segment_ids(
+    preview: &MemoryKnowledgePreviewContextOutput,
+) -> Vec<String> {
+    preview
+        .segments
+        .iter()
+        .map(|segment| format!("external-knowledge-{}", segment.segment_id))
+        .collect()
 }
 
 fn insert_tool_metadata(
@@ -1185,6 +1271,33 @@ mod tests {
                 .response
                 .meta
                 .extra
+                .get("knowledge_context_preview_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_injected_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_dropped_count")
+                .map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
                 .get("knowledge_context_connects_real_service")
                 .map(String::as_str),
             Some("false")
@@ -1197,6 +1310,116 @@ mod tests {
                 .get("knowledge_context_runtime_retrieval_wired")
                 .map(String::as_str),
             Some("false")
+        );
+    }
+
+    #[test]
+    fn run_with_options_reports_knowledge_context_drops_under_tight_budget() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-runtime-knowledge-drop-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let knowledge_root = temp_dir.join("knowledge");
+        fs::create_dir_all(&knowledge_root).expect("knowledge root should be created");
+        fs::write(
+            knowledge_root.join("wiki.md"),
+            "runtime knowledge context marker should enter preview only and be dropped by budget\n",
+        )
+        .expect("knowledge doc should write");
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        runtime.context_budget = chuang_agent::context_engine::ContextBudget {
+            max_tokens: 11,
+            reserve_system_tokens: 10,
+            min_working_tokens: 1,
+            max_tool_results: 5,
+            max_memory_segments: 20,
+        };
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "查".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: Some(crate::cli_types::KnowledgeContextCliRequest {
+                root: knowledge_root,
+                query: "marker".to_string(),
+                limit: 1,
+                enabled: true,
+            }),
+        };
+
+        let (result, _) = run_with_options(&request).expect("run should succeed");
+
+        assert!(result
+            .dropped_segment_ids
+            .iter()
+            .any(|id| id == "external-knowledge-knowledge-segment-1"));
+        assert!(result
+            .packed_context_preview
+            .contains("external-knowledge-knowledge-segment-1"));
+        assert!(!result.packed_context_preview.contains(
+            "runtime knowledge context marker should enter preview only and be dropped by budget"
+        ));
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_preview_enabled")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_injected")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_preview_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_injected_count")
+                .map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_dropped_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_dropped_segment_ids")
+                .map(String::as_str),
+            Some(r#"["external-knowledge-knowledge-segment-1"]"#)
         );
     }
 

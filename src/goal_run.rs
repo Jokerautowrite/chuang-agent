@@ -1,4 +1,4 @@
-use crate::goal_mode::{GoalSpec, GoalSpecError};
+use crate::goal_mode::{GoalCheckpointPolicy, GoalSpec, GoalSpecError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -34,6 +34,15 @@ pub struct GoalValidationPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalCheckpointWriteback {
+    pub manual_only: bool,
+    pub update_progress_log: bool,
+    pub update_handoff: bool,
+    pub commit_checkpoint: bool,
+    pub documentation_targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalIntegrationPolicy {
     pub main_process_owns_integration: bool,
     pub workers_may_commit: bool,
@@ -56,12 +65,16 @@ pub struct GoalRunDiagnostics {
     pub schema_version: u16,
     pub executes_automatically: bool,
     pub bypasses_governance: bool,
+    pub checkpoint_writeback: GoalCheckpointWriteback,
     pub worker_scope_complete: bool,
     pub worker_validation_complete: bool,
     pub validation_plan_complete: bool,
     pub checkpoint_log_complete: bool,
     pub last_checkpoint_id: Option<String>,
     pub last_checkpoint_summary: Option<String>,
+    pub last_checkpoint_created_at: Option<String>,
+    pub last_checkpoint_completed_worker_ids: Option<Vec<String>>,
+    pub last_checkpoint_validation_notes: Option<Vec<String>>,
     pub incomplete_reasons: Vec<String>,
 }
 
@@ -70,7 +83,12 @@ pub struct GoalRunReceipt {
     pub goal_id: String,
     pub path: String,
     pub checkpoint_count: usize,
+    pub checkpoint_writeback: GoalCheckpointWriteback,
     pub last_checkpoint_id: Option<String>,
+    pub last_checkpoint_summary: Option<String>,
+    pub last_checkpoint_created_at: Option<String>,
+    pub last_checkpoint_completed_worker_ids: Option<Vec<String>>,
+    pub last_checkpoint_validation_notes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,16 +147,16 @@ impl GoalRun {
             .worker_plan
             .iter()
             .all(|worker| !worker.validation_checks.is_empty());
-        let checkpoint_log_complete = self
-            .checkpoint_log
-            .last()
+        let last_checkpoint = self.checkpoint_log.last();
+        let checkpoint_writeback =
+            GoalCheckpointWriteback::from_policy(&self.goal_spec.checkpoint_policy);
+        let checkpoint_log_complete = last_checkpoint
             .map(|checkpoint| {
                 !checkpoint.completed_worker_ids.is_empty()
                     && !checkpoint.validation_notes.is_empty()
                     && validate_checkpoint_worker_ids(checkpoint, &self.worker_plan).is_ok()
             })
             .unwrap_or(false);
-        let last_checkpoint = self.checkpoint_log.last();
         let mut incomplete_reasons = Vec::new();
         if !worker_scope_complete {
             incomplete_reasons
@@ -163,12 +181,19 @@ impl GoalRun {
             schema_version: 1,
             executes_automatically: false,
             bypasses_governance: false,
+            checkpoint_writeback,
             worker_scope_complete,
             worker_validation_complete,
             validation_plan_complete,
             checkpoint_log_complete,
             last_checkpoint_id: last_checkpoint.map(|checkpoint| checkpoint.checkpoint_id.clone()),
             last_checkpoint_summary: last_checkpoint.map(|checkpoint| checkpoint.summary.clone()),
+            last_checkpoint_created_at: last_checkpoint
+                .and_then(|checkpoint| checkpoint.created_at.clone()),
+            last_checkpoint_completed_worker_ids: last_checkpoint
+                .map(|checkpoint| checkpoint.completed_worker_ids.clone()),
+            last_checkpoint_validation_notes: last_checkpoint
+                .map(|checkpoint| checkpoint.validation_notes.clone()),
             incomplete_reasons,
         }
     }
@@ -281,10 +306,29 @@ impl GoalRunStore {
             goal_id: run.goal_spec.goal_id.clone(),
             path: path.display().to_string(),
             checkpoint_count: run.checkpoint_log.len(),
+            checkpoint_writeback: GoalCheckpointWriteback::from_policy(
+                &run.goal_spec.checkpoint_policy,
+            ),
             last_checkpoint_id: run
                 .checkpoint_log
                 .last()
                 .map(|checkpoint| checkpoint.checkpoint_id.clone()),
+            last_checkpoint_summary: run
+                .checkpoint_log
+                .last()
+                .map(|checkpoint| checkpoint.summary.clone()),
+            last_checkpoint_created_at: run
+                .checkpoint_log
+                .last()
+                .and_then(|checkpoint| checkpoint.created_at.clone()),
+            last_checkpoint_completed_worker_ids: run
+                .checkpoint_log
+                .last()
+                .map(|checkpoint| checkpoint.completed_worker_ids.clone()),
+            last_checkpoint_validation_notes: run
+                .checkpoint_log
+                .last()
+                .map(|checkpoint| checkpoint.validation_notes.clone()),
         })
     }
 }
@@ -317,6 +361,25 @@ impl GoalWriteScope {
 impl GoalValidationPlan {
     pub fn new(commands: Vec<String>) -> Self {
         Self { commands }
+    }
+}
+
+impl GoalCheckpointWriteback {
+    fn from_policy(policy: &GoalCheckpointPolicy) -> Self {
+        let mut documentation_targets = Vec::new();
+        if policy.update_progress_log {
+            documentation_targets.push("docs/progress-log.md".to_string());
+        }
+        if policy.update_handoff {
+            documentation_targets.push("docs/handoff-current.md".to_string());
+        }
+        Self {
+            manual_only: true,
+            update_progress_log: policy.update_progress_log,
+            update_handoff: policy.update_handoff,
+            commit_checkpoint: policy.commit_checkpoint,
+            documentation_targets,
+        }
     }
 }
 

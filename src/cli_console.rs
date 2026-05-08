@@ -110,6 +110,94 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.external_ai_readiness.overall_state
     );
     println!(
+        "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
+        snapshot.status.goal_mode.ok,
+        snapshot.status.goal_mode.kind,
+        snapshot.status.goal_mode.cli_entrypoint,
+        snapshot.status.goal_mode.context_source,
+        snapshot.status.goal_mode.default_goal_id,
+        format_name_list(&snapshot.status.goal_mode.default_allowed_slots),
+        snapshot
+            .status
+            .goal_mode
+            .checkpoint_policy
+            .update_progress_log,
+        snapshot.status.goal_mode.checkpoint_policy.update_handoff,
+        snapshot.status.goal_mode.checkpoint_policy.commit_checkpoint,
+        snapshot.status.goal_mode.final_report_policy.include_validation,
+        snapshot.status.goal_mode.final_report_policy.include_next_steps,
+        snapshot.status.goal_mode.bypasses_governance,
+        snapshot.status.goal_mode.adds_core_slot
+    );
+    println!(
+        "goal_run: ok={} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} path={}",
+        snapshot.status.goal_run.ok,
+        snapshot.status.goal_run.plan_exists,
+        snapshot.status.goal_run.goal_id,
+        snapshot.status.goal_run.checkpoint_count,
+        snapshot.status.goal_run.worker_count,
+        snapshot.status.goal_run.validation_command_count,
+        snapshot.status.goal_run.path
+    );
+    println!(
+        "goal_run_checkpoint_log_complete: {}",
+        snapshot.status.goal_run.checkpoint_log_complete
+    );
+    println!(
+        "goal_run_last_checkpoint: {}",
+        snapshot
+            .status
+            .goal_run
+            .last_checkpoint_id
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_summary: {}",
+        snapshot
+            .status
+            .goal_run
+            .last_checkpoint_summary
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_created_at: {}",
+        snapshot
+            .status
+            .goal_run
+            .last_checkpoint_created_at
+            .as_deref()
+            .unwrap_or("none")
+    );
+    println!(
+        "goal_run_last_checkpoint_completed_worker_ids: {}",
+        snapshot
+            .status
+            .goal_run
+            .last_checkpoint_completed_worker_ids
+            .as_ref()
+            .map(|values| values.join(","))
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "goal_run_last_checkpoint_validation_notes: {}",
+        snapshot
+            .status
+            .goal_run
+            .last_checkpoint_validation_notes
+            .as_ref()
+            .map(|values| values.join(" | "))
+            .unwrap_or_else(|| "none".to_string())
+    );
+    if let Some(read_error) = &snapshot.status.goal_run.read_error {
+        println!("goal_run_read_error: {read_error}");
+    }
+    println!(
+        "goal_run_incomplete_reasons: {}",
+        format_text_list(&snapshot.status.goal_run.incomplete_reasons)
+    );
+    println!(
         "local_contract_readiness: ok={} state={} contracts={} connects_real_external_services={} writes_core_memory={} executes_plugins={}",
         snapshot.status.local_contract_readiness.ok,
         snapshot.status.local_contract_readiness.overall_state,
@@ -120,6 +208,38 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
             .connects_real_external_services,
         snapshot.status.local_contract_readiness.writes_core_memory,
         snapshot.status.local_contract_readiness.executes_plugins
+    );
+    println!(
+        "memory_maintenance_receipt: available={} readable={} state={} receipts={} latest_entry_id={} latest_source_record_id={} latest_approval_source={} latest_approved_at={} latest_provenance_preserved={}",
+        snapshot.status.memory_maintenance_receipt.available,
+        snapshot.status.memory_maintenance_receipt.readable,
+        snapshot.status.memory_maintenance_receipt.state,
+        snapshot.status.memory_maintenance_receipt.receipt_count,
+        snapshot
+            .status
+            .memory_maintenance_receipt
+            .latest_entry_id
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot
+            .status
+            .memory_maintenance_receipt
+            .latest_source_record_id
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot
+            .status
+            .memory_maintenance_receipt
+            .latest_approval_source
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot
+            .status
+            .memory_maintenance_receipt
+            .latest_approved_at
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot.status.memory_maintenance_receipt.latest_provenance_preserved
     );
     println!(
         "release_readiness: ok={} name={} state={}",
@@ -224,6 +344,14 @@ fn format_name_list(names: &[String]) -> String {
         "none".to_string()
     } else {
         names.join(",")
+    }
+}
+
+fn format_text_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(";")
     }
 }
 

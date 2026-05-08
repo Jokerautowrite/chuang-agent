@@ -177,7 +177,7 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["contract_count"],
-        4
+        5
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
@@ -191,6 +191,37 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         parsed["status"]["local_contract_readiness"]["executes_plugins"],
         false
     );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["available"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["readable"],
+        true
+    );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["state"],
+        "missing"
+    );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["receipt_count"],
+        0
+    );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["latest_entry_id"],
+        Value::Null
+    );
+    assert_eq!(
+        parsed["status"]["memory_maintenance_receipt"]["error"],
+        Value::Null
+    );
+    assert_eq!(parsed["status"]["goal_mode"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["goal_mode"]["cli_entrypoint"],
+        "run --goal TEXT"
+    );
+    assert_eq!(parsed["status"]["goal_run"]["ok"], true);
+    assert_eq!(parsed["status"]["goal_run"]["goal_id"], "mainline-mvp");
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
         serde_json::json!(["file_read", "file_write", "code_execute"])
@@ -323,7 +354,22 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=4 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
+    ));
+    assert!(stdout.contains("goal_run: ok=true"));
+    assert!(stdout.contains("goal_id=mainline-mvp"));
+    assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
+    assert!(stdout.contains("goal_run_last_checkpoint:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_completed_worker_ids:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_validation_notes:"));
+    assert!(stdout.contains("goal_run_incomplete_reasons:"));
+    assert!(stdout.contains(
+        "local_contract_readiness: ok=true state=ready contracts=5 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+    ));
+    assert!(stdout.contains(
+        "memory_maintenance_receipt: available=true readable=true state=missing receipts=0 latest_entry_id=none latest_source_record_id=none latest_approval_source=none latest_approved_at=none latest_provenance_preserved=false"
     ));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
@@ -340,6 +386,52 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("app_server_health: status=warning"));
     assert!(stdout.contains("configure an openai_compatible provider"));
     assert!(stdout.contains("plugin_registry: available=true ok=true plugin_count=5"));
+}
+
+#[test]
+fn cli_console_snapshot_renders_memory_maintenance_receipt_summary() {
+    let root = temp_root("receipt-text");
+    let config_path = write_config(&root);
+    fs::write(
+        root.join("identity").join("experiences.md"),
+        r#"## lim-candidate-42
+writeback=memory_maintenance_apply
+approved_writeback=true
+approval_source=cli --approve-writeback
+approved_at=2026-05-07T12:34:56Z
+approval_note=老爸批准写入 LIM 候选
+provenance_preserved=true
+source=lim_dry_run
+source_record_id=turn-42
+created_at=2026-05-07T12:00:00Z
+lesson=先把回执面露出来
+"#,
+    )
+    .expect("receipt experiences should be written");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "console",
+            "snapshot",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains(
+        "memory_maintenance_receipt: available=true readable=true state=ready receipts=1 latest_entry_id=lim-candidate-42 latest_source_record_id=turn-42 latest_approval_source=cli --approve-writeback latest_approved_at=2026-05-07T12:34:56Z latest_provenance_preserved=true"
+    ));
 }
 
 #[test]

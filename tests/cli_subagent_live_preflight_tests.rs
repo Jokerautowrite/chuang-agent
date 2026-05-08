@@ -278,6 +278,58 @@ fn cli_subagent_live_preflight_requires_runner_allowlist_match() {
 }
 
 #[test]
+fn cli_subagent_live_preflight_rejects_capability_mismatch_even_when_gate_is_enabled() {
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--requires-capability",
+            "rust",
+            "--capability",
+            "filesystem",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let rehearsal = &parsed["rehearsal"];
+
+    assert_eq!(rehearsal["ok"], false);
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["gate_enabled"], true);
+    assert_eq!(rehearsal["capability_routing_ok"], false);
+    assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["capability_routing"]["ok"], false);
+    assert_eq!(
+        rehearsal["capability_routing"]["missing_capabilities"],
+        serde_json::json!(["rust"])
+    );
+    assert_eq!(
+        rehearsal["capability_routing"]["matched_capabilities"],
+        serde_json::json!([])
+    );
+    assert!(rehearsal["capability_routing"]["reason"]
+        .as_str()
+        .expect("reason")
+        .contains("do not satisfy"));
+}
+
+#[test]
 fn cli_subagent_live_preflight_rejects_forbidden_subagent_capability() {
     let output = cargo_command()
         .env("CHUANG_CODEX_RUNNER_ENABLE", "1")

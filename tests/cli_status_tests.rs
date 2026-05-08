@@ -107,18 +107,24 @@ fn cli_status_prints_mvp_health_summary() {
         "context_budget: max=512 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
     ));
     assert!(stdout.contains("control_plane: fake_local"));
+    assert!(stdout.contains(
+        "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
+    ));
     assert!(stdout.contains("goal_run: ok=true"));
     assert!(stdout.contains("goal_id=mainline-mvp"));
     assert!(stdout.contains("checkpoints="));
     assert!(stdout.contains("plugin_registry: available=true ok=true"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=4 ready=4 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=5 ready=5 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "local_contract name=knowledge_context_preview state=ready boundary=local_markdown_text_preview_only read_only=true dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "local_contract name=skill_proposal_review state=ready boundary=dry_run_review_only read_only=false dry_run=true connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=skill_approval_flow state=ready boundary=approval_receipt_only read_only=false dry_run=true connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "local_contract name=plugin_registry_evidence state=ready boundary=manifest_check_only"
@@ -146,6 +152,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "memory_layer name=maintenance_loop state=ready storage=docs/memory-maintenance-loop.md"
     ));
+    assert!(stdout.contains(
+        "memory_maintenance_receipt: available=true readable=true state=missing receipts=0 latest_entry_id=none latest_source_record_id=none latest_approval_source=none latest_approved_at=none latest_provenance_preserved=false"
+    ));
     assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("channel_layer name=app_server state=ready"));
     assert!(stdout.contains("channel_layer name=dedicated_feishu_bridge state=ready"));
@@ -158,6 +167,10 @@ fn cli_status_prints_mvp_health_summary() {
         "subagent_layer name=command_runner state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred"
     ));
     assert!(stdout.contains("live_adapter_reason=local command-runner contract is ready"));
+    assert!(stdout.contains(
+        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred boundary=read_only_preflight"
+    ));
+    assert!(stdout.contains("live_adapter_reason=read-only live runner rehearsal is ready"));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
     assert!(stdout.contains(
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
@@ -173,6 +186,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
     assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_completed_worker_ids:"));
+    assert!(stdout.contains("goal_run_last_checkpoint_validation_notes:"));
     assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: actuator=fake"));
@@ -250,8 +266,8 @@ fn cli_status_can_render_json_without_secret_leak() {
     );
     assert_eq!(parsed["local_contract_readiness"]["ok"], true);
     assert_eq!(parsed["local_contract_readiness"]["overall_state"], "ready");
-    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 4);
-    assert_eq!(parsed["local_contract_readiness"]["ready_count"], 4);
+    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 5);
+    assert_eq!(parsed["local_contract_readiness"]["ready_count"], 5);
     assert_eq!(
         parsed["local_contract_readiness"]["connects_real_external_services"],
         false
@@ -278,6 +294,13 @@ fn cli_status_can_render_json_without_secret_leak() {
         .any(|contract| contract["name"] == "skill_proposal_review"
             && contract["dry_run"] == true
             && contract["writes_core_memory"] == false));
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(|contract| contract["name"] == "skill_approval_flow"
+            && contract["dry_run"] == true
+            && contract["boundary"] == "approval_receipt_only"));
     assert!(parsed["local_contract_readiness"]["contracts"]
         .as_array()
         .expect("local contracts should be an array")
@@ -358,6 +381,27 @@ fn cli_status_can_render_json_without_secret_leak() {
     );
     assert_eq!(parsed["governance"]["secret_shell_decision"], "draft_only");
     assert_eq!(parsed["governance"]["goal_run_executes"], false);
+    assert_eq!(parsed["goal_mode"]["ok"], true);
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_progress_log"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["update_handoff"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["checkpoint_policy"]["commit_checkpoint"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_validation"],
+        true
+    );
+    assert_eq!(
+        parsed["goal_mode"]["final_report_policy"]["include_next_steps"],
+        true
+    );
     assert_eq!(parsed["goal_run"]["ok"], true);
     assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert!(parsed["goal_run"]["plan_exists"].is_boolean());
@@ -462,6 +506,15 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["memory_readiness"]["ok"], true);
     assert_eq!(parsed["memory_readiness"]["overall_state"], "ready");
     assert_eq!(parsed["memory_readiness"]["layer_count"], 5);
+    assert_eq!(parsed["memory_maintenance_receipt"]["available"], true);
+    assert_eq!(parsed["memory_maintenance_receipt"]["readable"], true);
+    assert_eq!(parsed["memory_maintenance_receipt"]["state"], "missing");
+    assert_eq!(parsed["memory_maintenance_receipt"]["receipt_count"], 0);
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_entry_id"],
+        Value::Null
+    );
+    assert_eq!(parsed["memory_maintenance_receipt"]["error"], Value::Null);
     assert!(parsed["memory_readiness"]["layers"]
         .as_array()
         .expect("memory layers should be an array")
@@ -503,8 +556,8 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert!(parsed["subagent_readiness"]["live_adapter_reason"]
         .as_str()
         .expect("subagent live adapter reason should be a string")
-        .contains("not yet connected"));
-    assert_eq!(parsed["subagent_readiness"]["layer_count"], 5);
+        .contains("read-only live runner rehearsal is ready"));
+    assert_eq!(parsed["subagent_readiness"]["layer_count"], 6);
     assert!(parsed["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers should be an array")
@@ -526,6 +579,17 @@ fn cli_status_can_render_json_without_secret_leak() {
                 .as_str()
                 .expect("layer live adapter reason should be a string")
                 .contains("live runner adapters remain deferred")));
+    assert!(parsed["subagent_readiness"]["layers"]
+        .as_array()
+        .expect("subagent layers should be an array")
+        .iter()
+        .any(|layer| layer["name"] == "live_runner_rehearsal"
+            && layer["state"] == "ready"
+            && layer["boundary"] == "read_only_preflight"
+            && layer["live_adapter_reason"]
+                .as_str()
+                .expect("layer live adapter reason should be a string")
+                .contains("read-only live runner rehearsal is ready")));
     assert_eq!(parsed["live_adapter_gates"]["ok"], true);
     assert_eq!(
         parsed["live_adapter_gates"]["overall_state"],
@@ -662,6 +726,78 @@ fn cli_status_can_use_custom_identity_memory_root() {
     assert_eq!(
         parsed["kernel"]["identity_memory_chars"].as_u64(),
         Some("## mem-1\n创项目聚焦核心 MVP".chars().count() as u64)
+    );
+}
+
+#[test]
+fn cli_status_exposes_memory_maintenance_receipt_summary() {
+    let root = temp_identity_root("memory-receipt");
+    let config_path = write_fake_status_config(&root);
+    fs::write(
+        root.join("identity").join("experiences.md"),
+        r#"## lim-candidate-42
+writeback=memory_maintenance_apply
+approved_writeback=true
+approval_source=cli --approve-writeback
+approved_at=2026-05-07T12:34:56Z
+approval_note=老爸批准写入 LIM 候选
+provenance_preserved=true
+source=lim_dry_run
+source_record_id=turn-42
+created_at=2026-05-07T12:00:00Z
+lesson=先把回执面露出来
+"#,
+    )
+    .expect("receipt experiences should be written");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["memory_maintenance_receipt"]["available"], true);
+    assert_eq!(parsed["memory_maintenance_receipt"]["readable"], true);
+    assert_eq!(parsed["memory_maintenance_receipt"]["state"], "ready");
+    assert_eq!(parsed["memory_maintenance_receipt"]["receipt_count"], 1);
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_entry_id"],
+        "lim-candidate-42"
+    );
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_source_record_id"],
+        "turn-42"
+    );
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_approval_source"],
+        "cli --approve-writeback"
+    );
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_approved_at"],
+        "2026-05-07T12:34:56Z"
+    );
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_approval_note"],
+        "老爸批准写入 LIM 候选"
+    );
+    assert_eq!(
+        parsed["memory_maintenance_receipt"]["latest_provenance_preserved"],
+        true
     );
 }
 
