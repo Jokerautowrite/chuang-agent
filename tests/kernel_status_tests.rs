@@ -105,10 +105,15 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(!status.plugin_registry.executes_plugins);
     assert!(!status.plugin_registry.reads_secret);
     assert!(status.plugin_registry.capability_count >= 5);
+    assert!(status.provider_readiness.ok);
+    assert_eq!(status.provider_readiness.provider_kind, "fake");
+    assert_eq!(status.provider_readiness.transport, "fake");
+    assert!(!status.provider_readiness.fallback_configured);
+    assert_eq!(status.provider_readiness.request_timeout_ms, None);
     assert!(status.local_contract_readiness.ok);
     assert_eq!(status.local_contract_readiness.overall_state, "ready");
-    assert_eq!(status.local_contract_readiness.contract_count, 5);
-    assert_eq!(status.local_contract_readiness.ready_count, 5);
+    assert_eq!(status.local_contract_readiness.contract_count, 6);
+    assert_eq!(status.local_contract_readiness.ready_count, 6);
     assert!(
         !status
             .local_contract_readiness
@@ -152,6 +157,14 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             |contract| contract.name == "external_knowledge_source_contracts"
                 && contract.boundary == "adapter_contract_only"
         ));
+    assert!(status
+        .local_contract_readiness
+        .contracts
+        .iter()
+        .any(|contract| contract.name == "goal_mode_smoke_gate"
+            && contract.boundary == "local_cli_smoke_only"
+            && contract.read_only
+            && !contract.connects_real_service));
     assert!(status.project_readiness.ok);
     assert_eq!(
         status.project_readiness.overall_state,
@@ -281,6 +294,15 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         "queued_protocol_partial"
     );
     assert_eq!(status.subagent_readiness.mode, "fake");
+    assert!(!status.subagent_readiness.live_worker_available);
+    assert_eq!(
+        status.subagent_readiness.worker_runtime_state,
+        "local_contract_only"
+    );
+    assert!(status
+        .subagent_readiness
+        .worker_runtime_reason
+        .contains("subagent slot is fake"));
     assert!(status.subagent_readiness.local_contract_ready);
     assert_eq!(status.subagent_readiness.local_contract_state, "ready");
     assert!(status
@@ -304,6 +326,8 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && layer.local_contract_reason.contains("protocol-ready")
             && !layer.live_adapter_ready
             && layer.live_adapter_state == "deferred"
+            && !layer.live_worker_available
+            && layer.worker_runtime_state == "local_contract_only"
             && layer
                 .live_adapter_reason
                 .contains("live runner adapters remain deferred")));
@@ -317,6 +341,8 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && layer.local_contract_state == "ready"
             && !layer.live_adapter_ready
             && layer.live_adapter_state == "deferred"
+            && !layer.live_worker_available
+            && layer.worker_runtime_state == "local_contract_only"
             && layer.boundary == "read_only_preflight"));
     assert!(status
         .subagent_readiness
@@ -325,7 +351,9 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|layer| layer.name == "multi_worker"
             && layer.state == "ready"
             && layer.local_contract_state == "ready"
-            && layer.live_adapter_state == "deferred"));
+            && layer.live_adapter_state == "deferred"
+            && !layer.live_worker_available
+            && layer.worker_runtime_state == "local_contract_only"));
     assert!(status.live_adapter_gates.ok);
     assert_eq!(
         status.live_adapter_gates.overall_state,

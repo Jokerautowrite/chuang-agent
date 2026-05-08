@@ -414,6 +414,125 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
 }
 
 #[test]
+fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
+    let mut extra = BTreeMap::new();
+    extra.insert("transport".to_string(), "openai-compatible".to_string());
+    extra.insert("transport_mode".to_string(), "http".to_string());
+    extra.insert(
+        "request_url".to_string(),
+        "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+    );
+    extra.insert("request_method".to_string(), "POST".to_string());
+    extra.insert("config_error_field".to_string(), "http_timeout".to_string());
+    extra.insert("status_code".to_string(), "408".to_string());
+    extra.insert("provider_response_ok".to_string(), "false".to_string());
+    extra.insert("provider_retryable".to_string(), "true".to_string());
+    extra.insert(
+        "provider_error_class".to_string(),
+        "http_timeout".to_string(),
+    );
+    extra.insert(
+        "provider_error_message".to_string(),
+        "request timed out after 20ms".to_string(),
+    );
+    extra.insert(
+        "provider_failure_reason_code".to_string(),
+        "request_timeout".to_string(),
+    );
+    extra.insert(
+        "provider_failure_category".to_string(),
+        "timeout".to_string(),
+    );
+    extra.insert(
+        "provider_timeout_reason_code".to_string(),
+        "request_timeout".to_string(),
+    );
+    extra.insert(
+        "provider_timeout_category".to_string(),
+        "timeout".to_string(),
+    );
+    extra.insert("provider_timeout_ms".to_string(), "20".to_string());
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "primary-model".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: Some("primary-openai".to_string()),
+                recall_hit_count: Some(0),
+                finish_reason: Some("invalid-config".to_string()),
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("request_url"),
+        Some(&"http://127.0.0.1:8080/v1/chat/completions".to_string())
+    );
+    assert_eq!(
+        observability.get("request_method"),
+        Some(&"POST".to_string())
+    );
+    assert_eq!(
+        observability.get("config_error_field"),
+        Some(&"http_timeout".to_string())
+    );
+    assert_eq!(observability.get("status_code"), Some(&"408".to_string()));
+    assert_eq!(
+        observability.get("provider_response_ok"),
+        Some(&"false".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_retryable"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_error_class"),
+        Some(&"http_timeout".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_error_message"),
+        Some(&"request timed out after 20ms".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_failure_reason_code"),
+        Some(&"request_timeout".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_failure_category"),
+        Some(&"timeout".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_timeout_reason_code"),
+        Some(&"request_timeout".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_timeout_category"),
+        Some(&"timeout".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_timeout_ms"),
+        Some(&"20".to_string())
+    );
+}
+
+#[test]
 fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     let mut extra = BTreeMap::new();
     extra.insert("provider_response_ok".to_string(), "true".to_string());
@@ -441,6 +560,34 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     extra.insert(
         "provider_fallback_primary_error_class".to_string(),
         "http_status".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_error_message".to_string(),
+        "at capacity".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_request_url".to_string(),
+        "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_request_method".to_string(),
+        "POST".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_request_message_count".to_string(),
+        "2".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_transport".to_string(),
+        "openai-compatible".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_transport_mode".to_string(),
+        "http".to_string(),
+    );
+    extra.insert(
+        "provider_fallback_primary_response_ok".to_string(),
+        "false".to_string(),
     );
     extra.insert(
         "provider_fallback_primary_failure_reason_code".to_string(),
@@ -510,6 +657,34 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     assert_eq!(
         observability.get("provider_fallback_primary_error_class"),
         Some(&"http_status".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_error_message"),
+        Some(&"at capacity".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_request_url"),
+        Some(&"http://127.0.0.1:8080/v1/chat/completions".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_request_method"),
+        Some(&"POST".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_request_message_count"),
+        Some(&"2".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_transport"),
+        Some(&"openai-compatible".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_transport_mode"),
+        Some(&"http".to_string())
+    );
+    assert_eq!(
+        observability.get("provider_fallback_primary_response_ok"),
+        Some(&"false".to_string())
     );
     assert_eq!(
         observability.get("provider_fallback_primary_failure_reason_code"),

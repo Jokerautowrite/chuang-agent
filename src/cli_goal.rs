@@ -1,20 +1,33 @@
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chuang_agent::goal_dispatch::{
+    collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, dispatch_goal_run,
+    load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
+    GoalDispatchDiagnostics, GoalDispatchManifest,
+};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::goal_run::{
     GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
     GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
+use chuang_agent::runtime_config::RuntimeConfig;
+use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use serde::Serialize;
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
+use crate::cli_subagent::run_subagent_run_loop;
+use crate::cli_types::{CliOptions, SubagentRunLoopCliOutput, SubagentRunOnceCliRequest};
 
 pub(crate) fn goal_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("plan") => goal_plan_command(&args[1..]),
         Some("show") => goal_show_command(&args[1..]),
         Some("checkpoint") => goal_checkpoint_command(&args[1..]),
+        Some("dispatch") => goal_dispatch_command(&args[1..]),
+        Some("collect") => goal_collect_command(&args[1..]),
+        Some("step") => goal_step_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -52,6 +65,14 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
     let run = store
         .load(&request.goal_id)
         .map_err(format_goal_run_error)?;
+    let diagnostics = run.diagnostics();
+    let operability = build_goal_operability_status(
+        &run,
+        &diagnostics,
+        &request.root,
+        &request.queue_root,
+        &request.goal_id,
+    );
 
     match request.output {
         ControlOutputFormat::Text => {
@@ -109,10 +130,12 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                 println!("goal_last_checkpoint: {}", last.checkpoint_id);
                 println!("goal_last_summary: {}", last.summary);
             }
+            print_goal_operability_text(&operability);
         }
-        ControlOutputFormat::Json => print_json(&GoalRunShowOutput {
+        ControlOutputFormat::Json => print_json(&GoalShowOutput {
             run: &run,
-            goal_run_diagnostics: run.diagnostics(),
+            goal_run_diagnostics: diagnostics,
+            goal_operability: operability,
         })?,
     }
     Ok(())
@@ -121,11 +144,28 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
 fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
     let request = parse_goal_checkpoint(args)?;
     let store = GoalRunStore::new(&request.root);
+    let (summary, completed_worker_ids, validation_notes, source_hint) = match request.source {
+        GoalCheckpointCliSource::Manual {
+            summary,
+            completed_worker_ids,
+            validation_notes,
+        } => (summary, completed_worker_ids, validation_notes, None),
+        GoalCheckpointCliSource::FromCollect { queue_root } => {
+            let suggestion =
+                load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
+            (
+                suggestion.summary,
+                suggestion.completed_worker_ids,
+                suggestion.validation_notes,
+                Some("collect"),
+            )
+        }
+    };
     let checkpoint = GoalCheckpoint::new(
         request.checkpoint_id,
-        request.summary,
-        request.completed_worker_ids,
-        request.validation_notes,
+        summary,
+        completed_worker_ids,
+        validation_notes,
     );
     let receipt = store
         .record_checkpoint(&request.goal_id, checkpoint)
@@ -133,6 +173,9 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
 
     match request.output {
         ControlOutputFormat::Text => {
+            if let Some(source_hint) = source_hint {
+                println!("goal_checkpoint_source: {}", source_hint);
+            }
             println!("goal_checkpoint_recorded: {}", receipt.goal_id);
             println!("goal_path: {}", receipt.path);
             println!("goal_checkpoint_count: {}", receipt.checkpoint_count);
@@ -141,6 +184,222 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
                 receipt.last_checkpoint_summary.as_deref().unwrap_or("none")
             );
             print_goal_checkpoint_writeback("goal", &receipt.checkpoint_writeback);
+        }
+        ControlOutputFormat::Json => print_json(&receipt)?,
+    }
+    Ok(())
+}
+
+fn goal_dispatch_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_dispatch(args)?;
+    let store = GoalRunStore::new(&request.root);
+    let run = store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    let receipt = dispatch_goal_run(
+        &run,
+        &request.root,
+        &request.queue_root,
+        request.parent_agent_id,
+    )
+    .map_err(format_goal_dispatch_error)?;
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_dispatch_queued: {}", receipt.goal_id);
+            println!("goal_dispatch_goal_objective: {}", receipt.goal_objective);
+            println!("goal_dispatch_goal_root: {}", receipt.goal_root);
+            println!("goal_dispatch_queue_root: {}", receipt.queue_root);
+            println!("goal_dispatch_count: {}", receipt.dispatch_count);
+            println!(
+                "goal_dispatch_ready: {}",
+                receipt.dispatch_diagnostics.ready_to_dispatch
+            );
+            println!(
+                "goal_dispatch_worker_scope_complete: {}",
+                receipt.dispatch_diagnostics.worker_scope_complete
+            );
+            println!(
+                "goal_dispatch_worker_validation_complete: {}",
+                receipt.dispatch_diagnostics.worker_validation_complete
+            );
+            println!(
+                "goal_dispatch_validation_plan_complete: {}",
+                receipt.dispatch_diagnostics.validation_plan_complete
+            );
+            println!(
+                "goal_dispatch_incomplete_reasons: {}",
+                format_text_list(&receipt.dispatch_diagnostics.incomplete_reasons)
+            );
+            println!(
+                "goal_dispatch_workers: {}",
+                format_text_list(
+                    &receipt
+                        .dispatches
+                        .iter()
+                        .map(|dispatch| dispatch.worker_id.clone())
+                        .collect::<Vec<_>>()
+                )
+            );
+            println!(
+                "goal_dispatch_run_ids: {}",
+                format_text_list(
+                    &receipt
+                        .dispatches
+                        .iter()
+                        .map(|dispatch| dispatch.run_id.clone())
+                        .collect::<Vec<_>>()
+                )
+            );
+            println!(
+                "goal_dispatch_paths: {}",
+                format_text_list(
+                    &receipt
+                        .dispatches
+                        .iter()
+                        .map(|dispatch| dispatch.dispatch_path.clone())
+                        .collect::<Vec<_>>()
+                )
+            );
+            println!(
+                "goal_dispatch_manifest_path: {}",
+                receipt.dispatch_manifest_path
+            );
+        }
+        ControlOutputFormat::Json => print_json(&receipt)?,
+    }
+    Ok(())
+}
+
+fn goal_collect_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_collect(args)?;
+    let receipt =
+        collect_goal_dispatch_reports(&request.root, &request.queue_root, &request.goal_id)
+            .map_err(format_goal_dispatch_error)?;
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_collect_goal_id: {}", receipt.goal_id);
+            println!("goal_collect_goal_root: {}", receipt.goal_root);
+            println!("goal_collect_queue_root: {}", receipt.queue_root);
+            println!(
+                "goal_collect_available_report_count: {}",
+                receipt.available_report_count
+            );
+            println!(
+                "goal_collect_missing_run_ids: {}",
+                format_text_list(&receipt.missing_run_ids)
+            );
+            println!(
+                "goal_collect_report_run_ids: {}",
+                format_text_list(&receipt.report_run_ids)
+            );
+            println!(
+                "goal_collect_completed_worker_ids: {}",
+                format_text_list(&receipt.completed_worker_ids)
+            );
+            println!(
+                "goal_collect_report_summaries: {}",
+                format_text_list(&receipt.report_summaries)
+            );
+            println!(
+                "goal_collect_blocked_report_run_ids: {}",
+                format_text_list(&receipt.blocked_report_run_ids)
+            );
+            println!(
+                "goal_collect_blocked_report_reasons: {}",
+                format_text_list(&receipt.blocked_report_reasons)
+            );
+            println!(
+                "goal_collect_ready_to_checkpoint: {}",
+                receipt.ready_to_checkpoint
+            );
+            if let Some(suggestion) = &receipt.checkpoint_suggestion {
+                println!("goal_collect_checkpoint_summary: {}", suggestion.summary);
+                println!(
+                    "goal_collect_checkpoint_completed_worker_ids: {}",
+                    format_text_list(&suggestion.completed_worker_ids)
+                );
+                println!(
+                    "goal_collect_checkpoint_validation_notes: {}",
+                    format_text_list(&suggestion.validation_notes)
+                );
+            }
+            println!("goal_collect_manifest_path: {}", receipt.manifest_path);
+        }
+        ControlOutputFormat::Json => print_json(&receipt)?,
+    }
+    Ok(())
+}
+
+fn goal_step_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_step(args)?;
+    let store = GoalRunStore::new(&request.root);
+    store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    let manifest = load_goal_dispatch_manifest(&request.root, &request.goal_id)
+        .map_err(format_goal_dispatch_error)?;
+    let allowed_run_ids = manifest
+        .dispatches
+        .iter()
+        .map(|dispatch| dispatch.run_id.clone())
+        .collect::<BTreeSet<_>>();
+    let max_runs = request.max_runs.unwrap_or(allowed_run_ids.len().max(1));
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&request.queue_root))
+        .map_err(dispatch_error_from_queue)?;
+    let run_once_request = request.run_once_request();
+    let run_loop = run_subagent_run_loop(
+        &queue,
+        &run_once_request,
+        max_runs,
+        request.max_concurrency,
+        Some(&allowed_run_ids),
+    )?;
+    let collection =
+        collect_goal_dispatch_reports(&request.root, &request.queue_root, &request.goal_id)
+            .map_err(format_goal_dispatch_error)?;
+    let receipt = GoalStepReceipt {
+        goal_id: request.goal_id,
+        goal_root: request.root.display().to_string(),
+        queue_root: request.queue_root.display().to_string(),
+        manifest,
+        run_loop,
+        collection,
+        checkpoint_recorded: false,
+        writes_progress_log: false,
+        writes_handoff: false,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_step_goal_id: {}", receipt.goal_id);
+            println!("goal_step_goal_root: {}", receipt.goal_root);
+            println!("goal_step_queue_root: {}", receipt.queue_root);
+            println!(
+                "goal_step_manifest_dispatch_count: {}",
+                receipt.manifest.dispatch_count
+            );
+            println!("goal_step_ran_count: {}", receipt.run_loop.ran_count);
+            println!("goal_step_idle: {}", receipt.run_loop.idle);
+            println!(
+                "goal_step_run_ids: {}",
+                format_text_list(&receipt.run_loop.run_ids)
+            );
+            println!(
+                "goal_step_ready_to_checkpoint: {}",
+                receipt.collection.ready_to_checkpoint
+            );
+            println!(
+                "goal_step_missing_run_ids: {}",
+                format_text_list(&receipt.collection.missing_run_ids)
+            );
+            println!("goal_step_checkpoint_recorded: false");
+            println!("goal_step_writes_progress_log: false");
+            println!("goal_step_writes_handoff: false");
+            if let Some(suggestion) = &receipt.collection.checkpoint_suggestion {
+                println!("goal_step_checkpoint_summary: {}", suggestion.summary);
+            }
         }
         ControlOutputFormat::Json => print_json(&receipt)?,
     }
@@ -161,24 +420,391 @@ struct GoalPlanCliRequest {
 struct GoalShowCliRequest {
     goal_id: String,
     root: PathBuf,
+    queue_root: PathBuf,
     output: ControlOutputFormat,
 }
 
 struct GoalCheckpointCliRequest {
     goal_id: String,
     checkpoint_id: String,
-    summary: String,
-    completed_worker_ids: Vec<String>,
-    validation_notes: Vec<String>,
     root: PathBuf,
+    source: GoalCheckpointCliSource,
     output: ControlOutputFormat,
 }
 
+enum GoalCheckpointCliSource {
+    Manual {
+        summary: String,
+        completed_worker_ids: Vec<String>,
+        validation_notes: Vec<String>,
+    },
+    FromCollect {
+        queue_root: PathBuf,
+    },
+}
+
+struct GoalDispatchCliRequest {
+    goal_id: String,
+    root: PathBuf,
+    queue_root: PathBuf,
+    parent_agent_id: String,
+    output: ControlOutputFormat,
+}
+
+struct GoalCollectCliRequest {
+    goal_id: String,
+    root: PathBuf,
+    queue_root: PathBuf,
+    output: ControlOutputFormat,
+}
+
+struct GoalStepCliRequest {
+    goal_id: String,
+    root: PathBuf,
+    queue_root: PathBuf,
+    output: ControlOutputFormat,
+    runner: String,
+    runner_command: Option<String>,
+    runner_args: Vec<String>,
+    worker_capabilities: Vec<String>,
+    approve_exec: bool,
+    max_runs: Option<usize>,
+    max_concurrency: usize,
+}
+
+impl GoalStepCliRequest {
+    fn run_once_request(&self) -> SubagentRunOnceCliRequest {
+        let mut runtime = RuntimeConfig::new(self.queue_root.join("goal-step-memory.db"));
+        runtime.subagent_queue.root = self.queue_root.clone();
+        SubagentRunOnceCliRequest {
+            options: CliOptions { runtime },
+            output: self.output,
+            runner: self.runner.clone(),
+            runner_command: self.runner_command.clone(),
+            runner_args: self.runner_args.clone(),
+            worker_capabilities: self.worker_capabilities.clone(),
+            approve_exec: self.approve_exec,
+        }
+    }
+}
+
 #[derive(Serialize)]
-struct GoalRunShowOutput<'a> {
+struct GoalStepReceipt {
+    goal_id: String,
+    goal_root: String,
+    queue_root: String,
+    manifest: GoalDispatchManifest,
+    run_loop: SubagentRunLoopCliOutput,
+    collection: GoalDispatchCollectionReceipt,
+    checkpoint_recorded: bool,
+    writes_progress_log: bool,
+    writes_handoff: bool,
+}
+
+fn build_goal_operability_status(
+    run: &GoalRun,
+    diagnostics: &GoalRunDiagnostics,
+    goal_root: &Path,
+    queue_root: &Path,
+    goal_id: &str,
+) -> GoalOperabilityStatus {
+    let dispatch_manifest_path = goal_root
+        .join(format!("{goal_id}.dispatch.json"))
+        .display()
+        .to_string();
+    match load_goal_dispatch_manifest(goal_root, goal_id) {
+        Ok(manifest) => {
+            let collect_result =
+                collect_goal_dispatch_reports_read_only(goal_root, queue_root, goal_id);
+            let (goal_collect, goal_collect_error_field, goal_collect_error_message) =
+                match collect_result {
+                    Ok(receipt) => (Some(receipt), None, None),
+                    Err(error) => (None, Some(error.field), Some(error.message)),
+                };
+            let goal_checkpoint_ready = goal_collect
+                .as_ref()
+                .map(|receipt| receipt.ready_to_checkpoint)
+                .unwrap_or(false);
+            let goal_pipeline_state =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    "checkpointed".to_string()
+                } else if goal_checkpoint_ready {
+                    "checkpoint_ready".to_string()
+                } else {
+                    "step_pending".to_string()
+                };
+            let goal_next_command_reason =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    "latest checkpoint is already recorded".to_string()
+                } else if goal_checkpoint_ready {
+                    "dispatch reports are ready to checkpoint".to_string()
+                } else {
+                    "dispatch manifest is present but reports are not yet ready to checkpoint"
+                        .to_string()
+                };
+            let goal_next_command =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    goal_show_command_line(goal_root, goal_id)
+                } else if goal_checkpoint_ready {
+                    goal_checkpoint_command_line(goal_root, queue_root, goal_id)
+                } else {
+                    goal_step_command_line(goal_root, queue_root, goal_id)
+                };
+
+            return GoalOperabilityStatus {
+                goal_id: goal_id.to_string(),
+                goal_root: goal_root.display().to_string(),
+                queue_root: queue_root.display().to_string(),
+                goal_dispatch_manifest_path: dispatch_manifest_path,
+                goal_dispatch_manifest_state: "ready".to_string(),
+                goal_dispatch_manifest_error_field: None,
+                goal_dispatch_manifest_error_message: None,
+                goal_dispatch_ready: manifest.dispatch_diagnostics.ready_to_dispatch,
+                goal_step_ready: true,
+                goal_collect_ready: true,
+                goal_checkpoint_ready,
+                goal_pipeline_state,
+                goal_next_command,
+                goal_next_command_reason,
+                goal_dispatch_diagnostics: Some(manifest.dispatch_diagnostics),
+                goal_collect,
+                goal_collect_error_field,
+                goal_collect_error_message,
+            };
+        }
+        Err(error) => {
+            let goal_dispatch_ready = diagnostics.worker_scope_complete
+                && diagnostics.worker_validation_complete
+                && diagnostics.validation_plan_complete;
+            let goal_pipeline_state =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    "checkpointed".to_string()
+                } else {
+                    "dispatch_pending".to_string()
+                };
+            let goal_next_command_reason =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    "latest checkpoint is already recorded".to_string()
+                } else {
+                    "dispatch manifest is missing or invalid".to_string()
+                };
+            let goal_next_command =
+                if !run.checkpoint_log.is_empty() && diagnostics.checkpoint_log_complete {
+                    goal_show_command_line(goal_root, goal_id)
+                } else {
+                    goal_dispatch_command_line(goal_root, queue_root, goal_id)
+                };
+            let goal_dispatch_manifest_state = if error.field == "goal_dispatch_manifest.path" {
+                "missing".to_string()
+            } else {
+                "invalid".to_string()
+            };
+
+            return GoalOperabilityStatus {
+                goal_id: goal_id.to_string(),
+                goal_root: goal_root.display().to_string(),
+                queue_root: queue_root.display().to_string(),
+                goal_dispatch_manifest_path: dispatch_manifest_path,
+                goal_dispatch_manifest_state,
+                goal_dispatch_manifest_error_field: Some(error.field),
+                goal_dispatch_manifest_error_message: Some(error.message),
+                goal_dispatch_ready,
+                goal_step_ready: false,
+                goal_collect_ready: false,
+                goal_checkpoint_ready: false,
+                goal_pipeline_state,
+                goal_next_command,
+                goal_next_command_reason,
+                goal_dispatch_diagnostics: None,
+                goal_collect: None,
+                goal_collect_error_field: None,
+                goal_collect_error_message: None,
+            };
+        }
+    }
+}
+
+fn print_goal_operability_text(status: &GoalOperabilityStatus) {
+    println!("goal_operability_goal_id: {}", status.goal_id);
+    println!("goal_operability_goal_root: {}", status.goal_root);
+    println!("goal_operability_queue_root: {}", status.queue_root);
+    println!(
+        "goal_operability_dispatch_manifest_path: {}",
+        status.goal_dispatch_manifest_path
+    );
+    println!(
+        "goal_operability_dispatch_manifest_state: {}",
+        status.goal_dispatch_manifest_state
+    );
+    if let Some(field) = &status.goal_dispatch_manifest_error_field {
+        println!("goal_operability_dispatch_manifest_error_field: {}", field);
+    }
+    if let Some(message) = &status.goal_dispatch_manifest_error_message {
+        println!(
+            "goal_operability_dispatch_manifest_error_message: {}",
+            message
+        );
+    }
+    println!(
+        "goal_operability_dispatch_ready: {}",
+        status.goal_dispatch_ready
+    );
+    println!("goal_operability_step_ready: {}", status.goal_step_ready);
+    println!(
+        "goal_operability_collect_ready: {}",
+        status.goal_collect_ready
+    );
+    println!(
+        "goal_operability_checkpoint_ready: {}",
+        status.goal_checkpoint_ready
+    );
+    println!(
+        "goal_operability_pipeline_state: {}",
+        status.goal_pipeline_state
+    );
+    println!(
+        "goal_operability_next_command: {}",
+        status.goal_next_command
+    );
+    println!(
+        "goal_operability_next_command_reason: {}",
+        status.goal_next_command_reason
+    );
+    if let Some(dispatch_diagnostics) = &status.goal_dispatch_diagnostics {
+        println!(
+            "goal_operability_dispatch_worker_scope_complete: {}",
+            dispatch_diagnostics.worker_scope_complete
+        );
+        println!(
+            "goal_operability_dispatch_worker_validation_complete: {}",
+            dispatch_diagnostics.worker_validation_complete
+        );
+        println!(
+            "goal_operability_dispatch_validation_plan_complete: {}",
+            dispatch_diagnostics.validation_plan_complete
+        );
+        println!(
+            "goal_operability_dispatch_incomplete_reasons: {}",
+            format_text_list(&dispatch_diagnostics.incomplete_reasons)
+        );
+    }
+    if let Some(collect) = &status.goal_collect {
+        println!(
+            "goal_operability_collect_available_report_count: {}",
+            collect.available_report_count
+        );
+        println!(
+            "goal_operability_collect_missing_run_ids: {}",
+            format_text_list(&collect.missing_run_ids)
+        );
+        println!(
+            "goal_operability_collect_report_run_ids: {}",
+            format_text_list(&collect.report_run_ids)
+        );
+        println!(
+            "goal_operability_collect_blocked_report_run_ids: {}",
+            format_text_list(&collect.blocked_report_run_ids)
+        );
+        println!(
+            "goal_operability_collect_blocked_report_reasons: {}",
+            format_text_list(&collect.blocked_report_reasons)
+        );
+        println!(
+            "goal_operability_collect_ready_to_checkpoint: {}",
+            collect.ready_to_checkpoint
+        );
+        if let Some(suggestion) = &collect.checkpoint_suggestion {
+            println!(
+                "goal_operability_checkpoint_summary: {}",
+                suggestion.summary
+            );
+            println!(
+                "goal_operability_checkpoint_completed_worker_ids: {}",
+                format_text_list(&suggestion.completed_worker_ids)
+            );
+            println!(
+                "goal_operability_checkpoint_validation_notes: {}",
+                format_text_list(&suggestion.validation_notes)
+            );
+        }
+    }
+    if let Some(field) = &status.goal_collect_error_field {
+        println!("goal_operability_collect_error_field: {}", field);
+    }
+    if let Some(message) = &status.goal_collect_error_message {
+        println!("goal_operability_collect_error_message: {}", message);
+    }
+}
+
+fn goal_dispatch_command_line(goal_root: &Path, queue_root: &Path, goal_id: &str) -> String {
+    format!(
+        "cargo run -- goal dispatch --root {} --goal-id {} --subagent-queue-root {}",
+        goal_root.display(),
+        goal_id,
+        queue_root.display()
+    )
+}
+
+fn goal_step_command_line(goal_root: &Path, queue_root: &Path, goal_id: &str) -> String {
+    format!(
+        "cargo run -- goal step --root {} --goal-id {} --subagent-queue-root {}",
+        goal_root.display(),
+        goal_id,
+        queue_root.display()
+    )
+}
+
+fn goal_checkpoint_command_line(goal_root: &Path, queue_root: &Path, goal_id: &str) -> String {
+    format!(
+        "cargo run -- goal checkpoint --from-collect --root {} --goal-id {} --subagent-queue-root {} --checkpoint-id <checkpoint-id>",
+        goal_root.display(),
+        goal_id,
+        queue_root.display()
+    )
+}
+
+fn goal_show_command_line(goal_root: &Path, goal_id: &str) -> String {
+    format!(
+        "cargo run -- goal show --root {} --goal-id {}",
+        goal_root.display(),
+        goal_id
+    )
+}
+
+#[derive(Serialize)]
+struct GoalShowOutput<'a> {
     #[serde(flatten)]
     run: &'a GoalRun,
     goal_run_diagnostics: GoalRunDiagnostics,
+    goal_operability: GoalOperabilityStatus,
+}
+
+#[derive(Serialize)]
+struct GoalOperabilityStatus {
+    goal_id: String,
+    goal_root: String,
+    queue_root: String,
+    goal_dispatch_manifest_path: String,
+    goal_dispatch_manifest_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_dispatch_manifest_error_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_dispatch_manifest_error_message: Option<String>,
+    goal_dispatch_ready: bool,
+    goal_step_ready: bool,
+    goal_collect_ready: bool,
+    goal_checkpoint_ready: bool,
+    goal_pipeline_state: String,
+    goal_next_command: String,
+    goal_next_command_reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_dispatch_diagnostics: Option<GoalDispatchDiagnostics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_collect: Option<GoalDispatchCollectionReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_collect_error_field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    goal_collect_error_message: Option<String>,
 }
 
 fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
@@ -315,6 +941,7 @@ fn parse_worker_plan(raw: &str) -> Result<GoalWorkerPlan, String> {
 fn parse_goal_show(args: &[String]) -> Result<GoalShowCliRequest, String> {
     let mut goal_id = "mainline-mvp".to_string();
     let mut root = default_goal_root();
+    let mut queue_root = PathBuf::from("./context/subagent-queue");
     let mut output = ControlOutputFormat::Text;
 
     let mut index = 0;
@@ -322,6 +949,9 @@ fn parse_goal_show(args: &[String]) -> Result<GoalShowCliRequest, String> {
         match args[index].as_str() {
             "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
             "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--subagent-queue-root" => {
+                queue_root = PathBuf::from(take_value(args, &mut index, "--subagent-queue-root")?)
+            }
             "--json" => {
                 output = ControlOutputFormat::Json;
                 index += 1;
@@ -333,6 +963,7 @@ fn parse_goal_show(args: &[String]) -> Result<GoalShowCliRequest, String> {
     Ok(GoalShowCliRequest {
         goal_id,
         root,
+        queue_root,
         output,
     })
 }
@@ -344,6 +975,8 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
     let mut completed_worker_ids: Vec<String> = Vec::new();
     let mut validation_notes: Vec<String> = Vec::new();
     let mut root = default_goal_root();
+    let mut queue_root: Option<PathBuf> = None;
+    let mut from_collect = false;
     let mut output = ControlOutputFormat::Text;
 
     let mut index = 0;
@@ -361,6 +994,17 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
                 validation_notes.push(take_value(args, &mut index, "--validation-note")?)
             }
             "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--subagent-queue-root" => {
+                queue_root = Some(PathBuf::from(take_value(
+                    args,
+                    &mut index,
+                    "--subagent-queue-root",
+                )?))
+            }
+            "--from-collect" => {
+                from_collect = true;
+                index += 1;
+            }
             "--json" => {
                 output = ControlOutputFormat::Json;
                 index += 1;
@@ -369,14 +1013,204 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
         }
     }
 
+    let source = if from_collect {
+        if let Some(queue_root) = queue_root {
+            GoalCheckpointCliSource::FromCollect { queue_root }
+        } else {
+            return Err(format_goal_checkpoint_cli_error(
+                "collect.subagent_queue_root",
+                "--from-collect requires --subagent-queue-root",
+            ));
+        }
+    } else {
+        if queue_root.is_some() {
+            return Err(usage());
+        }
+        GoalCheckpointCliSource::Manual {
+            summary: summary.ok_or_else(|| "goal checkpoint requires --summary".to_string())?,
+            completed_worker_ids,
+            validation_notes,
+        }
+    };
+
     Ok(GoalCheckpointCliRequest {
         goal_id,
         checkpoint_id: checkpoint_id.unwrap_or_else(default_checkpoint_id),
-        summary: summary.ok_or_else(|| "goal checkpoint requires --summary".to_string())?,
-        completed_worker_ids,
-        validation_notes,
         root,
+        source,
         output,
+    })
+}
+
+fn parse_goal_dispatch(args: &[String]) -> Result<GoalDispatchCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut queue_root = PathBuf::from("./context/subagent-queue");
+    let mut parent_agent_id = "chuang-goal".to_string();
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--subagent-queue-root" => {
+                queue_root = PathBuf::from(take_value(args, &mut index, "--subagent-queue-root")?)
+            }
+            "--parent-agent-id" => {
+                parent_agent_id = take_value(args, &mut index, "--parent-agent-id")?
+            }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(GoalDispatchCliRequest {
+        goal_id,
+        root,
+        queue_root,
+        parent_agent_id,
+        output,
+    })
+}
+
+fn parse_goal_collect(args: &[String]) -> Result<GoalCollectCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut queue_root = PathBuf::from("./context/subagent-queue");
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--subagent-queue-root" => {
+                queue_root = PathBuf::from(take_value(args, &mut index, "--subagent-queue-root")?)
+            }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(GoalCollectCliRequest {
+        goal_id,
+        root,
+        queue_root,
+        output,
+    })
+}
+
+fn parse_goal_step(args: &[String]) -> Result<GoalStepCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut queue_root = PathBuf::from("./context/subagent-queue");
+    let mut output = ControlOutputFormat::Text;
+    let mut runner: Option<String> = None;
+    let mut runner_command: Option<String> = None;
+    let mut runner_args: Vec<String> = Vec::new();
+    let mut worker_capabilities: Vec<String> = Vec::new();
+    let mut approve_exec = false;
+    let mut max_runs: Option<usize> = None;
+    let mut max_concurrency = 1usize;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--subagent-queue-root" => {
+                queue_root = PathBuf::from(take_value(args, &mut index, "--subagent-queue-root")?)
+            }
+            "--runner" => runner = Some(take_value(args, &mut index, "--runner")?),
+            "--runner-command" => {
+                runner_command = Some(take_value(args, &mut index, "--runner-command")?)
+            }
+            "--runner-arg" => runner_args.push(take_value(args, &mut index, "--runner-arg")?),
+            "--capability" => {
+                push_unique_string(
+                    &mut worker_capabilities,
+                    take_value(args, &mut index, "--capability")?,
+                    "--capability",
+                )?;
+            }
+            "--approve-exec" => {
+                approve_exec = true;
+                index += 1;
+            }
+            "--max-runs" => {
+                max_runs = Some(parse_positive_usize(
+                    "--max-runs",
+                    &take_value(args, &mut index, "--max-runs")?,
+                )?)
+            }
+            "--max-concurrency" => {
+                max_concurrency = parse_positive_usize(
+                    "--max-concurrency",
+                    &take_value(args, &mut index, "--max-concurrency")?,
+                )?;
+                if max_concurrency > 8 {
+                    return Err(
+                        "--max-concurrency above 8 is not supported by the MVP worker loop"
+                            .to_string(),
+                    );
+                }
+            }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let runner = runner.unwrap_or_else(|| "fake".to_string());
+    match runner.as_str() {
+        "fake" => {
+            if runner_command.is_some() || !runner_args.is_empty() || approve_exec {
+                return Err(
+                    "goal step fake runner does not accept command execution flags".to_string(),
+                );
+            }
+        }
+        "command" => {
+            if !approve_exec {
+                return Err("command_runner_requires_approve_exec: pass --approve-exec".to_string());
+            }
+            if runner_command
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err("command_runner_requires_runner_command".to_string());
+            }
+        }
+        _ => {
+            return Err(format!(
+                "unsupported goal step runner: {runner} (supported: fake, command)"
+            ))
+        }
+    }
+
+    Ok(GoalStepCliRequest {
+        goal_id,
+        root,
+        queue_root,
+        output,
+        runner,
+        runner_command,
+        runner_args,
+        worker_capabilities,
+        approve_exec,
+        max_runs,
+        max_concurrency,
     })
 }
 
@@ -405,12 +1239,81 @@ fn format_goal_run_error(error: chuang_agent::goal_run::GoalRunError) -> String 
     format!("goal_run_invalid: {}: {}", error.field, error.message)
 }
 
+fn format_goal_dispatch_error(error: chuang_agent::goal_dispatch::GoalDispatchError) -> String {
+    format!("goal_dispatch_invalid: {}: {}", error.field, error.message)
+}
+
+fn format_goal_checkpoint_cli_error(field: &str, message: &str) -> String {
+    format!("goal_checkpoint_invalid: {}: {}", field, message)
+}
+
+fn dispatch_error_from_queue(
+    error: chuang_agent::subagent_queue::FileSubagentQueueError,
+) -> String {
+    format!("goal_dispatch_invalid: subagent_queue: {error:?}")
+}
+
+fn load_goal_checkpoint_suggestion(
+    root: &PathBuf,
+    queue_root: &PathBuf,
+    goal_id: &str,
+) -> Result<GoalCheckpointSuggestion, String> {
+    let receipt = collect_goal_dispatch_reports(root.as_path(), queue_root.as_path(), goal_id)
+        .map_err(format_goal_dispatch_error)?;
+
+    if !receipt.ready_to_checkpoint {
+        return Err(format_goal_checkpoint_cli_error(
+            "collect.ready_to_checkpoint",
+            &format!(
+                "collect state is not ready: available_report_count={} dispatch_count={} missing_run_ids={} report_run_ids={} blocked_report_run_ids={} blocked_report_reasons={} manifest_path={}",
+                receipt.available_report_count,
+                receipt.dispatch_count,
+                format_text_list(&receipt.missing_run_ids),
+                format_text_list(&receipt.report_run_ids),
+                format_text_list(&receipt.blocked_report_run_ids),
+                format_text_list(&receipt.blocked_report_reasons),
+                receipt.manifest_path
+            ),
+        ));
+    }
+
+    receipt.checkpoint_suggestion.ok_or_else(|| {
+        format_goal_checkpoint_cli_error(
+            "collect.checkpoint_suggestion",
+            &format!(
+                "ready collect state did not include a checkpoint suggestion: manifest_path={}",
+                receipt.manifest_path
+            ),
+        )
+    })
+}
+
 fn format_text_list(values: &[String]) -> String {
     if values.is_empty() {
         "none".to_string()
     } else {
         values.join(" | ")
     }
+}
+fn parse_positive_usize(flag: &str, raw: &str) -> Result<usize, String> {
+    let value = raw
+        .parse::<usize>()
+        .map_err(|_| format!("{flag} expects a positive integer"))?;
+    if value == 0 {
+        return Err(format!("{flag} must be greater than zero"));
+    }
+    Ok(value)
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String, flag: &str) -> Result<(), String> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(format!("{flag} must not be empty"));
+    }
+    if !values.contains(&value) {
+        values.push(value);
+    }
+    Ok(())
 }
 
 fn print_goal_checkpoint_writeback(prefix: &str, writeback: &GoalCheckpointWriteback) {

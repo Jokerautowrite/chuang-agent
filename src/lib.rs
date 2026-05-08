@@ -16,6 +16,7 @@ pub mod control_surface;
 pub mod control_workflow;
 pub mod external_ai_dispatch;
 pub mod genesis_actuator;
+pub mod goal_dispatch;
 pub mod goal_mode;
 pub mod goal_run;
 pub mod governance;

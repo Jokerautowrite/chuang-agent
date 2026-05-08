@@ -1,6 +1,6 @@
 # Multi-Worker Orchestration
 
-更新时间：2026-05-05
+更新时间：2026-05-08
 
 ## 目标
 
@@ -9,10 +9,16 @@
 ## 当前边界
 
 ```text
-GoalRun planning + durable queue + bounded local run-loop
+GoalRun planning + durable queue + foreground bounded goal step + bounded local run-loop
 ```
 
 `GoalRun` 继续只负责记录目标、worker plan、scope 和 checkpoint，不自动执行。
+
+`goal step` 是多 worker 层面给 goal 使用的最小执行包装：它在前台运行，只针对一个显式 goal 的已派发 dispatch，按固定 `max-runs` / `max-concurrency` 调用底层 `subagent run-loop`。它的产物应是本次 step 的运行回执和 worker report/admission 证据；是否已经可 checkpoint 仍由后续 `goal collect` 判断。
+
+本阶段验收链先固定为 `goal dispatch -> goal step -> goal collect -> goal checkpoint --from-collect`；`goal collect` 只产出 checkpoint suggestion，不直接写 checkpoint，且会把失败、缺失或身份不匹配的 report 留在阻断证据里。
+
+2026-05-08 增量状态：这条 happy path 已经进入 `scripts/chuang-goal-mode-smoke.sh`，not-ready 负例已经进入 `scripts/chuang-goal-mode-negative-smoke.sh`，两者都纳入 `scripts/chuang-complete-local-smoke.sh` 的本地门禁。多 worker goal-mode 当前已锁住正向闭环和基础负例门禁，避免 not-ready 或坏 report 被误提升为 checkpoint。
 
 运行层的最小并行入口是：
 
@@ -24,7 +30,13 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 
 ## 约束
 
-- GoalRun 不自动调度 worker；实际执行必须显式调用 `subagent run-loop`。
+- GoalRun 不自动调度 worker；实际执行必须显式调用 `subagent run-loop` 或前台 bounded `goal step`。
+- `goal step` 不自动调度新 worker；它只消费该 goal 已派发的 queued dispatch，并且必须有前台批次上限。
+- `goal step` 不做 daemon、不后台常驻、不自动续跑下一批。
+- `goal step` 不自动写 checkpoint、progress-log、handoff 或 core memory。
+- `goal step` 不做 cleanup/delete/purge/reset/release-claim，不删除 dispatch、claim、release 或 report 文件。
+- `goal step` 不连接 Feishu，不复用 Codex/Hermes bridge，不控制 Hermes 服务或记忆。
+- `goal collect` 只读聚合 manifest 里的 queued reports；只有当 report 齐全、身份匹配且执行成功时，才会返回可用于 `goal checkpoint --from-collect` 的 suggestion。
 - scope 必须先定义，不能互相重叠。
 - worker 之间只通过计划和报告协作，不共享临时状态。
 - command runner 仍必须显式传 `--approve-exec`。
@@ -34,5 +46,129 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 ## 下一步
 
 1. 把 GoalRun 的 worker plan 继续用作唯一计划入口。
-2. 继续收紧真实 runner 的 allowlist、身份校验和 capability routing。
-3. 后续再把 live worker pool 接成 audited adapter，而不是塞进核心主链。
+2. 让 `goal step` 只成为 goal-scoped foreground batch wrapper，避免演变成后台 scheduler。
+3. 继续收紧真实 runner 的 allowlist、身份校验和 capability routing。
+4. 后续再把 live worker pool 接成 audited adapter，而不是塞进核心主链。
+
+2026-05-08 已锁定的负例门禁：
+
+1. `goal checkpoint --from-collect` 遇到 not-ready collect receipt 时必须拒绝写 checkpoint。
+2. failed report / identity-mismatched report 必须保留为 blocked evidence，不能让 `ready_to_checkpoint=true`。
+3. `goal step` 必须继续由 manifest allowlist 和显式 `max-runs` / `max-concurrency` 约束，不能执行非本 goal run id。
+
+## 2026-05-08 可派活缺口清单
+
+基于当前 `progress-log`、`handoff`、goal-mode 和本文件的状态，"能干活" 还缺最多的不是再跑通 goal happy path，而是真实 worker/live adapter 启用前的可审计任务包。当前本地队列、`goal step`、`goal collect`、正负 smoke 已有门禁；下一阶段最容易跑偏的是把真实 runner 接进来时缺少统一的 allowlist、capability route、审批和 report/admission 验收口径。
+
+优先级排序：
+
+1. 真实 worker 启用前边界：live gate、runner allowlist、dispatch `required_capabilities`、worker 自报 capability、`ReportAdmission` 和 governance receipt 必须端到端可见。
+2. 状态面对齐：`status` / `doctor` / `console snapshot` / `app-server health` 对 live runner gate、blocked reason、capability mismatch 和 admission state 的文本/JSON 口径要一致。
+3. 失败恢复：缺 report、failed report、identity mismatch、capability mismatch、malformed report 都必须保持 blocked evidence，不能提升为 checkpoint suggestion。
+4. 操作员派活体验：每个 worker 任务必须提前写清楚写入范围、禁止事项、验收命令和预期 report 字段，避免 worker 自己猜权限。
+
+### 下一阶段 worker 任务包模板
+
+派给实现 worker 前，主控应把以下字段填完整：
+
+```text
+Worker ID:
+Objective:
+Allowed files:
+Forbidden files/services:
+Required capability:
+Expected dispatch/runner mode:
+Expected ReportAdmission state:
+Expected governance receipt fields:
+Acceptance commands:
+Required negative case:
+Final report must include:
+```
+
+字段约束：
+
+- `Allowed files` 必须是互不重叠的文件或目录范围；没有明确范围就不派活。
+- `Forbidden files/services` 必须写明不碰 Hermes、Feishu、secret、真实外部服务、删除/清理/reset/uninstall。
+- `Required capability` 必须能映射到 dispatch `required_capabilities`，不能只写自然语言。
+- `Expected dispatch/runner mode` 必须区分 fake/local queued runner、command runner rehearsal、live runner preflight、真实 live runner。
+- `Expected ReportAdmission state` 必须写明成功路径和至少一个拒绝路径。
+- `Acceptance commands` 优先用定向测试；改状态面时再补 `cargo test -q` 或 smoke。
+
+### 6 Worker 派发清单
+
+主控下一轮可以直接按 6 条并行线派活，但每条线必须先落到 `GoalRun` 的 scope/worker plan 里。最低要求：
+
+```text
+Goal ID:
+Goal root: ./context/goal-runs
+Queue root: ./context/subagent-queue
+Max subtasks: 6
+Worker count: 6
+Worker scopes: 6 个互不重叠 scope
+Global validation: cargo fmt --all --check; git diff --check; cargo test -q
+Step budget: --max-runs 6 --max-concurrency 6
+Checkpoint source: --from-collect only after collect ready
+```
+
+命令顺序固定为：
+
+```text
+goal plan      写入目标、scope、worker plan、validation plan
+goal show      检查 worker scope / validation / governance 诊断
+goal dispatch  把 6 个 worker plan 扇出成 queued dispatch 和 manifest
+goal step      前台 bounded 执行最多 6 个 manifest run id
+goal collect   只读收集 report，判断是否 ready_to_checkpoint
+goal checkpoint --from-collect  只在 collect ready 时显式写 checkpoint
+goal show      复查 checkpoint_log_complete 和最新验证证据
+```
+
+每个 worker 的任务卡至少包含：
+
+```text
+Worker ID:
+Objective:
+Allowed files:
+Forbidden files/services: 不碰 Hermes/Feishu/secret/真实外部服务；不删除、不清理、不 reset、不卸载。
+Required capability:
+Expected dispatch/runner mode:
+Expected ReportAdmission state:
+Expected governance receipt fields:
+Acceptance commands:
+Required negative case:
+Final report must include: changed files, evidence fields, tests run, blocked/remaining gaps.
+```
+
+主控验收字段：
+
+- `goal_dispatch_ready=true`、`goal_dispatch_count=6`、`goal_dispatch_manifest_path` 存在。
+- `goal_step_checkpoint_recorded=false`、`goal_step_writes_progress_log=false`、`goal_step_writes_handoff=false`。
+- `goal_collect_ready_to_checkpoint=true`、`goal_collect_missing_run_ids=none`、`goal_collect_blocked_report_run_ids=none`、`goal_collect_blocked_report_reasons=none`。
+- `goal_collect_checkpoint_completed_worker_ids` 必须覆盖 6 个 worker。
+- `goal_collect_checkpoint_validation_notes` 必须能对应到每个 worker 的报告证据。
+- checkpoint 后 `goal_checkpoint_source=collect`，最终 `goal_checkpoint_log_complete=true`。
+
+Blocked evidence 的读取顺序：
+
+1. 先看 `goal_collect_missing_run_ids`：有值说明 worker 未产出 report，继续跑 `goal step` 或让对应 worker 补报告。
+2. 再看 `goal_collect_blocked_report_run_ids`：有值说明 report 已存在但被阻断。
+3. 对照 `goal_collect_blocked_report_reasons`：常见原因是 report status 不是 success、report identity 和 manifest 不匹配、report admission 被拒绝。
+4. 如果 blocked 字段非空，`goal checkpoint --from-collect` 拒绝写入是正确行为；主控只能回派修复，不能手工伪造 completed worker。
+
+### 首个可派活低风险任务
+
+建议先派一个 worker 只做只读状态面一致性，不接真实 runner：
+
+```text
+Worker ID: live-runner-readiness-view
+Objective: 对齐 status/doctor/console/app-server health 的 live runner gate 文本和 JSON 字段。
+Allowed files: src/kernel_status.rs, src/cli_output.rs, src/cli_status.rs, src/cli_doctor.rs, src/cli_console.rs, src/app_server.rs, tests/*status*/*doctor*/*console*/*app_server* 相关文件
+Forbidden files/services: 不碰 Hermes/Feishu，不改 runner 执行逻辑，不启动真实 worker，不写 data/skills，不删除/清理任何文件。
+Required capability: live_runner_readiness_view
+Expected dispatch/runner mode: local tests only; no live runner start.
+Expected ReportAdmission state: 不新增 admission 语义，只展示已有 blocked/ready reasons。
+Acceptance commands: cargo fmt --all; cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test cli_console_tests --test app_server_tests
+Required negative case: capability route 缺失或不匹配时，所有只读面都显示 not ready / blocked reason，不能显示 ready_for_live=true。
+Final report must include: changed files, fields added/renamed, tests run, remaining live-runner gaps.
+```
+
+这个任务不连接外部服务、不扩大权限、不写长期记忆，是下一阶段把真实 worker 接入前最小的可派活验收面。

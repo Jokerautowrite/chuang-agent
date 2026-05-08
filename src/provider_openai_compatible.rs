@@ -340,8 +340,25 @@ impl OpenAICompatibleProviderAdapter {
         stream
             .read_to_string(&mut raw_response)
             .map_err(|error| ProviderConfigError {
-                field: "http_read".to_string(),
-                message: error.to_string(),
+                field: if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) {
+                    "http_timeout".to_string()
+                } else {
+                    "http_read".to_string()
+                },
+                message: if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) {
+                    format!(
+                        "request timed out after {}ms: {error}",
+                        self.request_timeout_ms
+                    )
+                } else {
+                    error.to_string()
+                },
             })?;
 
         let (status_code, response_body_json) = parse_http_response(&raw_response)?;
@@ -633,19 +650,22 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                                 "http_status",
                                 Some(&error_message),
                             );
+                            insert_provider_timeout_meta(&mut meta, Some(status_code), "http_status", Some(&error_message));
                             meta
                         },
                     };
                 }
 
-                let finish_reason = extract_finish_reason(response_body).or_else(|| {
-                    Some(default_finish_reason_for_transport(call.transport()).to_string())
-                });
                 let assistant_content = extract_assistant_content(response_body);
                 let mut extra_meta = build_success_meta(&call);
-                let body = if let Some(content) = assistant_content {
+                let (body, finish_reason) = if let Some(content) = assistant_content {
                     extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
-                    content
+                    (
+                        content,
+                        extract_finish_reason(response_body).or_else(|| {
+                            Some(default_finish_reason_for_transport(call.transport()).to_string())
+                        }),
+                    )
                 } else {
                     extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
                     extra_meta.insert(
@@ -663,16 +683,19 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                         "missing_content",
                         Some("missing assistant content in successful provider response"),
                     );
-                    format!(
-                        "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
-                        self.identity.provider_id,
-                        self.identity.model_name,
-                        call.transport().as_str(),
-                        call.status_code(),
-                        extra_meta
-                            .get("response_kind")
-                            .map(String::as_str)
-                            .unwrap_or("unknown")
+                    (
+                        format!(
+                            "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
+                            self.identity.provider_id,
+                            self.identity.model_name,
+                            call.transport().as_str(),
+                            call.status_code(),
+                            extra_meta
+                                .get("response_kind")
+                                .map(String::as_str)
+                                .unwrap_or("unknown")
+                        ),
+                        Some("provider-error-missing-content".to_string()),
                     )
                 };
                 ProviderAdapterResponse {
@@ -928,6 +951,7 @@ fn build_config_error_meta(
     }
 
     insert_provider_failure_meta(&mut meta, None, error_class, Some(&error.message));
+    insert_provider_timeout_meta(&mut meta, None, error_class, Some(&error.message));
 
     meta
 }
@@ -949,12 +973,39 @@ fn insert_provider_failure_meta(
     );
 }
 
+fn insert_provider_timeout_meta(
+    meta: &mut BTreeMap<String, String>,
+    status_code: Option<u16>,
+    error_class: &str,
+    error_message: Option<&str>,
+) {
+    if !is_timeout_error(
+        status_code,
+        error_class,
+        error_message.unwrap_or("").to_ascii_lowercase().as_str(),
+    ) {
+        return;
+    }
+
+    meta.insert(
+        "provider_timeout_reason_code".to_string(),
+        "request_timeout".to_string(),
+    );
+    meta.insert(
+        "provider_timeout_category".to_string(),
+        "timeout".to_string(),
+    );
+}
+
 fn provider_failure_reason(
     status_code: Option<u16>,
     error_class: &str,
     error_message: Option<&str>,
 ) -> (&'static str, &'static str) {
     let message = error_message.unwrap_or("").to_ascii_lowercase();
+    if is_timeout_error(status_code, error_class, &message) {
+        return ("request_timeout", "timeout");
+    }
     if message.contains("capacity") || message.contains("overloaded") {
         return ("model_capacity", "capacity");
     }
@@ -973,7 +1024,8 @@ fn provider_failure_reason(
             401 => ("auth_failed", "auth"),
             402 => ("quota_or_billing", "quota"),
             403 => ("permission_denied", "auth"),
-            408 | 429 => ("rate_limited", "rate_limit"),
+            408 => ("request_timeout", "timeout"),
+            429 => ("rate_limited", "rate_limit"),
             500..=599 => ("upstream_unavailable", "upstream"),
             _ => ("http_status_error", "http_status"),
         };
@@ -987,6 +1039,14 @@ fn provider_failure_reason(
         "missing_content" => ("missing_content", "response"),
         _ => ("provider_failure_unknown", "unknown"),
     }
+}
+
+fn is_timeout_error(status_code: Option<u16>, error_class: &str, message: &str) -> bool {
+    if status_code == Some(408) {
+        return true;
+    }
+
+    error_class == "transport" && message.contains("timed out")
 }
 
 fn provider_error_class(error: &ProviderConfigError) -> &'static str {
@@ -1029,7 +1089,7 @@ fn provider_error_retryable(error: &ProviderConfigError, error_class: &str) -> b
 }
 
 fn http_status_retryable(status_code: u16) -> bool {
-    status_code == 429 || (500..=599).contains(&status_code)
+    status_code == 408 || status_code == 429 || (500..=599).contains(&status_code)
 }
 
 fn http_status_is_success(status_code: u16) -> bool {
@@ -1243,7 +1303,14 @@ fn extract_finish_reason(response_body_json: &str) -> Option<String> {
 }
 
 fn extract_provider_error_message(response_body_json: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(response_body_json).ok()?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response_body_json) else {
+        let trimmed = response_body_json.trim();
+        return if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    };
     if let Some(message) = value.get("error").and_then(|value| {
         if let Some(text) = value.as_str() {
             Some(text.to_string())
@@ -1267,6 +1334,10 @@ fn extract_provider_error_message(response_body_json: &str) -> Option<String> {
         }
     }) {
         return Some(message);
+    }
+
+    if let Some(message) = value.as_str() {
+        return Some(message.to_string());
     }
 
     value

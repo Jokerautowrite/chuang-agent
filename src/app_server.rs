@@ -196,12 +196,14 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "placeholder_warnings": config_summary.placeholder_warnings,
         "goal_mode": status.goal_mode,
         "goal_run": status.goal_run,
+        "provider_readiness": status.provider_readiness,
         "project_readiness": status.project_readiness,
         "local_contract_readiness": status.local_contract_readiness,
         "release_readiness": status.release_readiness,
         "third_test_candidate": status.third_test_candidate,
         "channel_readiness": status.channel_readiness,
         "subagent_readiness": status.subagent_readiness,
+        "live_adapter_gates": status.live_adapter_gates,
         "external_ai_readiness": status.external_ai_readiness,
         "db_path": runtime.db_path.display().to_string(),
         "identity_memory_root": identity_memory_root,
@@ -243,6 +245,33 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         } else {
             println!("next_actions: {}", next_actions.join(";"));
         }
+        println!(
+            "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
+            status.provider_readiness.ok,
+            status.provider_readiness.overall_state,
+            status.provider_readiness.provider_kind,
+            status.provider_readiness.transport,
+            status.provider_readiness.fallback_configured,
+            status
+                .provider_readiness
+                .request_timeout_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            status
+                .provider_readiness
+                .api_key_state
+                .as_deref()
+                .unwrap_or("none"),
+            status.provider_readiness.placeholder_warning_count
+        );
+        println!(
+            "provider_readiness_current: {}",
+            status.provider_readiness.current
+        );
+        println!(
+            "provider_readiness_next_action: {}",
+            status.provider_readiness.next_action
+        );
         println!(
             "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
             status.goal_mode.ok,
@@ -377,6 +406,76 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.local_contract_readiness.writes_core_memory,
             status.local_contract_readiness.executes_plugins
         );
+        println!(
+            "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={}",
+            status.subagent_readiness.ok,
+            status.subagent_readiness.overall_state,
+            status.subagent_readiness.mode,
+            status.subagent_readiness.local_contract_ready,
+            status.subagent_readiness.local_contract_state,
+            status.subagent_readiness.live_adapter_ready,
+            status.subagent_readiness.live_adapter_state,
+            status.subagent_readiness.layer_count,
+            status.subagent_readiness.ready_count,
+            status.subagent_readiness.partial_count,
+            status.subagent_readiness.deferred_count,
+            status.subagent_readiness.blocked_count,
+            status.subagent_readiness.live_worker_available,
+            status.subagent_readiness.worker_runtime_state
+        );
+        println!(
+            "subagent_worker_runtime_reason: {}",
+            status.subagent_readiness.worker_runtime_reason
+        );
+        println!(
+            "subagent_readiness_local_contract_reason: {}",
+            status.subagent_readiness.local_contract_reason
+        );
+        println!(
+            "subagent_readiness_live_adapter_reason: {}",
+            status.subagent_readiness.live_adapter_reason
+        );
+        for layer in &status.subagent_readiness.layers {
+            println!(
+                "subagent_layer name={} state={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} live_worker_available={} worker_runtime_state={} boundary={} local_contract_reason={} live_adapter_reason={} next={}",
+                layer.name,
+                layer.state,
+                layer.local_contract_ready,
+                layer.local_contract_state,
+                layer.live_adapter_ready,
+                layer.live_adapter_state,
+                layer.live_worker_available,
+                layer.worker_runtime_state,
+                layer.boundary,
+                layer.local_contract_reason,
+                layer.live_adapter_reason,
+                layer.next_action
+            );
+        }
+        println!(
+            "live_adapter_gates: ok={} state={} gates={} enabled={} disabled={}",
+            status.live_adapter_gates.ok,
+            status.live_adapter_gates.overall_state,
+            status.live_adapter_gates.gate_count,
+            status.live_adapter_gates.enabled_count,
+            status.live_adapter_gates.disabled_count
+        );
+        for gate in &status.live_adapter_gates.gates {
+            println!(
+                "live_adapter_gate name={} state={} enabled={} default_enabled={} env_value_state={} required_env={} audit_label={} preflight={} must_reject={} reason={} next={}",
+                gate.name,
+                gate.state,
+                gate.enabled,
+                gate.default_enabled,
+                gate.env_value_state,
+                gate.required_env,
+                gate.audit_label,
+                format_text_list(&gate.preflight_checks),
+                format_text_list(&gate.must_reject_capabilities),
+                gate.reason,
+                gate.next_action
+            );
+        }
         println!(
             "release_readiness: ok={} name={} state={}",
             status.release_readiness.ok,
@@ -546,12 +645,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let turn_id = next_turn_id(state);
     let assistant_text = result.response.body.clone();
     let model_name = result.response.model_name.clone();
-    let status = result
-        .response
-        .meta
-        .finish_reason
-        .clone()
-        .unwrap_or_else(|| "completed".to_string());
+    let status = app_server_turn_status(&result.response.meta.extra).to_string();
     let now = now_millis();
     let mut out = io::stdout();
 
@@ -614,7 +708,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 "threadId": thread_id,
                 "turn": {
                     "id": turn_id,
-                    "status": "completed",
+                    "status": status,
                     "runtimeReportId": tool_run.runtime_report_id.clone(),
                     "toolCallCount": tool_call_count,
                     "toolProtocolErrorCount": tool_protocol_error_count,
@@ -643,7 +737,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         ),
         "turn": {
             "id": thread_turn_id(state, &thread_id).unwrap_or_default(),
-            "status": "completed",
+            "status": status,
             "runtimeReportId": tool_run.runtime_report_id,
             "modelName": model_name,
             "finishReason": result
@@ -731,6 +825,20 @@ fn run_turn_with_tools(
         tool_surface,
         runtime_report_id: records.runtime_report_id,
     })
+}
+
+fn app_server_turn_status(provider_meta: &BTreeMap<String, String>) -> &'static str {
+    if provider_meta.contains_key("provider_failure_reason_code")
+        || provider_meta.contains_key("provider_error_class")
+        || provider_meta
+            .get("provider_response_ok")
+            .map(|value| value == "false")
+            .unwrap_or(false)
+    {
+        "provider_error"
+    } else {
+        "completed"
+    }
 }
 
 fn tool_execution_record_to_json(record: &ToolExecutionRecord) -> Value {
@@ -1245,6 +1353,14 @@ pub(crate) fn app_server_health_next_actions(summary: &ConfigSummary) -> Vec<Str
 pub(crate) fn push_unique_action(actions: &mut Vec<String>, action: String) {
     if !actions.iter().any(|existing| existing == &action) {
         actions.push(action);
+    }
+}
+
+fn format_text_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(",")
     }
 }
 

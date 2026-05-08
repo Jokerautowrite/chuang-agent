@@ -68,6 +68,35 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     println!("config_source: {}", snapshot.source);
     println!("provider: {}", snapshot.status.config.provider_kind);
     println!("model: {}", snapshot.status.config.model_name);
+    println!(
+        "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
+        snapshot.status.provider_readiness.ok,
+        snapshot.status.provider_readiness.overall_state,
+        snapshot.status.provider_readiness.provider_kind,
+        snapshot.status.provider_readiness.transport,
+        snapshot.status.provider_readiness.fallback_configured,
+        snapshot
+            .status
+            .provider_readiness
+            .request_timeout_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        snapshot
+            .status
+            .provider_readiness
+            .api_key_state
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot.status.provider_readiness.placeholder_warning_count
+    );
+    println!(
+        "provider_readiness_current: {}",
+        snapshot.status.provider_readiness.current
+    );
+    println!(
+        "provider_readiness_next_action: {}",
+        snapshot.status.provider_readiness.next_action
+    );
     println!("execution: {}", snapshot.status.slots.execution);
     println!(
         "atomic_tools: ok={} total={} mapped={} interface_only={} action_schema_version={} report_schema_version={}",
@@ -101,8 +130,16 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.channel_readiness.ok, snapshot.status.channel_readiness.overall_state
     );
     println!(
-        "subagent_readiness: ok={} state={}",
-        snapshot.status.subagent_readiness.ok, snapshot.status.subagent_readiness.overall_state
+        "subagent_readiness: ok={} state={} mode={} live_worker_available={} worker_runtime_state={}",
+        snapshot.status.subagent_readiness.ok,
+        snapshot.status.subagent_readiness.overall_state,
+        snapshot.status.subagent_readiness.mode,
+        snapshot.status.subagent_readiness.live_worker_available,
+        snapshot.status.subagent_readiness.worker_runtime_state
+    );
+    println!(
+        "subagent_worker_runtime_reason: {}",
+        snapshot.status.subagent_readiness.worker_runtime_reason
     );
     println!(
         "external_ai_readiness: ok={} state={}",

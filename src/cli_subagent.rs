@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
 use std::io::{ErrorKind, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -339,54 +341,14 @@ fn subagent_run_loop_command(args: &[String]) -> Result<(), String> {
         worker_capabilities: request.worker_capabilities.clone(),
         approve_exec: request.approve_exec,
     };
-    let mut run_ids = Vec::new();
-    let mut report_paths = Vec::new();
-    let mut report_admissions = Vec::new();
-    let mut idle = false;
 
-    while run_ids.len() < request.max_runs {
-        let remaining_runs = request.max_runs - run_ids.len();
-        let batch_size = request.max_concurrency.min(remaining_runs);
-        let outputs = if batch_size == 1 {
-            vec![run_one_pending_subagent(&queue, &run_once_request)?]
-        } else {
-            run_subagent_worker_batch(&queue, &run_once_request, batch_size)?
-        };
-        let mut batch_ran = false;
-
-        for output in outputs {
-            if !output.ran {
-                idle = true;
-                continue;
-            }
-            batch_ran = true;
-            if let Some(run_id) = output.run_id {
-                run_ids.push(run_id);
-            }
-            if let Some(path) = output.report_path {
-                report_paths.push(path);
-            }
-            if let Some(admission) = output.report_admission {
-                report_admissions.push(admission);
-            }
-        }
-
-        if !batch_ran || run_ids.len() >= request.max_runs {
-            break;
-        }
-    }
-
-    let output = SubagentRunLoopCliOutput {
-        runner: request.runner,
-        worker_capabilities: request.worker_capabilities,
-        max_runs: request.max_runs,
-        max_concurrency: request.max_concurrency,
-        ran_count: run_ids.len(),
-        idle,
-        run_ids,
-        report_paths,
-        report_admissions,
-    };
+    let output = run_subagent_run_loop(
+        &queue,
+        &run_once_request,
+        request.max_runs,
+        request.max_concurrency,
+        None,
+    )?;
 
     match request.output {
         ControlOutputFormat::Text => {
@@ -410,17 +372,92 @@ fn subagent_run_loop_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn run_subagent_run_loop(
+    queue: &FileSubagentQueue,
+    request: &SubagentRunOnceCliRequest,
+    max_runs: usize,
+    max_concurrency: usize,
+    allowed_run_ids: Option<&BTreeSet<String>>,
+) -> Result<SubagentRunLoopCliOutput, String> {
+    if max_runs == 0 {
+        return Err("--max-runs must be greater than zero".to_string());
+    }
+    if max_concurrency == 0 {
+        return Err("--max-concurrency must be greater than zero".to_string());
+    }
+
+    let allowed_run_ids = allowed_run_ids.cloned().map(Arc::new);
+    let mut run_ids = Vec::new();
+    let mut report_paths = Vec::new();
+    let mut report_admissions = Vec::new();
+    let mut idle = false;
+
+    while run_ids.len() < max_runs {
+        let remaining_runs = max_runs - run_ids.len();
+        let batch_size = max_concurrency.min(remaining_runs);
+        let outputs = if batch_size == 1 {
+            vec![run_one_pending_subagent_with_allowlist(
+                queue,
+                request,
+                allowed_run_ids.as_deref(),
+            )?]
+        } else {
+            run_subagent_worker_batch(queue, request, batch_size, allowed_run_ids.clone())?
+        };
+        let mut batch_ran = false;
+
+        for output in outputs {
+            if !output.ran {
+                idle = true;
+                continue;
+            }
+            batch_ran = true;
+            if let Some(run_id) = output.run_id {
+                run_ids.push(run_id);
+            }
+            if let Some(path) = output.report_path {
+                report_paths.push(path);
+            }
+            if let Some(admission) = output.report_admission {
+                report_admissions.push(admission);
+            }
+        }
+
+        if !batch_ran || run_ids.len() >= max_runs {
+            break;
+        }
+    }
+
+    Ok(SubagentRunLoopCliOutput {
+        runner: request.runner.clone(),
+        worker_capabilities: request.worker_capabilities.clone(),
+        max_runs,
+        max_concurrency,
+        ran_count: run_ids.len(),
+        idle,
+        run_ids,
+        report_paths,
+        report_admissions,
+    })
+}
+
 fn run_subagent_worker_batch(
     queue: &FileSubagentQueue,
     request: &SubagentRunOnceCliRequest,
     batch_size: usize,
+    allowed_run_ids: Option<Arc<BTreeSet<String>>>,
 ) -> Result<Vec<SubagentRunOnceCliOutput>, String> {
     let mut handles = Vec::with_capacity(batch_size);
     for _ in 0..batch_size {
         let worker_queue = queue.clone();
         let worker_request = request.clone();
+        let worker_allowed_run_ids = allowed_run_ids.clone();
         handles.push(std::thread::spawn(move || {
-            run_one_pending_subagent(&worker_queue, &worker_request)
+            run_one_pending_subagent_with_allowlist(
+                &worker_queue,
+                &worker_request,
+                worker_allowed_run_ids.as_deref(),
+            )
         }));
     }
 
@@ -447,6 +484,14 @@ fn run_one_pending_subagent(
     queue: &FileSubagentQueue,
     request: &SubagentRunOnceCliRequest,
 ) -> Result<SubagentRunOnceCliOutput, String> {
+    run_one_pending_subagent_with_allowlist(queue, request, None)
+}
+
+fn run_one_pending_subagent_with_allowlist(
+    queue: &FileSubagentQueue,
+    request: &SubagentRunOnceCliRequest,
+    allowed_run_ids: Option<&BTreeSet<String>>,
+) -> Result<SubagentRunOnceCliOutput, String> {
     let owner = unique_worker_owner()?;
     let dispatches = queue
         .list_dispatches()
@@ -459,6 +504,11 @@ fn run_one_pending_subagent(
         .collect::<std::collections::BTreeSet<_>>();
     let mut claimed_dispatch = None;
     for dispatch in dispatches {
+        if let Some(allowed_run_ids) = allowed_run_ids {
+            if !allowed_run_ids.contains(&dispatch.run_id.0) {
+                continue;
+            }
+        }
         if report_run_ids.contains(&dispatch.run_id.0) {
             continue;
         }
@@ -1342,4 +1392,86 @@ fn format_unix_rfc3339(seconds: u64) -> String {
                 .expect("unix epoch timestamp should be valid")
         });
     datetime.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use chuang_agent::common::TaskId;
+    use chuang_agent::runtime_config::RuntimeConfig;
+    use chuang_agent::subagent_queue::FileSubagentQueueConfig;
+    use chuang_agent::subagent_spawner::{ContextIsolation, SubagentDispatch, SubagentToolPolicy};
+
+    #[test]
+    fn run_subagent_run_loop_respects_allowed_run_ids() {
+        let queue_root = temp_queue_root("run-loop-allowlist");
+        let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+            .expect("queue should open");
+        queue
+            .write_dispatch(&sample_dispatch("queued-run-1", "task-1"))
+            .expect("first dispatch should write");
+        queue
+            .write_dispatch(&sample_dispatch("queued-run-2", "task-2"))
+            .expect("second dispatch should write");
+
+        let request = sample_run_once_request(&queue_root);
+        let allowed_run_ids = BTreeSet::from(["queued-run-2".to_string()]);
+
+        let output = run_subagent_run_loop(&queue, &request, 2, 2, Some(&allowed_run_ids))
+            .expect("run loop should execute");
+
+        assert_eq!(output.ran_count, 1);
+        assert_eq!(output.run_ids, vec!["queued-run-2".to_string()]);
+        assert!(output.idle);
+        assert!(!queue_root
+            .join("reports")
+            .join("queued-run-1.json")
+            .exists());
+        assert!(queue_root
+            .join("reports")
+            .join("queued-run-2.json")
+            .exists());
+    }
+
+    fn temp_queue_root(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!("chuang-agent-cli-subagent-{name}-{nanos}"))
+    }
+
+    fn sample_run_once_request(queue_root: &std::path::Path) -> SubagentRunOnceCliRequest {
+        let mut runtime = RuntimeConfig::new(queue_root.join("memory.db"));
+        runtime.subagent_queue.root = queue_root.to_path_buf();
+        SubagentRunOnceCliRequest {
+            options: CliOptions { runtime },
+            output: ControlOutputFormat::Json,
+            runner: "fake".to_string(),
+            runner_command: None,
+            runner_args: Vec::new(),
+            worker_capabilities: Vec::new(),
+            approve_exec: false,
+        }
+    }
+
+    fn sample_dispatch(run_id: &str, task_id: &str) -> SubagentDispatch {
+        SubagentDispatch {
+            run_id: RunId(run_id.to_string()),
+            agent_id: AgentId(format!("worker-{run_id}")),
+            task_id: TaskId(task_id.to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: format!("queued task {task_id}"),
+            tool_policy: SubagentToolPolicy::Analyze,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 512,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: BTreeMap::new(),
+        }
+    }
 }

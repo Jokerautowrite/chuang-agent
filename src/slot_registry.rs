@@ -348,34 +348,7 @@ impl Responder for ProviderSlot {
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string()),
                 );
-                if let Some(status_code) = primary_output.meta.extra.get("status_code") {
-                    fallback_output.meta.extra.insert(
-                        "provider_fallback_primary_status_code".to_string(),
-                        status_code.clone(),
-                    );
-                }
-                if let Some(error_class) = primary_output.meta.extra.get("provider_error_class") {
-                    fallback_output.meta.extra.insert(
-                        "provider_fallback_primary_error_class".to_string(),
-                        error_class.clone(),
-                    );
-                }
-                if let Some(reason_code) = primary_output
-                    .meta
-                    .extra
-                    .get("provider_failure_reason_code")
-                {
-                    fallback_output.meta.extra.insert(
-                        "provider_fallback_primary_failure_reason_code".to_string(),
-                        reason_code.clone(),
-                    );
-                }
-                if let Some(category) = primary_output.meta.extra.get("provider_failure_category") {
-                    fallback_output.meta.extra.insert(
-                        "provider_fallback_primary_failure_category".to_string(),
-                        category.clone(),
-                    );
-                }
+                copy_provider_fallback_primary_meta(&primary_output, &mut fallback_output);
                 fallback_output.trace = format!(
                     "{} fallback_from_trace=({})",
                     fallback_output.trace, primary_output.trace
@@ -414,6 +387,58 @@ fn mark_provider_fallback_unconfigured(output: &mut ResponderOutput) {
         .extra
         .entry("provider_fallback_used".to_string())
         .or_insert_with(|| "false".to_string());
+}
+
+fn copy_provider_fallback_primary_meta(
+    primary_output: &ResponderOutput,
+    fallback_output: &mut ResponderOutput,
+) {
+    for (source, target) in [
+        ("status_code", "provider_fallback_primary_status_code"),
+        (
+            "provider_error_class",
+            "provider_fallback_primary_error_class",
+        ),
+        (
+            "provider_failure_reason_code",
+            "provider_fallback_primary_failure_reason_code",
+        ),
+        (
+            "provider_failure_category",
+            "provider_fallback_primary_failure_category",
+        ),
+        (
+            "config_error_field",
+            "provider_fallback_primary_config_error_field",
+        ),
+        (
+            "provider_timeout_ms",
+            "provider_fallback_primary_timeout_ms",
+        ),
+        (
+            "provider_error_message",
+            "provider_fallback_primary_error_message",
+        ),
+        ("request_url", "provider_fallback_primary_request_url"),
+        ("request_method", "provider_fallback_primary_request_method"),
+        (
+            "request_message_count",
+            "provider_fallback_primary_request_message_count",
+        ),
+        ("transport", "provider_fallback_primary_transport"),
+        ("transport_mode", "provider_fallback_primary_transport_mode"),
+        (
+            "provider_response_ok",
+            "provider_fallback_primary_response_ok",
+        ),
+    ] {
+        if let Some(value) = primary_output.meta.extra.get(source) {
+            fallback_output
+                .meta
+                .extra
+                .insert(target.to_string(), value.clone());
+        }
+    }
 }
 
 fn provider_output_should_fallback(

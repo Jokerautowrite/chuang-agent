@@ -68,7 +68,7 @@ assert data["plugin_registry"]["available"] is True
 assert data["plugin_registry"]["ok"] is True
 assert data["local_contract_readiness"]["ok"] is True
 assert data["local_contract_readiness"]["overall_state"] == "ready"
-assert data["local_contract_readiness"]["contract_count"] == 4
+assert data["local_contract_readiness"]["contract_count"] == 6
 assert data["local_contract_readiness"]["connects_real_external_services"] is False
 assert data["local_contract_readiness"]["writes_core_memory"] is False
 assert data["local_contract_readiness"]["executes_plugins"] is False
@@ -77,6 +77,8 @@ assert local_contracts["knowledge_context_preview"]["read_only"] is True
 assert local_contracts["skill_proposal_review"]["dry_run"] is True
 assert local_contracts["plugin_registry_evidence"]["executes_plugins"] is False
 assert local_contracts["external_knowledge_source_contracts"]["boundary"] == "adapter_contract_only"
+assert local_contracts["goal_mode_smoke_gate"]["boundary"] == "local_cli_smoke_only"
+assert local_contracts["goal_mode_smoke_gate"]["connects_real_service"] is False
 assert data["project_readiness"]["ok"] is True
 assert data["project_readiness"]["overall_state"] == "ready"
 assert data["release_readiness"]["ok"] is True
@@ -121,9 +123,14 @@ assert data["subagent_readiness"]["ok"] is True
 assert data["subagent_readiness"]["overall_state"] == "ready"
 assert data["subagent_readiness"]["local_contract_ready"] is True
 assert data["subagent_readiness"]["live_adapter_ready"] is False
+assert data["subagent_readiness"]["live_worker_available"] is False
+assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
+assert "queued_external" in data["subagent_readiness"]["worker_runtime_reason"]
 subagent_layers = {layer["name"]: layer["state"] for layer in data["subagent_readiness"]["layers"]}
 subagent_local = {layer["name"]: layer["local_contract_ready"] for layer in data["subagent_readiness"]["layers"]}
 subagent_live = {layer["name"]: layer["live_adapter_ready"] for layer in data["subagent_readiness"]["layers"]}
+subagent_workers = {layer["name"]: layer["live_worker_available"] for layer in data["subagent_readiness"]["layers"]}
+subagent_worker_states = {layer["name"]: layer["worker_runtime_state"] for layer in data["subagent_readiness"]["layers"]}
 assert subagent_layers["dispatch_queue"] == "ready"
 assert subagent_layers["report_collect"] == "ready"
 assert subagent_layers["command_runner"] == "ready"
@@ -133,6 +140,10 @@ assert subagent_local["command_runner"] is True
 assert subagent_local["multi_worker"] is True
 assert subagent_live["command_runner"] is False
 assert subagent_live["external_ai_downstream"] is False
+assert subagent_workers["command_runner"] is False
+assert subagent_workers["multi_worker"] is False
+assert subagent_worker_states["command_runner"] == "local_contract_only"
+assert subagent_worker_states["external_ai_downstream"] == "local_contract_only"
 assert data["external_ai_readiness"]["ok"] is True
 assert data["external_ai_readiness"]["overall_state"] == "ready"
 external_ai_layers = {layer["name"]: layer["state"] for layer in data["external_ai_readiness"]["layers"]}
@@ -141,6 +152,17 @@ assert external_ai_layers["browser_worker_frozen"] == "ready"
 assert external_ai_layers["dispatch_sop"] == "ready"
 assert external_ai_layers["unified_identity_engine"] == "ready"
 assert data["config"]["provider_request_timeout_ms"] is None
+assert data["provider_readiness"]["ok"] is True
+assert data["provider_readiness"]["overall_state"] == "ready"
+assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
+assert data["provider_readiness"]["provider_id"] == "mvp-smoke-openai"
+assert data["provider_readiness"]["model_name"] == "gpt-mvp-smoke"
+assert data["provider_readiness"]["transport"] == "stub"
+assert data["provider_readiness"]["fallback_configured"] is False
+assert data["provider_readiness"]["request_timeout_ms"] is None
+assert data["provider_readiness"]["api_key_state"] == "<set>"
+assert data["provider_readiness"]["placeholder_warning_count"] == 1
+assert "provider transport=stub" in data["provider_readiness"]["current"]
 present = {
     "soul": data["kernel"]["identity_soul_exists"],
     "story": data["kernel"]["identity_story_exists"],
@@ -192,6 +214,11 @@ assert status["atomic_tools"]["mapped_atomic_tool_names"] == ["file_read", "file
 assert status["atomic_tools"]["interface_only_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "wait", "human_suspend"]
 assert status["project_readiness"]["ok"] is True
 assert status["project_readiness"]["overall_state"] == "ready"
+assert status["provider_readiness"]["ok"] is True
+assert status["provider_readiness"]["provider_kind"] == "openai_compatible"
+assert status["provider_readiness"]["transport"] == "stub"
+assert status["provider_readiness"]["api_key_state"] == "<set>"
+assert status["provider_readiness"]["placeholder_warning_count"] == 1
 assert status["local_contract_readiness"]["ok"] is True
 assert status["local_contract_readiness"]["overall_state"] == "ready"
 assert status["local_contract_readiness"]["connects_real_external_services"] is False
@@ -208,6 +235,8 @@ assert status["channel_readiness"]["ok"] is True
 assert status["channel_readiness"]["overall_state"] == "ready"
 assert status["subagent_readiness"]["ok"] is True
 assert status["subagent_readiness"]["overall_state"] == "ready"
+assert status["subagent_readiness"]["live_worker_available"] is False
+assert status["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 assert status["external_ai_readiness"]["ok"] is True
 assert status["external_ai_readiness"]["overall_state"] == "ready"
 assert status["kernel"]["identity_soul_exists"] is True
@@ -367,7 +396,9 @@ printf '%s' "$knowledge_runtime_output" | python3 -c '
 import sys
 data = sys.stdin.read()
 assert "knowledge_context_preview_enabled: true" in data
-assert "knowledge_context_injected: true" in data
+assert "knowledge_context_preview_count: 1" in data
+assert "knowledge_context_injected: false" in data
+assert "knowledge_context_dropped_count: 1" in data
 assert "knowledge_context_connects_real_service: false" in data
 assert "knowledge_context_runtime_retrieval_wired: false" in data
 '
@@ -438,7 +469,20 @@ assert data["result"]["audit_id"].startswith("external-ai-kimi-")
 '
 
 printf '%s\n' "[smoke] app-server health"
-cargo run --quiet -- app-server health --workspace-root "$work_dir" --json >/dev/null
+app_health_output="$(cargo run --quiet -- app-server health --workspace-root "$work_dir" --json)"
+printf '%s' "$app_health_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+assert data["ok"] is True
+assert data["provider_readiness"]["ok"] is True
+assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
+assert data["provider_readiness"]["transport"] == "stub"
+assert data["provider_readiness"]["api_key_state"] == "<set>"
+assert data["provider_readiness"]["placeholder_warning_count"] == 1
+assert data["subagent_readiness"]["live_worker_available"] is False
+assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
+assert data["subagent_readiness"]["live_adapter_ready"] is False
+'
 
 printf '%s\n' "[smoke] repl launcher"
 bash -n scripts/launch-chuang-agent-repl.sh
@@ -463,6 +507,10 @@ assert data["dry_run"] is True
 assert data["writes_skills"] is False
 assert data["requires_approval"] is True
 assert data["proposal_count"] == 1
+assert data["approval_ticket_count"] == 1
+assert data["approval_tickets"][0]["local_only"] is True
+assert data["approval_tickets"][0]["approval_receipt"]["approved"] is False
+assert data["approval_tickets"][0]["approval_receipt"]["approval_source"] == "pending_operator_approval"
 assert data["boundary"]["writes_skill_files"] is False
 assert data["boundary"]["solidifies_skill"] is False
 '

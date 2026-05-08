@@ -73,6 +73,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("provider: fake"));
     assert!(stdout.contains("provider_slot: fake"));
     assert!(stdout.contains("model: stub-responder"));
+    assert!(stdout.contains(
+        "provider_readiness: ok=true state=ready kind=fake transport=fake fallback_configured=false timeout_ms=none api_key_state=none"
+    ));
     assert!(stdout.contains("identity_memory: hermes_dual_file"));
     assert!(stdout.contains("identity_experiences_path: "));
     assert!(stdout.contains("identity_memory_limits: user=1375 memory=2200"));
@@ -115,7 +118,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("checkpoints="));
     assert!(stdout.contains("plugin_registry: available=true ok=true"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=5 ready=5 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=6 ready=6 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "local_contract name=knowledge_context_preview state=ready boundary=local_markdown_text_preview_only read_only=true dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
@@ -131,6 +134,9 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains(
         "local_contract name=external_knowledge_source_contracts state=ready boundary=adapter_contract_only"
+    ));
+    assert!(stdout.contains(
+        "local_contract name=goal_mode_smoke_gate state=ready boundary=local_cli_smoke_only"
     ));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("project_module name=main_chain state=ready"));
@@ -161,6 +167,8 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
+    assert!(stdout.contains("live_worker_available=false worker_runtime_state=local_contract_only"));
+    assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
     assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains(
@@ -168,7 +176,7 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains("live_adapter_reason=local command-runner contract is ready"));
     assert!(stdout.contains(
-        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred boundary=read_only_preflight"
+        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred live_worker_available=false worker_runtime_state=local_contract_only boundary=read_only_preflight"
     ));
     assert!(stdout.contains("live_adapter_reason=read-only live runner rehearsal is ready"));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
@@ -266,8 +274,8 @@ fn cli_status_can_render_json_without_secret_leak() {
     );
     assert_eq!(parsed["local_contract_readiness"]["ok"], true);
     assert_eq!(parsed["local_contract_readiness"]["overall_state"], "ready");
-    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 5);
-    assert_eq!(parsed["local_contract_readiness"]["ready_count"], 5);
+    assert_eq!(parsed["local_contract_readiness"]["contract_count"], 6);
+    assert_eq!(parsed["local_contract_readiness"]["ready_count"], 6);
     assert_eq!(
         parsed["local_contract_readiness"]["connects_real_external_services"],
         false
@@ -315,6 +323,14 @@ fn cli_status_can_render_json_without_secret_leak() {
             |contract| contract["name"] == "external_knowledge_source_contracts"
                 && contract["boundary"] == "adapter_contract_only"
         ));
+    assert!(parsed["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts should be an array")
+        .iter()
+        .any(|contract| contract["name"] == "goal_mode_smoke_gate"
+            && contract["boundary"] == "local_cli_smoke_only"
+            && contract["read_only"] == true
+            && contract["connects_real_service"] == false));
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
@@ -553,6 +569,15 @@ fn cli_status_can_render_json_without_secret_leak() {
         .expect("subagent local contract reason should be a string")
         .contains("protocol-ready"));
     assert_eq!(parsed["subagent_readiness"]["live_adapter_ready"], false);
+    assert_eq!(parsed["subagent_readiness"]["live_worker_available"], false);
+    assert_eq!(
+        parsed["subagent_readiness"]["worker_runtime_state"],
+        "local_contract_only"
+    );
+    assert!(parsed["subagent_readiness"]["worker_runtime_reason"]
+        .as_str()
+        .expect("subagent worker runtime reason should be a string")
+        .contains("subagent slot is fake"));
     assert!(parsed["subagent_readiness"]["live_adapter_reason"]
         .as_str()
         .expect("subagent live adapter reason should be a string")
@@ -586,6 +611,8 @@ fn cli_status_can_render_json_without_secret_leak() {
         .any(|layer| layer["name"] == "live_runner_rehearsal"
             && layer["state"] == "ready"
             && layer["boundary"] == "read_only_preflight"
+            && layer["live_worker_available"] == false
+            && layer["worker_runtime_state"] == "local_contract_only"
             && layer["live_adapter_reason"]
                 .as_str()
                 .expect("layer live adapter reason should be a string")
@@ -837,6 +864,15 @@ fn cli_status_can_select_queued_external_subagent_slot() {
         queue_root.display().to_string()
     );
     assert_eq!(parsed["slots"]["subagent"], "queued_external");
+    assert_eq!(parsed["subagent_readiness"]["live_worker_available"], false);
+    assert_eq!(
+        parsed["subagent_readiness"]["worker_runtime_state"],
+        "local_contract_only"
+    );
+    assert!(parsed["subagent_readiness"]["worker_runtime_reason"]
+        .as_str()
+        .expect("queued_external worker runtime reason")
+        .contains("no live worker adapter is available yet"));
 }
 
 #[test]
@@ -877,6 +913,10 @@ fn cli_status_exposes_provider_request_timeout_from_cli_override() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["config"]["provider_request_timeout_ms"], 12_345);
+    assert_eq!(parsed["provider_readiness"]["transport"], "native");
+    assert_eq!(parsed["provider_readiness"]["request_timeout_ms"], 12_345);
+    assert_eq!(parsed["provider_readiness"]["fallback_configured"], false);
+    assert_eq!(parsed["provider_readiness"]["api_key_state"], "<set>");
     assert!(!stdout.contains("test-secret-key"));
 }
 
@@ -916,6 +956,9 @@ fn cli_status_prints_provider_request_timeout_in_text() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("provider_request_timeout_ms: 12345"));
+    assert!(stdout.contains(
+        "provider_readiness: ok=true state=ready kind=openai_compatible transport=native fallback_configured=false timeout_ms=12345 api_key_state=<set>"
+    ));
     assert!(!stdout.contains("test-secret-key"));
 }
 

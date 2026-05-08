@@ -177,7 +177,7 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["contract_count"],
-        5
+        6
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
@@ -345,13 +345,19 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains(
         "atomic_tools: ok=true total=9 mapped=3 interface_only=6 action_schema_version=1 report_schema_version=6"
     ));
+    assert!(stdout.contains(
+        "provider_readiness: ok=true state=ready kind=fake transport=fake fallback_configured=false timeout_ms=none api_key_state=none"
+    ));
     assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
     assert!(stdout.contains(
         "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
     ));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready"));
-    assert!(stdout.contains("subagent_readiness: ok=true state=queued_protocol_partial"));
+    assert!(stdout.contains(
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake live_worker_available=false worker_runtime_state=local_contract_only"
+    ));
+    assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
@@ -366,7 +372,7 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("goal_run_last_checkpoint_validation_notes:"));
     assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=5 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=6 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "memory_maintenance_receipt: available=true readable=true state=missing receipts=0 latest_entry_id=none latest_source_record_id=none latest_approval_source=none latest_approved_at=none latest_provenance_preserved=false"

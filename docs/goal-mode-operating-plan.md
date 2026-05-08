@@ -1,6 +1,6 @@
 # Goal Mode Operating Plan
 
-更新时间：2026-05-04
+更新时间：2026-05-08
 
 ## 定位
 
@@ -155,6 +155,18 @@ tests/goal_run_tests.rs
 
 `GoalSpec` 目前定义目标、验收、预算、允许 slot、checkpoint 策略和最终报告策略，并能渲染成 runtime extra context。`GoalRun` 负责把目标计划、worker plan、写入范围、验证计划和 checkpoint log 保存成 JSON；`goal show` 在读取时也会重新校验这些结构，避免坏文件伪装成可恢复状态。现在 `status` / `doctor` / `console snapshot` / `app-server health` 也会把 goal policy 和最新 checkpoint 复盘证据显式暴露出来。
 
+`goal step` 的定位必须保持很窄：它是 foreground bounded goal-scoped wrapper over `subagent run-loop`。换句话说，它只是在一个明确 `goal_id` 的 dispatch manifest / queued dispatch 范围内，按显式 `max-runs` 和 `max-concurrency` 跑一批 worker，然后返回本次 step receipt。它不是新的执行内核，也不是后台调度器。
+
+`goal step` 的硬边界：
+
+- 不做 daemon，不后台常驻，不自恢复循环。
+- 不自动创建 checkpoint；checkpoint 仍必须由 `goal checkpoint` 显式写入。
+- 不写 `docs/progress-log.md`、`docs/handoff-current.md` 或任何长期记忆。
+- 不做 cleanup、delete、purge、reset、release-claim 或队列文件删除。
+- 不连接 Feishu，不复用 Codex/Hermes 飞书桥，不控制 Hermes。
+- 不扩大 runner 权限；底层 command runner 仍必须遵守 `subagent run-loop` 的 `--approve-exec`、capability routing、ReportAdmission 和 live-preflight 边界。
+- 它只消费该 `goal_id` 的 dispatch manifest 里已经派发出去的 queued dispatch；跑完后最多只返回 step receipt 和 collect 证据，不会自己补写 checkpoint suggestion。
+
 第二测试版补强的验收面：
 
 - 每个 worker 必须有 `validation_checks`；CLI 自定义 `--worker` 默认继承全局 `--validation`。
@@ -164,20 +176,85 @@ tests/goal_run_tests.rs
 - `goal_run` 只读状态会显式暴露最新 checkpoint 的 `created_at`、`completed_worker_ids` 和 `validation_notes`，方便操作者直接看复盘证据，不必再打开 JSON 文件。
 - `incomplete_reasons` 是结构化恢复提示：旧 checkpoint 缺完成者、缺验证备注、worker scope 不完整或 validation plan 不完整时，readiness/诊断面应直接暴露原因。
 - checkpoint 必须带至少一个 `completed_worker_id` 和至少一条 `validation_note`。缺 checkpoint 仍只用于提示续接风险，不会触发任务执行。
+- `goal collect` 只有在所有 dispatch 都有 report、report 身份与 manifest 对齐且 `status=Success` 时才会给出 `checkpoint_suggestion`；失败、缺失或身份不匹配的 report 只会保留在 `blocked_report_*` 里，并保持 `ready_to_checkpoint=false`。
 
 当前 CLI 入口：
 
 ```text
-cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID] [--max-subtasks N]
+cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID] [--max-subtasks N] [--scope scope_id=path[,path...]] [--worker 'worker_id|scope_id[,scope_id...]|objective'] [--validation COMMAND]
 cargo run -- goal show [--root PATH] [--goal-id ID]
+cargo run -- goal dispatch [--root PATH] [--goal-id ID]
+cargo run -- goal step --max-runs N --max-concurrency N [--root PATH] [--goal-id ID]
+cargo run -- goal collect [--root PATH] [--goal-id ID]
 cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]
 ```
 
-默认 root 是 `./context/goal-runs`，属于本地可恢复运行态，不进入 git。上述入口只做计划和 checkpoint 记录，不执行命令、不绕过治理、不新增 slot。
+默认 root 是 `./context/goal-runs`，属于本地可恢复运行态，不进入 git。`goal dispatch` 只派发计划内 worker，`goal step` 只前台执行有界 worker 批次，`goal collect` 只读收集报告，`goal checkpoint` 才写 checkpoint；这些入口不绕过治理、不新增 slot、不写文档或记忆。
+
+`goal checkpoint` 现在有两种显式写回方式：手动填 `--summary/--completed-worker-id/--validation-note`，或者用 `--from-collect --subagent-queue-root PATH` 从 collect receipt 生成 checkpoint suggestion 后再写回。两条路径都只是显式 checkpoint，不会自动落 `docs/progress-log.md` 或 `docs/handoff-current.md`。
+
+## 6 Worker Operator Runbook
+
+下一轮主控要一次派满 6 个 worker 时，先把任务拆成 6 个互不重叠的 scope，再用 `GoalRun` 记录计划。示例命令里的路径和 objective 必须按当轮任务替换；`--worker` 参数需要整体加引号，避免 shell 把 `|` 当管道。
+
+```bash
+GOAL_ID=mainline-95-operator
+GOAL_ROOT=./context/goal-runs
+QUEUE_ROOT=./context/subagent-queue
+
+cargo run -- goal plan \
+  --goal-id "$GOAL_ID" \
+  --root "$GOAL_ROOT" \
+  --max-subtasks 6 \
+  --objective "push Chuang local operator usability toward 95 percent" \
+  --scope goal-ux=docs/goal-mode-operating-plan.md,docs/multi-worker-orchestration.md \
+  --scope status-ux=src/kernel_status.rs,src/cli_output.rs,tests/kernel_status_tests.rs,tests/cli_status_tests.rs \
+  --scope doctor-console=src/cli_doctor.rs,src/cli_console.rs,tests/cli_doctor_tests.rs,tests/cli_console_tests.rs \
+  --scope app-health=src/app_server.rs,tests/app_server_tests.rs \
+  --scope provider-diag=src/provider_openai_compatible.rs,src/runtime_report.rs,tests/runtime_report_tests.rs \
+  --scope smoke-docs=scripts/chuang-complete-local-smoke.sh,docs/handoff-current.md,docs/progress-log.md \
+  --worker 'worker-goal-ux|goal-ux|document goal/subagent operator command order and evidence fields' \
+  --worker 'worker-status-ux|status-ux|align status readiness wording for live worker availability' \
+  --worker 'worker-doctor-console|doctor-console|align doctor and console blocked reason visibility' \
+  --worker 'worker-app-health|app-health|expose health text/json runner evidence consistently' \
+  --worker 'worker-provider-diag|provider-diag|harden provider diagnostics surfaced to runtime observability' \
+  --worker 'worker-smoke-docs|smoke-docs|keep smoke and handoff evidence aligned after integration' \
+  --validation 'cargo fmt --all --check' \
+  --validation 'git diff --check' \
+  --validation 'cargo test -q'
+```
+
+计划完成后按固定顺序执行，不跳步：
+
+```bash
+cargo run -- goal show --goal-id "$GOAL_ID" --root "$GOAL_ROOT"
+cargo run -- goal dispatch --goal-id "$GOAL_ID" --root "$GOAL_ROOT" --subagent-queue-root "$QUEUE_ROOT"
+cargo run -- goal step --goal-id "$GOAL_ID" --root "$GOAL_ROOT" --subagent-queue-root "$QUEUE_ROOT" --max-runs 6 --max-concurrency 6
+cargo run -- goal collect --goal-id "$GOAL_ID" --root "$GOAL_ROOT" --subagent-queue-root "$QUEUE_ROOT"
+cargo run -- goal checkpoint --goal-id "$GOAL_ID" --root "$GOAL_ROOT" --subagent-queue-root "$QUEUE_ROOT" --from-collect
+cargo run -- goal show --goal-id "$GOAL_ID" --root "$GOAL_ROOT"
+```
+
+验收字段按阶段看：
+
+- `goal show`：`goal_worker_scope_complete=true`、`goal_worker_validation_complete=true`、`goal_validation_plan_complete=true`，并确认 `goal_executes_automatically=false` / `goal_bypasses_governance=false`。
+- `goal dispatch`：`goal_dispatch_ready=true`、`goal_dispatch_count=6`、`goal_dispatch_workers` 和 `goal_dispatch_run_ids` 都齐全，`goal_dispatch_manifest_path` 指向本轮 manifest。
+- `goal step`：`goal_step_ran_count` 不超过 6，`goal_step_checkpoint_recorded=false`、`goal_step_writes_progress_log=false`、`goal_step_writes_handoff=false`。
+- `goal collect`：只有 `goal_collect_ready_to_checkpoint=true` 且 `goal_collect_missing_run_ids=none`、`goal_collect_blocked_report_run_ids=none`、`goal_collect_blocked_report_reasons=none` 时，才进入 `goal checkpoint --from-collect`。
+- `goal checkpoint --from-collect`：文本面应出现 `goal_checkpoint_source: collect`；随后 `goal show` 的 `goal_checkpoint_log_complete=true`，最新 checkpoint 带 completed workers 和 validation notes。
+
+失败时先看 `goal collect`，不要猜。`goal_collect_missing_run_ids` 表示 worker 还没交报告；`goal_collect_blocked_report_run_ids` 表示已有报告但不能进 checkpoint；`goal_collect_blocked_report_reasons` 会说明是 failed report、identity mismatch 或其他 admission 问题。此时 `goal checkpoint --from-collect` 必须失败，主控应把 blocked evidence 贴给对应 worker 返工，不能手工绕过生成 checkpoint。
+
+2026-05-08 增量状态：`goal plan -> goal dispatch -> goal step -> goal collect -> goal checkpoint --from-collect -> goal show` 的 happy path 已进入 `scripts/chuang-goal-mode-smoke.sh`，not-ready 负例已进入 `scripts/chuang-goal-mode-negative-smoke.sh`，并由 `scripts/chuang-complete-local-smoke.sh` 直接调用，当前不再把“先跑通 happy path”或“先补负例门禁”作为下一阶段目标。已锁定的门禁包括：
+
+1. `goal checkpoint --from-collect` 在 collect receipt not-ready 时必须拒绝写回。
+2. failed report / identity-mismatched report 必须只进入 `blocked_report_run_ids` 和 `blocked_report_reasons`，不能生成 checkpoint material。
+3. `goal step` 必须持续保持 bounded / allowlist：只执行 manifest run id，拒绝无效 `max-runs` / `max-concurrency`，不扩大到后台调度。
 
 ## 禁止事项
 
 - 不把 goal mode 做成绕过治理的后台执行器。
+- 不把 `goal step` 做成 daemon、自动 checkpoint、自动文档/记忆写回、cleanup/delete 工具或 Feishu/Hermes 通道。
 - 不自动删除、清理、reset 或卸载任何东西。
 - 不复用 Codex/Hermes 飞书通道。
 - 不把外部智能体调度提前塞进主进程主线。

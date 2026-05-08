@@ -8,7 +8,7 @@ use crate::governance::{
 };
 use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
-use crate::runtime_config::{ConfigError, ConfigSummary, RuntimeConfig};
+use crate::runtime_config::{ConfigError, ConfigSummary, ProviderConfig, RuntimeConfig};
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
 use crate::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use serde::Serialize;
@@ -21,6 +21,7 @@ pub struct ChuangMvpStatus {
     pub kernel: ChuangKernelSnapshot,
     pub plugin_registry: PluginRegistrySummary,
     pub local_contract_readiness: LocalContractReadinessStatus,
+    pub provider_readiness: ProviderReadinessStatus,
     pub project_readiness: ProjectReadinessStatus,
     pub memory_readiness: MemoryReadinessStatus,
     pub memory_maintenance_receipt: MemoryMaintenanceReceiptStatus,
@@ -204,6 +205,9 @@ pub struct SubagentReadinessStatus {
     pub ok: bool,
     pub overall_state: String,
     pub mode: String,
+    pub live_worker_available: bool,
+    pub worker_runtime_state: String,
+    pub worker_runtime_reason: String,
     pub local_contract_ready: bool,
     pub local_contract_state: String,
     pub local_contract_reason: String,
@@ -222,6 +226,8 @@ pub struct SubagentReadinessStatus {
 pub struct SubagentLayerStatus {
     pub name: String,
     pub state: String,
+    pub live_worker_available: bool,
+    pub worker_runtime_state: String,
     pub local_contract_ready: bool,
     pub local_contract_state: String,
     pub local_contract_reason: String,
@@ -331,6 +337,24 @@ pub struct GoalModeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProviderReadinessStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub provider_kind: String,
+    pub provider_id: String,
+    pub model_name: String,
+    pub transport: String,
+    pub fallback_configured: bool,
+    pub fallback_policy: Option<String>,
+    pub request_timeout_ms: Option<u64>,
+    pub tls_ca_cert_path: Option<String>,
+    pub api_key_state: Option<String>,
+    pub placeholder_warning_count: usize,
+    pub current: String,
+    pub next_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GoalRunReadinessStatus {
     pub ok: bool,
     pub root: String,
@@ -373,6 +397,7 @@ pub fn build_chuang_mvp_status(
     let local_contract_readiness = build_local_contract_readiness();
     let slots = summarize_runtime_slots(config);
     let config_summary = config.summary();
+    let provider_readiness = build_provider_readiness(config, &config_summary);
     let atomic_tools = AtomicToolSurfaceStatus {
         source: "GenericAgent".to_string(),
         ok: atomic_manifests.len() == 9 && mapped_count == 3 && interface_only_count == 6,
@@ -498,6 +523,7 @@ pub fn build_chuang_mvp_status(
         },
         plugin_registry,
         local_contract_readiness,
+        provider_readiness,
         project_readiness,
         memory_readiness,
         memory_maintenance_receipt,
@@ -756,6 +782,19 @@ fn build_local_contract_readiness() -> LocalContractReadinessStatus {
             false,
             false,
         ),
+        local_contract(
+            "goal_mode_smoke_gate",
+            "ready",
+            "chuang-goal-mode-smoke and chuang-goal-mode-negative-smoke cover dispatch/step/collect/checkpoint happy path and not-ready rejection",
+            "local_cli_smoke_only",
+            "keep goal-mode smoke green while hardening live runner adapters",
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ),
     ];
 
     let ready_count = contracts
@@ -799,6 +838,91 @@ fn build_local_contract_readiness() -> LocalContractReadinessStatus {
         writes_core_memory,
         executes_plugins,
         contracts,
+    }
+}
+
+fn build_provider_readiness(
+    config: &RuntimeConfig,
+    summary: &ConfigSummary,
+) -> ProviderReadinessStatus {
+    let fallback_configured = matches!(config.provider, ProviderConfig::Fallback { .. });
+    let provider_kind = summary.provider_kind.clone();
+    let provider_id = summary.provider_id.clone();
+    let model_name = summary.model_name.clone();
+    let transport = provider_transport_label(&config.provider);
+    let fallback_policy = summary.provider_fallback_policy.clone();
+    let request_timeout_ms = summary.provider_request_timeout_ms;
+    let tls_ca_cert_path = summary.provider_tls_ca_cert_path.clone();
+    let api_key_state = summary.api_key_state.clone();
+    let placeholder_warning_count = summary
+        .placeholder_warnings
+        .iter()
+        .filter(|warning| warning.starts_with("provider "))
+        .count();
+    let missing_env = api_key_state
+        .as_deref()
+        .map(|state| state.contains("<missing") || state == "none")
+        .unwrap_or(true);
+    let uses_stub = provider_transport_label(&config.provider).contains("stub");
+    let provider_kind_is_fake = provider_kind == "fake";
+    let overall_state = if fallback_configured {
+        "ready_with_fallback"
+    } else if provider_kind_is_fake || uses_stub {
+        "ready"
+    } else if missing_env || placeholder_warning_count > 0 {
+        "partial"
+    } else {
+        "ready"
+    };
+
+    ProviderReadinessStatus {
+        ok: true,
+        overall_state: overall_state.to_string(),
+        provider_kind,
+        provider_id,
+        model_name,
+        transport,
+        fallback_configured,
+        fallback_policy,
+        request_timeout_ms,
+        tls_ca_cert_path,
+        api_key_state,
+        placeholder_warning_count,
+        current: if fallback_configured {
+            "provider fallback is configured; live provider and fallback metadata remain locally observable".to_string()
+        } else if provider_kind_is_fake {
+            "provider fake mode is local-only and ready for smoke coverage".to_string()
+        } else if uses_stub {
+            "provider transport=stub is local-only and ready for smoke coverage".to_string()
+        } else if missing_env {
+            "provider api_key_env is missing; live provider readiness remains partial".to_string()
+        } else {
+            "provider configuration is locally ready for live requests".to_string()
+        },
+        next_action: if fallback_configured {
+            "keep fallback metadata visible and verify primary diagnostics before promoting live provider traffic".to_string()
+        } else if provider_kind_is_fake || uses_stub {
+            "switch to a real provider transport only after live secrets and transport diagnostics are confirmed".to_string()
+        } else if missing_env {
+            "set the provider api_key_env before claiming live provider readiness".to_string()
+        } else {
+            "keep timeout, TLS, and fallback policy aligned with the selected provider transport"
+                .to_string()
+        },
+    }
+}
+
+fn provider_transport_label(provider: &ProviderConfig) -> String {
+    match provider {
+        ProviderConfig::Fake { .. } => "fake".to_string(),
+        ProviderConfig::OpenAICompatible(config) => config.transport.as_str().to_string(),
+        ProviderConfig::Fallback {
+            primary, fallback, ..
+        } => format!(
+            "{}->{}",
+            provider_transport_label(primary),
+            provider_transport_label(fallback)
+        ),
     }
 }
 
@@ -1144,11 +1268,37 @@ fn build_subagent_readiness(
     } else {
         "partial"
     };
+    let live_worker_available = live_adapter_ready;
+    let worker_runtime_state = if live_worker_available {
+        "live_worker_available"
+    } else if local_contract_ready {
+        "local_contract_only"
+    } else if blocked_count > 0 {
+        "blocked"
+    } else {
+        "deferred"
+    };
+    let worker_runtime_reason = if live_worker_available {
+        "a live subagent worker adapter is configured and all layers report live availability"
+            .to_string()
+    } else if slots.subagent == "fake" {
+        "subagent slot is fake; ready layers only prove local contracts and do not provide a live worker"
+            .to_string()
+    } else if queued {
+        "queued_external provides durable dispatch/report contracts, but no live worker adapter is available yet"
+            .to_string()
+    } else {
+        "subagent runtime is contract-only until an audited live worker adapter is configured"
+            .to_string()
+    };
 
     SubagentReadinessStatus {
         ok: blocked_count == 0,
         overall_state: overall_state.to_string(),
         mode: slots.subagent.clone(),
+        live_worker_available,
+        worker_runtime_state: worker_runtime_state.to_string(),
+        worker_runtime_reason,
         local_contract_ready,
         local_contract_state: local_contract_state.to_string(),
         local_contract_reason: if local_contract_ready {
@@ -1204,9 +1354,19 @@ fn subagent_layer(
     } else {
         "deferred"
     };
+    let live_worker_available = live_adapter_ready;
+    let worker_runtime_state = if live_worker_available {
+        "live_worker_available"
+    } else if local_contract_ready {
+        "local_contract_only"
+    } else {
+        live_adapter_state
+    };
     SubagentLayerStatus {
         name: name.to_string(),
         state: state.to_string(),
+        live_worker_available,
+        worker_runtime_state: worker_runtime_state.to_string(),
         local_contract_ready,
         local_contract_state: local_contract_state.to_string(),
         local_contract_reason: if local_contract_ready {

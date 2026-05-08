@@ -67,6 +67,28 @@ The worker only claims a dispatch when all required capabilities are present. Di
 
 Current MVP concurrency is bounded local worker batching: `--max-concurrency` accepts `1..8`. Each worker still claims from the durable queue, matches declared capabilities, and writes a normal `SubagentReport`; command runners still require explicit `--approve-exec`.
 
+## Goal-Scoped Step Wrapper
+
+`goal step` is a foreground bounded wrapper over `subagent run-loop` for one goal. It does not define a second runner protocol. A step must stay scoped to dispatches created for the selected `goal_id`, then delegate execution to the same durable queue, capability matching, command-runner approval, timeout handling, report validation, and `ReportAdmission` rules described here.
+
+Required boundary:
+
+- foreground only; no daemon, service, watcher, timer, or background auto-resume;
+- bounded by explicit `max-runs` and `max-concurrency`;
+- no automatic checkpoint; operators or the controller must call `goal collect` and `goal checkpoint` explicitly;
+- no writes to progress docs, handoff docs, core memory, or skill memory;
+- no cleanup, deletion, purge, reset, uninstall, queue-file removal, or implicit claim release;
+- no Feishu integration and no dependency on Codex/Hermes Feishu bridges or Hermes services;
+- no runner privilege expansion beyond `subagent run-loop`.
+
+`goal collect` remains the read-only handoff surface for this wrapper. It only reads reports for the manifest's queued run ids, keeps blocked evidence for missing, failed, or identity-mismatched reports, and does not write checkpoint or docs. `goal checkpoint --from-collect` is the only explicit writeback path from collection into persistent checkpoint state.
+
+2026-05-08 status update: the goal-mode happy path is no longer only a planned manual chain. `goal plan -> goal dispatch -> goal step -> goal collect -> goal checkpoint --from-collect -> goal show` is covered by `scripts/chuang-goal-mode-smoke.sh`, and the not-ready negative gate is covered by `scripts/chuang-goal-mode-negative-smoke.sh`. `scripts/chuang-complete-local-smoke.sh` now calls both smoke entries. Runner-protocol acceptance now includes:
+
+1. `goal checkpoint --from-collect` must reject a not-ready collect receipt.
+2. failed reports and identity-mismatched reports must remain blocked evidence instead of checkpoint material.
+3. `goal step` must stay bounded and allowlisted to the manifest run ids, with explicit `max-runs` and `max-concurrency` limits.
+
 ## Live Runner Preflight Rehearsal
 
 Before any real external worker runner is enabled, run the read-only rehearsal:
@@ -225,10 +247,13 @@ Collection restores the dispatch identity and verifies the report through the qu
 
 Collected reports must match the restored dispatch `task_id`, `agent_id`, and `parent_agent_id`. A mismatched report fails collection instead of being returned to the caller.
 
+Collection itself still returns a receipt when some reports are missing, failed, or blocked by identity mismatch. Those cases are surfaced in `missing_run_ids`, `blocked_report_run_ids`, `blocked_report_reasons`, and `ready_to_checkpoint=false`; they do not auto-promote into checkpoint material.
+
 ## Safety Rules
 
 - Real runners must be allowlisted outside the core.
 - Dangerous execution still requires explicit `--approve-exec`.
 - Runners must not depend on Codex or Hermes Feishu bridges.
 - Runners must not delete queue files autonomously.
+- `goal step` must preserve these same runner rules and must not add daemon behavior, auto checkpointing, doc/memory writes, cleanup/deletion, or Feishu/Hermes side effects.
 - UI/control layers should display `required_capabilities`, `is_claimed`, `is_claim_stale`, and `has_report` before operators retry or release work.

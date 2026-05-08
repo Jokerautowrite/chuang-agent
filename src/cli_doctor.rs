@@ -46,6 +46,27 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     let kernel = kernel_config_from_runtime(runtime)?;
     let status = build_chuang_mvp_status(runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    checks.push(pass(
+        "provider_readiness",
+        &format!(
+            "state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
+            status.provider_readiness.overall_state,
+            status.provider_readiness.provider_kind,
+            status.provider_readiness.transport,
+            status.provider_readiness.fallback_configured,
+            status
+                .provider_readiness
+                .request_timeout_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            status
+                .provider_readiness
+                .api_key_state
+                .as_deref()
+                .unwrap_or("none"),
+            status.provider_readiness.placeholder_warning_count
+        ),
+    ));
     checks.push(pass("identity_memory", "identity snapshot loaded"));
     run_identity_experiences_check(runtime)?;
     checks.push(pass(
@@ -97,14 +118,17 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "subagent_readiness",
         &format!(
-            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={}",
+            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_reason={}",
             status.subagent_readiness.overall_state,
             status.subagent_readiness.mode,
             status.subagent_readiness.layer_count,
             status.subagent_readiness.ready_count,
             status.subagent_readiness.partial_count,
             status.subagent_readiness.deferred_count,
-            status.subagent_readiness.blocked_count
+            status.subagent_readiness.blocked_count,
+            status.subagent_readiness.live_worker_available,
+            status.subagent_readiness.worker_runtime_state,
+            status.subagent_readiness.worker_runtime_reason
         ),
     ));
     let live_adapter_next_actions = status
@@ -658,6 +682,35 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.governance.secret_shell_decision
     );
     println!(
+        "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
+        doctor.status.provider_readiness.ok,
+        doctor.status.provider_readiness.overall_state,
+        doctor.status.provider_readiness.provider_kind,
+        doctor.status.provider_readiness.transport,
+        doctor.status.provider_readiness.fallback_configured,
+        doctor
+            .status
+            .provider_readiness
+            .request_timeout_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        doctor
+            .status
+            .provider_readiness
+            .api_key_state
+            .as_deref()
+            .unwrap_or("none"),
+        doctor.status.provider_readiness.placeholder_warning_count
+    );
+    println!(
+        "provider_readiness_current: {}",
+        doctor.status.provider_readiness.current
+    );
+    println!(
+        "provider_readiness_next_action: {}",
+        doctor.status.provider_readiness.next_action
+    );
+    println!(
         "atomic_tools_ok: {} manifest_schema_version={} action_schema_version={} report_schema_version={}",
         doctor.status.atomic_tools.ok,
         doctor.status.atomic_tools.manifest_schema_version,
@@ -832,7 +885,7 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.channel_readiness.blocked_count
     );
     println!(
-        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={}",
         doctor.status.subagent_readiness.ok,
         doctor.status.subagent_readiness.overall_state,
         doctor.status.subagent_readiness.mode,
@@ -844,7 +897,13 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.subagent_readiness.ready_count,
         doctor.status.subagent_readiness.partial_count,
         doctor.status.subagent_readiness.deferred_count,
-        doctor.status.subagent_readiness.blocked_count
+        doctor.status.subagent_readiness.blocked_count,
+        doctor.status.subagent_readiness.live_worker_available,
+        doctor.status.subagent_readiness.worker_runtime_state
+    );
+    println!(
+        "subagent_worker_runtime_reason: {}",
+        doctor.status.subagent_readiness.worker_runtime_reason
     );
     println!(
         "subagent_readiness_local_contract_reason: {}",

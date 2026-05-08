@@ -52,6 +52,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=identity_memory ok=true"));
     assert!(stdout.contains("doctor_check name=identity_experiences ok=true"));
     assert!(stdout.contains("doctor_check name=memory_readiness ok=true"));
+    assert!(stdout.contains("doctor_check name=provider_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=channel_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=subagent_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=live_adapter_preflight ok=true"));
@@ -69,6 +70,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=subagent_queue_smoke ok=true"));
     assert!(stdout.contains("doctor_check name=plugin_registry ok=true"));
     assert!(stdout.contains("provider: fake"));
+    assert!(stdout.contains(
+        "provider_readiness: ok=true state=ready kind=fake transport=fake fallback_configured=false timeout_ms=none api_key_state=none"
+    ));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains(
         "governance_readiness: ok=true kind=static_rule rules_loaded=true tool_surface_governed=true goal_run_executes=false"
@@ -99,7 +103,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("goal_run_incomplete_reasons:"));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains(
-        "local_contract_readiness: ok=true state=ready contracts=5 ready=5 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
+        "local_contract_readiness: ok=true state=ready contracts=6 ready=6 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
@@ -116,6 +120,8 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
+    assert!(stdout.contains("live_worker_available=false worker_runtime_state=local_contract_only"));
+    assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
     assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains(
@@ -176,12 +182,21 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 22);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 23);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
         .iter()
         .any(|check| check["name"] == "atomic_tools"));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "provider_readiness"
+            && check["detail"]
+                .as_str()
+                .expect("provider readiness detail")
+                .contains("transport=stub")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -274,7 +289,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
             && check["detail"]
                 .as_str()
                 .expect("local contract readiness detail")
-                .contains("contracts=5")));
+                .contains("contracts=6")));
     assert_eq!(
         parsed["status"]["config"]["identity_experiences_path"],
         root.join("identity")
@@ -346,7 +361,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["contract_count"],
-        5
+        6
     );
     assert_eq!(
         parsed["status"]["local_contract_readiness"]["connects_real_external_services"],
@@ -368,6 +383,13 @@ fn cli_doctor_can_render_json_without_secret_leak() {
             |contract| contract["name"] == "external_knowledge_source_contracts"
                 && contract["boundary"] == "adapter_contract_only"
         ));
+    assert!(parsed["status"]["local_contract_readiness"]["contracts"]
+        .as_array()
+        .expect("local contracts array")
+        .iter()
+        .any(|contract| contract["name"] == "goal_mode_smoke_gate"
+            && contract["boundary"] == "local_cli_smoke_only"
+            && contract["read_only"] == true));
     assert_eq!(parsed["status"]["release_readiness"]["ok"], true);
     assert_eq!(
         parsed["status"]["release_readiness"]["release_name"],
@@ -481,6 +503,20 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(
         parsed["status"]["subagent_readiness"]["live_adapter_ready"],
         false
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["live_worker_available"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["worker_runtime_state"],
+        "local_contract_only"
+    );
+    assert!(
+        parsed["status"]["subagent_readiness"]["worker_runtime_reason"]
+            .as_str()
+            .expect("subagent worker runtime reason")
+            .contains("subagent slot is fake")
     );
     assert!(
         parsed["status"]["subagent_readiness"]["live_adapter_reason"]

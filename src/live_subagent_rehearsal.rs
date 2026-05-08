@@ -231,6 +231,19 @@ fn build_runner_allowlist_check(
 fn build_capability_routing_check(
     input: &LiveSubagentRehearsalInput,
 ) -> LiveSubagentCapabilityRoutingCheck {
+    if input.required_capabilities.is_empty() {
+        return LiveSubagentCapabilityRoutingCheck {
+            ok: false,
+            required_capabilities: input.required_capabilities.clone(),
+            worker_capabilities: input.worker_capabilities.clone(),
+            matched_capabilities: Vec::new(),
+            missing_capabilities: Vec::new(),
+            reason:
+                "dispatch required_capabilities must be declared before live subagent rehearsal"
+                    .to_string(),
+        };
+    }
+
     let missing_capabilities = input
         .required_capabilities
         .iter()

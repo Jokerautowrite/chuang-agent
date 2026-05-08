@@ -144,6 +144,22 @@ fn cli_subagent_live_preflight_is_ready_only_when_gate_is_explicitly_enabled() {
     assert_eq!(rehearsal["forbidden_capabilities_ok"], true);
     assert_eq!(rehearsal["approval_audit_prerequisites_ok"], true);
     assert_eq!(rehearsal["gate"]["env_value_state"], "enabled");
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["governance_approval_required"],
+        true
+    );
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["dispatch_evidence_required"],
+        true
+    );
+    assert!(rehearsal["approval_audit_prerequisites"]["prerequisites"]
+        .as_array()
+        .expect("prerequisites")
+        .iter()
+        .any(|item| item
+            .as_str()
+            .expect("prerequisite")
+            .contains("audit receipt includes dispatch id")));
 }
 
 #[test]
@@ -327,6 +343,57 @@ fn cli_subagent_live_preflight_rejects_capability_mismatch_even_when_gate_is_ena
         .as_str()
         .expect("reason")
         .contains("do not satisfy"));
+}
+
+#[test]
+fn cli_subagent_live_preflight_requires_declared_dispatch_capability_route() {
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--capability",
+            "rust",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    let rehearsal = &parsed["rehearsal"];
+
+    assert_eq!(rehearsal["ok"], false);
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["gate_enabled"], true);
+    assert_eq!(rehearsal["runner_allowlist_ok"], true);
+    assert_eq!(rehearsal["capability_routing_ok"], false);
+    assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["capability_routing"]["ok"], false);
+    assert_eq!(
+        rehearsal["capability_routing"]["required_capabilities"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        rehearsal["capability_routing"]["worker_capabilities"],
+        serde_json::json!(["rust"])
+    );
+    assert!(rehearsal["capability_routing"]["reason"]
+        .as_str()
+        .expect("reason")
+        .contains("required_capabilities must be declared"));
 }
 
 #[test]

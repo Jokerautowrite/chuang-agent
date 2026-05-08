@@ -319,9 +319,51 @@ fn openai_compatible_http_transport_times_out_when_server_stalls() {
             .extra_meta
             .get("config_error_field")
             .map(String::as_str),
-        Some("http_read")
+        Some("http_timeout")
     );
-    assert!(response.body.contains("field=http_read"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_ms")
+            .map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("transport")
+    );
+    assert!(response.body.contains("field=http_timeout"));
 }
 
 #[test]
@@ -362,6 +404,132 @@ fn openai_compatible_native_transport_times_out_when_server_stalls() {
             .get("config_error_field")
             .map(String::as_str),
         Some("native_http_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_ms")
+            .map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("transport")
+    );
+    assert!(response.body.contains("timed out after 20ms"));
+}
+
+#[test]
+fn openai_compatible_curl_transport_times_out_when_server_stalls() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        thread::sleep(Duration::from_millis(120));
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Curl)
+    .with_request_timeout_ms(20);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "curl timeout".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(response.finish_reason.as_deref(), Some("invalid-config"));
+    assert_eq!(
+        response
+            .extra_meta
+            .get("config_error_field")
+            .map(String::as_str),
+        Some("curl_wait")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_reason_code")
+            .map(String::as_str),
+        Some("request_timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_category")
+            .map(String::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_timeout_ms")
+            .map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .map(String::as_str),
+        Some("transport")
     );
     assert!(response.body.contains("timed out after 20ms"));
 }
@@ -568,6 +736,76 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
 }
 
 #[test]
+fn openai_compatible_http_transport_surfaces_capacity_metadata_on_plain_text_429() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+
+        let body = "at capacity";
+        let response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+
+    let adapter = OpenAICompatibleProviderAdapter::new(
+        "custom-openai",
+        format!("http://{address}/v1"),
+        "test-key",
+        "gpt-4.1-mini",
+    )
+    .with_transport(ProviderTransport::Http);
+
+    let response = adapter.respond(&ResponderRequest {
+        prompt: "system+context prompt".to_string(),
+        user_input: "继续推进 at capacity".to_string(),
+        recall_hit_count: 2,
+    });
+
+    server.join().expect("server thread should finish");
+
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_response_ok")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_error_message")
+            .map(String::as_str),
+        Some("at capacity")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_reason_code")
+            .map(String::as_str),
+        Some("model_capacity")
+    );
+    assert_eq!(
+        response
+            .extra_meta
+            .get("provider_failure_category")
+            .map(String::as_str),
+        Some("capacity")
+    );
+    assert_eq!(response.finish_reason.as_deref(), Some("http-error-429"));
+}
+
+#[test]
 fn openai_compatible_http_transport_marks_200_missing_content_as_structured_provider_error() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
@@ -608,6 +846,10 @@ fn openai_compatible_http_transport_marks_200_missing_content_as_structured_prov
 
     assert!(response.body.starts_with("PROVIDER_MISSING_CONTENT"));
     assert!(!response.body.contains("provider_response_missing_content"));
+    assert_eq!(
+        response.finish_reason.as_deref(),
+        Some("provider-error-missing-content")
+    );
     assert_eq!(
         response.extra_meta.get("status_code").map(String::as_str),
         Some("200")

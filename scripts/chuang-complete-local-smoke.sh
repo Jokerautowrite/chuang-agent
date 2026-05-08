@@ -86,8 +86,18 @@ assert data["release_readiness"]["verifies_real_external_services"] is False
 assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
 assert data["memory_readiness"]["overall_state"] == "ready"
 assert data["channel_readiness"]["overall_state"] == "ready"
+assert data["provider_readiness"]["ok"] is True
+assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
+assert data["provider_readiness"]["provider_id"] == "complete-local-openai"
+assert data["provider_readiness"]["model_name"] == "gpt-complete-local-smoke"
+assert data["provider_readiness"]["transport"] == "stub"
+assert data["provider_readiness"]["fallback_configured"] is False
+assert data["provider_readiness"]["api_key_state"] == "<set>"
+assert data["provider_readiness"]["placeholder_warning_count"] == 1
 assert data["subagent_readiness"]["local_contract_ready"] is True
 assert data["subagent_readiness"]["live_adapter_ready"] is False
+assert data["subagent_readiness"]["live_worker_available"] is False
+assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 for gate in data["live_adapter_gates"]["gates"]:
     assert gate["enabled"] is False
 '
@@ -105,11 +115,16 @@ for name in [
     "release_readiness",
     "memory_readiness",
     "channel_readiness",
+    "provider_readiness",
     "subagent_readiness",
     "live_adapter_preflight",
 ]:
     assert name in checks, name
 assert data["status"]["release_readiness"]["connects_real_external_services"] is False
+assert data["status"]["provider_readiness"]["transport"] == "stub"
+assert data["status"]["provider_readiness"]["api_key_state"] == "<set>"
+assert data["status"]["subagent_readiness"]["live_worker_available"] is False
+assert data["status"]["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 '
 
 printf '%s\n' "[complete] app-server health diagnostic"
@@ -122,6 +137,15 @@ assert data["diagnostic_mode"] is True
 assert data["release_readiness"]["connects_real_external_services"] is False
 assert data["release_readiness"]["verifies_real_external_services"] is False
 assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
+assert data["provider_readiness"]["ok"] is True
+assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
+assert data["provider_readiness"]["transport"] == "stub"
+assert data["provider_readiness"]["api_key_state"] == "<set>"
+assert data["provider_readiness"]["placeholder_warning_count"] == 1
+assert data["subagent_readiness"]["local_contract_ready"] is True
+assert data["subagent_readiness"]["live_adapter_ready"] is False
+assert data["subagent_readiness"]["live_worker_available"] is False
+assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 '
 
 printf '%s\n' "[complete] console snapshot"
@@ -135,7 +159,17 @@ assert status["project_readiness"]["overall_state"] == "ready"
 assert status["release_readiness"]["overall_state"] == "second_test_version_ready"
 assert status["release_readiness"]["connects_real_external_services"] is False
 assert status["release_readiness"]["verifies_real_external_services"] is False
+assert status["provider_readiness"]["transport"] == "stub"
+assert status["provider_readiness"]["api_key_state"] == "<set>"
+assert status["subagent_readiness"]["live_worker_available"] is False
+assert status["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 '
+
+printf '%s\n' "[complete] goal mode smoke"
+sh "$root_dir/scripts/chuang-goal-mode-smoke.sh"
+
+printf '%s\n' "[complete] goal mode negative smoke"
+sh "$root_dir/scripts/chuang-goal-mode-negative-smoke.sh"
 
 printf '%s\n' "[complete] feishu local command smokes"
 node scripts/chuang-feishu-command-smoke.js >/dev/null
