@@ -1,6 +1,8 @@
 # 协作进度日志
 
 ## 2026-05-09 补充 checkpoint
+- 2026-05-09 live runner / actuator 本地可验收边界推进：新增 `scripts/chuang-live-runner-rehearsal-smoke.sh`，在 live gate 关闭时验证 `subagent live-preflight` 不启动 worker、runner command allowlist/capability route 可见、disabled Codex runner 仍产出标准 `SubagentReport` 且 `ReportAdmission=Accepted/report_validated`；同时 real actuator adapter 的 dry-run message 带出 `real_execution=false`、`audit_label=actuator.operation.live` 和 `required_env=CHUANG_REAL_ACTUATOR_ENABLE`，对应回归已补。本轮未执行真实 runner、真实桌面操作或真实服务控制。
+- 2026-05-09 real control adapter live-gate 边界补强：`chuang-real-control-adapter.py` 的 list metadata 现在显式暴露 `dry_run/live_enabled/audit_label/allowed_actions`，apply receipt message 也带 dry-run/live gate/audit label；`cli_control_tests` 新增直接脚本回归，锁住未设置 `CHUANG_REAL_CONTROL_ENABLE=1` 时 allowlisted command 不执行、marker 不生成，以及 allowlisted unit 上未列动作会被拒绝。本轮不控制真实服务、不碰 Hermes/Feishu secret。
 - 2026-05-09 live preflight / goal collect 边界继续加厚：`subagent live-preflight` 的 JSON/text 回归锁住 `starts_external_worker=false`、operator approval、governance approval、audit receipt 和 dispatch evidence 要求；`goal collect` 现在把 malformed report 作为 blocked evidence 暴露在 `blocked_report_run_ids/reasons`，保持 `ready_to_checkpoint=false` 并让 `checkpoint --from-collect` 拒绝，避免坏 JSON 报告中断收集或被误当 checkpoint 材料。
 - 2026-05-09 `status` / `console` 顶层 `subagent_readiness` 汇总行继续对齐，把 `capability_mismatch_reason` 一并带出；对应文本回归已补，和 doctor/app-server 的同类只读面保持一致。
 - 2026-05-09 `status` 只读回归再补一条 `queued_external` 断言，确认 `capability_mismatch_reason` 和 `worker_runtime_blocked_reason` / `capability_route_state` / `capability_mismatch_blocks_live` 一起锁定；这是 status 面最后一层可见性收口，不碰 Hermes/Feishu，不接真实 live runner。

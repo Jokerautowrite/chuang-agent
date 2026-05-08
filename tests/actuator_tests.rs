@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -241,4 +242,52 @@ fn real_actuator_adapter_allows_only_allowlisted_app_in_dry_run() {
         .click(ClickTarget::UiLabel("send".to_string()))
         .expect_err("click should not be allowlisted");
     assert!(err.message.contains("click not allowlisted"));
+}
+
+#[test]
+fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
+    let allowlist = temp_script_path("real-actuator-boundary").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [{
+    "app_name": "Feishu",
+    "open_command": ["feishu"]
+  }],
+  "input_allowed": false,
+  "click_allowed": false,
+  "screenshot_allowed": false
+}"#,
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+    let mut child = Command::new(adapter_path)
+        .args(["--json", "--allowlist"])
+        .arg(&allowlist)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("adapter should spawn");
+    let request = br#"{"action":"open_app","open_app":{"app_name":"Feishu"}}"#;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("stdin should be available"),
+        request,
+    )
+    .expect("request should write");
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("adapter should finish");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("response should be json");
+    let message = response["message"].as_str().expect("message should exist");
+    assert!(message.contains("real_execution=false"));
+    assert!(message.contains("audit_label=actuator.operation.live"));
+    assert!(message.contains("required_env=CHUANG_REAL_ACTUATOR_ENABLE"));
 }

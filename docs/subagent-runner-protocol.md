@@ -143,6 +143,14 @@ CHUANG_CODEX_RUNNER_ENABLE=1 cargo run -- subagent live-preflight \
 
 The command should report `ready_for_live=true`, `readonly=true`, `gate_enabled=true`, all `*_ok=true`, and a `next_action` that still requires an approved live runner rehearsal. A disabled or non-enabling gate should report `ready_for_live=false` even if all read-only checks pass.
 
+A local safe rehearsal smoke is available at:
+
+```bash
+bash scripts/chuang-live-runner-rehearsal-smoke.sh
+```
+
+It uses a temporary config and queue root, runs the read-only `live-preflight`, dispatches one local rehearsal task, and then invokes `subagent run-once --runner command --runner-command scripts/chuang-codex-runner.py --approve-exec` with `CHUANG_CODEX_RUNNER_ENABLE` unset. In that mode the checked-in Codex runner scaffold emits a standard failed protocol report instead of starting `codex exec`; the smoke verifies the report is admitted with `ReportAdmission.status=Accepted` and `reason_code=report_validated`, then checks the same admission through `subagent report` and `subagent collect`.
+
 ## Command Runner IO
 
 When `--runner command` is used, Chuang starts the runner process directly. It does not invoke a shell unless the configured command is a shell program such as `sh`.

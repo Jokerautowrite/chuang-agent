@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -402,6 +403,161 @@ apply_args = "apply --json --allowlist {}"
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("unknown control unit"));
+}
+
+#[test]
+fn cli_control_real_adapter_direct_receipt_keeps_live_gate_closed_by_default() {
+    let root = temp_config_path("real-adapter-direct-dry-run-root");
+    let allowlist_path = root.with_extension("json");
+    let marker_path = root.with_extension("marker");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-control-adapter.py");
+    fs::write(
+        &allowlist_path,
+        serde_json::json!({
+            "units": [{
+                "unit_id": "chuang-direct-test.service",
+                "display_name": "Chuang Direct Test",
+                "kind": "service",
+                "default_status": "Stopped",
+                "start_command": [
+                    "sh",
+                    "-c",
+                    format!("printf executed > {}", marker_path.display())
+                ],
+                "metadata": {"owner": "chuang-test"}
+            }]
+        })
+        .to_string(),
+    )
+    .expect("allowlist should write");
+
+    let list = Command::new(&adapter_path)
+        .args([
+            "list",
+            "--json",
+            "--allowlist",
+            allowlist_path.to_str().expect("allowlist path utf8"),
+        ])
+        .env_remove("CHUANG_REAL_CONTROL_ENABLE")
+        .env_remove("CHUANG_REAL_CONTROL_STATUS_ENABLE")
+        .output()
+        .expect("real adapter list should execute");
+    assert!(
+        list.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let units: Value = serde_json::from_slice(&list.stdout).expect("list output should be json");
+    assert_eq!(units[0]["metadata"]["adapter"], "chuang-real-control");
+    assert_eq!(units[0]["metadata"]["dry_run"], "true");
+    assert_eq!(units[0]["metadata"]["live_enabled"], "false");
+    assert_eq!(units[0]["metadata"]["audit_label"], "control.apply.live");
+    assert_eq!(units[0]["metadata"]["allowed_actions"], "start");
+
+    let mut child = Command::new(&adapter_path)
+        .args([
+            "apply",
+            "--json",
+            "--allowlist",
+            allowlist_path.to_str().expect("allowlist path utf8"),
+        ])
+        .env_remove("CHUANG_REAL_CONTROL_ENABLE")
+        .env_remove("CHUANG_REAL_CONTROL_STATUS_ENABLE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("real adapter apply should spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be available")
+        .write_all(
+            br#"{"unit_id":"chuang-direct-test.service","action":"start","reason":"dry-run regression"}"#,
+        )
+        .expect("request should write");
+    let apply = child
+        .wait_with_output()
+        .expect("real adapter apply should finish");
+    assert!(
+        apply.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert!(
+        !marker_path.exists(),
+        "adapter must not execute allowlisted command without CHUANG_REAL_CONTROL_ENABLE=1"
+    );
+    let receipt: Value =
+        serde_json::from_slice(&apply.stdout).expect("apply output should be json receipt");
+    assert_eq!(receipt["unit_id"], "chuang-direct-test.service");
+    assert_eq!(receipt["action"], "start");
+    assert_eq!(receipt["next_status"], "Running");
+    let message = receipt["message"].as_str().expect("receipt message");
+    assert!(message.contains("dry_run=true"), "message={message}");
+    assert!(message.contains("live_enabled=false"), "message={message}");
+    assert!(
+        message.contains("audit_label=control.apply.live"),
+        "message={message}"
+    );
+}
+
+#[test]
+fn cli_control_real_adapter_directly_rejects_unallowlisted_action() {
+    let root = temp_config_path("real-adapter-direct-reject-root");
+    let allowlist_path = root.with_extension("json");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-control-adapter.py");
+    fs::write(
+        &allowlist_path,
+        r#"{
+  "units": [{
+    "unit_id": "chuang-direct-test.service",
+    "display_name": "Chuang Direct Test",
+    "kind": "service",
+    "default_status": "Stopped",
+    "start_command": ["sh", "-c", "exit 42"],
+    "metadata": {"owner": "chuang-test"}
+  }]
+}"#,
+    )
+    .expect("allowlist should write");
+
+    let mut child = Command::new(&adapter_path)
+        .args([
+            "apply",
+            "--json",
+            "--allowlist",
+            allowlist_path.to_str().expect("allowlist path utf8"),
+        ])
+        .env_remove("CHUANG_REAL_CONTROL_ENABLE")
+        .env_remove("CHUANG_REAL_CONTROL_STATUS_ENABLE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("real adapter apply should spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be available")
+        .write_all(
+            br#"{"unit_id":"chuang-direct-test.service","action":"restart","reason":"reject regression"}"#,
+        )
+        .expect("request should write");
+    let output = child
+        .wait_with_output()
+        .expect("real adapter apply should finish");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("action not allowlisted: chuang-direct-test.service:restart"),
+        "stderr={stderr}"
+    );
 }
 
 #[test]

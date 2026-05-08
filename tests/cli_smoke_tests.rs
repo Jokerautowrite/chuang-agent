@@ -86,6 +86,55 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
 }
 
 #[test]
+fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-smoke.sh");
+    let script =
+        fs::read_to_string(&script_path).expect("live runner rehearsal smoke should be readable");
+
+    assert!(script.contains("subagent live-preflight"));
+    assert!(script.contains("--runner-command scripts/chuang-codex-runner.py"));
+    assert!(script.contains("--allow-runner-command scripts/chuang-codex-runner.py"));
+    assert!(script.contains("--requires-capability rehearsal"));
+    assert!(script.contains("--capability rehearsal"));
+    assert!(script.contains("starts_external_worker"));
+    assert!(script.contains("assert data[\"starts_external_worker\"] is False"));
+    assert!(script.contains("assert data[\"readonly\"] is True"));
+    assert!(script.contains("assert data[\"ready_for_live\"] is False"));
+    assert!(script.contains("assert not queue_root.exists()"));
+    assert!(script.contains("subagent dispatch"));
+    assert!(script.contains("--subagent-queue-root \"$queue_root\""));
+    assert!(script.contains("subagent list"));
+    assert!(script.contains("assert data[\"report_count\"] == 0"));
+    assert!(script.contains("subagent run-once"));
+    assert!(script.contains("--runner command"));
+    assert!(script.contains("--approve-exec"));
+    assert!(script.contains("CHUANG_CODEX_RUNNER_WORKSPACE=\"$runner_workspace\""));
+    assert!(script.contains("assert run_once[\"report_admission\"][\"status\"] == \"Accepted\""));
+    assert!(script.contains(
+        "assert run_once[\"report_admission\"][\"reason_code\"] == \"report_validated\""
+    ));
+    assert!(script.contains("subagent report"));
+    assert!(script.contains("subagent collect"));
+    assert!(script.contains("data.get(\"report_available\") or data.get(\"available\")"));
+    assert!(script.contains("assert data[\"report_admission\"][\"status\"] == \"Accepted\""));
+    assert!(script.contains("assert report[\"schema_version\"] == \"1.0\""));
+    assert!(script.contains("assert report[\"status\"] == \"Failed\""));
+    assert!(script.contains("codex runner disabled by default"));
+    assert!(script.contains("approved_by_cli_flag: --approve-exec"));
+    assert!(script.contains("live_runner_rehearsal_smoke_ok"));
+    assert!(script.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
+    assert!(!script.contains("CHUANG_CODEX_RUNNER_ENABLE=1"));
+    assert!(!script.contains("codex exec"));
+    assert!(!script.contains("systemctl"));
+    assert!(!script.contains("\nrm "));
+    assert!(!script.contains(" rm -"));
+    assert!(!script.contains(".codex-im/.env"));
+    assert!(!script.contains("hermes-gateway"));
+    assert!(!script.contains("FEISHU_"));
+}
+
+#[test]
 fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-final-verify.sh"))

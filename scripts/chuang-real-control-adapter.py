@@ -12,6 +12,9 @@ STATUSES = {
     "failed": "Failed",
 }
 
+ADAPTER_NAME = "chuang-real-control"
+CONTROL_AUDIT_LABEL = "control.apply.live"
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -49,17 +52,21 @@ def unit_view(unit: dict) -> dict:
     unit_id = require_str(unit, "unit_id")
     kind = require_str(unit, "kind")
     display_name = unit.get("display_name") or unit_id
+    metadata = {
+        **(unit.get("metadata") or {}),
+        "adapter": ADAPTER_NAME,
+        "dry_run": str(not live_enabled()).lower(),
+        "live_enabled": str(live_enabled()).lower(),
+        "audit_label": CONTROL_AUDIT_LABEL,
+        "allowed_actions": ",".join(allowed_actions_for_unit(unit)),
+    }
     return {
         "unit_id": unit_id,
         "display_name": display_name,
         "kind": kind,
         "status": status_for_unit(unit),
         "model_name": unit.get("model_name"),
-        "metadata": {
-            **(unit.get("metadata") or {}),
-            "adapter": "chuang-real-control",
-            "dry_run": str(not live_enabled()).lower(),
-        },
+        "metadata": metadata,
     }
 
 
@@ -80,9 +87,12 @@ def apply_request(allowlist: dict, request: dict) -> dict:
     previous_status = status_for_unit(unit)
     if live_enabled():
         run_command(command)
-        message = "allowlisted command executed"
+        message = receipt_message("allowlisted command executed", dry_run=False)
     else:
-        message = "dry-run accepted; set CHUANG_REAL_CONTROL_ENABLE=1 to execute"
+        message = receipt_message(
+            "dry-run accepted; set CHUANG_REAL_CONTROL_ENABLE=1 to execute",
+            dry_run=True,
+        )
     return {
         "unit_id": unit_id,
         "action": action,
@@ -105,7 +115,10 @@ def change_model_receipt(unit: dict, request: dict) -> dict:
         "previous_status": status_for_unit(unit),
         "next_status": "Running",
         "model_name": model_name,
-        "message": "dry-run model change accepted; env mutation is intentionally not implemented",
+        "message": receipt_message(
+            "dry-run model change accepted; env mutation is intentionally not implemented",
+            dry_run=True,
+        ),
     }
 
 
@@ -129,6 +142,23 @@ def run_command(command: list) -> None:
     if not isinstance(command, list) or not command:
         raise SystemExit("allowlisted command must be a non-empty array")
     subprocess.run(command, text=True, capture_output=True, check=True)
+
+
+def allowed_actions_for_unit(unit: dict) -> list:
+    actions = []
+    for action in ["start", "stop", "restart"]:
+        if unit.get(f"{action}_command"):
+            actions.append(action)
+    if unit.get("model_env_file") and unit.get("model_env_key"):
+        actions.append("change_model")
+    return actions
+
+
+def receipt_message(summary: str, dry_run: bool) -> str:
+    return (
+        f"{summary}; dry_run={str(dry_run).lower()} "
+        f"live_enabled={str(live_enabled()).lower()} audit_label={CONTROL_AUDIT_LABEL}"
+    )
 
 
 def require_str(unit: dict, key: str) -> str:

@@ -33,7 +33,7 @@ def handle_request(allowlist: dict, request: dict) -> dict:
                 "summary": "allowlisted actuator ready; no desktop operation was performed",
                 "evidence_ref": {"uri": "chuang-actuator://observe/dry-run"},
             },
-            message="dry-run observe",
+            message=boundary_message("observe"),
         )
     if action == "open_app":
         app_name = ((request.get("open_app") or {}).get("app_name") or "").strip()
@@ -42,9 +42,9 @@ def handle_request(allowlist: dict, request: dict) -> dict:
             raise SystemExit(f"app not allowlisted: {app_name}")
         if live_enabled():
             subprocess.Popen(app["open_command"])
-            message = "allowlisted app launch requested"
+            message = boundary_message("open_app", real_execution=True)
         else:
-            message = "dry-run accepted; set CHUANG_REAL_ACTUATOR_ENABLE=1 to launch"
+            message = boundary_message("open_app")
         return response(
             app_handle={
                 "app_name": app_name,
@@ -63,7 +63,7 @@ def handle_request(allowlist: dict, request: dict) -> dict:
             raise SystemExit("screenshot not allowlisted")
         return response(
             evidence_ref={"uri": "chuang-actuator://screenshot/dry-run"},
-            message="dry-run screenshot",
+            message=boundary_message("screenshot"),
         )
     raise SystemExit(f"unsupported actuator action: {action}")
 
@@ -71,7 +71,19 @@ def handle_request(allowlist: dict, request: dict) -> dict:
 def guarded_noop(allowlist: dict, key: str, action: str) -> dict:
     if not allowlist.get(key, False):
         raise SystemExit(f"{action} not allowlisted")
-    return response(message=f"dry-run {action}; live operation not implemented")
+    return response(message=boundary_message(action))
+
+
+def boundary_message(action: str, real_execution: bool = False) -> str:
+    state = "true" if real_execution else "false"
+    if real_execution:
+        prefix = "allowlisted live actuator operation requested"
+    else:
+        prefix = "dry-run actuator operation accepted"
+    return (
+        f"{prefix}; action={action} real_execution={state} "
+        "audit_label=actuator.operation.live required_env=CHUANG_REAL_ACTUATOR_ENABLE"
+    )
 
 
 def find_app(allowlist: dict, app_name: str):
