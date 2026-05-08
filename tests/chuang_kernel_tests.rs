@@ -332,6 +332,29 @@ fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
 }
 
 #[test]
+fn chuang_kernel_compacts_session_turn_memory_when_hard_limit_is_exceeded() {
+    let config = ChuangKernelConfig {
+        memory_write_max_chars: Some(500),
+        ..kernel_config()
+    };
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
+
+    let turn = kernel
+        .run_turn("会话记忆需要压缩".repeat(120))
+        .expect("kernel turn should run");
+    let receipt = kernel
+        .remember_session_turn(&turn, "alpha")
+        .expect("session memory should compact and write");
+
+    assert!(receipt
+        .record_id
+        .starts_with("turn-memory-session-alpha-turn-1-"));
+    assert!(receipt.compacted);
+    assert!(receipt.attempted_chars > 500);
+    assert!(receipt.stored_chars <= 500);
+}
+
+#[test]
 fn chuang_kernel_rejects_invalid_runtime_request_without_incrementing_turn() {
     let config = ChuangKernelConfig {
         recall_limit: 0,

@@ -304,6 +304,18 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
         "session_memory_recall_hit_count".to_string(),
         "2".to_string(),
     );
+    extra.insert(
+        "session_memory_write_status".to_string(),
+        "compacted".to_string(),
+    );
+    extra.insert(
+        "session_memory_compacted_from_chars".to_string(),
+        "2696".to_string(),
+    );
+    extra.insert(
+        "session_memory_compacted_to_chars".to_string(),
+        "948".to_string(),
+    );
     extra.insert("tool_call_count".to_string(), "1".to_string());
     extra.insert("tool_protocol_error_count".to_string(), "0".to_string());
 
@@ -394,6 +406,18 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert_eq!(
         observability.get("session_id"),
         Some(&"thread-a".to_string())
+    );
+    assert_eq!(
+        observability.get("session_memory_write_status"),
+        Some(&"compacted".to_string())
+    );
+    assert_eq!(
+        observability.get("session_memory_compacted_from_chars"),
+        Some(&"2696".to_string())
+    );
+    assert_eq!(
+        observability.get("session_memory_compacted_to_chars"),
+        Some(&"948".to_string())
     );
     assert_eq!(observability.get("tool_call_count"), Some(&"1".to_string()));
     assert_eq!(

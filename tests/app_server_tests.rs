@@ -290,7 +290,7 @@ transport = "stub"
 }
 
 #[test]
-fn app_server_turn_reports_session_memory_hard_limit_without_failing_turn() {
+fn app_server_turn_compacts_session_memory_hard_limit_without_failing_turn() {
     let workspace = temp_workspace("session-memory-limit");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
@@ -372,17 +372,41 @@ transport = "stub"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["session_memory_write_status"],
-        "hard_limit_exceeded"
+        "compacted"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["session_memory_summary_kind"],
-        "none"
+        "compacted_turn_summary"
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_record_id"]
+            .as_str()
+            .expect("session memory record id should be string")
+            .starts_with("turn-memory-session-chuang-thread-1-turn-1-")
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["session_memory_write_status"],
+        "compacted"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["providerMeta"]["session_memory_summary_kind"],
+        "compacted_turn_summary"
     );
     assert!(
         turn_response["result"]["turn"]["runtimeObservability"]["session_memory_write_error"]
-            .as_str()
-            .expect("session memory write error should be string")
-            .contains("memory_write_hard_limit_exceeded")
+            .is_null()
+    );
+    let turn_completed = responses
+        .iter()
+        .find(|value| value["method"] == "turn/completed")
+        .expect("turn/completed event should be present");
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["session_memory_write_status"],
+        "compacted"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["session_memory_summary_kind"],
+        "compacted_turn_summary"
     );
 }
 

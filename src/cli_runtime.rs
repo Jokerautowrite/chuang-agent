@@ -701,12 +701,36 @@ where
             .as_ref()
             .ok_or_else(|| "remember_session_requires_session_id: pass --session-id".to_string())?;
         match kernel.remember_session_turn(&turn, session_id) {
-            Ok(record_id) => {
-                records.session_record_id = Some(record_id);
+            Ok(receipt) => {
+                records.session_record_id = Some(receipt.record_id);
                 turn.result.response.meta.extra.insert(
                     "session_memory_write_status".to_string(),
-                    "written".to_string(),
+                    if receipt.compacted {
+                        "compacted"
+                    } else {
+                        "written"
+                    }
+                    .to_string(),
                 );
+                turn.result.response.meta.extra.insert(
+                    "session_memory_summary_kind".to_string(),
+                    if receipt.compacted {
+                        "compacted_turn_summary"
+                    } else {
+                        "turn_summary"
+                    }
+                    .to_string(),
+                );
+                if receipt.compacted {
+                    turn.result.response.meta.extra.insert(
+                        "session_memory_compacted_from_chars".to_string(),
+                        receipt.attempted_chars.to_string(),
+                    );
+                    turn.result.response.meta.extra.insert(
+                        "session_memory_compacted_to_chars".to_string(),
+                        receipt.stored_chars.to_string(),
+                    );
+                }
             }
             Err(chuang_agent::chuang_kernel::ChuangKernelMemoryError::HardLimitExceeded {
                 limit_chars,
@@ -834,15 +858,16 @@ fn insert_session_memory_metadata(
         "session_memory_write_requested".to_string(),
         request.remember_session.to_string(),
     );
-    extra.insert(
-        "session_memory_summary_kind".to_string(),
-        if records.session_record_id.is_some() {
-            "turn_summary"
-        } else {
-            "none"
-        }
-        .to_string(),
-    );
+    extra
+        .entry("session_memory_summary_kind".to_string())
+        .or_insert_with(|| {
+            if records.session_record_id.is_some() {
+                "turn_summary"
+            } else {
+                "none"
+            }
+            .to_string()
+        });
     if let Some(record_id) = &records.session_record_id {
         extra.insert("session_memory_record_id".to_string(), record_id.clone());
     }
@@ -1654,7 +1679,7 @@ mod tests {
     }
 
     #[test]
-    fn run_with_options_reports_session_memory_hard_limit_without_failing_turn() {
+    fn run_with_options_compacts_session_memory_hard_limit_without_failing_turn() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-session-memory-hard-limit-test-{}",
             unique_record_suffix_for_test()
@@ -1678,7 +1703,7 @@ mod tests {
         };
 
         let (result, records) = run_with_options(&request).expect("run should not fail");
-        assert!(records.session_record_id.is_none());
+        assert!(records.session_record_id.is_some());
         assert_eq!(
             result
                 .response
@@ -1695,7 +1720,7 @@ mod tests {
                 .extra
                 .get("session_memory_write_status")
                 .map(String::as_str),
-            Some("hard_limit_exceeded")
+            Some("compacted")
         );
         assert_eq!(
             result
@@ -1704,15 +1729,31 @@ mod tests {
                 .extra
                 .get("session_memory_summary_kind")
                 .map(String::as_str),
-            Some("none")
+            Some("compacted_turn_summary")
         );
         assert!(result
             .response
             .meta
             .extra
-            .get("session_memory_write_error")
-            .expect("session memory write error should exist")
-            .contains("memory_write_hard_limit_exceeded"));
+            .get("session_memory_record_id")
+            .is_some());
+        assert!(result
+            .response
+            .meta
+            .extra
+            .get("session_memory_compacted_from_chars")
+            .is_some());
+        assert!(result
+            .response
+            .meta
+            .extra
+            .get("session_memory_compacted_to_chars")
+            .is_some());
+        assert!(!result
+            .response
+            .meta
+            .extra
+            .contains_key("session_memory_write_error"));
     }
 
     #[test]

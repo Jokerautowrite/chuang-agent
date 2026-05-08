@@ -43,7 +43,7 @@ function buildStatusFooter(turn) {
     `API ${apiCallCount} 次`,
     runtimeReportId ? `报告 ${runtimeReportId}` : "",
     sessionMemoryWriteStatus && sessionMemoryWriteStatus !== "written"
-      ? `会话记忆 ${sessionMemoryWriteStatus}`
+      ? `会话记忆 ${formatSessionMemoryStatus(sessionMemoryWriteStatus)}`
       : "",
     sessionMemoryWriteError && sessionMemoryWriteStatus !== "written"
       ? `会话记忆错误 ${truncateText(sessionMemoryWriteError, 120)}`
@@ -78,6 +78,16 @@ function buildProcessSection(turn) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function formatSessionMemoryStatus(status) {
+  if (status === "compacted") {
+    return "已压缩写入";
+  }
+  if (status === "hard_limit_exceeded") {
+    return "超限未写入";
+  }
+  return status;
 }
 
 function formatDuration(ms) {

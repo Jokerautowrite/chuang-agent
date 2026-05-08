@@ -107,6 +107,14 @@ pub enum ChuangKernelGovernanceError {
     Runtime(AgentRuntimeError),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberTurnReceipt {
+    pub record_id: String,
+    pub compacted: bool,
+    pub attempted_chars: usize,
+    pub stored_chars: usize,
+}
+
 pub struct ChuangKernel<S, R> {
     config: ChuangKernelConfig,
     runtime: AgentRuntime<S, R>,
@@ -288,14 +296,15 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         &mut self,
         turn: &ChuangKernelTurn,
     ) -> Result<String, ChuangKernelMemoryError> {
-        self.remember_turn_with_metadata(turn, BTreeMap::new(), None)
+        self.remember_turn_with_metadata(turn, BTreeMap::new(), None, false)
+            .map(|receipt| receipt.record_id)
     }
 
     pub fn remember_session_turn(
         &mut self,
         turn: &ChuangKernelTurn,
         session_id: &str,
-    ) -> Result<String, ChuangKernelMemoryError> {
+    ) -> Result<RememberTurnReceipt, ChuangKernelMemoryError> {
         self.remember_turn_with_metadata(
             turn,
             BTreeMap::from([
@@ -303,6 +312,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 ("session_id".to_string(), session_id.to_string()),
             ]),
             Some(format!("session-{session_id}")),
+            true,
         )
     }
 
@@ -311,7 +321,8 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         turn: &ChuangKernelTurn,
         extra_metadata: BTreeMap<String, String>,
         record_scope: Option<String>,
-    ) -> Result<String, ChuangKernelMemoryError> {
+        allow_compaction: bool,
+    ) -> Result<RememberTurnReceipt, ChuangKernelMemoryError> {
         let record_id = record_scope
             .map(|scope| {
                 format!(
@@ -322,10 +333,10 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 )
             })
             .unwrap_or_else(|| format!("turn-memory-{}", turn.turn_id));
-        let content = format!(
-            "user={}\nresponse={}\nsummary={}",
-            turn.user_input, turn.result.response.body, turn.report.summary
-        );
+        let original_content = turn_summary_content(turn);
+        let original_chars = original_content.chars().count();
+        let mut content = original_content.clone();
+        let mut compacted = false;
 
         if let Some(limit_chars) = self.config.memory_write_max_chars {
             match TextMemoryAdmission::new(limit_chars)
@@ -337,11 +348,43 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                     attempted_chars,
                     existing_entries,
                 } => {
-                    return Err(ChuangKernelMemoryError::HardLimitExceeded {
-                        limit_chars,
-                        attempted_chars,
-                        existing_entries,
-                    });
+                    if allow_compaction {
+                        if let Some(compacted_content) =
+                            compact_turn_summary_content(turn, original_chars, limit_chars)
+                        {
+                            match TextMemoryAdmission::new(limit_chars)
+                                .evaluate(&compacted_content, existing_entries.clone())
+                            {
+                                TextMemoryAdmissionDecision::Accepted => {
+                                    content = compacted_content;
+                                    compacted = true;
+                                }
+                                TextMemoryAdmissionDecision::Rejected {
+                                    limit_chars,
+                                    attempted_chars,
+                                    existing_entries,
+                                } => {
+                                    return Err(ChuangKernelMemoryError::HardLimitExceeded {
+                                        limit_chars,
+                                        attempted_chars,
+                                        existing_entries,
+                                    });
+                                }
+                            }
+                        } else {
+                            return Err(ChuangKernelMemoryError::HardLimitExceeded {
+                                limit_chars,
+                                attempted_chars,
+                                existing_entries,
+                            });
+                        }
+                    } else {
+                        return Err(ChuangKernelMemoryError::HardLimitExceeded {
+                            limit_chars,
+                            attempted_chars,
+                            existing_entries,
+                        });
+                    }
                 }
             }
         }
@@ -351,8 +394,24 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             ("agent_id".to_string(), self.config.agent_id.clone()),
             ("turn_id".to_string(), turn.turn_id.clone()),
         ]);
+        if compacted {
+            metadata.insert(
+                "summary_kind".to_string(),
+                "compacted_turn_summary".to_string(),
+            );
+            metadata.insert("compacted".to_string(), "true".to_string());
+            metadata.insert(
+                "compacted_from_chars".to_string(),
+                original_chars.to_string(),
+            );
+            metadata.insert(
+                "compacted_to_chars".to_string(),
+                content.chars().count().to_string(),
+            );
+        }
         metadata.extend(self.config.metadata.clone());
         metadata.extend(extra_metadata);
+        let stored_chars = content.chars().count();
 
         self.runtime
             .memory_store_mut()
@@ -364,7 +423,12 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 expires_at: None,
             })
             .map_err(ChuangKernelMemoryError::Store)?;
-        Ok(record_id)
+        Ok(RememberTurnReceipt {
+            record_id,
+            compacted,
+            attempted_chars: original_chars,
+            stored_chars,
+        })
     }
 
     fn existing_turn_summary_entries(
@@ -456,6 +520,66 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             target: format!("{}:{turn_id}", self.config.agent_id),
             summary: "run local runtime turn and build auditable report".to_string(),
         }
+    }
+}
+
+fn turn_summary_content(turn: &ChuangKernelTurn) -> String {
+    format!(
+        "user={}\nresponse={}\nsummary={}",
+        turn.user_input, turn.result.response.body, turn.report.summary
+    )
+}
+
+fn compact_turn_summary_content(
+    turn: &ChuangKernelTurn,
+    original_chars: usize,
+    limit_chars: usize,
+) -> Option<String> {
+    const OVERHEAD_ROOM: usize = 96;
+    const MIN_FIELD_CHARS: usize = 48;
+
+    let fixed_chars =
+        format!("compacted=true\noriginal_chars={original_chars}\nuser=\nresponse=\nsummary=")
+            .chars()
+            .count();
+    let available = limit_chars.checked_sub(fixed_chars + OVERHEAD_ROOM)?;
+    if available / 3 < MIN_FIELD_CHARS {
+        return None;
+    }
+
+    let user_limit = (available.saturating_mul(2) / 5).min(900);
+    let response_limit = (available.saturating_mul(2) / 5).min(900);
+    let summary_limit = available
+        .saturating_sub(user_limit + response_limit)
+        .min(320);
+    let compacted = format!(
+        "compacted=true\noriginal_chars={original_chars}\nuser={}\nresponse={}\nsummary={}",
+        truncate_chars(&turn.user_input, user_limit),
+        truncate_chars(&turn.result.response.body, response_limit),
+        truncate_chars(&turn.report.summary, summary_limit)
+    );
+
+    if compacted.chars().count() <= limit_chars {
+        Some(compacted)
+    } else {
+        None
+    }
+}
+
+fn truncate_chars(value: &str, limit: usize) -> String {
+    let mut iter = value.chars();
+    let truncated = iter.by_ref().take(limit).collect::<String>();
+    if iter.next().is_some() {
+        if limit <= 3 {
+            ".".repeat(limit)
+        } else {
+            format!(
+                "{}...",
+                truncated.chars().take(limit - 3).collect::<String>()
+            )
+        }
+    } else {
+        truncated
     }
 }
 

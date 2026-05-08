@@ -25,6 +25,19 @@ assert(footer.includes("上下文 335/512"));
 assert(footer.includes("API 1 次"));
 assert(footer.includes("报告 report-turn-1"));
 
+const compactedFooter = buildStatusFooter({
+  status: "completed",
+  elapsedMs: 1200,
+  modelName: "gpt-5.5",
+  packedTokenCount: 335,
+  contextMaxTokens: 512,
+  runtimeObservability: {
+    session_memory_write_status: "compacted",
+  },
+});
+assert(compactedFooter.includes("会话记忆 已压缩写入"));
+assert(!compactedFooter.includes("会话记忆错误"));
+
 const process = buildProcessSection({
   status: "completed",
   providerMeta: {
