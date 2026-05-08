@@ -469,7 +469,7 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
-        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
         status.subagent_readiness.ok,
         status.subagent_readiness.overall_state,
         status.subagent_readiness.mode,
@@ -486,7 +486,8 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.subagent_readiness.worker_runtime_state,
         status.subagent_readiness.worker_runtime_blocked_reason,
         status.subagent_readiness.capability_route_state,
-        status.subagent_readiness.capability_mismatch_blocks_live
+        status.subagent_readiness.capability_mismatch_blocks_live,
+        status.subagent_readiness.capability_mismatch_reason
     );
     println!(
         "subagent_worker_runtime_reason: {}",

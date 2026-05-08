@@ -390,6 +390,9 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake live_worker_available=false worker_runtime_state=local_contract_only worker_runtime_blocked_reason=live_worker_unavailable: subagent slot is fake"
     ));
+    assert!(stdout.contains(
+        "capability_mismatch_reason=live subagent preflight must reject missing or mismatched dispatch required_capabilities"
+    ));
     assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
     assert!(stdout.contains("capability_mismatch_blocks_live=true"));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));

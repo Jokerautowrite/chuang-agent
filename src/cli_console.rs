@@ -130,7 +130,7 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.channel_readiness.ok, snapshot.status.channel_readiness.overall_state
     );
     println!(
-        "subagent_readiness: ok={} state={} mode={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={}",
+        "subagent_readiness: ok={} state={} mode={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
         snapshot.status.subagent_readiness.ok,
         snapshot.status.subagent_readiness.overall_state,
         snapshot.status.subagent_readiness.mode,
@@ -145,6 +145,11 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
             .status
             .subagent_readiness
             .capability_mismatch_blocks_live
+            ,
+        snapshot
+            .status
+            .subagent_readiness
+            .capability_mismatch_reason
     );
     println!(
         "subagent_worker_runtime_reason: {}",

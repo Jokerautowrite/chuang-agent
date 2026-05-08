@@ -167,11 +167,17 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
+    assert!(stdout.contains(
+        "capability_mismatch_reason=capability mismatch or missing dispatch required_capabilities must block live runner readiness"
+    ));
     assert!(stdout.contains("live_worker_available=false worker_runtime_state=local_contract_only"));
     assert!(stdout
         .contains("worker_runtime_blocked_reason=live_worker_unavailable: subagent slot is fake"));
     assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
     assert!(stdout.contains("capability_mismatch_blocks_live=true"));
+    assert!(stdout.contains(
+        "capability_mismatch_reason=capability mismatch or missing dispatch required_capabilities must block live runner readiness"
+    ));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains(
         "subagent_capability_mismatch_reason: live subagent preflight must reject missing or mismatched dispatch required_capabilities"

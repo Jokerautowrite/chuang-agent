@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-09 补充 checkpoint
+- 2026-05-09 `status` / `console` 顶层 `subagent_readiness` 汇总行继续对齐，把 `capability_mismatch_reason` 一并带出；对应文本回归已补，和 doctor/app-server 的同类只读面保持一致。
 - 2026-05-09 `status` 只读回归再补一条 `queued_external` 断言，确认 `capability_mismatch_reason` 和 `worker_runtime_blocked_reason` / `capability_route_state` / `capability_mismatch_blocks_live` 一起锁定；这是 status 面最后一层可见性收口，不碰 Hermes/Feishu，不接真实 live runner。
 - 2026-05-09 live runner / capability mismatch 读面继续收口：`status` / `doctor` / `console snapshot` / `app-server health` 现在都能看见 `worker_runtime_blocked_reason`、`capability_route_state`、`capability_mismatch_blocks_live`、`capability_mismatch_reason`，并由 `cli_*` / `app_server` / `kernel_status` 回归锁住 JSON/text 一致性；`scripts/chuang-complete-local-smoke.sh`、`cargo test -q`、`cargo fmt --all --check` 和 `git diff --check` 已通过，`scripts/chuang-final-verify.sh` 仍以 clean tree + complete-local + diff check 为最终门禁。
 - 2026-05-09 goal operability 只读回归继续加厚：`goal show` 的 JSON/text 现在由测试锁定显式 `--subagent-queue-root`、pipeline state、next command/reason、collect missing/blocked evidence；新增回归确认换成不存在的 queue root 做只读查看不会创建队列目录，blocked report 也会在 `goal_operability` 里保留阻断证据并保持 checkpoint not-ready。
