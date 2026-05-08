@@ -79,6 +79,8 @@ GoalRun
   -> diagnostics
 ```
 
+`goal_spec.budget.max_subtasks` 是并发 worker 的显式预算上限。它不是执行器本身，但它让 goal 计划可以声明“今天最多并行几条子任务”，并在 `GoalRun` 里做硬校验。
+
 当前 continuation model 是 checkpoint-first：目标计划保留接续点，下一轮优先恢复 `GoalRun`，而不是把 `continue` 当成协议核心。
 每次记录 checkpoint 时必须写上完成者和验证备注；没有这些证据的 checkpoint 会被拒绝落盘。
 
@@ -166,7 +168,7 @@ tests/goal_run_tests.rs
 当前 CLI 入口：
 
 ```text
-cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID]
+cargo run -- goal plan --objective TEXT [--root PATH] [--goal-id ID] [--max-subtasks N]
 cargo run -- goal show [--root PATH] [--goal-id ID]
 cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID]
 ```

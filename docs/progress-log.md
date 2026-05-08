@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-05 补充 checkpoint
+- 2026-05-08 继续把 goal budget 从文字变成硬约束：`GoalSpec` 默认并发子任务预算从 `0` 调整为 `4`，`goal plan` 也新增 `--max-subtasks N`，`GoalRun` 会拒绝超过预算的 worker plan；这样 goal 才能真的用于组织多个子代理并行。对应回归已补。
 - 2026-05-08 继续把 app-server health 的文本口径抬齐：`app-server health` 现在也补出 `goal_run_readiness` 摘要，和 `status` / `doctor` 一样把 `goal_run` 的 checkpoint 续接证据直接落到只读文本面；JSON 结构不变，回归已补。
 - 2026-05-08 继续把 goal mode 的状态面抬高：`status` / `doctor` / `console snapshot` / `app-server health` 现在都会显式暴露 `checkpoint_policy` 和 `final_report_policy`，并在文本面带出最新 checkpoint 的 `created_at`、完成 worker 和 validation notes；这轮 `goal checkpoint` 还补了结构化 `checkpoint_writeback` 回执/诊断字段，把 `docs/progress-log.md` 和 `docs/handoff-current.md` 的手动回写提示单独亮出来，继续保持不自动执行。对应 JSON/text 回归已补。
 - 2026-05-08 继续把 app-server health 的只读面和 skill solidify 的语义一起收口：`app-server health` 现在也显式输出 `goal_mode` / `goal_run` 及其 checkpoint 续接摘要，`skill solidify` 的默认 approval source 也从 approve 语义分离出来，避免文本面误导；对应 JSON/text 回归已补。`goal checkpoint` 的 progress-log / handoff 回写现在也能通过本地诊断字段直接看到，不再只靠口头约定。

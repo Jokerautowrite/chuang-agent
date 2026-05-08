@@ -212,6 +212,39 @@ fn goal_run_rejects_scope_owned_by_multiple_workers() {
 }
 
 #[test]
+fn goal_run_rejects_worker_plan_over_subtask_budget() {
+    let mut goal = GoalSpec::mainline_mvp("workers need a parallel budget");
+    goal.budget.max_subtasks = Some(1);
+
+    let err = GoalRun::new(
+        goal,
+        vec![
+            GoalWorkerPlan::new(
+                "worker-1",
+                "edit goal files",
+                vec!["scope-a".to_string()],
+                vec!["cargo test -q --test goal_run_tests".to_string()],
+            ),
+            GoalWorkerPlan::new(
+                "worker-2",
+                "also edit goal files",
+                vec!["scope-b".to_string()],
+                vec!["cargo test -q --test goal_run_tests".to_string()],
+            ),
+        ],
+        vec![
+            GoalWriteScope::new("scope-a", vec!["src/goal_run.rs".to_string()]),
+            GoalWriteScope::new("scope-b", vec!["tests/goal_run_tests.rs".to_string()]),
+        ],
+        GoalValidationPlan::new(vec!["cargo test -q".to_string()]),
+        GoalIntegrationPolicy::main_process_owned(),
+    )
+    .expect_err("worker plan should not exceed subtask budget");
+
+    assert_eq!(err.field, "budget.max_subtasks");
+}
+
+#[test]
 fn goal_run_rejects_checkpoint_for_unknown_worker() {
     let mut run = sample_goal_run();
     let err = run
@@ -302,7 +335,7 @@ fn goal_run_store_loads_legacy_persisted_checkpoint_without_created_at() {
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {
@@ -381,7 +414,7 @@ fn goal_run_store_rejects_persisted_checkpoint_with_invalid_created_at() {
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {
@@ -456,7 +489,7 @@ fn goal_run_store_rejects_invalid_persisted_checkpoint_on_load() {
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {
@@ -536,7 +569,7 @@ fn goal_run_store_loads_legacy_persisted_checkpoint_with_empty_completed_workers
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {
@@ -619,7 +652,7 @@ fn goal_run_store_loads_legacy_persisted_checkpoint_with_empty_validation_notes(
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {

@@ -24,6 +24,7 @@ fn goal_plan_command(args: &[String]) -> Result<(), String> {
     let store = GoalRunStore::new(&request.root);
     let mut goal_spec = GoalSpec::mainline_mvp(request.objective);
     goal_spec.goal_id = request.goal_id;
+    goal_spec.budget.max_subtasks = request.max_subtasks;
     let run = GoalRun::new(
         goal_spec,
         request.worker_plan,
@@ -153,6 +154,7 @@ struct GoalPlanCliRequest {
     write_scopes: Vec<GoalWriteScope>,
     worker_plan: Vec<GoalWorkerPlan>,
     validation_commands: Vec<String>,
+    max_subtasks: Option<usize>,
     output: ControlOutputFormat,
 }
 
@@ -187,6 +189,7 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
     let mut write_scopes: Vec<GoalWriteScope> = Vec::new();
     let mut worker_plan: Vec<GoalWorkerPlan> = Vec::new();
     let mut validation_commands: Vec<String> = Vec::new();
+    let mut max_subtasks: Option<usize> = None;
     let mut output = ControlOutputFormat::Text;
 
     let mut index = 0;
@@ -204,6 +207,13 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
             )?)?),
             "--validation" => {
                 validation_commands.push(take_value(args, &mut index, "--validation")?)
+            }
+            "--max-subtasks" => {
+                max_subtasks = Some(
+                    take_value(args, &mut index, "--max-subtasks")?
+                        .parse::<usize>()
+                        .map_err(|_| "--max-subtasks expects a positive integer".to_string())?,
+                )
             }
             "--json" => {
                 output = ControlOutputFormat::Json;
@@ -246,6 +256,12 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
         }
     }
 
+    if let Some(max_subtasks) = max_subtasks {
+        if max_subtasks == 0 {
+            return Err("--max-subtasks must be greater than zero".to_string());
+        }
+    }
+
     Ok(GoalPlanCliRequest {
         goal_id,
         objective: objective.ok_or_else(|| "goal plan requires --objective".to_string())?,
@@ -253,6 +269,7 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
         write_scopes,
         worker_plan,
         validation_commands,
+        max_subtasks,
         output,
     })
 }

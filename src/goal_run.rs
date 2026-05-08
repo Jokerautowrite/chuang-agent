@@ -204,6 +204,14 @@ impl GoalRun {
             .map_err(|error| GoalRunError::new("goal_spec", &format_goal_spec_error(error)))?;
         require_non_empty_vec("worker_plan", self.worker_plan.len())?;
         require_non_empty_vec("disjoint_write_scopes", self.disjoint_write_scopes.len())?;
+        if let Some(max_subtasks) = self.goal_spec.budget.max_subtasks {
+            if self.worker_plan.len() > max_subtasks {
+                return Err(GoalRunError::new(
+                    "budget.max_subtasks",
+                    "worker plan exceeds goal subtask budget",
+                ));
+            }
+        }
         self.validation_plan.validate()?;
         self.integration_policy.validate()?;
         validate_write_scopes(&self.disjoint_write_scopes)?;
@@ -219,6 +227,14 @@ impl GoalRun {
             .map_err(|error| GoalRunError::new("goal_spec", &format_goal_spec_error(error)))?;
         require_non_empty_vec("worker_plan", self.worker_plan.len())?;
         require_non_empty_vec("disjoint_write_scopes", self.disjoint_write_scopes.len())?;
+        if let Some(max_subtasks) = self.goal_spec.budget.max_subtasks {
+            if self.worker_plan.len() > max_subtasks {
+                return Err(GoalRunError::new(
+                    "budget.max_subtasks",
+                    "worker plan exceeds goal subtask budget",
+                ));
+            }
+        }
         self.validation_plan.validate()?;
         self.integration_policy.validate()?;
         validate_write_scopes(&self.disjoint_write_scopes)?;

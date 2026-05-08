@@ -45,7 +45,7 @@ impl GoalSpec {
             budget: GoalBudget {
                 max_minutes: Some(60),
                 max_tool_rounds: Some(8),
-                max_subtasks: Some(0),
+                max_subtasks: Some(4),
             },
             allowed_slots: vec![
                 "context".to_string(),

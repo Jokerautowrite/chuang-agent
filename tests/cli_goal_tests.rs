@@ -191,6 +191,56 @@ fn cli_goal_plan_defaults_worker_to_declared_scopes() {
 }
 
 #[test]
+fn cli_goal_plan_can_override_subtask_budget() {
+    let root = temp_goal_root("max-subtasks");
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--objective",
+            "allow a small parallel worker budget",
+            "--scope",
+            "memory=src/memory_recall.rs,tests/memory_recall_tests.rs",
+            "--worker",
+            "memory-worker|memory|extend memory recall surface",
+            "--max-subtasks",
+            "2",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "mainline-mvp",
+            "--json",
+        ])
+        .output()
+        .expect("goal show should execute");
+
+    assert!(
+        show.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    let run: serde_json::Value = serde_json::from_slice(&show.stdout).expect("run should be json");
+    assert_eq!(run["goal_spec"]["budget"]["max_subtasks"], 2);
+}
+
+#[test]
 fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
     let root = temp_goal_root("checkpoint-diagnostics");
     let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))

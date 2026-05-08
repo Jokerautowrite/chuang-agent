@@ -626,7 +626,7 @@ fn goal_run_readiness_surfaces_incomplete_legacy_checkpoint() {
     "budget": {
       "max_minutes": 60,
       "max_tool_rounds": 8,
-      "max_subtasks": 0
+      "max_subtasks": 4
     },
     "allowed_slots": ["context"],
     "checkpoint_policy": {
