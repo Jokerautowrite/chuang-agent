@@ -11,6 +11,16 @@ function buildStatusFooter(turn) {
       turn.runtimeObservability?.runtime_report_id ||
       turn.providerMeta?.runtime_report_id
   );
+  const sessionMemoryWriteStatus = normalizeText(
+    turn.sessionMemoryWriteStatus ||
+      turn.runtimeObservability?.session_memory_write_status ||
+      turn.providerMeta?.session_memory_write_status
+  );
+  const sessionMemoryWriteError = normalizeText(
+    turn.sessionMemoryWriteError ||
+      turn.runtimeObservability?.session_memory_write_error ||
+      turn.providerMeta?.session_memory_write_error
+  );
   const recallHits = Number.isFinite(Number(turn.recallHitCount)) ? Number(turn.recallHitCount) : 0;
   const packedTokens = Number.isFinite(Number(turn.packedTokenCount)) ? Number(turn.packedTokenCount) : 0;
   const contextMaxTokens = Number.isFinite(Number(turn.contextMaxTokens)) ? Number(turn.contextMaxTokens) : 0;
@@ -32,6 +42,12 @@ function buildStatusFooter(turn) {
     `回忆 ${recallHits}`,
     `API ${apiCallCount} 次`,
     runtimeReportId ? `报告 ${runtimeReportId}` : "",
+    sessionMemoryWriteStatus && sessionMemoryWriteStatus !== "written"
+      ? `会话记忆 ${sessionMemoryWriteStatus}`
+      : "",
+    sessionMemoryWriteError && sessionMemoryWriteStatus !== "written"
+      ? `会话记忆错误 ${truncateText(sessionMemoryWriteError, 120)}`
+      : "",
   ]
     .filter(Boolean)
     .join(" · ");

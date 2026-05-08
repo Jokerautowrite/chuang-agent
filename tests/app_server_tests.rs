@@ -290,6 +290,103 @@ transport = "stub"
 }
 
 #[test]
+fn app_server_turn_reports_session_memory_hard_limit_without_failing_turn() {
+    let workspace = temp_workspace("session-memory-limit");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang test soul\n").expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+    fs::write(
+        workspace.join("config.toml"),
+        r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-openai"
+base_url = "https://api.example.com/v1"
+model = "gpt-app-server-test"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "stub"
+"#,
+    )
+    .expect("config should write");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+
+    let oversized_input = "超限".repeat(1200);
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"chuang-thread-1","text":"{}"}}}}"#,
+        workspace.display(),
+        oversized_input
+    )
+    .expect("turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let responses = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let turn_response = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("turn/start response should be present");
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_write_requested"],
+        "true"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_write_status"],
+        "hard_limit_exceeded"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_summary_kind"],
+        "none"
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["session_memory_write_error"]
+            .as_str()
+            .expect("session memory write error should be string")
+            .contains("memory_write_hard_limit_exceeded")
+    );
+}
+
+#[test]
 fn app_server_turn_surfaces_provider_fallback_diagnostics() {
     let workspace = temp_workspace("provider-fallback");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");

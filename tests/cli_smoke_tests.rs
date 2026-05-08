@@ -517,8 +517,24 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert!(script.contains("\"connects_real_feishu\": False"));
     assert!(script.contains("\"sends_feishu_messages\": False"));
     assert!(script.contains("\"starts_services\": False"));
+    assert!(script.contains("\"starts_workers\": False"));
+    assert!(script.contains("\"dispatches_tasks\": False"));
+    assert!(script.contains("\"touches_services\": False"));
     assert!(script.contains("\"modifies_repo\": False"));
     assert!(script.contains("\"prints_secret_values\": False"));
+    assert!(script.contains("bridge_tools_command"));
+    assert!(script.contains("bridge_capabilities_command"));
+    assert!(script.contains("send /tools to the Chuang Feishu bot"));
+    assert!(script.contains("send /capabilities to the Chuang Feishu bot"));
+    assert!(script.contains("mounted_feishu_capabilities"));
+    assert!(script.contains("provider_readiness_evidence"));
+    assert!(script.contains("scripts/chuang-provider-readiness-check.sh"));
+    assert!(script.contains("source_status_surface"));
+    assert!(script.contains("cargo run --quiet -- status --json"));
+    assert!(script.contains("local_readonly_evidence"));
+    assert!(script.contains("scripts/chuang-live-readonly-preflight.sh"));
+    assert!(script.contains("normal text to app-server"));
+    assert!(script.contains("does not reuse Codex/Hermes credentials"));
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("tmux new"));
     assert!(!script.contains("codex exec"));
@@ -585,6 +601,9 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert_eq!(data["readonly_boundaries"]["connects_real_feishu"], false);
     assert_eq!(data["readonly_boundaries"]["sends_feishu_messages"], false);
     assert_eq!(data["readonly_boundaries"]["starts_services"], false);
+    assert_eq!(data["readonly_boundaries"]["starts_workers"], false);
+    assert_eq!(data["readonly_boundaries"]["dispatches_tasks"], false);
+    assert_eq!(data["readonly_boundaries"]["touches_services"], false);
     assert_eq!(data["readonly_boundaries"]["modifies_repo"], false);
     assert_eq!(data["readonly_boundaries"]["prints_secret_values"], false);
     assert_eq!(
@@ -603,12 +622,96 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
             workspace.display()
         )
     );
+    assert_eq!(
+        data["commands"]["provider_readiness_check"],
+        format!(
+            "bash scripts/chuang-provider-readiness-check.sh --config {}",
+            workspace.join("config.toml").display()
+        )
+    );
+    assert_eq!(
+        data["commands"]["bridge_tools_command"],
+        "send /tools to the Chuang Feishu bot"
+    );
+    assert_eq!(
+        data["commands"]["bridge_capabilities_command"],
+        "send /capabilities to the Chuang Feishu bot"
+    );
+    let mounted = data["mounted_feishu_capabilities"]
+        .as_array()
+        .expect("mounted feishu capabilities should be an array");
+    assert!(mounted.iter().any(|item| item["command"] == "/tools"
+        && item["expected_evidence"]
+            .as_array()
+            .expect("expected evidence should be array")
+            .iter()
+            .any(|evidence| evidence == "normal text to app-server")));
+    assert!(mounted.iter().any(|item| item["command"] == "/capabilities"
+        && item["capability"]
+            .as_str()
+            .unwrap_or("")
+            .contains("alias of /tools")));
+    assert_eq!(data["provider_readiness_evidence"]["readonly"], true);
+    assert_eq!(
+        data["provider_readiness_evidence"]["source_status_surface"],
+        "cargo run --quiet -- status --json"
+    );
+    assert_eq!(
+        data["provider_readiness_evidence"]["connects_real_provider"],
+        false
+    );
+    assert_eq!(
+        data["provider_readiness_evidence"]["prints_secret_values"],
+        false
+    );
+    let readiness_fields = data["provider_readiness_evidence"]["expected_fields"]
+        .as_array()
+        .expect("provider readiness expected fields should be array");
+    assert!(readiness_fields
+        .iter()
+        .any(|field| field == "provider_kind"));
+    assert!(readiness_fields.iter().any(|field| field == "transport"));
+    assert!(readiness_fields
+        .iter()
+        .any(|field| field == "request_timeout_ms"));
+    assert!(readiness_fields
+        .iter()
+        .any(|field| field == "api_key_state"));
+    assert!(readiness_fields.iter().any(|field| field == "current"));
+    assert!(readiness_fields.iter().any(|field| field == "next_action"));
+    assert_eq!(data["local_readonly_evidence"]["readonly"], true);
+    assert_eq!(data["local_readonly_evidence"]["starts_workers"], false);
+    assert_eq!(data["local_readonly_evidence"]["dispatches_tasks"], false);
+    assert_eq!(data["local_readonly_evidence"]["touches_services"], false);
+    assert_eq!(data["local_readonly_evidence"]["modifies_repo"], false);
+    let readonly_steps = data["local_readonly_evidence"]["expected_steps"]
+        .as_array()
+        .expect("local readonly expected steps should be array");
+    assert!(readonly_steps
+        .iter()
+        .any(|step| step == "provider readiness check"));
+    assert!(readonly_steps
+        .iter()
+        .any(|step| step == "complete local smoke"));
     assert!(data["suggested_provider_env_file"].is_null());
     assert!(data["manual_steps"]
         .as_array()
         .expect("manual steps should be an array")
         .iter()
         .any(|step| step.as_str().unwrap_or("").contains("/health")));
+    assert!(data["manual_steps"]
+        .as_array()
+        .expect("manual steps should be an array")
+        .iter()
+        .any(|step| step.as_str().unwrap_or("").contains("/tools")));
+    assert!(data["manual_steps"]
+        .as_array()
+        .expect("manual steps should be an array")
+        .iter()
+        .any(|step| step
+            .as_str()
+            .unwrap_or("")
+            .contains("provider_readiness_check")));
 }
 
 #[test]

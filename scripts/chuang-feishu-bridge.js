@@ -192,6 +192,16 @@ class AppServerClient {
       replyText: fullText,
       modelName: assistant.model || result.model || "unknown",
       runtimeReportId: normalizeText(turn.runtimeReportId || turn.runtime_report_id || turn.runtimeObservability?.runtime_report_id || turn.providerMeta?.runtime_report_id),
+      sessionMemoryWriteStatus: normalizeText(
+        turn.sessionMemoryWriteStatus ||
+          turn.runtimeObservability?.session_memory_write_status ||
+          turn.providerMeta?.session_memory_write_status
+      ),
+      sessionMemoryWriteError: normalizeText(
+        turn.sessionMemoryWriteError ||
+          turn.runtimeObservability?.session_memory_write_error ||
+          turn.providerMeta?.session_memory_write_error
+      ),
     };
   }
 

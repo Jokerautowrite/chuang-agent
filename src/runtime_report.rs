@@ -195,6 +195,8 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "session_memory_write_requested",
         "session_memory_summary_kind",
         "session_memory_record_id",
+        "session_memory_write_status",
+        "session_memory_write_error",
         "tool_call_count",
         "tool_protocol_error_count",
         "tool_surface_available",
