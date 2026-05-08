@@ -454,6 +454,10 @@ fn cli_control_real_adapter_direct_receipt_keeps_live_gate_closed_by_default() {
     assert_eq!(units[0]["metadata"]["dry_run"], "true");
     assert_eq!(units[0]["metadata"]["live_enabled"], "false");
     assert_eq!(units[0]["metadata"]["audit_label"], "control.apply.live");
+    assert_eq!(
+        units[0]["metadata"]["required_env"],
+        "CHUANG_REAL_CONTROL_ENABLE"
+    );
     assert_eq!(units[0]["metadata"]["allowed_actions"], "start");
 
     let mut child = Command::new(&adapter_path)
@@ -496,10 +500,15 @@ fn cli_control_real_adapter_direct_receipt_keeps_live_gate_closed_by_default() {
     assert_eq!(receipt["action"], "start");
     assert_eq!(receipt["next_status"], "Running");
     let message = receipt["message"].as_str().expect("receipt message");
+    assert!(message.contains("allowed=true"), "message={message}");
     assert!(message.contains("dry_run=true"), "message={message}");
     assert!(message.contains("live_enabled=false"), "message={message}");
     assert!(
         message.contains("audit_label=control.apply.live"),
+        "message={message}"
+    );
+    assert!(
+        message.contains("required_env=CHUANG_REAL_CONTROL_ENABLE"),
         "message={message}"
     );
 }

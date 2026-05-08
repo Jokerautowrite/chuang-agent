@@ -84,6 +84,19 @@ run_quiet "doctor diagnostic" cargo run --quiet -- doctor --config "$config_path
 run_quiet "app-server health diagnostic" cargo run --quiet -- app-server health --workspace-root "$work_dir" --diagnostic --json
 run_quiet "console snapshot diagnostic" cargo run --quiet -- console snapshot --config "$config_path" --json
 
+printf '%s\n' "[preflight] provider readiness check"
+if bash "$root_dir/scripts/chuang-provider-readiness-check.sh" --config "$config_path"; then
+  printf '%s\n' "[preflight] provider readiness check passed"
+else
+  provider_status=$?
+  if [ "$provider_status" -eq 1 ]; then
+    printf '%s\n' "[preflight] provider readiness check reported a local-only block; continuing readonly preflight"
+  else
+    printf '%s\n' "[preflight] provider readiness check failed unexpectedly with status $provider_status"
+    exit "$provider_status"
+  fi
+fi
+
 printf '%s\n' "[preflight] complete local smoke"
 CHUANG_SMOKE_NAME=live_readiness sh "$root_dir/scripts/chuang-complete-local-smoke.sh"
 

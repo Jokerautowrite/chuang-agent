@@ -14,6 +14,7 @@ STATUSES = {
 
 ADAPTER_NAME = "chuang-real-control"
 CONTROL_AUDIT_LABEL = "control.apply.live"
+CONTROL_REQUIRED_ENV = "CHUANG_REAL_CONTROL_ENABLE"
 
 
 def main() -> int:
@@ -58,6 +59,7 @@ def unit_view(unit: dict) -> dict:
         "dry_run": str(not live_enabled()).lower(),
         "live_enabled": str(live_enabled()).lower(),
         "audit_label": CONTROL_AUDIT_LABEL,
+        "required_env": CONTROL_REQUIRED_ENV,
         "allowed_actions": ",".join(allowed_actions_for_unit(unit)),
     }
     return {
@@ -156,8 +158,9 @@ def allowed_actions_for_unit(unit: dict) -> list:
 
 def receipt_message(summary: str, dry_run: bool) -> str:
     return (
-        f"{summary}; dry_run={str(dry_run).lower()} "
-        f"live_enabled={str(live_enabled()).lower()} audit_label={CONTROL_AUDIT_LABEL}"
+        f"{summary}; allowed=true dry_run={str(dry_run).lower()} "
+        f"live_enabled={str(live_enabled()).lower()} audit_label={CONTROL_AUDIT_LABEL} "
+        f"required_env={CONTROL_REQUIRED_ENV}"
     )
 
 

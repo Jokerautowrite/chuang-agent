@@ -15,6 +15,9 @@ function parseBridgeCommand(text) {
   if (normalized === "/live-check" || normalized === "/live") {
     return buildLiveCheckCommandReply();
   }
+  if (normalized === "/tools" || normalized === "/capabilities") {
+    return buildToolsCommandReply();
+  }
   if (normalized === "/help" || normalized === "help") {
     return buildHelpCommandReply();
   }
@@ -201,6 +204,36 @@ function buildLiveCheckCommandReply() {
   };
 }
 
+function buildToolsCommandReply() {
+  return {
+    commandName: "tools",
+    threadId: "",
+    modelName: "chuang-feishu-bridge",
+    replyText: [
+      "Chuang 当前已挂载的本地能力与边界：",
+      "",
+      "已挂载能力：",
+      "",
+      "- `/new`：创建新的 Chuang 会话上下文。",
+      "- `/session`：查看当前飞书聊天绑定的会话与工作区。",
+      "- `/health`：查看本地 bridge、app-server 与 provider env 状态。",
+      "- `/receipt` / `/live-receipt`：输出人工 live 回执模板，不执行脚本。",
+      "- `/live-check`：输出人工 live 检查步骤，不执行本地检查。",
+      "- `/tools` / `/capabilities`：查看当前本地能力与边界。",
+      "- 普通文本：转发到 Chuang app-server 处理。",
+      "- 图片消息：先下载并 OCR，再进入 Chuang 主链。",
+      "",
+      "边界：",
+      "",
+      "- 不复用 Hermes bridge。",
+      "- 不复用 Codex bridge。",
+      "- 不打印 secret、token、app_secret、api_key 或完整 env 内容。",
+      "- 本地命令只做只读展示，不会替你执行现场检查或修改服务。",
+      "- App-server 或 bridge 的失败会以脱敏运维消息返回。",
+    ].join("\n"),
+  };
+}
+
 function buildHelpCommandReply() {
   return {
     commandName: "help",
@@ -215,6 +248,7 @@ function buildHelpCommandReply() {
       "- 图片消息：会先下载、OCR，再进入 Chuang 主链。",
       "- `/receipt` / `/live-receipt`：显示人工 live 回执模板入口；不会进入 Agent 主链。",
       "- `/live-check`：显示人工 live 检查步骤；不会进入 Agent 主链。",
+      "- `/tools` / `/capabilities`：显示当前本地能力与边界。",
       "- `/help`：显示这条帮助；不会进入 Agent 主链。",
       "",
       "普通文本会转发到 Chuang app-server，由 Agent runtime 处理。",
@@ -241,6 +275,7 @@ module.exports = {
   buildHelpCommandReply,
   buildHealthCommandReply,
   buildLiveCheckCommandReply,
+  buildToolsCommandReply,
   buildReceiptCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,

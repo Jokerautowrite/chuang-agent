@@ -29,7 +29,12 @@ The list command must print a JSON array:
     "status": "Running",
     "model_name": null,
     "metadata": {
-      "channel": "systemd"
+      "channel": "systemd",
+      "dry_run": "true",
+      "live_enabled": "false",
+      "audit_label": "control.apply.live",
+      "required_env": "CHUANG_REAL_CONTROL_ENABLE",
+      "allowed_actions": "start,restart"
     }
   }
 ]
@@ -72,6 +77,13 @@ The apply command must print one JSON receipt:
   "model_name": "gpt-5.5",
   "message": "model switched"
 }
+```
+
+When the live gate is closed, the adapter message should still expose the dry-run
+evidence explicitly, for example:
+
+```text
+allowed=true dry_run=true live_enabled=false audit_label=control.apply.live required_env=CHUANG_REAL_CONTROL_ENABLE
 ```
 
 Chuang still applies governance before calling `apply`. Dangerous changes require explicit approval at the CLI/control surface layer.

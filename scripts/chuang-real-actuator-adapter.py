@@ -6,6 +6,10 @@ import subprocess
 import sys
 
 
+ACTUATOR_AUDIT_LABEL = "actuator.operation.live"
+ACTUATOR_REQUIRED_ENV = "CHUANG_REAL_ACTUATOR_ENABLE"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", required=True)
@@ -75,14 +79,15 @@ def guarded_noop(allowlist: dict, key: str, action: str) -> dict:
 
 
 def boundary_message(action: str, real_execution: bool = False) -> str:
+    dry_run = "false" if real_execution else "true"
     state = "true" if real_execution else "false"
     if real_execution:
         prefix = "allowlisted live actuator operation requested"
     else:
         prefix = "dry-run actuator operation accepted"
     return (
-        f"{prefix}; action={action} real_execution={state} "
-        "audit_label=actuator.operation.live required_env=CHUANG_REAL_ACTUATOR_ENABLE"
+        f"{prefix}; allowed=true dry_run={dry_run} action={action} real_execution={state} "
+        f"audit_label={ACTUATOR_AUDIT_LABEL} required_env={ACTUATOR_REQUIRED_ENV}"
     )
 
 

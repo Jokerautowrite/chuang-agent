@@ -42,6 +42,13 @@ Response shape:
 Unknown top-level response fields are rejected. Adapter-specific detail should go in
 `message` or in the typed result object for the requested action.
 
+When the live gate is closed, the adapter message should still make the evidence
+explicit, for example:
+
+```text
+allowed=true dry_run=true real_execution=false audit_label=actuator.operation.live required_env=CHUANG_REAL_ACTUATOR_ENABLE
+```
+
 Rules:
 
 - Do not put secrets in logs or response text. `SecretOrPlainText::Secret` carries only a label.

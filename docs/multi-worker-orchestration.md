@@ -143,9 +143,12 @@ Final report must include: changed files, evidence fields, tests run, blocked/re
 - `goal_dispatch_ready=true`、`goal_dispatch_count=6`、`goal_dispatch_manifest_path` 存在。
 - `goal_step_checkpoint_recorded=false`、`goal_step_writes_progress_log=false`、`goal_step_writes_handoff=false`。
 - `goal_collect_ready_to_checkpoint=true`、`goal_collect_missing_run_ids=none`、`goal_collect_blocked_report_run_ids=none`、`goal_collect_blocked_report_reasons=none`。
+- `goal_collect_report_run_ids` 必须覆盖 manifest 里的 6 个 run id；`goal_operability_collect_report_run_ids` 也必须能在 `goal show` 文本面看到。
 - `goal_collect_checkpoint_completed_worker_ids` 必须覆盖 6 个 worker。
 - `goal_collect_checkpoint_validation_notes` 必须能对应到每个 worker 的报告证据。
+- `goal_operability_checkpoint_completed_worker_ids` 和 `goal_operability_checkpoint_validation_notes` 必须在 checkpoint-ready 状态下可见，不能只存在于一次性的 collect 输出里。
 - checkpoint 后 `goal_checkpoint_source=collect`，最终 `goal_checkpoint_log_complete=true`。
+- `subagent list` 文本面必须能看到 `queue_root`、`dispatch_count`、`report_count`、每个 `run_id` 的 `required_capabilities`、`is_claimed`、`is_claim_stale` 和 `has_report`，方便不看 JSON 时也能判断是否还缺 worker/report 证据。
 
 Blocked evidence 的读取顺序：
 
@@ -228,6 +231,7 @@ Final report must include: changed files, evidence fields, tests run, negative c
 - `Expected ReportAdmission state` 至少覆盖一条 accepted 路径和一条 rejected 路径；rejected 路径必须能看到 `reason_code`，有上游协议原因时还要保留 `upstream_reason_code`。
 - `Expected governance receipt fields` 至少覆盖 action id、decision、reason/source、approval boundary，并明确主控允许启动 runner 不等于 worker 内部动作自动获批。
 - `Expected blocked evidence fields` 至少覆盖 `goal_collect_missing_run_ids`、`goal_collect_blocked_report_run_ids`、`goal_collect_blocked_report_reasons`、`goal_collect_ready_to_checkpoint=false`。
+- `Expected read-only status fields` 至少覆盖 `goal_operability_collect_report_run_ids`、`goal_operability_checkpoint_completed_worker_ids`、`goal_operability_checkpoint_validation_notes`，以及 `subagent list` 的 claim/report/capability 字段。
 - `Acceptance commands` 优先写定向测试和 `git diff --check`；跨状态面改动再补 `cargo test -q` 或 `sh scripts/chuang-complete-local-smoke.sh`。
 
 主控验收 live preflight 时按这个顺序看，不要从 checkpoint 反推：

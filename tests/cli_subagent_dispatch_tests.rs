@@ -160,6 +160,63 @@ fn cli_subagent_list_reports_dispatches_and_report_presence() {
 }
 
 #[test]
+fn cli_subagent_list_text_surfaces_queue_and_readonly_evidence_fields() {
+    let queue_root = temp_queue_root("list-text-evidence");
+    let first = dispatch_task_with_capabilities(
+        &queue_root,
+        "task-cli-list-text-1",
+        "文本列表证据任务一",
+        &["rust", "filesystem"],
+    );
+    let second = dispatch_task(&queue_root, "task-cli-list-text-2", "文本列表证据任务二");
+    let first_run = first["run_id"].as_str().expect("first run id");
+    let second_run = second["run_id"].as_str().expect("second run id");
+    std::fs::create_dir_all(queue_root.join("claims")).expect("claims dir should exist");
+    std::fs::write(
+        queue_root.join("claims").join(format!("{first_run}.json")),
+        format!(r#"{{"run_id":"{first_run}","owner":"other-worker","claimed_at_unix_nanos":1}}"#),
+    )
+    .expect("claim should write");
+    std::fs::create_dir_all(queue_root.join("reports")).expect("reports dir should exist");
+    std::fs::write(
+        queue_root
+            .join("reports")
+            .join(format!("{second_run}.json")),
+        sample_report_json("second completed"),
+    )
+    .expect("report should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "list",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains(&format!(
+        "subagent_queue queue_root={} dispatch_count=2 report_count=1",
+        queue_root.display()
+    )));
+    assert!(stdout.contains(&format!("run_id={first_run} agent_id=")));
+    assert!(stdout.contains("required_capabilities=rust,filesystem"));
+    assert!(stdout.contains("is_claimed=true"));
+    assert!(stdout.contains(&format!("run_id={second_run} agent_id=")));
+    assert!(stdout.contains("has_report=true"));
+}
+
+#[test]
 fn cli_subagent_run_once_respects_required_capabilities() {
     let queue_root = temp_queue_root("required-capabilities");
     let first = dispatch_task_with_capabilities(

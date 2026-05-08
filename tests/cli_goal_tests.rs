@@ -549,9 +549,29 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         serde_json::json!([])
     );
     assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_collect"]["report_run_ids"]
+            .as_array()
+            .expect("report run ids")
+            .len(),
+        2
+    );
+    assert_eq!(
         ready_to_checkpoint["goal_operability"]["goal_collect"]["blocked_report_run_ids"],
         serde_json::json!([])
     );
+    assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_collect"]["completed_worker_ids"],
+        serde_json::json!(["goal-worker-1", "goal-worker-2"])
+    );
+    let ready_validation_notes = ready_to_checkpoint["goal_operability"]["goal_collect"]
+        ["checkpoint_suggestion"]["validation_notes"]
+        .as_array()
+        .expect("validation notes");
+    assert_eq!(ready_validation_notes.len(), 2);
+    assert!(ready_validation_notes.iter().all(|note| note
+        .as_str()
+        .expect("validation note string")
+        .contains("worker completed")));
     assert_eq!(
         ready_to_checkpoint["goal_operability"]["goal_collect"]["checkpoint_suggestion"]["summary"],
         serde_json::Value::String(
@@ -590,9 +610,17 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         "goal_operability_next_command_reason: dispatch reports are ready to checkpoint"
     ));
     assert!(stdout.contains("goal_operability_collect_missing_run_ids: none"));
+    assert!(stdout.contains(
+        "goal_operability_collect_report_run_ids: goal-show-operability-goal-goal-worker-1-"
+    ));
     assert!(stdout.contains("goal_operability_collect_blocked_report_run_ids: none"));
     assert!(stdout.contains("goal_operability_collect_blocked_report_reasons: none"));
     assert!(stdout.contains("goal_operability_collect_ready_to_checkpoint: true"));
+    assert!(stdout.contains(
+        "goal_operability_checkpoint_completed_worker_ids: goal-worker-1 | goal-worker-2"
+    ));
+    assert!(stdout.contains("goal_operability_checkpoint_validation_notes:"));
+    assert!(stdout.contains("worker completed"));
 }
 
 #[test]

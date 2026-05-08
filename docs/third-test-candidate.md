@@ -1,6 +1,6 @@
 # Third Test Candidate Quick Entry
 
-更新时间：2026-05-07
+更新时间：2026-05-09
 
 这一页只回答四件事：现在哪些已经是 `local-ready`，哪些必须人工 live check，怎么跑第三测试版候选，和 100% 前最后的硬门槛是什么。
 
@@ -8,12 +8,16 @@
 
 第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，然后再回到本地 `final verify` 绿。
 
+2026-05-09 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。下一步不再卡“桥是否挂上”，而是收集 live 侧可审计 receipt、provider `<set>` 状态和单 worker rehearsal 证据。
+
 ## 现在的分层
 
 ### local-ready
 
 - `sh scripts/chuang-final-verify.sh`
 - `sh scripts/chuang-live-readonly-preflight.sh`
+- `cargo run --quiet -- channel feishu-check --env-file /home/user/.codex-im/chuang-feishu-bridge.env --json`
+- `node scripts/chuang-feishu-command-smoke.js`
 
 这两项都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。
 
@@ -62,6 +66,8 @@ scripts/chuang-live-operator-receipt.sh --json
 /session
 ```
 
+已联系上的 Feishu 会话优先用 `/health` 和 `/session` 留证据；需要新上下文时再发 `/new`，避免把“能联系上”误判成还缺本地绑定。
+
 4. 只允许单个子代理 live rehearsal，不扩成 runner 池。
 5. rehearsal 后再跑一次 `sh scripts/chuang-final-verify.sh`。
 6. 最后做 `git diff --check -- docs/third-test-candidate.md docs/acceptance-next-matrix.md`。
@@ -78,4 +84,3 @@ scripts/chuang-live-operator-receipt.sh --json
 
 - [Acceptance Next Matrix](./acceptance-next-matrix.md)
 - [Live Operator Test Runbook](./live-operator-test-runbook.md)
-

@@ -7,6 +7,7 @@ const {
   buildHealthCommandReply,
   buildLiveCheckCommandReply,
   buildReceiptCommandReply,
+  buildToolsCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
   parseBridgeCommand,
@@ -36,6 +37,7 @@ assert(help.replyText.includes("/health"));
 assert(help.replyText.includes("图片消息：会先下载、OCR，再进入 Chuang 主链。"));
 assert(help.replyText.includes("/receipt"));
 assert(help.replyText.includes("/live-check"));
+assert(help.replyText.includes("/tools"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
 assert(help.replyText.includes("普通文本会转发到 Chuang app-server"));
 assert.strictEqual(buildHelpCommandReply().commandName, "help");
@@ -67,6 +69,21 @@ assert(liveCheck.replyText.includes("blocked"));
 assert(liveCheck.replyText.includes("warning"));
 assert(liveCheck.replyText.includes("不要把 secret"));
 assert.strictEqual(buildLiveCheckCommandReply().commandName, "live-check");
+
+const tools = parseBridgeCommand("/tools");
+assert(tools, "/tools should be handled as a bridge command");
+assert.strictEqual(tools.commandName, "tools");
+assert(tools.replyText.includes("当前已挂载的本地能力与边界"));
+assert(tools.replyText.includes("/capabilities"));
+assert(tools.replyText.includes("不复用 Hermes bridge"));
+assert(tools.replyText.includes("不复用 Codex bridge"));
+assert(tools.replyText.includes("图片消息：先下载并 OCR"));
+assert(tools.replyText.includes("不打印 secret"));
+assert.strictEqual(buildToolsCommandReply().commandName, "tools");
+
+const capabilities = parseBridgeCommand(" /capabilities ");
+assert(capabilities, "/capabilities should be handled as a bridge command");
+assert.strictEqual(capabilities.commandName, "tools");
 
 const session = parseBridgeCommand("/session");
 assert(session, "/session should be handled as a bridge command");

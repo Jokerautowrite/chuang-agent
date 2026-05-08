@@ -287,6 +287,8 @@ fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
     let response: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("response should be json");
     let message = response["message"].as_str().expect("message should exist");
+    assert!(message.contains("allowed=true"));
+    assert!(message.contains("dry_run=true"));
     assert!(message.contains("real_execution=false"));
     assert!(message.contains("audit_label=actuator.operation.live"));
     assert!(message.contains("required_env=CHUANG_REAL_ACTUATOR_ENABLE"));

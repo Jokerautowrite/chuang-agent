@@ -25,7 +25,13 @@ if [ -f "$provider_readiness_check" ]; then
     if bash "$provider_readiness_check"; then
         printf '%s\n' "[candidate-verify] provider readiness check passed"
     else
-        printf '%s\n' "[candidate-verify] provider readiness check reported a non-live block; continuing candidate-only gate"
+        provider_status=$?
+        if [ "$provider_status" -eq 1 ]; then
+            printf '%s\n' "[candidate-verify] provider readiness check reported a non-live block; continuing candidate-only gate"
+        else
+            printf '%s\n' "[candidate-verify] provider readiness check failed unexpectedly with status $provider_status"
+            exit "$provider_status"
+        fi
     fi
 else
     printf '%s\n' "[candidate-verify] provider readiness check script not found: scripts/chuang-provider-readiness-check.sh"
