@@ -143,6 +143,11 @@ fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission()
     assert!(script.contains("--subagent-queue-root \"$queue_root\""));
     assert!(script.contains("subagent list"));
     assert!(script.contains("assert data[\"report_count\"] == 0"));
+    assert!(script.contains("list_after_json"));
+    assert!(script.contains("queue evidence remains visible after runner"));
+    assert!(script.contains("assert listing[\"report_count\"] == 1"));
+    assert!(script.contains("assert item[\"has_report\"] is True"));
+    assert!(script.contains("assert item[\"is_claimed\"] is True"));
     assert!(script.contains("subagent run-once"));
     assert!(script.contains("--runner command"));
     assert!(script.contains("--approve-exec"));

@@ -8,7 +8,7 @@
 
 第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，然后再回到本地 `final verify` 绿。
 
-2026-05-09 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。下一步不再卡“桥是否挂上”，而是收集 live 侧可审计 receipt、provider `<set>` 状态和单 worker rehearsal 证据。
+2026-05-09 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。`/tools` / `/capabilities` 已能展示当前可见命令能力与边界。下一步不再卡“桥是否挂上”，而是收集 live 侧可审计 receipt、provider `<set>` 状态和单 worker rehearsal 证据。
 
 ## 现在的分层
 
@@ -16,14 +16,17 @@
 
 - `sh scripts/chuang-final-verify.sh`
 - `sh scripts/chuang-live-readonly-preflight.sh`
+- `sh scripts/chuang-candidate-verify.sh`
+- `scripts/chuang-provider-readiness-check.sh`
 - `cargo run --quiet -- channel feishu-check --env-file /home/user/.codex-im/chuang-feishu-bridge.env --json`
 - `node scripts/chuang-feishu-command-smoke.js`
 
-这两项都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。
+这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-candidate-verify.sh` 会把 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。
 
 ### 必须人工 live check
 
 - Chuang 专用 Feishu live 通道真实收发一次，并拿到可审计 receipt。
+- 在 Chuang 专用 Feishu 会话发 `/tools`，确认可见能力包含 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界。
 - Chuang provider env 对齐，输出只允许 `变量名=<set>`。
 - 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件和结果摘要。
 - 单个子代理 live rehearsal 通过 gate + allowlist + capability routing + report admission。
@@ -48,6 +51,8 @@
 ```bash
 sh scripts/chuang-final-verify.sh
 sh scripts/chuang-live-readonly-preflight.sh
+sh scripts/chuang-candidate-verify.sh
+scripts/chuang-provider-readiness-check.sh
 ```
 
 2. 再跑只读 operator 预检与回执模板：
@@ -61,12 +66,13 @@ scripts/chuang-live-operator-receipt.sh --json
 
 ```text
 /live-check
+/tools
 /health
 /new
 /session
 ```
 
-已联系上的 Feishu 会话优先用 `/health` 和 `/session` 留证据；需要新上下文时再发 `/new`，避免把“能联系上”误判成还缺本地绑定。
+已联系上的 Feishu 会话优先用 `/tools`、`/health` 和 `/session` 留证据；需要新上下文时再发 `/new`，避免把“能联系上”误判成还缺本地绑定。
 
 4. 只允许单个子代理 live rehearsal，不扩成 runner 池。
 5. rehearsal 后再跑一次 `sh scripts/chuang-final-verify.sh`。
@@ -78,7 +84,7 @@ scripts/chuang-live-operator-receipt.sh --json
 - 不碰 Hermes。
 - 不打印 token 或 secret。
 - 不做 deletion、cleanup、reset、purge、uninstall。
-- 不把 local-ready smoke 解释成 100%。
+- 不把 local-ready smoke、provider readiness check 或 `/tools` 可见能力解释成 100%。
 
 ## 快速参考
 

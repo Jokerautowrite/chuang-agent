@@ -726,8 +726,31 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         format_name_list(&doctor.status.atomic_tools.mapped_atomic_tool_names)
     );
     println!(
+        "atomic_tools_executable: {}",
+        format_name_list(
+            &doctor
+                .status
+                .atomic_tools
+                .governed_executable_atomic_tool_names
+        )
+    );
+    println!(
         "atomic_tools_interface_only: {}",
         format_name_list(&doctor.status.atomic_tools.interface_only_atomic_tool_names)
+    );
+    println!(
+        "atomic_tools_desktop_browser_interface_only: {} reason={}",
+        format_name_list(
+            &doctor
+                .status
+                .atomic_tools
+                .desktop_browser_interface_only_atomic_tool_names
+        ),
+        doctor.status.atomic_tools.interface_only_reason
+    );
+    println!(
+        "atomic_tools_self_check_entrypoints: {}",
+        format_name_list(&doctor.status.atomic_tools.local_cli_self_check_entrypoints)
     );
     println!(
         "goal_mode: ok={} entrypoint={} kind={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",

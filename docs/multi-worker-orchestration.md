@@ -43,6 +43,84 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 - live external worker pool 仍是后续 audited adapter 边界，本地 run-loop 不连接真实外部平台。
 - 真实外部 worker runner 启用前先跑只读 `subagent live-preflight`，确认 live gate、runner allowlist、capability routing、ReportAdmission 证据和 forbidden capability rejection 都可见；该命令不启动真实 worker。
 
+## 今晚可操作入口
+
+这个入口用于从 Feishu `/tools` / `/capabilities` 看到“goal/subagent 本地能力可见”之后，回到本地终端收一份可审计证据。它不改 Feishu bridge、不启动真实服务、不启用真实 runner、不删除或清理文件。
+
+最快本地证据：
+
+```bash
+sh scripts/chuang-goal-mode-smoke.sh
+sh scripts/chuang-live-runner-rehearsal-smoke.sh
+```
+
+预期 marker：
+
+```text
+goal_mode_smoke_ok
+live_runner_rehearsal_smoke_ok
+```
+
+第一条覆盖 `goal dispatch -> goal step -> goal collect` 的本地闭环，并继续证明 checkpoint 只能来自 `--from-collect`。第二条覆盖 live-preflight-only 边界：`starts_external_worker=false`、live gate disabled、runner allowlist/capability route 可见、`ReportAdmission=Accepted/report_validated` 可见、治理审批字段可见。
+
+如果今晚只想看派活到收集，不写 checkpoint，使用临时目录手工跑到 collect 即停：
+
+```bash
+GOAL_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/chuang-tonight-goal-runs.XXXXXX")"
+QUEUE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/chuang-tonight-subagent-queue.XXXXXX")"
+GOAL_ID="tonight-local-subagent-loop"
+
+cargo run --quiet -- goal plan \
+  --root "$GOAL_ROOT" \
+  --goal-id "$GOAL_ID" \
+  --objective "tonight local check for goal dispatch step collect" \
+  --scope "tonight-docs=docs/multi-worker-orchestration.md" \
+  --worker "tonight-worker-1|tonight-docs|verify local goal dispatch step collect evidence" \
+  --validation "sh scripts/chuang-goal-mode-smoke.sh" \
+  --max-subtasks 1 \
+  --json
+
+cargo run --quiet -- goal dispatch \
+  --root "$GOAL_ROOT" \
+  --goal-id "$GOAL_ID" \
+  --subagent-queue-root "$QUEUE_ROOT" \
+  --json
+
+cargo run --quiet -- goal step \
+  --root "$GOAL_ROOT" \
+  --goal-id "$GOAL_ID" \
+  --subagent-queue-root "$QUEUE_ROOT" \
+  --runner fake \
+  --max-runs 1 \
+  --max-concurrency 1 \
+  --json
+
+cargo run --quiet -- goal collect \
+  --root "$GOAL_ROOT" \
+  --goal-id "$GOAL_ID" \
+  --subagent-queue-root "$QUEUE_ROOT" \
+  --json
+```
+
+collect 输出里只看这几项：
+
+- `ready_to_checkpoint=true` 才代表 dispatch/step/report 收齐；今晚如果不需要写 checkpoint，可以停在这里。
+- `missing_run_ids=[]`、`blocked_report_run_ids=[]`、`blocked_report_reasons=[]` 才能继续 checkpoint。
+- 任一 blocked 字段非空时，不手工补 checkpoint；把 exact reason 贴回对应 worker。
+
+live-preflight-only 单独证据可以只跑：
+
+```bash
+cargo run --quiet -- subagent live-preflight \
+  --runner-command scripts/chuang-codex-runner.py \
+  --allow-runner-command scripts/chuang-codex-runner.py \
+  --requires-capability rehearsal \
+  --capability rehearsal \
+  --json
+```
+
+预期边界是 `ready_for_live=false` 且 `starts_external_worker=false`。这表示 preflight 证据可见，不表示真实 runner 已经启动或允许启动。
+
 ## 下一步
 
 1. 把 GoalRun 的 worker plan 继续用作唯一计划入口。

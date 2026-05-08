@@ -144,8 +144,25 @@ pub fn print_status(status: &ChuangMvpStatus) {
         format_name_list(&status.atomic_tools.mapped_atomic_tool_names)
     );
     println!(
+        "atomic_tools_executable: {}",
+        format_name_list(&status.atomic_tools.governed_executable_atomic_tool_names)
+    );
+    println!(
         "atomic_tools_interface_only: {}",
         format_name_list(&status.atomic_tools.interface_only_atomic_tool_names)
+    );
+    println!(
+        "atomic_tools_desktop_browser_interface_only: {} reason={}",
+        format_name_list(
+            &status
+                .atomic_tools
+                .desktop_browser_interface_only_atomic_tool_names
+        ),
+        status.atomic_tools.interface_only_reason
+    );
+    println!(
+        "atomic_tools_self_check_entrypoints: {}",
+        format_name_list(&status.atomic_tools.local_cli_self_check_entrypoints)
     );
     for tool in &status.atomic_tools.manifests {
         println!(

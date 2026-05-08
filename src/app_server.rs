@@ -197,6 +197,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "goal_mode": status.goal_mode,
         "goal_run": status.goal_run,
         "provider_readiness": status.provider_readiness,
+        "atomic_tools": status.atomic_tools.clone(),
         "project_readiness": status.project_readiness,
         "local_contract_readiness": status.local_contract_readiness,
         "release_readiness": status.release_readiness,
@@ -271,6 +272,38 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         println!(
             "provider_readiness_next_action: {}",
             status.provider_readiness.next_action
+        );
+        println!(
+            "atomic_tools: source={} ok={} total={} mapped={} interface_only={} manifest_schema_version={} action_schema_version={} report_schema_version={}",
+            status.atomic_tools.source,
+            status.atomic_tools.ok,
+            status.atomic_tools.total_count,
+            status.atomic_tools.mapped_count,
+            status.atomic_tools.interface_only_count,
+            status.atomic_tools.manifest_schema_version,
+            status.atomic_tools.tool_action_schema_version,
+            status.atomic_tools.tool_report_schema_version
+        );
+        println!(
+            "atomic_tools_executable: {}",
+            format_text_list(&status.atomic_tools.governed_executable_atomic_tool_names)
+        );
+        println!(
+            "atomic_tools_interface_only: {}",
+            format_text_list(&status.atomic_tools.interface_only_atomic_tool_names)
+        );
+        println!(
+            "atomic_tools_desktop_browser_interface_only: {} reason={}",
+            format_text_list(
+                &status
+                    .atomic_tools
+                    .desktop_browser_interface_only_atomic_tool_names
+            ),
+            status.atomic_tools.interface_only_reason
+        );
+        println!(
+            "atomic_tools_self_check_entrypoints: {}",
+            format_text_list(&status.atomic_tools.local_cli_self_check_entrypoints)
         );
         println!(
             "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",

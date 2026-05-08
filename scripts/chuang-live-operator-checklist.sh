@@ -18,6 +18,9 @@ Readonly boundaries:
   connects_real_feishu=false
   sends_feishu_messages=false
   starts_services=false
+  starts_workers=false
+  dispatches_tasks=false
+  touches_services=false
   modifies_repo=false
   prints_secret_values=false
 EOF
@@ -83,6 +86,9 @@ BOUNDARIES = {
     "connects_real_feishu": False,
     "sends_feishu_messages": False,
     "starts_services": False,
+    "starts_workers": False,
+    "dispatches_tasks": False,
+    "touches_services": False,
     "modifies_repo": False,
     "prints_secret_values": False,
     "reuses_codex_or_hermes_credentials": False,
@@ -175,11 +181,16 @@ commands = {
         f"--workspace-root {workspace_root} --json"
     ),
     "local_readiness_gate": "sh scripts/chuang-live-readonly-preflight.sh",
+    "provider_readiness_check": (
+        f"bash scripts/chuang-provider-readiness-check.sh --config {workspace_root / 'config.toml'}"
+    ),
     "final_verify": "sh scripts/chuang-final-verify.sh",
     "goal_status": "scripts/chuang-goal-run-status.sh --json",
     "bridge_health_command": "send /health to the Chuang Feishu bot",
     "bridge_session_command": "send /session to the Chuang Feishu bot",
     "new_thread_command": "send /new to the Chuang Feishu bot",
+    "bridge_tools_command": "send /tools to the Chuang Feishu bot",
+    "bridge_capabilities_command": "send /capabilities to the Chuang Feishu bot",
 }
 if suggested_provider_env_file is not None:
     commands["provider_env_next_step"] = (
@@ -195,8 +206,12 @@ if suggested_provider_env_file is not None:
     )
 manual_steps.extend(
     [
+        "run provider_readiness_check and confirm provider_kind, transport, request_timeout_ms, api_key_state, current, and next_action are visible without secret values",
+        "run local_readiness_gate and confirm it reports watchdog readonly evidence, diagnostics, provider readiness check, and complete local smoke",
         "start or confirm the Chuang-only Feishu bridge outside this checklist",
         "send /health to the Chuang bot and confirm secrets show only <set>/<missing>",
+        "send /tools and confirm the mounted local capabilities and boundaries are visible",
+        "send /capabilities and confirm it matches /tools",
         "send /new, then send one normal text message",
         "send /session and confirm the active chat binding changed after /new",
         "confirm the reply is not fake-responder and includes a runtime report id when applicable",
@@ -204,6 +219,84 @@ manual_steps.extend(
         "after the test, run final_verify before committing any follow-up changes",
     ]
 )
+
+mounted_feishu_capabilities = [
+    {
+        "command": "/health",
+        "capability": "bridge health and runtime readiness summary",
+        "expected_evidence": ["redacted secret states", "health/readiness status"],
+    },
+    {
+        "command": "/tools",
+        "capability": "mounted local command and boundary list",
+        "expected_evidence": [
+            "/health",
+            "/new",
+            "/session",
+            "/tools",
+            "/capabilities",
+            "live-check",
+            "image OCR",
+            "normal text to app-server",
+            "does not reuse Codex/Hermes credentials",
+        ],
+    },
+    {
+        "command": "/capabilities",
+        "capability": "alias of /tools for mounted local capabilities",
+        "expected_evidence": ["same local capability and boundary list as /tools"],
+    },
+    {
+        "command": "/new",
+        "capability": "new Feishu chat/topic/thread binding guidance",
+        "expected_evidence": ["handled locally", "does not consume an agent runtime turn"],
+    },
+    {
+        "command": "/session",
+        "capability": "current Feishu chat binding evidence",
+        "expected_evidence": ["active session/binding state", "redacted identifiers only"],
+    },
+]
+
+provider_readiness_evidence = {
+    "command": commands["provider_readiness_check"],
+    "script": "scripts/chuang-provider-readiness-check.sh",
+    "readonly": True,
+    "source_status_surface": "cargo run --quiet -- status --json",
+    "connects_real_provider": False,
+    "prints_secret_values": False,
+    "expected_fields": [
+        "provider_kind",
+        "transport",
+        "request_timeout_ms",
+        "api_key_state",
+        "overall_state",
+        "placeholder_warning_count",
+        "current",
+        "next_action",
+        "blocked_reason",
+    ],
+    "api_key_state_values": ["<set>", "<missing>"],
+}
+
+local_readonly_evidence = {
+    "command": commands["local_readiness_gate"],
+    "script": "scripts/chuang-live-readonly-preflight.sh",
+    "readonly": True,
+    "starts_workers": False,
+    "dispatches_tasks": False,
+    "touches_services": False,
+    "modifies_repo": False,
+    "expected_steps": [
+        "watchdog readonly once",
+        "status diagnostic",
+        "doctor diagnostic",
+        "app-server health diagnostic",
+        "console snapshot diagnostic",
+        "provider readiness check",
+        "complete local smoke",
+    ],
+}
 
 result = {
     "schema_version": 1,
@@ -238,6 +331,9 @@ result = {
             "contains_feishu_credential_names": any(name in provider_values for name in FEISHU_REQUIRED + FEISHU_OPTIONAL),
         },
     },
+    "mounted_feishu_capabilities": mounted_feishu_capabilities,
+    "provider_readiness_evidence": provider_readiness_evidence,
+    "local_readonly_evidence": local_readonly_evidence,
     "blockers": blockers,
     "warnings": warnings,
     "commands": commands,
@@ -252,6 +348,18 @@ else:
     print(f"env_file={ENV_FILE}")
     print(f"workspace_root={workspace_root}")
     print(f"provider_env_file={provider_env_file or '<missing>'}")
+    print("mounted_feishu_capabilities=/health,/tools,/capabilities,/new,/session")
+    print(
+        "provider_readiness_evidence="
+        "script=scripts/chuang-provider-readiness-check.sh source=status --json "
+        "fields=provider_kind,transport,request_timeout_ms,api_key_state,current,next_action "
+        "connects_real_provider=false prints_secret_values=false"
+    )
+    print(
+        "local_readonly_evidence="
+        "script=scripts/chuang-live-readonly-preflight.sh "
+        "starts_workers=false dispatches_tasks=false touches_services=false modifies_repo=false"
+    )
     if suggested_provider_env_file is not None:
         print(
             "suggested_provider_env_file="

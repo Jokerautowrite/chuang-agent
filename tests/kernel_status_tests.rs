@@ -70,6 +70,14 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         ]
     );
     assert_eq!(
+        status.atomic_tools.governed_executable_atomic_tool_names,
+        vec![
+            "file_read".to_string(),
+            "file_write".to_string(),
+            "code_execute".to_string(),
+        ]
+    );
+    assert_eq!(
         status.atomic_tools.interface_only_atomic_tool_names,
         vec![
             "mouse".to_string(),
@@ -78,6 +86,29 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             "locate".to_string(),
             "wait".to_string(),
             "human_suspend".to_string(),
+        ]
+    );
+    assert_eq!(
+        status
+            .atomic_tools
+            .desktop_browser_interface_only_atomic_tool_names,
+        vec![
+            "mouse".to_string(),
+            "keyboard".to_string(),
+            "screenshot".to_string(),
+            "locate".to_string(),
+        ]
+    );
+    assert!(status
+        .atomic_tools
+        .interface_only_reason
+        .contains("desktop/browser atoms are exposed as interface contracts only"));
+    assert_eq!(
+        status.atomic_tools.local_cli_self_check_entrypoints,
+        vec![
+            "status --json".to_string(),
+            "doctor --json".to_string(),
+            "app-server health --diagnostic --json".to_string(),
         ]
     );
     assert_eq!(status.atomic_tools.tool_action_schema_version, 1);

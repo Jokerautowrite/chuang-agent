@@ -1229,6 +1229,27 @@ transport = "stub"
         .as_str()
         .expect("provider next action should be text")
         .contains("real provider transport"));
+    assert_eq!(parsed["atomic_tools"]["ok"], true);
+    assert_eq!(
+        parsed["atomic_tools"]["governed_executable_atomic_tool_names"],
+        serde_json::json!(["file_read", "file_write", "code_execute"])
+    );
+    assert_eq!(
+        parsed["atomic_tools"]["desktop_browser_interface_only_atomic_tool_names"],
+        serde_json::json!(["mouse", "keyboard", "screenshot", "locate"])
+    );
+    assert!(parsed["atomic_tools"]["interface_only_reason"]
+        .as_str()
+        .expect("interface only reason should be text")
+        .contains("desktop/browser atoms are exposed as interface contracts only"));
+    assert_eq!(
+        parsed["atomic_tools"]["local_cli_self_check_entrypoints"],
+        serde_json::json!([
+            "status --json",
+            "doctor --json",
+            "app-server health --diagnostic --json"
+        ])
+    );
     assert!(parsed["next_actions"]
         .as_array()
         .expect("next actions array")
@@ -1712,6 +1733,19 @@ transport = "stub"
     assert!(stdout.contains("next_actions:"));
     assert!(stdout.contains(
         "provider_readiness: ok=true state=ready kind=openai_compatible transport=stub fallback_configured=false"
+    ));
+    assert!(stdout.contains(
+        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
+    ));
+    assert!(stdout.contains("atomic_tools_executable: file_read,file_write,code_execute"));
+    assert!(stdout.contains(
+        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
+    ));
+    assert!(stdout.contains(
+        "atomic_tools_desktop_browser_interface_only: mouse,keyboard,screenshot,locate reason=desktop/browser atoms are exposed as interface contracts only until an audited actuator adapter is configured"
+    ));
+    assert!(stdout.contains(
+        "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"
     ));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"

@@ -301,8 +301,12 @@ pub struct AtomicToolSurfaceStatus {
     pub total_count: usize,
     pub mapped_count: usize,
     pub interface_only_count: usize,
+    pub governed_executable_atomic_tool_names: Vec<String>,
     pub mapped_atomic_tool_names: Vec<String>,
     pub interface_only_atomic_tool_names: Vec<String>,
+    pub desktop_browser_interface_only_atomic_tool_names: Vec<String>,
+    pub interface_only_reason: String,
+    pub local_cli_self_check_entrypoints: Vec<String>,
     pub manifest_schema_version: u16,
     pub manifest_schema_fields: Vec<String>,
     pub tool_action_schema_version: u16,
@@ -412,6 +416,11 @@ pub fn build_chuang_mvp_status(
         total_count: atomic_manifests.len(),
         mapped_count,
         interface_only_count,
+        governed_executable_atomic_tool_names: atomic_manifests
+            .iter()
+            .filter(|tool| tool.status == AtomicToolStatus::Mapped)
+            .map(|tool| tool.name.to_string())
+            .collect(),
         mapped_atomic_tool_names: atomic_manifests
             .iter()
             .filter(|tool| tool.status == AtomicToolStatus::Mapped)
@@ -422,6 +431,23 @@ pub fn build_chuang_mvp_status(
             .filter(|tool| tool.status == AtomicToolStatus::InterfaceOnly)
             .map(|tool| tool.name.to_string())
             .collect(),
+        desktop_browser_interface_only_atomic_tool_names: atomic_manifests
+            .iter()
+            .filter(|tool| {
+                tool.status == AtomicToolStatus::InterfaceOnly
+                    && matches!(
+                        tool.name,
+                        "mouse" | "keyboard" | "screenshot" | "locate"
+                    )
+            })
+            .map(|tool| tool.name.to_string())
+            .collect(),
+        interface_only_reason: "desktop/browser atoms are exposed as interface contracts only until an audited actuator adapter is configured".to_string(),
+        local_cli_self_check_entrypoints: vec![
+            "status --json".to_string(),
+            "doctor --json".to_string(),
+            "app-server health --diagnostic --json".to_string(),
+        ],
         manifest_schema_version: AtomicToolManifest::schema_version(),
         manifest_schema_fields: AtomicToolManifest::schema_fields()
             .iter()

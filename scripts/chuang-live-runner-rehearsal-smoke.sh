@@ -10,6 +10,7 @@ runner_workspace="$work_dir/runner-workspace"
 preflight_json="$work_dir/live-preflight.json"
 dispatch_json="$work_dir/dispatch.json"
 list_before_json="$work_dir/list-before-runner.json"
+list_after_json="$work_dir/list-after-runner.json"
 run_once_json="$work_dir/run-once.json"
 report_json="$work_dir/report.json"
 collect_json="$work_dir/collect.json"
@@ -140,6 +141,32 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     print(json.load(handle)["run_id"])
 PY
 )"
+
+printf '%s\n' "[smoke] queue evidence remains visible after runner"
+cargo run --quiet -- subagent list \
+  --config "$config_path" \
+  --subagent queued_external \
+  --subagent-queue-root "$queue_root" \
+  --json > "$list_after_json"
+python3 - "$list_after_json" "$dispatch_json" "$run_once_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    listing = json.load(handle)
+with open(sys.argv[2], encoding="utf-8") as handle:
+    dispatch = json.load(handle)
+with open(sys.argv[3], encoding="utf-8") as handle:
+    run_once = json.load(handle)
+
+assert listing["dispatch_count"] == 1
+assert listing["report_count"] == 1
+item = listing["items"][0]
+assert item["run_id"] == dispatch["run_id"] == run_once["run_id"]
+assert item["required_capabilities"] == ["rehearsal"]
+assert item["is_claimed"] is True
+assert item["has_report"] is True
+PY
 
 printf '%s\n' "[smoke] report admission remains visible"
 cargo run --quiet -- subagent report \
