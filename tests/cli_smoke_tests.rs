@@ -86,6 +86,43 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
 }
 
 #[test]
+fn provider_readiness_check_is_status_only_and_secret_safe() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script =
+        fs::read_to_string(manifest_dir.join("scripts/chuang-provider-readiness-check.sh"))
+            .expect("provider readiness check should be readable");
+
+    assert!(script.contains("cargo run --quiet -- status"));
+    assert!(script.contains("--json"));
+    assert!(script.contains("provider_readiness"));
+    assert!(script.contains("provider_kind"));
+    assert!(script.contains("transport"));
+    assert!(script.contains("request_timeout_ms"));
+    assert!(script.contains("api_key_state"));
+    assert!(script.contains("sanitized_api_key_state"));
+    assert!(script.contains("\"<set>\""));
+    assert!(script.contains("\"<missing>\""));
+    assert!(script.contains("provider_api_key_env_missing"));
+    assert!(script.contains("next_action"));
+    assert!(script.contains("connects_real_provider"));
+    assert!(script.contains("\"connects_real_provider\": False"));
+    assert!(script.contains("prints_secret_values"));
+    assert!(script.contains("\"prints_secret_values\": False"));
+    assert!(!script.contains("run --input"));
+    assert!(!script.contains("app-server"));
+    assert!(!script.contains("doctor"));
+    assert!(!script.contains("curl "));
+    assert!(!script.contains("wget "));
+    assert!(!script.contains("FEISHU_"));
+    assert!(!script.contains("HERMES_"));
+    assert!(!script.contains(".codex-im/.env"));
+    assert!(!script.contains("hermes-gateway"));
+    assert!(!script.contains("\nrm "));
+    assert!(!script.contains(" rm -"));
+    assert!(!script.contains("systemctl"));
+}
+
+#[test]
 fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-smoke.sh");
@@ -159,6 +196,51 @@ fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
     assert!(!wrapper.contains("reset"));
     assert!(!wrapper.contains("git checkout"));
     assert!(!wrapper.contains("systemctl"));
+}
+
+#[test]
+fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-candidate-verify.sh"))
+        .expect("candidate verify wrapper should be readable");
+
+    let complete_local_smoke = wrapper
+        .find("sh scripts/chuang-complete-local-smoke.sh")
+        .expect("candidate verify should run complete-local smoke");
+    let live_runner_rehearsal = wrapper
+        .find("bash scripts/chuang-live-runner-rehearsal-smoke.sh")
+        .expect("candidate verify should run live runner rehearsal smoke");
+    let provider_readiness = wrapper
+        .find("provider readiness check")
+        .expect("candidate verify should include provider readiness check");
+    let marker = wrapper
+        .find("chuang_candidate_verify_ok")
+        .expect("candidate verify should print a stable success marker");
+
+    assert!(complete_local_smoke < live_runner_rehearsal);
+    assert!(live_runner_rehearsal < provider_readiness);
+    assert!(provider_readiness < marker);
+    assert!(wrapper.contains("scripts/chuang-provider-readiness-check.sh"));
+    assert!(wrapper.contains("if [ -f \"$provider_readiness_check\" ]; then"));
+    assert!(wrapper.contains("if bash \"$provider_readiness_check\"; then"));
+    assert!(wrapper.contains("provider readiness check reported a non-live block"));
+    assert!(wrapper.contains("continuing candidate-only gate"));
+    assert!(wrapper.contains("provider readiness remains covered by complete-local"));
+    assert!(wrapper.contains("no real provider call is attempted"));
+    assert!(wrapper.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
+    assert!(wrapper.contains("unset CHUANG_REAL_CONTROL_ENABLE"));
+    assert!(wrapper.contains("unset CHUANG_REAL_ACTUATOR_ENABLE"));
+    assert!(!wrapper.contains("git status --short"));
+    assert!(!wrapper.contains("working tree must be clean"));
+    assert!(!wrapper.contains("git diff --check"));
+    assert!(!wrapper.contains("git reset"));
+    assert!(!wrapper.contains("git checkout"));
+    assert!(!wrapper.contains("systemctl"));
+    assert!(!wrapper.contains("\nrm "));
+    assert!(!wrapper.contains(" rm -"));
+    assert!(!wrapper.contains(".codex-im/.env"));
+    assert!(!wrapper.contains("hermes-gateway"));
+    assert!(!wrapper.contains("FEISHU_"));
 }
 
 #[test]
