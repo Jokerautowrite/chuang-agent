@@ -92,6 +92,14 @@ fn cli_subagent_live_preflight_is_readonly_and_reports_disabled_gate() {
     assert_eq!(rehearsal["forbidden_capabilities"]["ok"], true);
     assert_eq!(rehearsal["approval_audit_prerequisites"]["ok"], true);
     assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["explicit_operator_approval_required"],
+        true
+    );
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["governance_approval_required"],
+        true
+    );
+    assert_eq!(
         rehearsal["approval_audit_prerequisites"]["audit_label"],
         "subagent.runner.live"
     );
@@ -99,6 +107,22 @@ fn cli_subagent_live_preflight_is_readonly_and_reports_disabled_gate() {
         rehearsal["approval_audit_prerequisites"]["audit_receipt_required"],
         true
     );
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["dispatch_evidence_required"],
+        true
+    );
+    assert!(rehearsal["approval_audit_prerequisites"]["prerequisites"]
+        .as_array()
+        .expect("prerequisites")
+        .iter()
+        .any(|item| item
+            .as_str()
+            .expect("prerequisite")
+            .contains("governance records why an external runner process may start")));
+    assert!(rehearsal["approval_audit_prerequisites"]["reason"]
+        .as_str()
+        .expect("reason")
+        .contains("requires operator approval, governance evidence, and an audit receipt"));
 }
 
 #[test]
@@ -231,6 +255,7 @@ fn cli_subagent_live_preflight_text_uses_stable_gate_field_names() {
 
     assert!(stdout.contains("ready_for_live=false"));
     assert!(stdout.contains("readonly=true"));
+    assert!(stdout.contains("starts_external_worker=false"));
     assert!(stdout.contains("gate_enabled=false"));
     assert!(stdout.contains("runner_allowlist_ok=true"));
     assert!(stdout.contains("capability_routing_ok=true"));
@@ -247,7 +272,13 @@ fn cli_subagent_live_preflight_text_uses_stable_gate_field_names() {
     assert!(stdout.contains("forbidden_capabilities ok=true"));
     assert!(stdout.contains("checked_capability_sources=dispatch required_capabilities"));
     assert!(stdout.contains("approval_audit_prerequisites ok=true"));
+    assert!(stdout.contains("explicit_operator_approval_required=true"));
+    assert!(stdout.contains("governance_approval_required=true"));
     assert!(stdout.contains("audit_receipt_required=true"));
+    assert!(stdout.contains("dispatch_evidence_required=true"));
+    assert!(
+        stdout.contains("requires operator approval, governance evidence, and an audit receipt")
+    );
     assert!(stdout.contains("next_action="));
 }
 

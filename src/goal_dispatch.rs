@@ -205,7 +205,7 @@ pub fn collect_goal_dispatch_reports(
     let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
         .map_err(dispatch_error_from_queue)?;
     collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, |run_id| {
-        queue.read_report(run_id).map_err(dispatch_error_from_queue)
+        read_report_for_collect(&queue, run_id)
     })
 }
 
@@ -218,8 +218,14 @@ pub fn collect_goal_dispatch_reports_read_only(
     let queue_root = queue_root.into();
     let manifest = load_goal_dispatch_manifest(&goal_root, goal_id)?;
     collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, |run_id| {
-        read_report_read_only(&queue_root, run_id)
+        read_report_for_collect_read_only(&queue_root, run_id)
     })
+}
+
+enum GoalReportReadOutcome {
+    Missing,
+    Report(SubagentReport),
+    Blocked(String),
 }
 
 fn collect_goal_dispatch_reports_with_reader<F>(
@@ -228,7 +234,7 @@ fn collect_goal_dispatch_reports_with_reader<F>(
     mut read_report: F,
 ) -> Result<GoalDispatchCollectionReceipt, GoalDispatchError>
 where
-    F: FnMut(&RunId) -> Result<Option<SubagentReport>, GoalDispatchError>,
+    F: FnMut(&RunId) -> Result<GoalReportReadOutcome, GoalDispatchError>,
 {
     let mut available_report_count = 0usize;
     let mut missing_run_ids = Vec::new();
@@ -241,7 +247,7 @@ where
     for dispatch in &manifest.dispatches {
         let run_id = RunId(dispatch.run_id.clone());
         match read_report(&run_id)? {
-            Some(report) => {
+            GoalReportReadOutcome::Report(report) => {
                 available_report_count += 1;
                 report_run_ids.push(dispatch.run_id.clone());
                 if report.task_id.0 != dispatch.task_id
@@ -270,7 +276,13 @@ where
                 completed_worker_ids.push(dispatch.worker_id.clone());
                 report_summaries.push(report.summary);
             }
-            None => missing_run_ids.push(dispatch.run_id.clone()),
+            GoalReportReadOutcome::Blocked(reason) => {
+                available_report_count += 1;
+                report_run_ids.push(dispatch.run_id.clone());
+                blocked_report_run_ids.push(dispatch.run_id.clone());
+                blocked_report_reasons.push(reason);
+            }
+            GoalReportReadOutcome::Missing => missing_run_ids.push(dispatch.run_id.clone()),
         }
     }
 
@@ -309,32 +321,50 @@ where
     })
 }
 
-fn read_report_read_only(
+fn read_report_for_collect(
+    queue: &FileSubagentQueue,
+    run_id: &RunId,
+) -> Result<GoalReportReadOutcome, GoalDispatchError> {
+    let Some(payload) = queue
+        .read_report_raw(run_id)
+        .map_err(dispatch_error_from_queue)?
+    else {
+        return Ok(GoalReportReadOutcome::Missing);
+    };
+    match serde_json::from_slice::<SubagentReport>(&payload) {
+        Ok(report) => Ok(GoalReportReadOutcome::Report(report)),
+        Err(error) => Ok(GoalReportReadOutcome::Blocked(format!(
+            "report parse failed for run_id={} error={error}",
+            run_id.0
+        ))),
+    }
+}
+
+fn read_report_for_collect_read_only(
     queue_root: &Path,
     run_id: &RunId,
-) -> Result<Option<SubagentReport>, GoalDispatchError> {
+) -> Result<GoalReportReadOutcome, GoalDispatchError> {
     let path = queue_root
         .join("reports")
         .join(format!("{}.json", run_id.0));
     if !path.exists() {
-        return Ok(None);
+        return Ok(GoalReportReadOutcome::Missing);
     }
-    let payload = fs::read_to_string(&path).map_err(|error| GoalDispatchError {
+    let payload = fs::read(&path).map_err(|error| GoalDispatchError {
         field: "goal_dispatch_report.path".to_string(),
         message: format!(
             "goal dispatch report read failed path={} error={error}",
             path.display()
         ),
     })?;
-    let report =
-        serde_json::from_str::<SubagentReport>(&payload).map_err(|error| GoalDispatchError {
-            field: "goal_dispatch_report.json".to_string(),
-            message: format!(
-                "goal dispatch report parse failed path={} error={error}",
-                path.display()
-            ),
-        })?;
-    Ok(Some(report))
+    match serde_json::from_slice::<SubagentReport>(&payload) {
+        Ok(report) => Ok(GoalReportReadOutcome::Report(report)),
+        Err(error) => Ok(GoalReportReadOutcome::Blocked(format!(
+            "report parse failed path={} run_id={} error={error}",
+            path.display(),
+            run_id.0
+        ))),
+    }
 }
 
 fn build_spawn_request(

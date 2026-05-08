@@ -1599,6 +1599,135 @@ fn cli_goal_collect_surfaces_blocked_report_reasons_for_failed_and_mismatched_re
 }
 
 #[test]
+fn cli_goal_collect_blocks_malformed_report_from_checkpoint_material() {
+    let root = temp_goal_root("collect-malformed");
+    let queue_root = temp_goal_root("collect-malformed-queue");
+    plan_dispatch_goal(&root, &queue_root, "collect-malformed-goal");
+    let manifest_path = root.join("collect-malformed-goal.dispatch.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest should exist"))
+            .expect("manifest should be json");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    let first = &manifest["dispatches"][0];
+    let second = &manifest["dispatches"][1];
+    queue
+        .write_report_for_test(
+            &RunId(first["run_id"].as_str().expect("run id").to_string()),
+            &build_cli_goal_report(
+                first["run_id"].as_str().expect("run id"),
+                first["task_id"].as_str().expect("task id"),
+                first["agent_id"].as_str().expect("agent id"),
+                first["worker_id"].as_str().expect("worker id"),
+                "first worker completed",
+            ),
+        )
+        .expect("valid report should write");
+    let malformed_run_id = RunId(second["run_id"].as_str().expect("run id").to_string());
+    std::fs::write(queue.report_path(&malformed_run_id), "{bad json")
+        .expect("malformed report should write");
+
+    let collect = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "collect",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "collect-malformed-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("goal collect should execute");
+
+    assert!(
+        collect.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&collect.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&collect.stdout).expect("collect should be json");
+    assert_eq!(receipt["available_report_count"], 2);
+    assert_eq!(
+        receipt["missing_run_ids"]
+            .as_array()
+            .expect("missing")
+            .len(),
+        0
+    );
+    assert_eq!(
+        receipt["blocked_report_run_ids"],
+        serde_json::json!([malformed_run_id.0.clone()])
+    );
+    assert_eq!(
+        receipt["ready_to_checkpoint"],
+        serde_json::Value::Bool(false)
+    );
+    assert!(receipt["checkpoint_suggestion"].is_null());
+    let blocked_reasons = receipt["blocked_report_reasons"]
+        .as_array()
+        .expect("blocked reasons")
+        .iter()
+        .map(|value| value.as_str().expect("blocked reason string"))
+        .collect::<Vec<_>>();
+    assert!(blocked_reasons
+        .iter()
+        .any(|reason| reason.contains("report parse failed")));
+
+    let text_collect = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "collect",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "collect-malformed-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+        ])
+        .output()
+        .expect("goal collect text should execute");
+
+    assert!(
+        text_collect.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&text_collect.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&text_collect.stdout);
+    assert!(stdout.contains("goal_collect_ready_to_checkpoint: false"));
+    assert!(stdout.contains("goal_collect_blocked_report_run_ids:"));
+    assert!(stdout.contains("goal_collect_blocked_report_reasons:"));
+    assert!(stdout.contains("report parse failed"));
+
+    let checkpoint = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "checkpoint",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "collect-malformed-goal",
+            "--checkpoint-id",
+            "checkpoint-from-malformed-collect",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--from-collect",
+        ])
+        .output()
+        .expect("goal checkpoint should execute");
+
+    assert!(!checkpoint.status.success());
+    let stderr = String::from_utf8_lossy(&checkpoint.stderr);
+    assert!(stderr.contains("goal_checkpoint_invalid: collect.ready_to_checkpoint"));
+    assert!(stderr.contains("blocked_report_run_ids="));
+    assert!(stderr.contains("blocked_report_reasons="));
+    assert!(stderr.contains("report parse failed"));
+}
+
+#[test]
 fn cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointing() {
     let root = temp_goal_root("step");
     let queue_root = temp_goal_root("step-queue");
