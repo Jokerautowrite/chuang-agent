@@ -20,6 +20,7 @@
 /tmp/
 /$tmp/
 /$work_dir/
+__pycache__/
 
 # Local operator config / generated identity runtime files
 /config.toml
