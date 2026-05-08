@@ -125,6 +125,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
         .contains("worker_runtime_blocked_reason=live_worker_unavailable: subagent slot is fake"));
     assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
     assert!(stdout.contains("capability_mismatch_blocks_live=true"));
+    assert!(stdout.contains(
+        "capability_mismatch_reason=live subagent preflight must reject missing or mismatched dispatch required_capabilities"
+    ));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains(
         "subagent_capability_mismatch_reason: live subagent preflight must reject missing or mismatched dispatch required_capabilities"

@@ -925,6 +925,10 @@ fn cli_status_can_select_queued_external_subagent_slot() {
         parsed["subagent_readiness"]["capability_mismatch_blocks_live"],
         true
     );
+    assert!(parsed["subagent_readiness"]["capability_mismatch_reason"]
+        .as_str()
+        .expect("queued_external capability mismatch reason")
+        .contains("missing or mismatched dispatch required_capabilities"));
 }
 
 #[test]
