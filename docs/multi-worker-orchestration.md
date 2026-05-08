@@ -1,6 +1,6 @@
 # Multi-Worker Orchestration
 
-更新时间：2026-05-08
+更新时间：2026-05-09
 
 ## 目标
 
@@ -153,6 +153,115 @@ Blocked evidence 的读取顺序：
 2. 再看 `goal_collect_blocked_report_run_ids`：有值说明 report 已存在但被阻断。
 3. 对照 `goal_collect_blocked_report_reasons`：常见原因是 report status 不是 success、report identity 和 manifest 不匹配、report admission 被拒绝。
 4. 如果 blocked 字段非空，`goal checkpoint --from-collect` 拒绝写入是正确行为；主控只能回派修复，不能手工伪造 completed worker。
+
+### Live Runner Preflight 派活 Runbook
+
+这一节是下一阶段统一复制给 worker 的 runbook。它只覆盖真实 runner 启用前的只读 preflight、capability mismatch 和 blocked evidence 验收；默认不启动真实 live runner，不连接外部平台，不接 Feishu/Hermes，不读取或输出 secret，不做删除、清理、reset 或卸载。
+
+适用目标：
+
+```text
+Goal: harden live runner preflight before enabling a real worker pool
+Purpose: prove live gate, runner allowlist, capability routing, governance receipt, ReportAdmission, status surfaces, and blocked evidence all stay auditable before any live worker can start
+Default runner mode: live runner preflight / local tests only
+Disallowed mode: real live runner start
+```
+
+6 线派活时，主控先把以下任务映射成 6 个互不重叠 `GoalRun` scope。文件范围按实际实现点填写；没有明确 allowed files 时不要派发。
+
+```text
+Worker ID: live-preflight-status
+Objective: make status/doctor/console/app-server health show the same live gate, readiness reason, and next action.
+Required capability: live_runner_readiness_view
+Expected negative case: live gate closed or capability route missing still shows ready_for_live=false.
+
+Worker ID: live-preflight-allowlist
+Objective: lock runner command allowlist and disabled-by-default evidence before any real runner can start.
+Required capability: live_runner_allowlist_audit
+Expected negative case: unallowlisted runner path stays blocked and starts_external_worker=false.
+
+Worker ID: live-preflight-capability-route
+Objective: verify dispatch required_capabilities and worker --capability matching are visible and enforced.
+Required capability: live_runner_capability_route
+Expected negative case: capability mismatch exposes missing_capabilities and ready_for_live=false.
+
+Worker ID: live-preflight-admission
+Objective: keep ReportAdmission accepted/rejected state, reason_code, and upstream reason visible for reports from runner rehearsal.
+Required capability: report_admission_audit
+Expected negative case: malformed, identity-mismatched, or failed report stays rejected/blocked.
+
+Worker ID: live-preflight-governance
+Objective: surface governance receipt fields that prove runner start approval is separate from worker internal actions.
+Required capability: governance_receipt_audit
+Expected negative case: missing approval receipt or forbidden capability keeps live preflight not ready.
+
+Worker ID: live-preflight-goal-collect
+Objective: prove goal collect converts missing/failed/mismatched worker outputs into blocked evidence and never into checkpoint material.
+Required capability: goal_collect_blocked_evidence
+Expected negative case: goal checkpoint --from-collect refuses when any blocked evidence field is non-empty.
+```
+
+每个 worker 的任务卡必须按这个模板填写，不允许只写自然语言目标：
+
+```text
+Worker ID:
+Objective:
+Allowed files:
+Forbidden files/services: no Hermes, no Feishu bridge, no secret output, no real external service, no real live runner start, no deletion/cleanup/reset/uninstall.
+Required capability:
+Expected dispatch required_capabilities:
+Expected worker capabilities:
+Expected dispatch/runner mode: live runner preflight / local tests only.
+Expected live preflight fields:
+Expected ReportAdmission state:
+Expected governance receipt fields:
+Expected blocked evidence fields:
+Acceptance commands:
+Required negative case:
+Final report must include: changed files, evidence fields, tests run, negative case result, blocked/remaining gaps.
+```
+
+字段验收口径：
+
+- `Required capability`、`Expected dispatch required_capabilities` 和 `Expected worker capabilities` 必须能一一对上；capability mismatch 是本阶段必须覆盖的负例，不是可选测试。
+- `Expected live preflight fields` 至少覆盖 `ready_for_live=false`、`starts_external_worker=false`、`missing_capabilities`、runner allowlist 状态、live gate 状态、forbidden capability rejection 和 next action。
+- `Expected ReportAdmission state` 至少覆盖一条 accepted 路径和一条 rejected 路径；rejected 路径必须能看到 `reason_code`，有上游协议原因时还要保留 `upstream_reason_code`。
+- `Expected governance receipt fields` 至少覆盖 action id、decision、reason/source、approval boundary，并明确主控允许启动 runner 不等于 worker 内部动作自动获批。
+- `Expected blocked evidence fields` 至少覆盖 `goal_collect_missing_run_ids`、`goal_collect_blocked_report_run_ids`、`goal_collect_blocked_report_reasons`、`goal_collect_ready_to_checkpoint=false`。
+- `Acceptance commands` 优先写定向测试和 `git diff --check`；跨状态面改动再补 `cargo test -q` 或 `sh scripts/chuang-complete-local-smoke.sh`。
+
+主控验收 live preflight 时按这个顺序看，不要从 checkpoint 反推：
+
+```text
+1. live gate / runner allowlist: disabled-by-default or explicitly allowed state is visible.
+2. dispatch capability route: dispatch required_capabilities is present and normalized.
+3. worker capability route: worker --capability is present and mismatches are named in missing_capabilities.
+4. preflight decision: ready_for_live=false for closed gate, missing route, mismatch, forbidden capability, or missing approval evidence.
+5. start boundary: starts_external_worker=false for every preflight-only run.
+6. admission boundary: ReportAdmission accepted/rejected state and reason codes are visible.
+7. collect boundary: goal collect keeps missing/failed/mismatched reports in blocked evidence.
+8. checkpoint boundary: goal checkpoint --from-collect only runs after ready_to_checkpoint=true and blocked evidence is empty.
+```
+
+Capability mismatch 的标准负例：
+
+```text
+Dispatch required_capabilities: browser_control
+Worker capabilities: codex_runner
+Expected result: ready_for_live=false
+Expected evidence: missing_capabilities includes browser_control; starts_external_worker=false; no checkpoint suggestion; corresponding run id appears in blocked evidence if a report is present but not acceptable.
+```
+
+Blocked evidence 的复派规则：
+
+```text
+missing_run_ids non-empty: rerun bounded goal step or ask the worker to produce a report.
+blocked_report_run_ids non-empty: inspect blocked_report_reasons, then return the exact reason to the worker.
+blocked_report_reasons includes identity mismatch: fix report/manifest identity; do not rewrite checkpoint by hand.
+blocked_report_reasons includes failed report: worker must report remediation or a scoped failure; main process does not mark it completed.
+ReportAdmission rejected: fix protocol/report format first; do not parse stderr or free text as success.
+ready_to_checkpoint=false: goal checkpoint --from-collect must fail and that failure is expected.
+```
 
 ### 首个可派活低风险任务
 

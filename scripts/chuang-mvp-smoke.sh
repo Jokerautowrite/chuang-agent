@@ -62,6 +62,7 @@ assert data["goal_mode"]["cli_entrypoint"] == "run --goal TEXT"
 assert data["goal_run"]["ok"] is True
 assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert isinstance(data["goal_run"]["plan_exists"], bool)
+assert data["goal_run"]["plan_exists"] is True
 assert isinstance(data["goal_run"]["checkpoint_count"], int)
 assert data["goal_run"]["path"].endswith("/context/goal-runs/mainline-mvp.json")
 assert data["plugin_registry"]["available"] is True
@@ -184,7 +185,8 @@ printf '%s' "$doctor_output" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 assert data["ok"] is True
-checks = {check["name"] for check in data["checks"]}
+checks_by_name = {check["name"]: check for check in data["checks"]}
+checks = set(checks_by_name)
 for name in [
     "config",
     "identity_memory",
@@ -209,7 +211,12 @@ for name in [
 status = data["status"]
 assert status["goal_run"]["ok"] is True
 assert status["goal_run"]["goal_id"] == "mainline-mvp"
+assert status["goal_run"]["plan_exists"] is True
 assert isinstance(status["goal_run"]["checkpoint_count"], int)
+goal_run_readiness = checks_by_name["goal_run_readiness"]
+assert goal_run_readiness["ok"] is True
+assert "goal_id=mainline-mvp" in goal_run_readiness["detail"]
+assert "plan_exists=true" in goal_run_readiness["detail"]
 assert status["atomic_tools"]["mapped_atomic_tool_names"] == ["file_read", "file_write", "code_execute"]
 assert status["atomic_tools"]["interface_only_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "wait", "human_suspend"]
 assert status["project_readiness"]["ok"] is True

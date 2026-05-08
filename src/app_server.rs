@@ -407,7 +407,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.local_contract_readiness.executes_plugins
         );
         println!(
-            "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={}",
+            "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
             status.subagent_readiness.ok,
             status.subagent_readiness.overall_state,
             status.subagent_readiness.mode,
@@ -421,7 +421,11 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.subagent_readiness.deferred_count,
             status.subagent_readiness.blocked_count,
             status.subagent_readiness.live_worker_available,
-            status.subagent_readiness.worker_runtime_state
+            status.subagent_readiness.worker_runtime_state,
+            status.subagent_readiness.worker_runtime_blocked_reason,
+            status.subagent_readiness.capability_route_state,
+            status.subagent_readiness.capability_mismatch_blocks_live,
+            status.subagent_readiness.capability_mismatch_reason
         );
         println!(
             "subagent_worker_runtime_reason: {}",
@@ -437,7 +441,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         );
         for layer in &status.subagent_readiness.layers {
             println!(
-                "subagent_layer name={} state={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} live_worker_available={} worker_runtime_state={} boundary={} local_contract_reason={} live_adapter_reason={} next={}",
+                "subagent_layer name={} state={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} live_worker_available={} worker_runtime_state={} blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={} boundary={} local_contract_reason={} live_adapter_reason={} next={}",
                 layer.name,
                 layer.state,
                 layer.local_contract_ready,
@@ -446,6 +450,10 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 layer.live_adapter_state,
                 layer.live_worker_available,
                 layer.worker_runtime_state,
+                layer.blocked_reason,
+                layer.capability_route_state,
+                layer.capability_mismatch_blocks_live,
+                layer.capability_mismatch_reason,
                 layer.boundary,
                 layer.local_contract_reason,
                 layer.live_adapter_reason,

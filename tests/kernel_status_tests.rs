@@ -303,6 +303,19 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .subagent_readiness
         .worker_runtime_reason
         .contains("subagent slot is fake"));
+    assert!(status
+        .subagent_readiness
+        .worker_runtime_blocked_reason
+        .contains("subagent slot is fake"));
+    assert_eq!(
+        status.subagent_readiness.capability_route_state,
+        "requires_dispatch_required_capabilities"
+    );
+    assert!(status.subagent_readiness.capability_mismatch_blocks_live);
+    assert!(status
+        .subagent_readiness
+        .capability_mismatch_reason
+        .contains("missing or mismatched dispatch required_capabilities"));
     assert!(status.subagent_readiness.local_contract_ready);
     assert_eq!(status.subagent_readiness.local_contract_state, "ready");
     assert!(status
@@ -343,6 +356,12 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && layer.live_adapter_state == "deferred"
             && !layer.live_worker_available
             && layer.worker_runtime_state == "local_contract_only"
+            && layer.blocked_reason.contains("required_capabilities")
+            && layer.capability_route_state == "requires_dispatch_required_capabilities"
+            && layer.capability_mismatch_blocks_live
+            && layer
+                .capability_mismatch_reason
+                .contains("required_capabilities")
             && layer.boundary == "read_only_preflight"));
     assert!(status
         .subagent_readiness

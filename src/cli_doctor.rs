@@ -118,7 +118,7 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "subagent_readiness",
         &format!(
-            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_reason={}",
+            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_reason={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
             status.subagent_readiness.overall_state,
             status.subagent_readiness.mode,
             status.subagent_readiness.layer_count,
@@ -128,7 +128,11 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
             status.subagent_readiness.blocked_count,
             status.subagent_readiness.live_worker_available,
             status.subagent_readiness.worker_runtime_state,
-            status.subagent_readiness.worker_runtime_reason
+            status.subagent_readiness.worker_runtime_reason,
+            status.subagent_readiness.worker_runtime_blocked_reason,
+            status.subagent_readiness.capability_route_state,
+            status.subagent_readiness.capability_mismatch_blocks_live,
+            status.subagent_readiness.capability_mismatch_reason
         ),
     ));
     let live_adapter_next_actions = status
@@ -885,7 +889,7 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.channel_readiness.blocked_count
     );
     println!(
-        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={}",
+        "subagent_readiness: ok={} state={} mode={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={}",
         doctor.status.subagent_readiness.ok,
         doctor.status.subagent_readiness.overall_state,
         doctor.status.subagent_readiness.mode,
@@ -899,11 +903,18 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.subagent_readiness.deferred_count,
         doctor.status.subagent_readiness.blocked_count,
         doctor.status.subagent_readiness.live_worker_available,
-        doctor.status.subagent_readiness.worker_runtime_state
+        doctor.status.subagent_readiness.worker_runtime_state,
+        doctor.status.subagent_readiness.worker_runtime_blocked_reason,
+        doctor.status.subagent_readiness.capability_route_state,
+        doctor.status.subagent_readiness.capability_mismatch_blocks_live
     );
     println!(
         "subagent_worker_runtime_reason: {}",
         doctor.status.subagent_readiness.worker_runtime_reason
+    );
+    println!(
+        "subagent_capability_mismatch_reason: {}",
+        doctor.status.subagent_readiness.capability_mismatch_reason
     );
     println!(
         "subagent_readiness_local_contract_reason: {}",
@@ -913,6 +924,27 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         "subagent_readiness_live_adapter_reason: {}",
         doctor.status.subagent_readiness.live_adapter_reason
     );
+    for layer in &doctor.status.subagent_readiness.layers {
+        println!(
+            "subagent_layer name={} state={} local_contract_ready={} local_contract_state={} live_adapter_ready={} live_adapter_state={} live_worker_available={} worker_runtime_state={} blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} boundary={} local_contract_reason={} live_adapter_reason={} capability_mismatch_reason={} next={}",
+            layer.name,
+            layer.state,
+            layer.local_contract_ready,
+            layer.local_contract_state,
+            layer.live_adapter_ready,
+            layer.live_adapter_state,
+            layer.live_worker_available,
+            layer.worker_runtime_state,
+            layer.blocked_reason,
+            layer.capability_route_state,
+            layer.capability_mismatch_blocks_live,
+            layer.boundary,
+            layer.local_contract_reason,
+            layer.live_adapter_reason,
+            layer.capability_mismatch_reason,
+            layer.next_action
+        );
+    }
     println!(
         "live_adapter_gates: ok={} state={} gates={} enabled={} disabled={}",
         doctor.status.live_adapter_gates.ok,

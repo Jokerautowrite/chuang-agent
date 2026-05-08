@@ -30,6 +30,8 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("smoke_name=\"${CHUANG_SMOKE_NAME:-mvp}\""));
     assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
     assert!(mvp_smoke.contains("assert data[\"approval_ticket_count\"] == 1"));
+    assert!(mvp_smoke.contains("data[\"goal_run\"][\"plan_exists\"] is True"));
+    assert!(mvp_smoke.contains("checks_by_name[\"goal_run_readiness\"]"));
     assert!(mvp_smoke.contains("data[\"provider_readiness\"]"));
     assert!(mvp_smoke.contains("data[\"subagent_readiness\"][\"live_worker_available\"] is False"));
     assert!(mvp_smoke.contains(
@@ -69,6 +71,8 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("CHUANG_AGENT_COMPLETE_SMOKE_API_KEY=\"test-key\""));
     assert!(wrapper.contains("connects_real_external_services"));
     assert!(wrapper.contains("verifies_real_external_services"));
+    assert!(wrapper.contains("goal_run\"][\"plan_exists\"] is True"));
+    assert!(wrapper.contains("checks_by_name[\"goal_run_readiness\"]"));
     assert!(wrapper.contains("provider_readiness"));
     assert!(wrapper.contains("provider_id\"] == \"complete-local-openai\""));
     assert!(wrapper.contains("live_worker_available"));

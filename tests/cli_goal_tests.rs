@@ -344,12 +344,28 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         serde_json::Value::String("missing".to_string())
     );
     assert_eq!(
+        before_dispatch["goal_operability"]["queue_root"],
+        serde_json::Value::String(queue_root.display().to_string())
+    );
+    assert_eq!(
+        before_dispatch["goal_operability"]["goal_pipeline_state"],
+        serde_json::Value::String("dispatch_pending".to_string())
+    );
+    assert_eq!(
         before_dispatch["goal_operability"]["goal_next_command"],
         serde_json::Value::String(format!(
             "cargo run -- goal dispatch --root {} --goal-id show-operability-goal --subagent-queue-root {}",
             root.display(),
             queue_root.display()
         ))
+    );
+    assert_eq!(
+        before_dispatch["goal_operability"]["goal_next_command_reason"],
+        serde_json::Value::String("dispatch manifest is missing or invalid".to_string())
+    );
+    assert_eq!(
+        before_dispatch["goal_operability"]["goal_dispatch_manifest_error_field"],
+        serde_json::Value::String("goal_dispatch_manifest.path".to_string())
     );
     assert_eq!(
         before_dispatch["goal_operability"]["goal_dispatch_ready"],
@@ -416,12 +432,22 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         serde_json::Value::String("ready".to_string())
     );
     assert_eq!(
+        after_dispatch["goal_operability"]["goal_pipeline_state"],
+        serde_json::Value::String("step_pending".to_string())
+    );
+    assert_eq!(
         after_dispatch["goal_operability"]["goal_next_command"],
         serde_json::Value::String(format!(
             "cargo run -- goal step --root {} --goal-id show-operability-goal --subagent-queue-root {}",
             root.display(),
             queue_root.display()
         ))
+    );
+    assert_eq!(
+        after_dispatch["goal_operability"]["goal_next_command_reason"],
+        serde_json::Value::String(
+            "dispatch manifest is present but reports are not yet ready to checkpoint".to_string()
+        )
     );
     assert_eq!(
         after_dispatch["goal_operability"]["goal_step_ready"],
@@ -438,6 +464,21 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
     assert_eq!(
         after_dispatch["goal_operability"]["goal_collect"]["available_report_count"],
         serde_json::Value::Number(0.into())
+    );
+    assert_eq!(
+        after_dispatch["goal_operability"]["goal_collect"]["missing_run_ids"]
+            .as_array()
+            .expect("missing run ids")
+            .len(),
+        2
+    );
+    assert_eq!(
+        after_dispatch["goal_operability"]["goal_collect"]["blocked_report_run_ids"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        after_dispatch["goal_operability"]["goal_collect"]["blocked_report_reasons"],
+        serde_json::json!([])
     );
 
     let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
@@ -480,6 +521,10 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
     let ready_to_checkpoint: serde_json::Value =
         serde_json::from_slice(&show_ready_to_checkpoint.stdout).expect("show should be json");
     assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_pipeline_state"],
+        serde_json::Value::String("checkpoint_ready".to_string())
+    );
+    assert_eq!(
         ready_to_checkpoint["goal_operability"]["goal_next_command"],
         serde_json::Value::String(format!(
             "cargo run -- goal checkpoint --from-collect --root {} --goal-id show-operability-goal --subagent-queue-root {} --checkpoint-id <checkpoint-id>",
@@ -492,8 +537,20 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         serde_json::Value::Bool(true)
     );
     assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_next_command_reason"],
+        serde_json::Value::String("dispatch reports are ready to checkpoint".to_string())
+    );
+    assert_eq!(
         ready_to_checkpoint["goal_operability"]["goal_collect"]["ready_to_checkpoint"],
         serde_json::Value::Bool(true)
+    );
+    assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_collect"]["missing_run_ids"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        ready_to_checkpoint["goal_operability"]["goal_collect"]["blocked_report_run_ids"],
+        serde_json::json!([])
     );
     assert_eq!(
         ready_to_checkpoint["goal_operability"]["goal_collect"]["checkpoint_suggestion"]["summary"],
@@ -522,9 +579,91 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         String::from_utf8_lossy(&show_ready_text.stderr)
     );
     let stdout = String::from_utf8_lossy(&show_ready_text.stdout);
+    assert!(stdout.contains(&format!(
+        "goal_operability_queue_root: {}",
+        queue_root.display()
+    )));
+    assert!(stdout.contains("goal_operability_pipeline_state: checkpoint_ready"));
     assert!(stdout
         .contains("goal_operability_next_command: cargo run -- goal checkpoint --from-collect"));
+    assert!(stdout.contains(
+        "goal_operability_next_command_reason: dispatch reports are ready to checkpoint"
+    ));
+    assert!(stdout.contains("goal_operability_collect_missing_run_ids: none"));
+    assert!(stdout.contains("goal_operability_collect_blocked_report_run_ids: none"));
+    assert!(stdout.contains("goal_operability_collect_blocked_report_reasons: none"));
     assert!(stdout.contains("goal_operability_collect_ready_to_checkpoint: true"));
+}
+
+#[test]
+fn cli_goal_show_uses_subagent_queue_root_without_creating_it() {
+    let root = temp_goal_root("show-readonly-queue-root");
+    let dispatch_queue_root = temp_goal_root("show-readonly-dispatch-queue");
+    let readonly_queue_root = temp_goal_root("show-readonly-missing-queue");
+    plan_dispatch_goal(&root, &dispatch_queue_root, "show-readonly-queue-goal");
+    assert!(
+        !readonly_queue_root.exists(),
+        "precondition: read-only queue root should not exist"
+    );
+
+    let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "show-readonly-queue-goal",
+            "--subagent-queue-root",
+            readonly_queue_root
+                .to_str()
+                .expect("read-only queue root should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("goal show should execute");
+
+    assert!(
+        show.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    assert!(
+        !readonly_queue_root.exists(),
+        "goal show must not create the read-only queue root"
+    );
+    let output: serde_json::Value = serde_json::from_slice(&show.stdout).expect("show json");
+    assert_eq!(
+        output["goal_operability"]["queue_root"],
+        serde_json::Value::String(readonly_queue_root.display().to_string())
+    );
+    assert_eq!(
+        output["goal_operability"]["goal_pipeline_state"],
+        serde_json::Value::String("step_pending".to_string())
+    );
+    assert_eq!(
+        output["goal_operability"]["goal_next_command"],
+        serde_json::Value::String(format!(
+            "cargo run -- goal step --root {} --goal-id show-readonly-queue-goal --subagent-queue-root {}",
+            root.display(),
+            readonly_queue_root.display()
+        ))
+    );
+    assert_eq!(
+        output["goal_operability"]["goal_collect"]["available_report_count"],
+        serde_json::Value::Number(0.into())
+    );
+    assert_eq!(
+        output["goal_operability"]["goal_collect"]["missing_run_ids"]
+            .as_array()
+            .expect("missing run ids")
+            .len(),
+        2
+    );
+    assert_eq!(
+        output["goal_operability"]["goal_collect"]["blocked_report_run_ids"],
+        serde_json::json!([])
+    );
 }
 
 #[test]
@@ -1364,6 +1503,99 @@ fn cli_goal_collect_surfaces_blocked_report_reasons_for_failed_and_mismatched_re
     assert!(stderr.contains("blocked_report_reasons="));
     assert!(stderr.contains("report status is not success"));
     assert!(stderr.contains("identity does not match"));
+
+    let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "collect-blocked-reasons-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("goal show should execute");
+    assert!(
+        show.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    let show_json: serde_json::Value = serde_json::from_slice(&show.stdout).expect("show json");
+    assert_eq!(
+        show_json["goal_operability"]["goal_pipeline_state"],
+        serde_json::Value::String("step_pending".to_string())
+    );
+    assert_eq!(
+        show_json["goal_operability"]["goal_next_command"],
+        serde_json::Value::String(format!(
+            "cargo run -- goal step --root {} --goal-id collect-blocked-reasons-goal --subagent-queue-root {}",
+            root.display(),
+            queue_root.display()
+        ))
+    );
+    assert_eq!(
+        show_json["goal_operability"]["goal_next_command_reason"],
+        serde_json::Value::String(
+            "dispatch manifest is present but reports are not yet ready to checkpoint".to_string()
+        )
+    );
+    assert_eq!(
+        show_json["goal_operability"]["goal_checkpoint_ready"],
+        serde_json::Value::Bool(false)
+    );
+    assert_eq!(
+        show_json["goal_operability"]["goal_collect"]["blocked_report_run_ids"]
+            .as_array()
+            .expect("blocked ids")
+            .len(),
+        2
+    );
+    let show_blocked_reasons = show_json["goal_operability"]["goal_collect"]
+        ["blocked_report_reasons"]
+        .as_array()
+        .expect("blocked reasons")
+        .iter()
+        .map(|value| value.as_str().expect("blocked reason string"))
+        .collect::<Vec<_>>();
+    assert!(show_blocked_reasons
+        .iter()
+        .any(|reason| reason.contains("report status is not success")));
+    assert!(show_blocked_reasons
+        .iter()
+        .any(|reason| reason.contains("identity does not match")));
+
+    let show_text = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "collect-blocked-reasons-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+        ])
+        .output()
+        .expect("goal show text should execute");
+    assert!(
+        show_text.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show_text.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&show_text.stdout);
+    assert!(stdout.contains("goal_operability_pipeline_state: step_pending"));
+    assert!(stdout.contains("goal_operability_next_command: cargo run -- goal step"));
+    assert!(stdout.contains(
+        "goal_operability_next_command_reason: dispatch manifest is present but reports are not yet ready to checkpoint"
+    ));
+    assert!(stdout.contains("goal_operability_checkpoint_ready: false"));
+    assert!(stdout.contains("goal_operability_collect_blocked_report_run_ids:"));
+    assert!(stdout.contains("goal_operability_collect_blocked_report_reasons:"));
+    assert!(stdout.contains("report status is not success"));
+    assert!(stdout.contains("identity does not match"));
 }
 
 #[test]

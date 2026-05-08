@@ -222,6 +222,39 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     );
     assert_eq!(parsed["status"]["goal_run"]["ok"], true);
     assert_eq!(parsed["status"]["goal_run"]["goal_id"], "mainline-mvp");
+    assert_eq!(parsed["status"]["subagent_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["overall_state"],
+        "queued_protocol_partial"
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["live_worker_available"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["worker_runtime_state"],
+        "local_contract_only"
+    );
+    assert!(
+        parsed["status"]["subagent_readiness"]["worker_runtime_blocked_reason"]
+            .as_str()
+            .expect("worker runtime blocked reason should be a string")
+            .contains("subagent slot is fake")
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(
+        parsed["status"]["subagent_readiness"]["capability_mismatch_blocks_live"],
+        true
+    );
+    assert!(
+        parsed["status"]["subagent_readiness"]["capability_mismatch_reason"]
+            .as_str()
+            .expect("capability mismatch reason should be a string")
+            .contains("missing or mismatched dispatch required_capabilities")
+    );
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
         serde_json::json!(["file_read", "file_write", "code_execute"])
@@ -355,9 +388,14 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready"));
     assert!(stdout.contains(
-        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake live_worker_available=false worker_runtime_state=local_contract_only"
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake live_worker_available=false worker_runtime_state=local_contract_only worker_runtime_blocked_reason=live_worker_unavailable: subagent slot is fake"
     ));
+    assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
+    assert!(stdout.contains("capability_mismatch_blocks_live=true"));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
+    assert!(stdout.contains(
+        "subagent_capability_mismatch_reason: live subagent preflight must reject missing or mismatched dispatch required_capabilities"
+    ));
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"

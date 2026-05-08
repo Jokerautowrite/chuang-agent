@@ -1,6 +1,6 @@
 # Goal Mode Operating Plan
 
-更新时间：2026-05-08
+更新时间：2026-05-09
 
 ## 定位
 
@@ -196,6 +196,8 @@ cargo run -- goal checkpoint --summary TEXT --completed-worker-id ID --validatio
 ## 6 Worker Operator Runbook
 
 下一轮主控要一次派满 6 个 worker 时，先把任务拆成 6 个互不重叠的 scope，再用 `GoalRun` 记录计划。示例命令里的路径和 objective 必须按当轮任务替换；`--worker` 参数需要整体加引号，避免 shell 把 `|` 当管道。
+
+本节只固定 `GoalRun`、dispatch、step、collect 和 checkpoint 的通用顺序。下一阶段针对 live runner preflight、capability mismatch 和 blocked evidence 的可复制派活模板与验收字段，统一维护在 `docs/multi-worker-orchestration.md` 的 `Live Runner Preflight 派活 Runbook`，避免操作员在多个文档里拼接口径。
 
 ```bash
 GOAL_ID=mainline-95-operator

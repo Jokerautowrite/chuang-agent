@@ -1,5 +1,12 @@
 # 协作进度日志
 
+## 2026-05-09 补充 checkpoint
+- 2026-05-09 live runner / capability mismatch 读面继续收口：`status` / `doctor` / `console snapshot` / `app-server health` 现在都能看见 `worker_runtime_blocked_reason`、`capability_route_state`、`capability_mismatch_blocks_live`、`capability_mismatch_reason`，并由 `cli_*` / `app_server` / `kernel_status` 回归锁住 JSON/text 一致性；`scripts/chuang-complete-local-smoke.sh`、`cargo test -q`、`cargo fmt --all --check` 和 `git diff --check` 已通过，`scripts/chuang-final-verify.sh` 仍以 clean tree + complete-local + diff check 为最终门禁。
+- 2026-05-09 goal operability 只读回归继续加厚：`goal show` 的 JSON/text 现在由测试锁定显式 `--subagent-queue-root`、pipeline state、next command/reason、collect missing/blocked evidence；新增回归确认换成不存在的 queue root 做只读查看不会创建队列目录，blocked report 也会在 `goal_operability` 里保留阻断证据并保持 checkpoint not-ready。
+- 2026-05-09 smoke gate 覆盖补强：MVP 与 complete-local smoke 现在明确断言 `goal_run.plan_exists=true`，并通过 doctor 的 `goal_run_readiness` check 锁住 `goal_id=mainline-mvp` / `plan_exists=true` 详情；wrapper 静态回归同步锁住这些断言存在，避免状态面已声明 goal run readiness 但本地 smoke 未验收。本轮只改 smoke/wrapper，不接外部服务、不碰 Hermes/Feishu。
+- 2026-05-09 provider diagnostics 只读复核补强：`runtimeObservability` 现在会保留顶层 `request_message_count`，与已存在的 `request_url` / `request_method` / `config_error_field` / `provider_timeout_*` 一起用于 timeout、capacity、missing-content 等 provider 排障；新增 runtime report 单元断言和 app-server timeout 端到端断言，未接外部服务、不碰 Hermes/Feishu、不暴露 secret。
+- 2026-05-09 goal/subagent operator UX 文档收口：`docs/multi-worker-orchestration.md` 现在作为下一阶段 live runner preflight 的统一 runbook，集中列出 6 worker 派活线、任务卡模板、live gate / runner allowlist / `required_capabilities` / worker capability / `ReportAdmission` / governance receipt / blocked evidence 的验收字段，以及 capability mismatch 和 `goal_collect_*` 阻断证据的复派规则；`docs/goal-mode-operating-plan.md` 只保留通用 GoalRun 顺序并指向该 runbook。本轮只改文档，不碰代码、Hermes/Feishu 或 secret。
+
 ## 2026-05-08 补充 checkpoint
 - 2026-05-08 继续补强 goal-mode 的可操作性状态面：`goal show` 现在会带出只读 operability 摘要，直接显示下一步该跑 `goal dispatch` / `goal step` / `goal checkpoint --from-collect` / `goal show` 中的哪一个，并把 dispatch/step/collect/checkpoint 的准备状态和 collect 阻断证据同步落到文本和 JSON 面；对应回归已加，complete-local smoke 和全量测试已通过。
 - 2026-05-08 验收门禁覆盖扫描补强：发现 `provider_readiness` 和 subagent live-worker 口径已经进入 status/doctor/app-server/console 状态面，但 MVP/complete-local smoke 之前只覆盖旧的 provider config 与 live adapter 片段；代码和测试面已补上 provider readiness、stub provider 边界、`live_worker_available=false`、`worker_runtime_state=local_contract_only` 的 JSON 门禁和静态 smoke wrapper 回归。不接外部服务、不碰 Hermes/Feishu。

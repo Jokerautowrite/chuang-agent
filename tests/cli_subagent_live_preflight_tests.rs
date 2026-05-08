@@ -328,6 +328,7 @@ fn cli_subagent_live_preflight_rejects_capability_mismatch_even_when_gate_is_ena
     assert_eq!(rehearsal["ok"], false);
     assert_eq!(rehearsal["ready_for_live"], false);
     assert_eq!(rehearsal["gate_enabled"], true);
+    assert_eq!(rehearsal["gate"]["enabled"], true);
     assert_eq!(rehearsal["capability_routing_ok"], false);
     assert_eq!(rehearsal["starts_external_worker"], false);
     assert_eq!(rehearsal["capability_routing"]["ok"], false);
@@ -343,6 +344,14 @@ fn cli_subagent_live_preflight_rejects_capability_mismatch_even_when_gate_is_ena
         .as_str()
         .expect("reason")
         .contains("do not satisfy"));
+    assert!(rehearsal["next_action"]
+        .as_str()
+        .expect("next action")
+        .contains("fix failed preflight checks"));
+    assert!(rehearsal["capability_routing"]["reason"]
+        .as_str()
+        .expect("routing reason")
+        .contains("dispatch required_capabilities"));
 }
 
 #[test]

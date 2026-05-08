@@ -86,6 +86,9 @@ assert data["release_readiness"]["verifies_real_external_services"] is False
 assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
 assert data["memory_readiness"]["overall_state"] == "ready"
 assert data["channel_readiness"]["overall_state"] == "ready"
+assert data["goal_run"]["ok"] is True
+assert data["goal_run"]["goal_id"] == "mainline-mvp"
+assert data["goal_run"]["plan_exists"] is True
 assert data["provider_readiness"]["ok"] is True
 assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
 assert data["provider_readiness"]["provider_id"] == "complete-local-openai"
@@ -108,7 +111,8 @@ printf '%s' "$doctor_output" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 assert data["ok"] is True
-checks = {check["name"] for check in data["checks"]}
+checks_by_name = {check["name"]: check for check in data["checks"]}
+checks = set(checks_by_name)
 for name in [
     "config",
     "project_readiness",
@@ -121,6 +125,13 @@ for name in [
 ]:
     assert name in checks, name
 assert data["status"]["release_readiness"]["connects_real_external_services"] is False
+assert data["status"]["goal_run"]["ok"] is True
+assert data["status"]["goal_run"]["goal_id"] == "mainline-mvp"
+assert data["status"]["goal_run"]["plan_exists"] is True
+goal_run_readiness = checks_by_name["goal_run_readiness"]
+assert goal_run_readiness["ok"] is True
+assert "goal_id=mainline-mvp" in goal_run_readiness["detail"]
+assert "plan_exists=true" in goal_run_readiness["detail"]
 assert data["status"]["provider_readiness"]["transport"] == "stub"
 assert data["status"]["provider_readiness"]["api_key_state"] == "<set>"
 assert data["status"]["subagent_readiness"]["live_worker_available"] is False
@@ -137,6 +148,9 @@ assert data["diagnostic_mode"] is True
 assert data["release_readiness"]["connects_real_external_services"] is False
 assert data["release_readiness"]["verifies_real_external_services"] is False
 assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
+assert data["goal_run"]["ok"] is True
+assert data["goal_run"]["goal_id"] == "mainline-mvp"
+assert data["goal_run"]["plan_exists"] is True
 assert data["provider_readiness"]["ok"] is True
 assert data["provider_readiness"]["provider_kind"] == "openai_compatible"
 assert data["provider_readiness"]["transport"] == "stub"
@@ -159,6 +173,9 @@ assert status["project_readiness"]["overall_state"] == "ready"
 assert status["release_readiness"]["overall_state"] == "second_test_version_ready"
 assert status["release_readiness"]["connects_real_external_services"] is False
 assert status["release_readiness"]["verifies_real_external_services"] is False
+assert status["goal_run"]["ok"] is True
+assert status["goal_run"]["goal_id"] == "mainline-mvp"
+assert status["goal_run"]["plan_exists"] is True
 assert status["provider_readiness"]["transport"] == "stub"
 assert status["provider_readiness"]["api_key_state"] == "<set>"
 assert status["subagent_readiness"]["live_worker_available"] is False

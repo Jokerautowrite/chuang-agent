@@ -168,7 +168,14 @@ fn cli_status_prints_mvp_health_summary() {
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
     assert!(stdout.contains("live_worker_available=false worker_runtime_state=local_contract_only"));
+    assert!(stdout
+        .contains("worker_runtime_blocked_reason=live_worker_unavailable: subagent slot is fake"));
+    assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
+    assert!(stdout.contains("capability_mismatch_blocks_live=true"));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
+    assert!(stdout.contains(
+        "subagent_capability_mismatch_reason: live subagent preflight must reject missing or mismatched dispatch required_capabilities"
+    ));
     assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
     assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains(
@@ -176,7 +183,10 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains("live_adapter_reason=local command-runner contract is ready"));
     assert!(stdout.contains(
-        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred live_worker_available=false worker_runtime_state=local_contract_only boundary=read_only_preflight"
+        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred live_worker_available=false worker_runtime_state=local_contract_only blocked_reason=live_runner_rehearsal is read-only; missing or mismatched dispatch required_capabilities keep ready_for_live=false capability_route_state=requires_dispatch_required_capabilities capability_mismatch_blocks_live=true boundary=read_only_preflight"
+    ));
+    assert!(stdout.contains(
+        "capability_mismatch_reason=capability mismatch or missing dispatch required_capabilities must block live runner readiness"
     ));
     assert!(stdout.contains("live_adapter_reason=read-only live runner rehearsal is ready"));
     assert!(stdout.contains("subagent_layer name=multi_worker state=ready"));
@@ -578,6 +588,24 @@ fn cli_status_can_render_json_without_secret_leak() {
         .as_str()
         .expect("subagent worker runtime reason should be a string")
         .contains("subagent slot is fake"));
+    assert!(
+        parsed["subagent_readiness"]["worker_runtime_blocked_reason"]
+            .as_str()
+            .expect("subagent worker runtime blocked reason should be a string")
+            .contains("subagent slot is fake")
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_mismatch_blocks_live"],
+        true
+    );
+    assert!(parsed["subagent_readiness"]["capability_mismatch_reason"]
+        .as_str()
+        .expect("subagent capability mismatch reason should be a string")
+        .contains("missing or mismatched dispatch required_capabilities"));
     assert!(parsed["subagent_readiness"]["live_adapter_reason"]
         .as_str()
         .expect("subagent live adapter reason should be a string")
@@ -613,6 +641,16 @@ fn cli_status_can_render_json_without_secret_leak() {
             && layer["boundary"] == "read_only_preflight"
             && layer["live_worker_available"] == false
             && layer["worker_runtime_state"] == "local_contract_only"
+            && layer["blocked_reason"]
+                .as_str()
+                .expect("layer blocked reason should be a string")
+                .contains("required_capabilities")
+            && layer["capability_route_state"] == "requires_dispatch_required_capabilities"
+            && layer["capability_mismatch_blocks_live"] == true
+            && layer["capability_mismatch_reason"]
+                .as_str()
+                .expect("layer capability mismatch reason should be a string")
+                .contains("required_capabilities")
             && layer["live_adapter_reason"]
                 .as_str()
                 .expect("layer live adapter reason should be a string")
@@ -873,6 +911,20 @@ fn cli_status_can_select_queued_external_subagent_slot() {
         .as_str()
         .expect("queued_external worker runtime reason")
         .contains("no live worker adapter is available yet"));
+    assert!(
+        parsed["subagent_readiness"]["worker_runtime_blocked_reason"]
+            .as_str()
+            .expect("queued_external worker runtime blocked reason")
+            .contains("queued_external")
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_mismatch_blocks_live"],
+        true
+    );
 }
 
 #[test]

@@ -423,6 +423,7 @@ fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
         "http://127.0.0.1:8080/v1/chat/completions".to_string(),
     );
     extra.insert("request_method".to_string(), "POST".to_string());
+    extra.insert("request_message_count".to_string(), "2".to_string());
     extra.insert("config_error_field".to_string(), "http_timeout".to_string());
     extra.insert("status_code".to_string(), "408".to_string());
     extra.insert("provider_response_ok".to_string(), "false".to_string());
@@ -488,6 +489,10 @@ fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
     assert_eq!(
         observability.get("request_method"),
         Some(&"POST".to_string())
+    );
+    assert_eq!(
+        observability.get("request_message_count"),
+        Some(&"2".to_string())
     );
     assert_eq!(
         observability.get("config_error_field"),

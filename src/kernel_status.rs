@@ -208,6 +208,10 @@ pub struct SubagentReadinessStatus {
     pub live_worker_available: bool,
     pub worker_runtime_state: String,
     pub worker_runtime_reason: String,
+    pub worker_runtime_blocked_reason: String,
+    pub capability_route_state: String,
+    pub capability_mismatch_blocks_live: bool,
+    pub capability_mismatch_reason: String,
     pub local_contract_ready: bool,
     pub local_contract_state: String,
     pub local_contract_reason: String,
@@ -228,6 +232,10 @@ pub struct SubagentLayerStatus {
     pub state: String,
     pub live_worker_available: bool,
     pub worker_runtime_state: String,
+    pub blocked_reason: String,
+    pub capability_route_state: String,
+    pub capability_mismatch_blocks_live: bool,
+    pub capability_mismatch_reason: String,
     pub local_contract_ready: bool,
     pub local_contract_state: String,
     pub local_contract_reason: String,
@@ -1291,6 +1299,31 @@ fn build_subagent_readiness(
         "subagent runtime is contract-only until an audited live worker adapter is configured"
             .to_string()
     };
+    let worker_runtime_blocked_reason = if live_worker_available {
+        "none".to_string()
+    } else if blocked_count > 0 {
+        "one or more subagent readiness layers are blocked".to_string()
+    } else if slots.subagent == "fake" {
+        "live_worker_unavailable: subagent slot is fake; local contracts are visible but no live worker can run"
+            .to_string()
+    } else if queued {
+        "live_worker_unavailable: queued_external has durable dispatch/report contracts but no live worker adapter"
+            .to_string()
+    } else {
+        "live_worker_unavailable: configure an audited live worker adapter before live execution"
+            .to_string()
+    };
+    let capability_route_state = if live_worker_available {
+        "ready_for_live"
+    } else {
+        "requires_dispatch_required_capabilities"
+    };
+    let capability_mismatch_reason = if live_worker_available {
+        "capability route is satisfied for the configured live worker adapter".to_string()
+    } else {
+        "live subagent preflight must reject missing or mismatched dispatch required_capabilities before any worker starts"
+            .to_string()
+    };
 
     SubagentReadinessStatus {
         ok: blocked_count == 0,
@@ -1299,6 +1332,10 @@ fn build_subagent_readiness(
         live_worker_available,
         worker_runtime_state: worker_runtime_state.to_string(),
         worker_runtime_reason,
+        worker_runtime_blocked_reason,
+        capability_route_state: capability_route_state.to_string(),
+        capability_mismatch_blocks_live: !live_worker_available,
+        capability_mismatch_reason,
         local_contract_ready,
         local_contract_state: local_contract_state.to_string(),
         local_contract_reason: if local_contract_ready {
@@ -1362,11 +1399,40 @@ fn subagent_layer(
     } else {
         live_adapter_state
     };
+    let blocked_reason = if live_worker_available {
+        "none".to_string()
+    } else if state == "blocked" {
+        format!("{name} is blocked before live worker execution")
+    } else if name == "live_runner_rehearsal" {
+        "live_runner_rehearsal is read-only; missing or mismatched dispatch required_capabilities keep ready_for_live=false"
+            .to_string()
+    } else {
+        format!("{name} has no live worker adapter; local contract evidence only")
+    };
+    let capability_route_state = if live_worker_available {
+        "ready_for_live"
+    } else if name == "live_runner_rehearsal" {
+        "requires_dispatch_required_capabilities"
+    } else {
+        "not_live_routed"
+    };
+    let capability_mismatch_reason = if live_worker_available {
+        format!("{name} capability route is satisfied for live execution")
+    } else if name == "live_runner_rehearsal" {
+        "capability mismatch or missing dispatch required_capabilities must block live runner readiness"
+            .to_string()
+    } else {
+        format!("{name} does not start a live worker, so capability mismatch stays blocked at live-preflight")
+    };
     SubagentLayerStatus {
         name: name.to_string(),
         state: state.to_string(),
         live_worker_available,
         worker_runtime_state: worker_runtime_state.to_string(),
+        blocked_reason,
+        capability_route_state: capability_route_state.to_string(),
+        capability_mismatch_blocks_live: !live_worker_available,
+        capability_mismatch_reason,
         local_contract_ready,
         local_contract_state: local_contract_state.to_string(),
         local_contract_reason: if local_contract_ready {

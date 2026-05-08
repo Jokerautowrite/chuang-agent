@@ -26,6 +26,7 @@ fn write_fake_config() -> PathBuf {
 #[test]
 fn cli_run_http_transport_surfaces_preview_metadata() {
     let config_path = write_fake_config();
+    let fake_api_key = "test-key";
     let output = Command::new("cargo")
         .args([
             "run",
@@ -39,7 +40,7 @@ fn cli_run_http_transport_surfaces_preview_metadata() {
             "--provider-base-url",
             "https://api.example.com/v1",
             "--provider-api-key",
-            "test-key",
+            fake_api_key,
             "--provider-model",
             "gpt-4.1-mini",
             "--provider-id",
@@ -62,8 +63,34 @@ fn cli_run_http_transport_surfaces_preview_metadata() {
         "stdout={stdout}"
     );
     assert!(
+        stdout.contains("provider_error_class: config"),
+        "stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("provider_failure_reason_code: provider_config_invalid"),
+        "stdout={stdout}"
+    );
+    assert!(
+        stdout.contains("provider_failure_category: config"),
+        "stdout={stdout}"
+    );
+    assert!(
         stdout.contains("unsupported_http_scheme:https://api.example.com/v1/chat/completions"),
         "stdout={stdout}"
+    );
+    assert!(stdout.contains("request_method: POST"), "stdout={stdout}");
+    assert!(
+        stdout.contains("request_message_count: 2"),
+        "stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains(fake_api_key),
+        "stdout should not leak provider api key, got: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains(fake_api_key),
+        "stderr should not leak provider api key, got: {stderr}"
     );
 }
 

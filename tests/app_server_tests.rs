@@ -973,6 +973,14 @@ transport = "curl"
         turn_response["result"]["turn"]["runtimeObservability"]["request_url"],
         format!("http://{address}/v1/chat/completions")
     );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["request_method"],
+        "POST"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["request_message_count"],
+        "2"
+    );
 }
 
 #[test]
@@ -1192,6 +1200,24 @@ transport = "stub"
         .as_str()
         .expect("subagent worker runtime reason should be text")
         .contains("subagent slot is fake"));
+    assert!(
+        parsed["subagent_readiness"]["worker_runtime_blocked_reason"]
+            .as_str()
+            .expect("subagent worker runtime blocked reason should be text")
+            .contains("live_worker_unavailable")
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_mismatch_blocks_live"],
+        true
+    );
+    assert!(parsed["subagent_readiness"]["capability_mismatch_reason"]
+        .as_str()
+        .expect("subagent capability mismatch reason should be text")
+        .contains("required_capabilities"));
     assert_eq!(parsed["subagent_readiness"]["local_contract_ready"], true);
     assert_eq!(
         parsed["subagent_readiness"]["local_contract_state"],
@@ -1218,7 +1244,17 @@ transport = "stub"
             && layer["local_contract_ready"] == true
             && layer["live_adapter_ready"] == false
             && layer["live_worker_available"] == false
-            && layer["worker_runtime_state"] == "local_contract_only"));
+            && layer["worker_runtime_state"] == "local_contract_only"
+            && layer["blocked_reason"]
+                .as_str()
+                .expect("layer blocked reason should be text")
+                .contains("required_capabilities")
+            && layer["capability_route_state"] == "requires_dispatch_required_capabilities"
+            && layer["capability_mismatch_blocks_live"] == true
+            && layer["capability_mismatch_reason"]
+                .as_str()
+                .expect("layer capability mismatch reason should be text")
+                .contains("required_capabilities")));
     assert_eq!(parsed["live_adapter_gates"]["ok"], true);
     assert_eq!(
         parsed["live_adapter_gates"]["overall_state"],
@@ -1257,6 +1293,14 @@ transport = "stub"
                         .expect("capability should be text")
                         .contains("core-memory write")
                 })
+            && gate["reason"]
+                .as_str()
+                .expect("gate reason should be text")
+                .contains("disabled by default")
+            && gate["next_action"]
+                .as_str()
+                .expect("gate next action should be text")
+                .contains("preflight evidence")
     }));
     assert_eq!(
         parsed["project_readiness"]["overall_state"],
@@ -1425,6 +1469,24 @@ transport = "stub"
         .as_str()
         .expect("subagent worker runtime reason should be text")
         .contains("subagent slot is fake"));
+    assert!(
+        parsed["subagent_readiness"]["worker_runtime_blocked_reason"]
+            .as_str()
+            .expect("subagent worker runtime blocked reason should be text")
+            .contains("live_worker_unavailable")
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["capability_mismatch_blocks_live"],
+        true
+    );
+    assert!(parsed["subagent_readiness"]["capability_mismatch_reason"]
+        .as_str()
+        .expect("subagent capability mismatch reason should be text")
+        .contains("required_capabilities"));
     assert!(parsed["subagent_readiness"]["layers"]
         .as_array()
         .expect("subagent layers array")
@@ -1433,7 +1495,17 @@ transport = "stub"
             && layer["local_contract_state"] == "ready"
             && layer["live_adapter_state"] == "deferred"
             && layer["live_worker_available"] == false
-            && layer["worker_runtime_state"] == "local_contract_only"));
+            && layer["worker_runtime_state"] == "local_contract_only"
+            && layer["blocked_reason"]
+                .as_str()
+                .expect("layer blocked reason should be text")
+                .contains("local contract evidence only")
+            && layer["capability_route_state"] == "not_live_routed"
+            && layer["capability_mismatch_blocks_live"] == true
+            && layer["capability_mismatch_reason"]
+                .as_str()
+                .expect("layer capability mismatch reason should be text")
+                .contains("live-preflight")));
     assert_eq!(
         parsed["live_adapter_gates"]["overall_state"],
         "disabled_by_default"
@@ -1542,14 +1614,20 @@ transport = "stub"
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));
     assert!(stdout.contains("live_worker_available=false worker_runtime_state=local_contract_only"));
+    assert!(stdout.contains("worker_runtime_blocked_reason=live_worker_unavailable"));
+    assert!(stdout.contains("capability_route_state=requires_dispatch_required_capabilities"));
+    assert!(stdout.contains("capability_mismatch_blocks_live=true"));
+    assert!(stdout.contains("capability_mismatch_reason=live subagent preflight"));
     assert!(stdout.contains("subagent_worker_runtime_reason: subagent slot is fake"));
     assert!(stdout.contains("subagent_readiness_local_contract_reason:"));
     assert!(stdout.contains("protocol-ready"));
     assert!(stdout.contains("subagent_readiness_live_adapter_reason:"));
     assert!(stdout.contains("not yet connected"));
     assert!(stdout.contains(
-        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred live_worker_available=false worker_runtime_state=local_contract_only boundary=read_only_preflight"
+        "subagent_layer name=live_runner_rehearsal state=ready local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=deferred live_worker_available=false worker_runtime_state=local_contract_only blocked_reason=live_runner_rehearsal is read-only"
     ));
+    assert!(stdout.contains("capability_mismatch_blocks_live=true"));
+    assert!(stdout.contains("capability mismatch or missing dispatch required_capabilities"));
     assert!(stdout.contains(
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
@@ -1558,5 +1636,10 @@ transport = "stub"
     ));
     assert!(stdout.contains("preflight=confirm CHUANG_CODEX_RUNNER_ENABLE=1"));
     assert!(stdout.contains("must_reject=unscoped external worker pool"));
+    assert!(
+        stdout.contains("reason=live adapter execution for subagent_runner is disabled by default")
+    );
+    assert!(stdout
+        .contains("next=keep disabled until the operator approves exact live adapter targets"));
     assert!(stdout.contains("set CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY"));
 }
