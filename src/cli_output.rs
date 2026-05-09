@@ -282,6 +282,15 @@ pub fn print_status(status: &ChuangMvpStatus) {
         println!("actuator_command_timeout_ms: {timeout_ms}");
     }
     println!("subagent: {}", status.slots.subagent);
+    println!(
+        "subagent_live_worker: enabled={} adapter_kind={} status={} starts_worker={} available={} reason={}",
+        status.config.subagent_live_worker.enabled,
+        status.config.subagent_live_worker.adapter_kind,
+        status.config.subagent_live_worker.status,
+        status.config.subagent_live_worker.starts_worker,
+        status.config.subagent_live_worker.available,
+        status.config.subagent_live_worker.reason
+    );
     println!("subagent_queue_root: {}", status.config.subagent_queue_root);
     println!("evolution: {}", status.slots.evolution);
     println!("control_plane: {}", status.slots.control_plane);
@@ -683,6 +692,15 @@ pub fn print_config_summary(ok: bool, source: &str, summary: &ConfigSummary) {
         println!("actuator_command_timeout_ms: {timeout_ms}");
     }
     println!("subagent: {}", summary.subagent_kind);
+    println!(
+        "subagent_live_worker: enabled={} adapter_kind={} status={} starts_worker={} available={} reason={}",
+        summary.subagent_live_worker.enabled,
+        summary.subagent_live_worker.adapter_kind,
+        summary.subagent_live_worker.status,
+        summary.subagent_live_worker.starts_worker,
+        summary.subagent_live_worker.available,
+        summary.subagent_live_worker.reason
+    );
     println!("subagent_queue_root: {}", summary.subagent_queue_root);
     println!("control_plane: {}", summary.control_plane_kind);
     if let Some(timeout_ms) = summary.control_command_timeout_ms {

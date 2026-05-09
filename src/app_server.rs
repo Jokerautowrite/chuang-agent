@@ -194,6 +194,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "next_actions": next_actions.clone(),
         "api_key_state": config_summary.api_key_state,
         "placeholder_warnings": config_summary.placeholder_warnings,
+        "subagent_live_worker": config_summary.subagent_live_worker,
         "goal_mode": status.goal_mode,
         "goal_run": status.goal_run,
         "provider_readiness": status.provider_readiness,
@@ -241,6 +242,15 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 config_summary.placeholder_warnings.join(";")
             );
         }
+        println!(
+            "subagent_live_worker: enabled={} adapter_kind={} status={} starts_worker={} available={} reason={}",
+            config_summary.subagent_live_worker.enabled,
+            config_summary.subagent_live_worker.adapter_kind,
+            config_summary.subagent_live_worker.status,
+            config_summary.subagent_live_worker.starts_worker,
+            config_summary.subagent_live_worker.available,
+            config_summary.subagent_live_worker.reason
+        );
         if next_actions.is_empty() {
             println!("next_actions: none");
         } else {

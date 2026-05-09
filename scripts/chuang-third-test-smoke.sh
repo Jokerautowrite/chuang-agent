@@ -18,6 +18,44 @@ sh scripts/chuang-final-verify.sh
 printf '%s\n' "[third-test] live readonly preflight"
 sh scripts/chuang-live-readonly-preflight.sh
 
+printf '%s\n' "[third-test] live gaps matrix"
+live_gaps_json="$(bash scripts/chuang-live-gaps-check.sh --json)"
+printf '%s' "$live_gaps_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["ok"] is True
+assert data["check_name"] == "live-gaps"
+assert data["summary"] == "local_contract=ready preflight=ready_but_no_start real_live=pending"
+boundaries = data["boundaries"]
+assert boundaries["readonly"] is True
+assert boundaries["connects_real_feishu"] is False
+assert boundaries["connects_real_provider"] is False
+assert boundaries["starts_external_worker"] is False
+assert boundaries["enables_live_gate"] is False
+assert boundaries["modifies_repo"] is False
+assert boundaries["prints_secret_values"] is False
+matrix = {item["name"]: item for item in data["matrix"]}
+assert matrix["local_contract"]["state"] == "ready"
+assert matrix["local_contract"]["live_worker_available"] is False
+assert matrix["preflight_ready_but_no_start"]["state"] == "ready_but_no_start"
+assert matrix["preflight_ready_but_no_start"]["ready_for_live"] is False
+assert matrix["preflight_ready_but_no_start"]["starts_external_worker"] is False
+assert matrix["preflight_ready_but_no_start"]["live_worker_available"] is False
+assert matrix["real_live"]["state"] == "pending"
+assert matrix["real_live"]["real_live_ready"] is False
+assert matrix["real_live"]["connects_real_external_services"] is False
+gap_ids = [item["id"] for item in data["gaps"]]
+assert "live_worker_adapter_pending" in gap_ids
+assert "live_runner_gate_disabled" in gap_ids
+assert "manual_operator_live_receipt_missing" in gap_ids
+assert "real_external_services_not_verified" in gap_ids
+print("live_gaps_summary=" + data["summary"])
+print("live_gaps_gap_count=" + str(len(data["gaps"])))
+print("live_gaps_marker=" + data["marker"])
+'
+
 printf '%s\n' "[third-test] live operator checklist readonly summary"
 operator_status=0
 operator_json="$(bash scripts/chuang-live-operator-checklist.sh --json)" || operator_status=$?

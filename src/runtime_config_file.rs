@@ -8,7 +8,7 @@ use crate::runtime_config::{
     ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
     ControlPlaneConfig, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
     ProviderConfig, ProviderFallbackPolicy, RulesConfig, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    SubagentLiveWorkerConfig, SubagentQueueConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +137,21 @@ pub fn parse_runtime_config_file_with_options(
     }
     if let Some(value) = values.get("subagent") {
         config.subagent = parse_subagent(value)?;
+    }
+    if has_any(
+        &values,
+        &[
+            "subagent_live_worker.enabled",
+            "subagent_live_worker.adapter_kind",
+            "subagent_live_worker.status",
+            "subagent_live_worker.starts_worker",
+            "subagent_live_worker_enabled",
+            "subagent_live_worker_adapter_kind",
+            "subagent_live_worker_status",
+            "subagent_live_worker_starts_worker",
+        ],
+    ) {
+        config.subagent_live_worker = parse_subagent_live_worker(&values)?;
     }
     if values.contains_key("actuator.kind") || values.contains_key("actuator") {
         config.actuator = parse_actuator(&values)?;
@@ -482,6 +497,10 @@ fn get_any<'a>(values: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'
     keys.iter().find_map(|key| values.get(*key))
 }
 
+fn has_any(values: &BTreeMap<String, String>, keys: &[&str]) -> bool {
+    keys.iter().any(|key| values.contains_key(*key))
+}
+
 fn required_any(
     values: &BTreeMap<String, String>,
     keys: &[&str],
@@ -504,6 +523,56 @@ fn parse_subagent(raw: &str) -> Result<SubagentConfig, RuntimeConfigFileError> {
             value: other.to_string(),
         }),
     }
+}
+
+fn parse_subagent_live_worker(
+    values: &BTreeMap<String, String>,
+) -> Result<SubagentLiveWorkerConfig, RuntimeConfigFileError> {
+    let starts_worker = get_any(
+        values,
+        &[
+            "subagent_live_worker.starts_worker",
+            "subagent_live_worker_starts_worker",
+        ],
+    )
+    .map(|value| parse_bool("subagent_live_worker.starts_worker", value))
+    .transpose()?
+    .unwrap_or(false);
+    if starts_worker {
+        return Err(RuntimeConfigFileError::InvalidValue {
+            key: "subagent_live_worker.starts_worker".to_string(),
+            value: "true".to_string(),
+        });
+    }
+
+    Ok(SubagentLiveWorkerConfig {
+        enabled: get_any(
+            values,
+            &[
+                "subagent_live_worker.enabled",
+                "subagent_live_worker_enabled",
+            ],
+        )
+        .map(|value| parse_bool("subagent_live_worker.enabled", value))
+        .transpose()?
+        .unwrap_or(false),
+        adapter_kind: get_any(
+            values,
+            &[
+                "subagent_live_worker.adapter_kind",
+                "subagent_live_worker_adapter_kind",
+            ],
+        )
+        .cloned()
+        .unwrap_or_else(|| "none".to_string()),
+        status: get_any(
+            values,
+            &["subagent_live_worker.status", "subagent_live_worker_status"],
+        )
+        .cloned()
+        .unwrap_or_else(|| "disabled".to_string()),
+        starts_worker,
+    })
 }
 
 fn parse_actuator(

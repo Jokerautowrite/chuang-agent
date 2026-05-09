@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 root_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 provider_readiness_check="$root_dir/scripts/chuang-provider-readiness-check.sh"
@@ -20,10 +20,13 @@ sh scripts/chuang-complete-local-smoke.sh
 printf '%s\n' "[candidate-verify] live runner rehearsal smoke"
 bash scripts/chuang-live-runner-rehearsal-smoke.sh
 
+printf '%s\n' "[candidate-verify] live gaps check"
+bash scripts/chuang-live-gaps-check.sh
+
 printf '%s\n' "[candidate-verify] provider readiness check"
 if [ -f "$provider_readiness_check" ]; then
     if bash "$provider_readiness_check"; then
-        printf '%s\n' "[candidate-verify] provider readiness check passed"
+        printf '%s\n' "[candidate-verify] provider config/readiness preflight passed; connects_real_provider=false"
     else
         provider_status=$?
         if [ "$provider_status" -eq 1 ]; then

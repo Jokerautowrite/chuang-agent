@@ -131,6 +131,15 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     );
     println!("subagent: {}", snapshot.status.config.subagent_kind);
     println!(
+        "subagent_live_worker: enabled={} adapter_kind={} status={} starts_worker={} available={} reason={}",
+        snapshot.status.config.subagent_live_worker.enabled,
+        snapshot.status.config.subagent_live_worker.adapter_kind,
+        snapshot.status.config.subagent_live_worker.status,
+        snapshot.status.config.subagent_live_worker.starts_worker,
+        snapshot.status.config.subagent_live_worker.available,
+        snapshot.status.config.subagent_live_worker.reason
+    );
+    println!(
         "project_readiness: ok={} state={}",
         snapshot.status.project_readiness.ok, snapshot.status.project_readiness.overall_state
     );

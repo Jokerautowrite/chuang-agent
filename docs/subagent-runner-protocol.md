@@ -133,6 +133,13 @@ JSON also keeps the detailed nested checks under `gate`, `runner_allowlist`, `ca
 
 `ok=true` means the read-only rehearsal contract passed. `ready_for_live=true` additionally requires `CHUANG_CODEX_RUNNER_ENABLE=1`, so it must remain `false` when the gate env is unset or set to any non-enabling value. `live_worker_available` stays `false` for this command because preflight never starts or attaches a worker process. When the runner command, allowlist, capabilities, report admission, and audit prerequisites are configured but the gate is disabled, `worker_runtime_state=configured_but_gate_disabled`; the `adapter_entrypoint` field points at the command-runner adapter boundary that a later approved live adapter must wrap. `ready_for_live=true` should only appear after explicit operator approval for the exact runner command and target dispatch. `status` / `doctor` also surface the same read-only boundary as `subagent_readiness.layers.live_runner_rehearsal`, which stays deferred for real worker execution.
 
+Current acceptance vocabulary:
+
+- `live_worker_available=false`: the only valid state for `subagent live-preflight` and local rehearsal smoke; no worker process has been started or attached.
+- `preflight_ready_but_no_start`: gate, allowlist, capability route, ReportAdmission, forbidden capability, and audit prerequisite checks are visible, but the command is still read-only and must not be counted as live completion.
+- `real_external_acceptance_pending`: true until an operator-approved live receipt exists for the exact worker run and the local verify gate is green after that run.
+- `desktop_browser_live_gated`: desktop/browser actuator capabilities may be mapped elsewhere in the system, but they do not change subagent runner live status and do not prove a runner is available.
+
 Minimum live-gate acceptance check:
 
 ```bash
@@ -144,7 +151,7 @@ CHUANG_CODEX_RUNNER_ENABLE=1 cargo run -- subagent live-preflight \
   --json
 ```
 
-The command should report `ready_for_live=true`, `readonly=true`, `gate_enabled=true`, all `*_ok=true`, and a `next_action` that still requires an approved live runner rehearsal. A disabled or non-enabling gate should report `ready_for_live=false` even if all read-only checks pass.
+The preflight may report `ready_for_live=true`, `readonly=true`, `gate_enabled=true`, and all `*_ok=true`, but this is not live completion: `live_worker_available=false` and `starts_external_worker=false` remain required for this command. A disabled or non-enabling gate should report `ready_for_live=false` even if all read-only checks pass.
 
 A local safe rehearsal smoke is available at:
 

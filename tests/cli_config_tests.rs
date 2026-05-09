@@ -27,8 +27,11 @@ identity_memory_root = "{identity}"
 provider = "fake"
 provider_id = "config-check-fake"
 model = "config-check-stub"
-subagent = "queued_external"
-subagent_queue_root = "{queue}"
+	subagent = "queued_external"
+	subagent_live_worker_enabled = "true"
+	subagent_live_worker_adapter_kind = "command"
+	subagent_live_worker_status = "configured_status_only"
+	subagent_queue_root = "{queue}"
 context_max_tokens = 333
 "#,
             db = root.join("chuang.db").display(),
@@ -65,6 +68,15 @@ context_max_tokens = 333
     assert_eq!(parsed["summary"]["provider_id"], "config-check-fake");
     assert_eq!(parsed["summary"]["model_name"], "config-check-stub");
     assert_eq!(parsed["summary"]["subagent_kind"], "queued_external");
+    assert_eq!(parsed["summary"]["subagent_live_worker"]["enabled"], true);
+    assert_eq!(
+        parsed["summary"]["subagent_live_worker"]["available"],
+        false
+    );
+    assert_eq!(
+        parsed["summary"]["subagent_live_worker"]["starts_worker"],
+        false
+    );
     assert_eq!(parsed["summary"]["context_max_tokens"], 333);
     assert!(parsed["summary"]["placeholder_warnings"]
         .as_array()
@@ -129,6 +141,49 @@ provider_timeout_ms = 12345
     assert_eq!(parsed["summary"]["api_key_state"], "<set>");
     assert_eq!(parsed["summary"]["provider_request_timeout_ms"], 12_345);
     assert!(!stdout.contains("test-secret-key"));
+}
+
+#[test]
+fn cli_config_check_rejects_subagent_live_worker_starting_workers() {
+    let root = temp_root("live-worker-starts-worker");
+    fs::create_dir_all(&root).expect("temp root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+db_path = "{db}"
+provider = "fake"
+
+[subagent_live_worker]
+enabled = "true"
+adapter_kind = "command"
+status = "configured_status_only"
+starts_worker = "true"
+"#,
+            db = root.join("chuang.db").display(),
+        ),
+    )
+    .expect("config should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "config",
+            "check",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("config_invalid_value"));
+    assert!(stderr.contains("subagent_live_worker.starts_worker"));
 }
 
 #[test]

@@ -6,6 +6,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
+use chuang_agent::live_adapter_gate::{require_live_adapter_enabled, LiveAdapterSlot};
 use chuang_agent::live_subagent_rehearsal::{
     rehearse_live_subagent_adapter, LiveSubagentRehearsalInput,
 };
@@ -338,6 +339,7 @@ fn subagent_run_once_command(args: &[String]) -> Result<(), String> {
 
 fn subagent_run_loop_command(args: &[String]) -> Result<(), String> {
     let request = parse_subagent_run_loop(args)?;
+    validate_live_run_loop_gate(&request)?;
     let queue = open_subagent_queue(&request.options)?;
     let run_once_request = SubagentRunOnceCliRequest {
         options: request.options.clone(),
@@ -376,6 +378,38 @@ fn subagent_run_loop_command(args: &[String]) -> Result<(), String> {
         ControlOutputFormat::Json => print_json(&output)?,
     }
 
+    Ok(())
+}
+
+fn validate_live_run_loop_gate(request: &SubagentRunLoopCliRequest) -> Result<(), String> {
+    if !request.require_live_gate {
+        return Ok(());
+    }
+    if request.runner != "command" {
+        return Err("--require-live-gate requires --runner command".to_string());
+    }
+    let runner_command = request
+        .runner_command
+        .as_deref()
+        .ok_or_else(|| "--require-live-gate requires --runner-command".to_string())?;
+    if request.allowed_runner_commands.is_empty() {
+        return Err("--require-live-gate requires at least one --allow-runner-command".to_string());
+    }
+    if !request
+        .allowed_runner_commands
+        .iter()
+        .any(|allowed| allowed == runner_command)
+    {
+        return Err(format!(
+            "live_runner_command_not_allowlisted: runner_command={runner_command}"
+        ));
+    }
+    require_live_adapter_enabled(LiveAdapterSlot::SubagentRunner).map_err(|error| {
+        format!(
+            "live_runner_gate_disabled: required_env={} audit_label={} reason={}",
+            error.required_env, error.audit_label, error.reason
+        )
+    })?;
     Ok(())
 }
 

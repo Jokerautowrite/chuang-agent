@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
     ContextEngineConfig, ControlPlaneCommandConfig, ControlPlaneConfig, IdentityMemoryConfig,
-    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig, SubagentQueueConfig,
+    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    SubagentLiveWorkerConfig, SubagentQueueConfig,
 };
 
 #[test]
@@ -18,6 +19,11 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.governance_kind, "static_rule");
     assert_eq!(summary.actuator_kind, "fake");
     assert_eq!(summary.subagent_kind, "fake");
+    assert_eq!(summary.subagent_live_worker.enabled, false);
+    assert_eq!(summary.subagent_live_worker.adapter_kind, "none");
+    assert_eq!(summary.subagent_live_worker.status, "disabled");
+    assert_eq!(summary.subagent_live_worker.starts_worker, false);
+    assert_eq!(summary.subagent_live_worker.available, false);
     assert_eq!(summary.subagent_queue_root, "./data/subagent-queue");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
@@ -44,6 +50,53 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
         "delete_or_cleanup=13,service_change=7,network_change=8,secret_access=7"
     );
     assert_eq!(summary.api_key_state, None);
+}
+
+#[test]
+fn subagent_live_worker_config_is_status_only_and_never_available_by_default() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent_live_worker = SubagentLiveWorkerConfig {
+        enabled: true,
+        adapter_kind: "command".to_string(),
+        status: "configured_status_only".to_string(),
+        starts_worker: false,
+    };
+
+    config
+        .validate()
+        .expect("status-only live worker config should validate");
+    let summary = config.summary();
+
+    assert_eq!(summary.subagent_live_worker.enabled, true);
+    assert_eq!(summary.subagent_live_worker.adapter_kind, "command");
+    assert_eq!(
+        summary.subagent_live_worker.status,
+        "configured_status_only"
+    );
+    assert_eq!(summary.subagent_live_worker.starts_worker, false);
+    assert_eq!(summary.subagent_live_worker.available, false);
+    assert!(summary.subagent_live_worker.reason.contains("status only"));
+    assert!(summary
+        .placeholder_warnings
+        .iter()
+        .any(|warning| warning.contains("subagent_live_worker is status-only")));
+}
+
+#[test]
+fn subagent_live_worker_config_rejects_starting_workers_in_runtime_config() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent_live_worker = SubagentLiveWorkerConfig {
+        enabled: true,
+        adapter_kind: "command".to_string(),
+        status: "configured_status_only".to_string(),
+        starts_worker: true,
+    };
+
+    let err = config
+        .validate()
+        .expect_err("status-only live worker config must not start workers");
+
+    assert_eq!(err.field, "subagent_live_worker.starts_worker");
 }
 
 #[test]

@@ -269,6 +269,24 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["config"]["provider_kind"], "openai_compatible");
     assert_eq!(parsed["config"]["provider_id"], "custom-openai");
     assert_eq!(parsed["config"]["provider_request_timeout_ms"], Value::Null);
+    assert_eq!(parsed["config"]["subagent_live_worker"]["enabled"], false);
+    assert_eq!(
+        parsed["config"]["subagent_live_worker"]["adapter_kind"],
+        "none"
+    );
+    assert_eq!(
+        parsed["config"]["subagent_live_worker"]["status"],
+        "disabled"
+    );
+    assert_eq!(
+        parsed["config"]["subagent_live_worker"]["starts_worker"],
+        false
+    );
+    assert_eq!(parsed["config"]["subagent_live_worker"]["available"], false);
+    assert!(parsed["config"]["subagent_live_worker"]["reason"]
+        .as_str()
+        .expect("subagent live worker reason")
+        .contains("no live worker is started"));
     assert_eq!(parsed["config"]["identity_memory_kind"], "hermes_dual_file");
     assert_eq!(
         parsed["config"]["identity_experiences_path"],

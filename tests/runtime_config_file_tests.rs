@@ -26,8 +26,11 @@ first_wake_path = "./tmp/bootstrap/FIRST_WAKE.md"
 agents_registry_path = "./tmp/bootstrap/agents.toml"
 rules_root = "./tmp/rules"
 rules_core_path = "./tmp/rules/core.md"
-subagent = "queued_external"
-subagent_queue_root = "./tmp/subagents"
+	subagent = "queued_external"
+	subagent_live_worker_enabled = "true"
+	subagent_live_worker_adapter_kind = "command"
+	subagent_live_worker_status = "configured_status_only"
+	subagent_queue_root = "./tmp/subagents"
 context_engine = "summary_compression"
 
 [provider]
@@ -50,6 +53,10 @@ max_memory_segments = 3
     assert_eq!(config.tool_loop.max_rounds, 6);
     assert_eq!(config.tool_loop.shell_timeout_ms, 45_000);
     assert_eq!(config.subagent, SubagentConfig::QueuedExternal);
+    assert_eq!(config.subagent_live_worker.enabled, true);
+    assert_eq!(config.subagent_live_worker.adapter_kind, "command");
+    assert_eq!(config.subagent_live_worker.status, "configured_status_only");
+    assert_eq!(config.subagent_live_worker.starts_worker, false);
     assert_eq!(
         config.context_engine,
         ContextEngineConfig::SummaryCompression
@@ -144,6 +151,75 @@ secret_access = " .env.local, vault token"
             model_name
         } if provider_id == "flat-fake" && model_name == "flat-stub"
     ));
+}
+
+#[test]
+fn config_file_parses_section_subagent_live_worker_status_only_shape() {
+    let config = parse_runtime_config_file(
+        r#"
+[subagent_live_worker]
+enabled = "true"
+adapter_kind = "command"
+status = "configured_status_only"
+starts_worker = "false"
+"#,
+    )
+    .expect("section live worker config should parse");
+
+    let summary = config.summary().subagent_live_worker;
+    assert_eq!(config.subagent_live_worker.enabled, true);
+    assert_eq!(config.subagent_live_worker.adapter_kind, "command");
+    assert_eq!(config.subagent_live_worker.status, "configured_status_only");
+    assert_eq!(config.subagent_live_worker.starts_worker, false);
+    assert_eq!(summary.enabled, true);
+    assert_eq!(summary.adapter_kind, "command");
+    assert_eq!(summary.status, "configured_status_only");
+    assert_eq!(summary.starts_worker, false);
+    assert_eq!(summary.available, false);
+    assert!(summary.reason.contains("status only"));
+}
+
+#[test]
+fn config_file_rejects_subagent_live_worker_starts_worker_flat_key() {
+    let err = parse_runtime_config_file(
+        r#"
+subagent_live_worker_enabled = "true"
+subagent_live_worker_adapter_kind = "command"
+subagent_live_worker_status = "configured_status_only"
+subagent_live_worker_starts_worker = "true"
+"#,
+    )
+    .expect_err("flat starts_worker=true should be rejected");
+
+    assert_eq!(
+        err,
+        RuntimeConfigFileError::InvalidValue {
+            key: "subagent_live_worker.starts_worker".to_string(),
+            value: "true".to_string()
+        }
+    );
+}
+
+#[test]
+fn config_file_rejects_subagent_live_worker_starts_worker_section_key() {
+    let err = parse_runtime_config_file(
+        r#"
+[subagent_live_worker]
+enabled = "true"
+adapter_kind = "command"
+status = "configured_status_only"
+starts_worker = "true"
+"#,
+    )
+    .expect_err("section starts_worker=true should be rejected");
+
+    assert_eq!(
+        err,
+        RuntimeConfigFileError::InvalidValue {
+            key: "subagent_live_worker.starts_worker".to_string(),
+            value: "true".to_string()
+        }
+    );
 }
 
 #[test]

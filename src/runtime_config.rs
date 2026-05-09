@@ -25,6 +25,7 @@ pub struct RuntimeConfig {
     pub tool_loop: ToolLoopConfig,
     pub actuator: ActuatorConfig,
     pub subagent: SubagentConfig,
+    pub subagent_live_worker: SubagentLiveWorkerConfig,
     pub subagent_queue: SubagentQueueConfig,
     pub evolution: EvolutionConfig,
     pub control_plane: ControlPlaneConfig,
@@ -129,6 +130,14 @@ pub struct SubagentQueueConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentLiveWorkerConfig {
+    pub enabled: bool,
+    pub adapter_kind: String,
+    pub status: String,
+    pub starts_worker: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolutionConfig {
     Noop,
 }
@@ -158,6 +167,7 @@ pub struct ConfigSummary {
     pub governance_kind: String,
     pub actuator_kind: String,
     pub subagent_kind: String,
+    pub subagent_live_worker: SubagentLiveWorkerSummary,
     pub subagent_queue_root: String,
     pub evolution_kind: String,
     pub control_plane_kind: String,
@@ -188,6 +198,16 @@ pub struct ConfigSummary {
     pub context_max_memory_segments: usize,
     pub api_key_state: Option<String>,
     pub placeholder_warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SubagentLiveWorkerSummary {
+    pub enabled: bool,
+    pub adapter_kind: String,
+    pub status: String,
+    pub starts_worker: bool,
+    pub available: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +243,7 @@ impl RuntimeConfig {
             },
             actuator: ActuatorConfig::Fake,
             subagent: SubagentConfig::Fake,
+            subagent_live_worker: SubagentLiveWorkerConfig::disabled(),
             subagent_queue: SubagentQueueConfig {
                 root: PathBuf::from("./data/subagent-queue"),
             },
@@ -261,6 +282,7 @@ impl RuntimeConfig {
         self.tool_loop.validate()?;
         self.actuator.validate()?;
         self.subagent.validate()?;
+        self.subagent_live_worker.validate()?;
         self.subagent_queue.validate()?;
         self.evolution.validate()?;
         self.control_plane.validate()
@@ -279,6 +301,7 @@ impl RuntimeConfig {
             governance_kind: self.governance.kind().to_string(),
             actuator_kind: self.actuator.kind().to_string(),
             subagent_kind: self.subagent.kind().to_string(),
+            subagent_live_worker: self.subagent_live_worker.summary(),
             subagent_queue_root: self.subagent_queue.root.display().to_string(),
             evolution_kind: self.evolution.kind().to_string(),
             control_plane_kind: self.control_plane.kind().to_string(),
@@ -355,6 +378,12 @@ impl RuntimeConfig {
         if matches!(self.subagent, SubagentConfig::Fake) {
             warnings.push(
                 "subagent=fake is a local test runner; use queued_external plus command runner for real workers"
+                    .to_string(),
+            );
+        }
+        if self.subagent_live_worker.enabled {
+            warnings.push(
+                "subagent_live_worker is status-only; live worker execution remains unavailable until an audited adapter is wired"
                     .to_string(),
             );
         }
@@ -744,6 +773,50 @@ impl SubagentConfig {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
+    }
+}
+
+impl SubagentLiveWorkerConfig {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            adapter_kind: "none".to_string(),
+            status: "disabled".to_string(),
+            starts_worker: false,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        require_non_empty("subagent_live_worker.adapter_kind", &self.adapter_kind)?;
+        require_non_empty("subagent_live_worker.status", &self.status)?;
+        if self.starts_worker {
+            return Err(ConfigError {
+                field: "subagent_live_worker.starts_worker".to_string(),
+                message: "subagent_live_worker is status-only and must not start a worker"
+                    .to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn summary(&self) -> SubagentLiveWorkerSummary {
+        let available = false;
+        let reason = if self.enabled {
+            format!(
+                "subagent_live_worker config is enabled for adapter_kind={}, but this build exposes status only and does not start workers",
+                self.adapter_kind
+            )
+        } else {
+            "subagent_live_worker disabled by default; no live worker is started".to_string()
+        };
+        SubagentLiveWorkerSummary {
+            enabled: self.enabled,
+            adapter_kind: self.adapter_kind.clone(),
+            status: self.status.clone(),
+            starts_worker: self.starts_worker,
+            available,
+            reason,
+        }
     }
 }
 

@@ -172,6 +172,8 @@ pub(crate) struct SubagentRunLoopCliRequest {
     pub(crate) approve_exec: bool,
     pub(crate) max_runs: usize,
     pub(crate) max_concurrency: usize,
+    pub(crate) require_live_gate: bool,
+    pub(crate) allowed_runner_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

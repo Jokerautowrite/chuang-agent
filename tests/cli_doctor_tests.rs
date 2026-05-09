@@ -96,6 +96,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"
     ));
     assert!(stdout.contains(
+        "subagent_live_worker: enabled=false adapter_kind=none status=disabled starts_worker=false available=false reason=subagent_live_worker disabled by default; no live worker is started"
+    ));
+    assert!(stdout.contains(
         "goal_mode: ok=true entrypoint=run --goal TEXT kind=lightweight_runtime_context context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
     ));
     assert!(stdout.contains("goal_run_ok: true plan_exists=true goal_id=mainline-mvp checkpoints="));
@@ -438,6 +441,26 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         parsed["status"]["release_readiness"]["writes_repo_files"],
         false
     );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["enabled"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["adapter_kind"],
+        "none"
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["starts_worker"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["available"],
+        false
+    );
+    assert!(parsed["status"]["config"]["subagent_live_worker"]["reason"]
+        .as_str()
+        .expect("doctor subagent live worker reason")
+        .contains("no live worker is started"));
     assert!(parsed["status"]["release_readiness"]["acceptance"]
         .as_array()
         .expect("release acceptance array")

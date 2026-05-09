@@ -665,6 +665,8 @@ pub(crate) fn parse_subagent_run_loop(
         approve_exec: parsed.approve_exec,
         max_runs: parsed.max_runs.unwrap_or(10),
         max_concurrency: parsed.max_concurrency.unwrap_or(1),
+        require_live_gate: parsed.require_live_gate,
+        allowed_runner_commands: parsed.allowed_runner_commands,
     })
 }
 
@@ -767,6 +769,8 @@ struct ParsedSubagentRunnerArgs {
     approve_exec: bool,
     max_runs: Option<usize>,
     max_concurrency: Option<usize>,
+    require_live_gate: bool,
+    allowed_runner_commands: Vec<String>,
 }
 
 fn parse_subagent_runner_args(
@@ -783,6 +787,8 @@ fn parse_subagent_runner_args(
     let mut approve_exec = false;
     let mut max_runs: Option<usize> = None;
     let mut max_concurrency: Option<usize> = None;
+    let mut require_live_gate = false;
+    let mut allowed_runner_commands: Vec<String> = Vec::new();
 
     let mut index = 0;
     while index < args.len() {
@@ -832,6 +838,28 @@ fn parse_subagent_runner_args(
                 }
                 max_runs = Some(parsed);
                 index += 2;
+            }
+            "--require-live-gate" if allow_max_runs => {
+                require_live_gate = true;
+                index += 1;
+            }
+            "--require-live-gate" => {
+                return Err("--require-live-gate is only supported by subagent run-loop".to_string())
+            }
+            "--allow-runner-command" if allow_max_runs => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    format!("{command_name} requires value after --allow-runner-command")
+                })?;
+                if value.trim().is_empty() {
+                    return Err("--allow-runner-command must not be empty".to_string());
+                }
+                allowed_runner_commands.push(value.clone());
+                index += 2;
+            }
+            "--allow-runner-command" => {
+                return Err(
+                    "--allow-runner-command is only supported by subagent run-loop".to_string(),
+                )
             }
             "--max-concurrency" if allow_max_runs => {
                 let value = args.get(index + 1).ok_or_else(|| {
@@ -906,6 +934,8 @@ fn parse_subagent_runner_args(
         approve_exec,
         max_runs,
         max_concurrency,
+        require_live_gate,
+        allowed_runner_commands,
     })
 }
 

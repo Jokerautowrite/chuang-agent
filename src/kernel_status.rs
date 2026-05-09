@@ -937,7 +937,7 @@ fn build_provider_readiness(
         } else if missing_env {
             "provider api_key_env is missing; live provider readiness remains partial".to_string()
         } else {
-            "provider configuration is locally ready for live requests".to_string()
+            "provider configuration is ready for a live-request attempt; readiness sends no live provider call and verifies no live response".to_string()
         },
         next_action: if fallback_configured {
             "keep fallback metadata visible and verify primary diagnostics before promoting live provider traffic".to_string()

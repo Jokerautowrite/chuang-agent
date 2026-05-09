@@ -221,6 +221,26 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         parsed["status"]["goal_mode"]["cli_entrypoint"],
         "run --goal TEXT"
     );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["enabled"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["adapter_kind"],
+        "none"
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["starts_worker"],
+        false
+    );
+    assert_eq!(
+        parsed["status"]["config"]["subagent_live_worker"]["available"],
+        false
+    );
+    assert!(parsed["status"]["config"]["subagent_live_worker"]["reason"]
+        .as_str()
+        .expect("console subagent live worker reason")
+        .contains("no live worker is started"));
     assert_eq!(parsed["status"]["goal_run"]["ok"], true);
     assert_eq!(parsed["status"]["goal_run"]["goal_id"], "mainline-mvp");
     assert_eq!(parsed["status"]["subagent_readiness"]["ok"], true);
@@ -390,6 +410,9 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
         "atomic_tools_desktop_browser_live_gated: mouse,keyboard,screenshot,locate required=adapter,live_gate,allowlist,audit_receipt"
     ));
     assert!(stdout.contains("atomic_tools_interface_only: none"));
+    assert!(stdout.contains(
+        "subagent_live_worker: enabled=false adapter_kind=none status=disabled starts_worker=false available=false reason=subagent_live_worker disabled by default; no live worker is started"
+    ));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready"));
     assert!(stdout.contains(

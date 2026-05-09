@@ -1181,6 +1181,14 @@ transport = "stub"
         .expect("diagnostic summary")
         .contains("local warning"));
     assert_eq!(parsed["api_key_state"], "<set>");
+    assert_eq!(parsed["subagent_live_worker"]["enabled"], false);
+    assert_eq!(parsed["subagent_live_worker"]["adapter_kind"], "none");
+    assert_eq!(parsed["subagent_live_worker"]["starts_worker"], false);
+    assert_eq!(parsed["subagent_live_worker"]["available"], false);
+    assert!(parsed["subagent_live_worker"]["reason"]
+        .as_str()
+        .expect("app-server subagent live worker reason")
+        .contains("no live worker is started"));
     assert_eq!(parsed["goal_mode"]["ok"], true);
     assert_eq!(parsed["goal_mode"]["cli_entrypoint"], "run --goal TEXT");
     assert_eq!(
@@ -1745,6 +1753,9 @@ transport = "stub"
     assert!(stdout.contains("diagnostic_status: warning"));
     assert!(stdout.contains("diagnostic_summary:"));
     assert!(stdout.contains("next_actions:"));
+    assert!(stdout.contains(
+        "subagent_live_worker: enabled=false adapter_kind=none status=disabled starts_worker=false available=false reason=subagent_live_worker disabled by default; no live worker is started"
+    ));
     assert!(stdout.contains(
         "provider_readiness: ok=true state=ready kind=openai_compatible transport=stub fallback_configured=false"
     ));

@@ -932,6 +932,79 @@ fn cli_subagent_run_loop_rejects_zero_max_runs() {
 }
 
 #[test]
+fn cli_subagent_run_loop_live_gate_fails_before_worker_without_env_gate() {
+    let queue_root = temp_queue_root("run-loop-live-gate-disabled");
+    let output = cargo_command()
+        .env_remove("CHUANG_CODEX_RUNNER_ENABLE")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-loop",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "sh",
+            "--allow-runner-command",
+            "sh",
+            "--approve-exec",
+            "--require-live-gate",
+            "--max-runs",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("live_runner_gate_disabled"));
+    assert!(stderr.contains("CHUANG_CODEX_RUNNER_ENABLE"));
+    assert!(stderr.contains("subagent.runner.live"));
+    assert!(!queue_root.join("claims").exists());
+    assert!(!queue_root.join("reports").exists());
+}
+
+#[test]
+fn cli_subagent_run_loop_live_gate_rejects_command_outside_allowlist_first() {
+    let queue_root = temp_queue_root("run-loop-live-gate-allowlist");
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-loop",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "sh",
+            "--allow-runner-command",
+            "bash",
+            "--approve-exec",
+            "--require-live-gate",
+            "--max-runs",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("live_runner_command_not_allowlisted"));
+    assert!(stderr.contains("runner_command=sh"));
+    assert!(!queue_root.join("claims").exists());
+    assert!(!queue_root.join("reports").exists());
+}
+
+#[test]
 fn cli_subagent_run_once_command_runner_requires_explicit_approval() {
     let queue_root = temp_queue_root("command-runner-approval");
     let _dispatch = dispatch_task(&queue_root, "task-cli-command-approval", "命令 runner 审批");

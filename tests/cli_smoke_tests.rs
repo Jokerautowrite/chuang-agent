@@ -215,6 +215,9 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     let live_runner_rehearsal = wrapper
         .find("bash scripts/chuang-live-runner-rehearsal-smoke.sh")
         .expect("candidate verify should run live runner rehearsal smoke");
+    let live_gaps_check = wrapper
+        .find("bash scripts/chuang-live-gaps-check.sh")
+        .expect("candidate verify should run live gaps check");
     let provider_readiness = wrapper
         .find("provider readiness check")
         .expect("candidate verify should include provider readiness check");
@@ -223,8 +226,10 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
         .expect("candidate verify should print a stable success marker");
 
     assert!(complete_local_smoke < live_runner_rehearsal);
-    assert!(live_runner_rehearsal < provider_readiness);
+    assert!(live_runner_rehearsal < live_gaps_check);
+    assert!(live_gaps_check < provider_readiness);
     assert!(provider_readiness < marker);
+    assert!(wrapper.contains("[candidate-verify] live gaps check"));
     assert!(wrapper.contains("scripts/chuang-provider-readiness-check.sh"));
     assert!(wrapper.contains("if [ -f \"$provider_readiness_check\" ]; then"));
     assert!(wrapper.contains("if bash \"$provider_readiness_check\"; then"));
@@ -249,6 +254,62 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
 }
 
 #[test]
+fn live_gaps_check_reports_local_preflight_and_real_live_pending_without_live_side_effects() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fs::read_to_string(manifest_dir.join("scripts/chuang-live-gaps-check.sh"))
+        .expect("live gaps check should be readable");
+
+    let status = script
+        .find("cargo run --quiet -- status --json")
+        .expect("live gaps check should read status json");
+    let preflight = script
+        .find("cargo run --quiet -- subagent live-preflight")
+        .expect("live gaps check should run live-preflight");
+    let matrix = script
+        .find("\"matrix\"")
+        .expect("live gaps check should output a matrix");
+
+    assert!(status < preflight);
+    assert!(preflight < matrix);
+    assert!(script.contains("check_name\": \"live-gaps\""));
+    assert!(script.contains("marker\": \"live_gaps_check_ok\""));
+    assert!(script.contains("local_contract=ready preflight=ready_but_no_start real_live=pending"));
+    assert!(script.contains("\"name\": \"local_contract\""));
+    assert!(script.contains("\"name\": \"preflight_ready_but_no_start\""));
+    assert!(script.contains("\"name\": \"real_live\""));
+    assert!(script.contains("\"state\": \"ready_but_no_start\""));
+    assert!(script.contains("\"state\": \"pending\" if real_live_pending else \"ready\""));
+    assert!(script.contains("ready_for_live\"] is False"));
+    assert!(script.contains("starts_external_worker\"] is False"));
+    assert!(script.contains("live_worker_available\"] is False"));
+    assert!(script.contains("\"id\": \"live_worker_adapter_pending\""));
+    assert!(script.contains("\"id\": \"live_runner_gate_disabled\""));
+    assert!(script.contains("\"id\": \"manual_operator_live_receipt_missing\""));
+    assert!(script.contains("\"id\": \"real_external_services_not_verified\""));
+    assert!(script.contains("\"api_key_state\": provider_api_key_state"));
+    assert!(script.contains("\"uses_redacted_state_only\": True"));
+    assert!(script.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
+    assert!(script.contains("unset CHUANG_REAL_CONTROL_ENABLE"));
+    assert!(script.contains("unset CHUANG_REAL_ACTUATOR_ENABLE"));
+    assert!(script.contains("\"connects_real_feishu\": False"));
+    assert!(script.contains("\"connects_real_provider\": False"));
+    assert!(script.contains("\"starts_external_worker\": False"));
+    assert!(script.contains("\"enables_live_gate\": False"));
+    assert!(script.contains("\"modifies_repo\": False"));
+    assert!(script.contains("\"prints_secret_values\": False"));
+    assert!(!script.contains("systemctl"));
+    assert!(!script.contains("tmux new"));
+    assert!(!script.contains("codex exec"));
+    assert!(!script.contains("git reset"));
+    assert!(!script.contains("git checkout"));
+    assert!(!script.contains("\nrm "));
+    assert!(!script.contains(" rm -"));
+    assert!(!script.contains(".codex-im/.env"));
+    assert!(!script.contains("hermes-gateway"));
+    assert!(!script.contains("FEISHU_"));
+}
+
+#[test]
 fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-third-test-smoke.sh"))
@@ -263,6 +324,9 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     let live_preflight = wrapper
         .find("sh scripts/chuang-live-readonly-preflight.sh")
         .expect("third test smoke should run live readonly preflight");
+    let live_gaps_check = wrapper
+        .find("bash scripts/chuang-live-gaps-check.sh --json")
+        .expect("third test smoke should run live gaps matrix");
     let operator_checklist = wrapper
         .find("bash scripts/chuang-live-operator-checklist.sh --json")
         .expect("third test smoke should run live operator checklist readonly summary");
@@ -275,12 +339,28 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
 
     assert!(clean_tree_check < final_verify);
     assert!(final_verify < live_preflight);
-    assert!(live_preflight < operator_checklist);
+    assert!(live_preflight < live_gaps_check);
+    assert!(live_gaps_check < operator_checklist);
     assert!(operator_checklist < goal_status);
     assert!(goal_status < marker);
     assert!(wrapper.contains("working tree must be clean before third test smoke"));
     assert!(wrapper.contains("operator_status=0"));
     assert!(wrapper.contains("operator_status=$?"));
+    assert!(wrapper.contains("live_gaps_summary="));
+    assert!(wrapper.contains("live_gaps_gap_count="));
+    assert!(wrapper.contains("live_gaps_marker="));
+    assert!(wrapper.contains("data[\"check_name\"] == \"live-gaps\""));
+    assert!(wrapper.contains(
+        "data[\"summary\"] == \"local_contract=ready preflight=ready_but_no_start real_live=pending\""
+    ));
+    assert!(wrapper.contains("matrix[\"local_contract\"][\"state\"] == \"ready\""));
+    assert!(wrapper
+        .contains("matrix[\"preflight_ready_but_no_start\"][\"state\"] == \"ready_but_no_start\""));
+    assert!(wrapper.contains("matrix[\"real_live\"][\"state\"] == \"pending\""));
+    assert!(wrapper.contains("\"live_worker_adapter_pending\" in gap_ids"));
+    assert!(wrapper.contains("\"live_runner_gate_disabled\" in gap_ids"));
+    assert!(wrapper.contains("\"manual_operator_live_receipt_missing\" in gap_ids"));
+    assert!(wrapper.contains("\"real_external_services_not_verified\" in gap_ids"));
     assert!(wrapper.contains("[ \"$operator_status\" -ne 0 ] && [ \"$operator_status\" -ne 1 ]"));
     assert!(wrapper.contains("live_operator_checklist_status="));
     assert!(wrapper.contains("live_operator_checklist_blockers="));

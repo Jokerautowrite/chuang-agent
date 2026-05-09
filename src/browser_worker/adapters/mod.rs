@@ -194,7 +194,7 @@ impl<D: RealBrowserDriver> BrowserProviderDriver for ProviderBackedRealBrowserDr
                 task_id: receipt.task_id.clone(),
                 content,
                 raw_snapshot_ref: snapshot_ref,
-                completed_at: "real-browser-completed-at".to_string(),
+                completed_at: "browser-driver-output-captured-at".to_string(),
                 finish_reason: WorkerFinishReason::Completed,
             }),
             _ => Err(BrowserWorkerError::UnexpectedBrowserObservation {

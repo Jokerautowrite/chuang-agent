@@ -670,6 +670,15 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.config.context_engine_kind
     );
     println!("subagent: {}", doctor.status.config.subagent_kind);
+    println!(
+        "subagent_live_worker: enabled={} adapter_kind={} status={} starts_worker={} available={} reason={}",
+        doctor.status.config.subagent_live_worker.enabled,
+        doctor.status.config.subagent_live_worker.adapter_kind,
+        doctor.status.config.subagent_live_worker.status,
+        doctor.status.config.subagent_live_worker.starts_worker,
+        doctor.status.config.subagent_live_worker.available,
+        doctor.status.config.subagent_live_worker.reason
+    );
     println!("execution: {}", doctor.status.slots.execution);
     println!(
         "governance_readiness: ok={} kind={} rules_loaded={} tool_surface_governed={} goal_run_executes={}",
