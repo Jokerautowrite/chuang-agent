@@ -1,6 +1,48 @@
-use std::process::Command;
+use std::{
+    fs,
+    path::PathBuf,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde_json::Value;
+
+fn test_skills_root(name: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-cli-skill-test-{}-{}-{}",
+        name,
+        std::process::id(),
+        nonce
+    ));
+    fs::create_dir_all(&root).expect("test skills root should be creatable");
+    root
+}
+
+fn seed_cli_canonical_skill(skills_root: &PathBuf, version: u32) -> PathBuf {
+    let path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
+    fs::write(
+        &path,
+        format!(
+            r#"---
+skill_id: dry_run_skill_candidate_for_xiaoce
+title: "Dry Run Skill Candidate For Xiaoce"
+status: active
+version: {version}
+---
+
+# Dry Run Skill Candidate For Xiaoce
+
+Existing canonical body kept for lifecycle tests.
+"#
+        ),
+    )
+    .expect("seeded canonical skill should be writable");
+    path
+}
 
 #[test]
 fn cli_skill_propose_outputs_dry_run_review_contract() {
@@ -168,8 +210,23 @@ fn cli_skill_approve_outputs_local_approval_receipt() {
         serde_json::from_slice(&output.stdout).expect("skill approve should output json");
 
     assert_eq!(parsed["approved"], true);
+    assert_eq!(parsed["self_scored"], true);
+    assert_eq!(parsed["approval_policy"], "darwin_style_cli_rubric");
+    assert_eq!(parsed["approval_threshold"], 80);
     assert_eq!(parsed["writes_skills"], false);
     assert_eq!(parsed["solidifies_skill"], false);
+    assert_eq!(parsed["judgment_count"], 1);
+    assert_eq!(parsed["judgments"][0]["approved"], true);
+    assert_eq!(
+        parsed["judgments"][0]["canonical_skill_id"],
+        "dry_run_skill_candidate_for_xiaoce"
+    );
+    assert!(
+        parsed["judgments"][0]["score_total"]
+            .as_u64()
+            .expect("score_total should be numeric")
+            >= 80
+    );
     assert_eq!(parsed["approval_receipt_count"], 1);
     assert_eq!(
         parsed["approval_receipts"][0]["approval_receipt"]["approved"],
@@ -188,6 +245,7 @@ fn cli_skill_approve_outputs_local_approval_receipt() {
         "本地审阅已通过"
     );
     assert_eq!(parsed["boundary"]["validates_proposal"], true);
+    assert_eq!(parsed["boundary"]["self_scores_proposal"], true);
     assert_eq!(parsed["boundary"]["emits_approval_receipt"], true);
     assert_eq!(parsed["boundary"]["writes_skill_files"], false);
     assert_eq!(parsed["boundary"]["solidifies_skill"], false);
@@ -218,6 +276,11 @@ fn cli_skill_approve_text_keeps_approval_boundary_visible() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("skill_approve approved=true"));
+    assert!(stdout.contains("self_scored=true"));
+    assert!(stdout.contains("approval_policy=darwin_style_cli_rubric"));
+    assert!(stdout.contains("judgments=1"));
+    assert!(stdout.contains("judgment proposal_id=dry-run-xiaoce-event-4"));
+    assert!(stdout.contains("skill_id=dry_run_skill_candidate_for_xiaoce"));
     assert!(stdout.contains("writes_skills=false"));
     assert!(stdout.contains("solidifies_skill=false"));
     assert!(stdout.contains("approval_receipts=1"));
@@ -228,7 +291,103 @@ fn cli_skill_approve_text_keeps_approval_boundary_visible() {
 }
 
 #[test]
-fn cli_skill_solidify_outputs_refusal_boundary_without_writing() {
+fn cli_skill_judge_outputs_self_scored_policy_without_writing() {
+    let skills_root = test_skills_root("judge-json");
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "judge",
+            "--event-id",
+            "event-judge-1",
+            "--task-id",
+            "task-judge-1",
+            "--summary",
+            "判断候选技能是否应该进入长期资产",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill judge should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).expect("skill judge should output json");
+
+    assert_eq!(parsed["judged"], true);
+    assert_eq!(parsed["self_scored"], true);
+    assert_eq!(parsed["writes_skills"], false);
+    assert_eq!(parsed["solidifies_skill"], false);
+    assert_eq!(parsed["approved_count"], 1);
+    assert_eq!(
+        parsed["judgments"][0]["canonical_skill_id"],
+        "dry_run_skill_candidate_for_xiaoce"
+    );
+    assert_eq!(
+        parsed["judgments"][0]["duplicate_state"],
+        "new_canonical_skill"
+    );
+    assert_eq!(parsed["boundary"]["reads_existing_skills"], true);
+    assert_eq!(parsed["boundary"]["writes_skill_files"], false);
+    assert_eq!(parsed["boundary"]["connects_external_service"], false);
+    assert!(!skills_root
+        .join("dry_run_skill_candidate_for_xiaoce.md")
+        .exists());
+}
+
+#[test]
+fn cli_skill_judge_detects_preexisting_canonical_skill_file() {
+    let skills_root = test_skills_root("judge-existing");
+    let path = seed_cli_canonical_skill(&skills_root, 3);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "judge",
+            "--event-id",
+            "event-judge-existing",
+            "--task-id",
+            "task-judge-existing",
+            "--summary",
+            "判断已有 canonical skill 是否应更新",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill judge should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).expect("skill judge should output json");
+
+    assert_eq!(
+        parsed["judgments"][0]["canonical_skill_id"],
+        "dry_run_skill_candidate_for_xiaoce"
+    );
+    assert_eq!(
+        parsed["judgments"][0]["duplicate_state"],
+        "updates_existing"
+    );
+    assert_eq!(
+        parsed["judgments"][0]["target_path"],
+        path.display().to_string()
+    );
+    assert_eq!(parsed["writes_skills"], false);
+    assert!(path.exists());
+}
+
+#[test]
+fn cli_skill_solidify_outputs_write_receipt_and_writes_canonical_file() {
+    let skills_root = test_skills_root("solidify-json");
     let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "skill",
@@ -241,6 +400,8 @@ fn cli_skill_solidify_outputs_refusal_boundary_without_writing() {
             "本地固化边界回执",
             "--approval-source",
             "cli-review",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
             "--json",
         ])
         .output()
@@ -255,9 +416,23 @@ fn cli_skill_solidify_outputs_refusal_boundary_without_writing() {
         serde_json::from_slice(&output.stdout).expect("skill solidify should output json");
 
     assert_eq!(parsed["solidify_requested"], true);
-    assert_eq!(parsed["solidify_allowed"], false);
-    assert_eq!(parsed["writes_skills"], false);
-    assert_eq!(parsed["solidifies_skill"], false);
+    assert_eq!(parsed["solidify_allowed"], true);
+    assert_eq!(parsed["self_scored"], true);
+    assert_eq!(parsed["writes_skills"], true);
+    assert_eq!(parsed["solidifies_skill"], true);
+    assert_eq!(parsed["judgment_count"], 1);
+    assert_eq!(parsed["write_count"], 1);
+    assert_eq!(
+        parsed["write_receipts"][0]["skill_id"],
+        "dry_run_skill_candidate_for_xiaoce"
+    );
+    assert_eq!(parsed["write_receipts"][0]["action"], "created");
+    assert_eq!(
+        parsed["write_receipts"][0]["duplicate_state"],
+        "created_new_canonical_skill"
+    );
+    assert_eq!(parsed["write_receipts"][0]["status"], "active");
+    assert_eq!(parsed["write_receipts"][0]["version"], 1);
     assert_eq!(parsed["solidify_receipt_count"], 1);
     assert_eq!(
         parsed["solidify_receipts"][0]["approval_receipt"]["approved"],
@@ -268,13 +443,24 @@ fn cli_skill_solidify_outputs_refusal_boundary_without_writing() {
         "cli-review"
     );
     assert_eq!(parsed["boundary"]["emits_solidify_receipt"], true);
-    assert_eq!(parsed["boundary"]["writes_skill_files"], false);
-    assert_eq!(parsed["boundary"]["solidifies_skill"], false);
+    assert_eq!(parsed["boundary"]["self_scores_proposal"], true);
+    assert_eq!(parsed["boundary"]["reads_existing_skills"], true);
+    assert_eq!(parsed["boundary"]["writes_skill_files"], true);
+    assert_eq!(parsed["boundary"]["upserts_canonical_skill"], true);
+    assert_eq!(parsed["boundary"]["solidifies_skill"], true);
     assert_eq!(parsed["boundary"]["connects_external_service"], false);
+
+    let written_path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
+    let written = fs::read_to_string(written_path).expect("solidify should write skill file");
+    assert!(written.contains("skill_id: dry_run_skill_candidate_for_xiaoce"));
+    assert!(written.contains("status: active"));
+    assert!(written.contains("approval_policy: darwin_style_cli_rubric"));
+    assert!(written.contains("duplicate_policy: `upsert_canonical_skill_id`"));
 }
 
 #[test]
-fn cli_skill_solidify_text_keeps_refusal_boundary_visible() {
+fn cli_skill_solidify_text_keeps_write_boundary_visible() {
+    let skills_root = test_skills_root("solidify-text");
     let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "skill",
@@ -285,6 +471,8 @@ fn cli_skill_solidify_text_keeps_refusal_boundary_visible() {
             "task-6",
             "--summary",
             "本地固化文本输出",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
         ])
         .output()
         .expect("skill solidify should execute");
@@ -296,7 +484,14 @@ fn cli_skill_solidify_text_keeps_refusal_boundary_visible() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("skill_solidify solidify_requested=true"));
-    assert!(stdout.contains("solidify_allowed=false"));
+    assert!(stdout.contains("solidify_allowed=true"));
+    assert!(stdout.contains("self_scored=true"));
+    assert!(stdout.contains("writes_skills=true"));
+    assert!(stdout.contains("solidifies_skill=true"));
+    assert!(stdout.contains("writes=1"));
+    assert!(stdout.contains("skill_write skill_id=dry_run_skill_candidate_for_xiaoce"));
+    assert!(stdout.contains("action=created"));
+    assert!(stdout.contains("duplicate_state=created_new_canonical_skill"));
     assert!(stdout.contains("solidify_receipts=1"));
     assert!(stdout.contains("solidify_receipt id=approved-solidify-dry-run-xiaoce-event-6"));
     assert!(stdout.contains("approved=true"));
@@ -305,17 +500,91 @@ fn cli_skill_solidify_text_keeps_refusal_boundary_visible() {
 }
 
 #[test]
-fn cli_skill_solidify_defaults_to_local_only_refusal_receipt() {
+fn cli_skill_solidify_upserts_existing_canonical_skill_without_duplicate() {
+    let skills_root = test_skills_root("solidify-upsert");
+    let first = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-7a",
+            "--task-id",
+            "task-7a",
+            "--summary",
+            "第一次固化同一 canonical 技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("first skill solidify should execute");
+
+    assert!(
+        first.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let second = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-7b",
+            "--task-id",
+            "task-7b",
+            "--summary",
+            "第二次固化同一 canonical 技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("second skill solidify should execute");
+
+    assert!(
+        second.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_slice(&second.stdout).expect("skill solidify should output json");
+
+    assert_eq!(
+        parsed["judgments"][0]["duplicate_state"],
+        "updates_existing"
+    );
+    assert_eq!(
+        parsed["write_receipts"][0]["duplicate_state"],
+        "updated_existing_canonical_skill"
+    );
+    assert_eq!(parsed["write_receipts"][0]["action"], "updated");
+    assert_eq!(parsed["write_receipts"][0]["version"], 2);
+
+    let entries = fs::read_dir(&skills_root)
+        .expect("skills root should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("skill dir entries should be readable");
+    assert_eq!(entries.len(), 1);
+}
+
+#[test]
+fn cli_skill_solidify_updates_seeded_canonical_file_version() {
+    let skills_root = test_skills_root("solidify-seeded-existing");
+    let path = seed_cli_canonical_skill(&skills_root, 4);
+
     let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "skill",
             "solidify",
             "--event-id",
-            "event-7",
+            "event-seeded-existing",
             "--task-id",
-            "task-7",
+            "task-seeded-existing",
             "--summary",
-            "默认本地固化回执",
+            "固化时更新已经存在的 canonical 技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
             "--json",
         ])
         .output()
@@ -329,17 +598,180 @@ fn cli_skill_solidify_defaults_to_local_only_refusal_receipt() {
     let parsed: Value =
         serde_json::from_slice(&output.stdout).expect("skill solidify should output json");
 
-    assert_eq!(parsed["solidify_requested"], true);
-    assert_eq!(parsed["solidify_allowed"], false);
-    assert_eq!(parsed["solidify_receipt_count"], 1);
     assert_eq!(
-        parsed["solidify_receipts"][0]["approval_receipt"]["approval_source"],
-        "cli skill solidify"
+        parsed["judgments"][0]["duplicate_state"],
+        "updates_existing"
     );
+    assert_eq!(parsed["write_receipts"][0]["action"], "updated");
     assert_eq!(
-        parsed["solidify_receipts"][0]["approval_receipt"]["approved"],
-        true
+        parsed["write_receipts"][0]["duplicate_state"],
+        "updated_existing_canonical_skill"
     );
-    assert_eq!(parsed["boundary"]["writes_skill_files"], false);
-    assert_eq!(parsed["boundary"]["connects_external_service"], false);
+    assert_eq!(parsed["write_receipts"][0]["version"], 5);
+    assert_eq!(
+        parsed["write_receipts"][0]["path"],
+        path.display().to_string()
+    );
+
+    let content = fs::read_to_string(&path).expect("updated canonical skill should be readable");
+    assert!(content.contains("version: 5"));
+    assert!(content.contains("Previous Version Snapshot"));
+}
+
+#[test]
+fn cli_skill_retire_marks_skill_in_place_without_deleting() {
+    let skills_root = test_skills_root("retire");
+    let solidify = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-retire-1",
+            "--task-id",
+            "task-retire-1",
+            "--summary",
+            "准备被淘汰的技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+    assert!(
+        solidify.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&solidify.stderr)
+    );
+
+    let retire = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "retire",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "low usage after maintenance review",
+            "--status",
+            "retired",
+            "--retired-at",
+            "2026-05-09T20:00:00+08:00",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill retire should execute");
+    assert!(
+        retire.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&retire.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&retire.stdout).expect("retire json");
+    assert_eq!(parsed["lifecycle_updated"], true);
+    assert_eq!(parsed["writes_skill_files"], true);
+    assert_eq!(parsed["deletes_skill_files"], false);
+    assert_eq!(parsed["receipt"]["status"], "retired");
+    assert_eq!(parsed["receipt"]["previous_status"], "active");
+    assert_eq!(parsed["boundary"]["deletes_skill_files"], false);
+
+    let path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
+    let content = fs::read_to_string(&path).expect("retired skill should still exist");
+    assert!(path.exists());
+    assert!(content.contains("status: retired"));
+    assert!(content.contains("deletes_skill_file: false"));
+    assert!(content.contains("Lifecycle notice"));
+}
+
+#[test]
+fn cli_skill_retire_text_reports_deprecation_boundary() {
+    let skills_root = test_skills_root("retire-text");
+    let solidify = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-retire-2",
+            "--task-id",
+            "task-retire-2",
+            "--summary",
+            "准备被降级的技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+    assert!(
+        solidify.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&solidify.stderr)
+    );
+
+    let retire = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "deprecate",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "replaced by broader canonical skill",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+        ])
+        .output()
+        .expect("skill deprecate should execute");
+    assert!(
+        retire.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&retire.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&retire.stdout);
+    assert!(stdout.contains("skill_retire lifecycle_updated=true"));
+    assert!(stdout.contains("writes_skill_files=true"));
+    assert!(stdout.contains("deletes_skill_files=false"));
+    assert!(stdout.contains("skill_id=dry_run_skill_candidate_for_xiaoce"));
+    assert!(stdout.contains("status=deprecated"));
+    assert!(stdout.contains("previous_status=active"));
+}
+
+#[test]
+fn cli_skill_deprecate_updates_seeded_canonical_file_without_deleting() {
+    let skills_root = test_skills_root("deprecate-seeded");
+    let path = seed_cli_canonical_skill(&skills_root, 6);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "deprecate",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "covered by a stronger maintained canonical skill",
+            "--retired-at",
+            "2026-05-09T21:00:00+08:00",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill deprecate should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("deprecate json");
+    assert_eq!(parsed["receipt"]["status"], "deprecated");
+    assert_eq!(parsed["receipt"]["previous_status"], "active");
+    assert_eq!(parsed["receipt"]["version"], 7);
+    assert_eq!(parsed["receipt"]["path"], path.display().to_string());
+    assert_eq!(parsed["deletes_skill_files"], false);
+
+    let content = fs::read_to_string(&path).expect("deprecated skill should remain readable");
+    assert!(path.exists());
+    assert!(content.contains("status: deprecated"));
+    assert!(content.contains("version: 7"));
+    assert!(content.contains("deletes_skill_file: false"));
+    assert!(content.contains("Existing canonical body kept for lifecycle tests."));
 }

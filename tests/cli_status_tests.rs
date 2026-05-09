@@ -131,10 +131,10 @@ fn cli_status_prints_mvp_health_summary() {
         "local_contract name=knowledge_context_preview state=ready boundary=local_markdown_text_preview_only read_only=true dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
     ));
     assert!(stdout.contains(
-        "local_contract name=skill_proposal_review state=ready boundary=dry_run_review_only read_only=false dry_run=true connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
+        "local_contract name=skill_proposal_review state=ready boundary=self_scored_review_and_dedup read_only=false dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
     ));
     assert!(stdout.contains(
-        "local_contract name=skill_approval_flow state=ready boundary=approval_receipt_only read_only=false dry_run=true connects_real_service=false writes_core_memory=false writes_repo_files=false executes_plugins=false"
+        "local_contract name=skill_lifecycle_write_retire state=ready boundary=self_maintained_upsert_and_retire read_only=false dry_run=false connects_real_service=false writes_core_memory=false writes_repo_files=true executes_plugins=false"
     ));
     assert!(stdout.contains(
         "local_contract name=plugin_registry_evidence state=ready boundary=manifest_check_only"
@@ -323,15 +323,26 @@ fn cli_status_can_render_json_without_secret_leak() {
         .expect("local contracts should be an array")
         .iter()
         .any(|contract| contract["name"] == "skill_proposal_review"
-            && contract["dry_run"] == true
+            && contract["evidence"]
+                .as_str()
+                .expect("skill proposal review evidence")
+                .contains("writable lifecycle")
+            && contract["dry_run"] == false
             && contract["writes_core_memory"] == false));
     assert!(parsed["local_contract_readiness"]["contracts"]
         .as_array()
         .expect("local contracts should be an array")
         .iter()
-        .any(|contract| contract["name"] == "skill_approval_flow"
-            && contract["dry_run"] == true
-            && contract["boundary"] == "approval_receipt_only"));
+        .any(
+            |contract| contract["name"] == "skill_lifecycle_write_retire"
+                && contract["evidence"]
+                    .as_str()
+                    .expect("skill lifecycle write/retire evidence")
+                    .contains("skill lifecycle write/retire")
+                && contract["dry_run"] == false
+                && contract["writes_repo_files"] == true
+                && contract["boundary"] == "self_maintained_upsert_and_retire"
+        ));
     assert!(parsed["local_contract_readiness"]["contracts"]
         .as_array()
         .expect("local contracts should be an array")

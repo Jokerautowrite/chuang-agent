@@ -1,0 +1,878 @@
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+
+use super::{
+    validate_event, validate_proposal, validate_scope, EvolutionError, EvolutionReceipt,
+    EvolutionScope, RuntimeEvent, SkillApprovalReceipt, SkillEvolver, SkillId, SkillProposal,
+    ValidationReport,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillLifecycleStatus {
+    Active,
+    Deprecated,
+    Retired,
+}
+
+impl SkillLifecycleStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Deprecated => "deprecated",
+            Self::Retired => "retired",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value.trim() {
+            "deprecated" => Self::Deprecated,
+            "retired" => Self::Retired,
+            _ => Self::Active,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillScoreDimension {
+    pub name: String,
+    pub score: u16,
+    pub max_score: u16,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillScoreCard {
+    pub total_score: u16,
+    pub approval_threshold: u16,
+    pub approved: bool,
+    pub dimensions: Vec<SkillScoreDimension>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillSelfApprovalDecision {
+    pub proposal_id: String,
+    pub approved: bool,
+    pub approval_source: String,
+    pub scorecard: SkillScoreCard,
+    pub receipt: SkillApprovalReceipt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUpsertKind {
+    Created,
+    Updated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DuplicateDecision {
+    pub duplicate_found: bool,
+    pub canonical_skill_id: String,
+    pub existing_path: Option<PathBuf>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillUpsertReceipt {
+    pub skill_id: String,
+    pub path: PathBuf,
+    pub version: u32,
+    pub status: SkillLifecycleStatus,
+    pub kind: SkillUpsertKind,
+    pub duplicate_decision: DuplicateDecision,
+    pub approval_decision: SkillSelfApprovalDecision,
+    pub writes_skills: bool,
+    pub deletes_skill: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillRetirementRequest {
+    pub skill_id: String,
+    pub target_status: SkillLifecycleStatus,
+    pub reason: String,
+    pub score: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkillRetirementReceipt {
+    pub skill_id: String,
+    pub path: PathBuf,
+    pub previous_status: SkillLifecycleStatus,
+    pub status: SkillLifecycleStatus,
+    pub reason: String,
+    pub score: Option<u16>,
+    pub writes_skills: bool,
+    pub deletes_skill: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CanonicalSkillEvolver {
+    observed_events: Vec<RuntimeEvent>,
+    skill_root: PathBuf,
+    approval_threshold: u16,
+    last_solidify_receipt: Option<SkillUpsertReceipt>,
+}
+
+impl CanonicalSkillEvolver {
+    pub fn new(skill_root: impl Into<PathBuf>) -> Self {
+        Self {
+            observed_events: Vec::new(),
+            skill_root: skill_root.into(),
+            approval_threshold: 75,
+            last_solidify_receipt: None,
+        }
+    }
+
+    pub fn with_approval_threshold(mut self, approval_threshold: u16) -> Self {
+        self.approval_threshold = approval_threshold.min(100);
+        self
+    }
+
+    pub fn observed_events(&self) -> &[RuntimeEvent] {
+        &self.observed_events
+    }
+
+    pub fn skill_root(&self) -> &Path {
+        &self.skill_root
+    }
+
+    pub fn last_solidify_receipt(&self) -> Option<&SkillUpsertReceipt> {
+        self.last_solidify_receipt.as_ref()
+    }
+
+    pub fn self_approve(
+        &self,
+        proposal: &SkillProposal,
+    ) -> Result<SkillSelfApprovalDecision, EvolutionError> {
+        validate_proposal(proposal)?;
+        let scorecard = self.score(proposal)?;
+        let validation_report = ValidationReport {
+            proposal_id: proposal.proposal_id.clone(),
+            accepted: scorecard.approved,
+            reasons: scorecard.reasons.clone(),
+        };
+        let receipt = if scorecard.approved {
+            SkillApprovalReceipt::approved_receipt(
+                proposal.proposal_id.clone(),
+                validation_report,
+                "self_policy:darwin_rubric".to_string(),
+                None,
+                Some(format!(
+                    "score={} threshold={}",
+                    scorecard.total_score, scorecard.approval_threshold
+                )),
+            )
+        } else {
+            SkillApprovalReceipt {
+                proposal_id: proposal.proposal_id.clone(),
+                validation_report,
+                approved: false,
+                approval_source: "self_policy:darwin_rubric_rejected".to_string(),
+                approved_at: None,
+                approval_note: Some(format!(
+                    "score={} threshold={}; improve proposal before upsert",
+                    scorecard.total_score, scorecard.approval_threshold
+                )),
+            }
+        };
+
+        Ok(SkillSelfApprovalDecision {
+            proposal_id: proposal.proposal_id.clone(),
+            approved: scorecard.approved,
+            approval_source: receipt.approval_source.clone(),
+            scorecard,
+            receipt,
+        })
+    }
+
+    pub fn solidify_with_receipt(
+        &mut self,
+        proposal: SkillProposal,
+    ) -> Result<SkillUpsertReceipt, EvolutionError> {
+        validate_proposal(&proposal)?;
+        let approval_decision = self.self_approve(&proposal)?;
+        if !approval_decision.approved {
+            return Err(EvolutionError::ValidationRejected(
+                approval_decision.scorecard.reasons.clone(),
+            ));
+        }
+
+        fs::create_dir_all(&self.skill_root).map_err(storage_error)?;
+
+        let existing_records = self.load_existing_records()?;
+        let duplicate_decision = duplicate_decision(&proposal, &existing_records);
+        let existing = existing_records
+            .iter()
+            .find(|record| record.skill_id == duplicate_decision.canonical_skill_id);
+        let version = existing.map(|record| record.version + 1).unwrap_or(1);
+        let path = existing
+            .map(|record| record.path.clone())
+            .unwrap_or_else(|| {
+                self.skill_root
+                    .join(format!("{}.md", duplicate_decision.canonical_skill_id))
+            });
+        let rendered = render_skill_markdown(
+            &duplicate_decision.canonical_skill_id,
+            version,
+            SkillLifecycleStatus::Active,
+            &proposal,
+            &approval_decision,
+        );
+        fs::write(&path, rendered).map_err(storage_error)?;
+
+        let receipt = SkillUpsertReceipt {
+            skill_id: duplicate_decision.canonical_skill_id.clone(),
+            path,
+            version,
+            status: SkillLifecycleStatus::Active,
+            kind: if duplicate_decision.duplicate_found {
+                SkillUpsertKind::Updated
+            } else {
+                SkillUpsertKind::Created
+            },
+            duplicate_decision,
+            approval_decision,
+            writes_skills: true,
+            deletes_skill: false,
+        };
+        self.last_solidify_receipt = Some(receipt.clone());
+        Ok(receipt)
+    }
+
+    pub fn retire(
+        &self,
+        request: SkillRetirementRequest,
+    ) -> Result<SkillRetirementReceipt, EvolutionError> {
+        if request.skill_id.trim().is_empty() {
+            return Err(EvolutionError::InvalidProposal(
+                "skill_id must not be empty".to_string(),
+            ));
+        }
+        if request.reason.trim().is_empty() {
+            return Err(EvolutionError::InvalidProposal(
+                "retirement reason must not be empty".to_string(),
+            ));
+        }
+        if matches!(request.target_status, SkillLifecycleStatus::Active) {
+            return Err(EvolutionError::InvalidProposal(
+                "retirement target_status must be deprecated or retired".to_string(),
+            ));
+        }
+
+        let records = self.load_existing_records()?;
+        let record = records
+            .iter()
+            .find(|record| record.skill_id == request.skill_id)
+            .ok_or_else(|| {
+                EvolutionError::StorageError(format!(
+                    "skill not found for retirement: {}",
+                    request.skill_id
+                ))
+            })?;
+        let existing = fs::read_to_string(&record.path).map_err(storage_error)?;
+        let updated = update_lifecycle_frontmatter(
+            &existing,
+            record,
+            request.target_status,
+            &request.reason,
+            request.score,
+        );
+        fs::write(&record.path, updated).map_err(storage_error)?;
+
+        Ok(SkillRetirementReceipt {
+            skill_id: record.skill_id.clone(),
+            path: record.path.clone(),
+            previous_status: record.status,
+            status: request.target_status,
+            reason: request.reason,
+            score: request.score,
+            writes_skills: true,
+            deletes_skill: false,
+        })
+    }
+
+    fn score(&self, proposal: &SkillProposal) -> Result<SkillScoreCard, EvolutionError> {
+        validate_proposal(proposal)?;
+
+        let mut dimensions = vec![
+            dimension(
+                "frontmatter_quality",
+                10,
+                required_text_score(
+                    10,
+                    &[&proposal.proposal_id, &proposal.title, &proposal.trigger],
+                ),
+                "proposal has stable identity, title, and trigger",
+            ),
+            dimension(
+                "workflow_clarity",
+                15,
+                if proposal.procedure.len() >= 3 {
+                    15
+                } else if proposal.procedure.len() >= 2 {
+                    10
+                } else {
+                    5
+                },
+                "procedure contains enough ordered steps",
+            ),
+            dimension(
+                "boundary_coverage",
+                15,
+                boundary_score(proposal),
+                "procedure names verification, approval, governance, risk, or write boundaries",
+            ),
+            dimension(
+                "checkpoint_design",
+                10,
+                keyword_score(
+                    proposal,
+                    10,
+                    &["verify", "test", "check", "record", "report"],
+                ),
+                "procedure includes a checkpoint or verification action",
+            ),
+            dimension(
+                "instruction_specificity",
+                15,
+                specificity_score(proposal),
+                "steps are concrete enough to execute repeatedly",
+            ),
+            dimension(
+                "resource_integration",
+                10,
+                if proposal.provenance.is_empty() || proposal.evidence_event_ids.is_empty() {
+                    0
+                } else {
+                    10
+                },
+                "proposal preserves source event provenance",
+            ),
+            dimension(
+                "overall_architecture",
+                15,
+                if canonical_skill_id_for(&proposal.title, &proposal.proposal_id).len() >= 4 {
+                    15
+                } else {
+                    5
+                },
+                "proposal maps to a stable canonical skill identity",
+            ),
+            dimension(
+                "real_world_test_performance",
+                10,
+                if proposal
+                    .provenance
+                    .iter()
+                    .any(|item| !item.source_summary.trim().is_empty())
+                {
+                    10
+                } else {
+                    5
+                },
+                "proposal is grounded in observed runtime evidence",
+            ),
+        ];
+        let total_score = dimensions.iter().map(|dimension| dimension.score).sum();
+        let approved = total_score >= self.approval_threshold;
+        let mut reasons = dimensions
+            .iter()
+            .map(|dimension| {
+                format!(
+                    "{}={}/{}",
+                    dimension.name, dimension.score, dimension.max_score
+                )
+            })
+            .collect::<Vec<_>>();
+        reasons.push(format!(
+            "total_score={} approval_threshold={} approved={}",
+            total_score, self.approval_threshold, approved
+        ));
+        if !approved {
+            reasons.push(
+                "self approval rejected; keep as proposal for further improvement".to_string(),
+            );
+        }
+
+        dimensions.sort_by(|left, right| left.name.cmp(&right.name));
+
+        Ok(SkillScoreCard {
+            total_score,
+            approval_threshold: self.approval_threshold,
+            approved,
+            dimensions,
+            reasons,
+        })
+    }
+
+    fn load_existing_records(&self) -> Result<Vec<StoredSkillRecord>, EvolutionError> {
+        if !self.skill_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut records = Vec::new();
+        let entries = fs::read_dir(&self.skill_root).map_err(storage_error)?;
+        for entry in entries {
+            let entry = entry.map_err(storage_error)?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            let content = fs::read_to_string(&path).map_err(storage_error)?;
+            records.push(parse_record(&path, &content));
+        }
+        records.sort_by(|left, right| left.skill_id.cmp(&right.skill_id));
+        Ok(records)
+    }
+}
+
+impl SkillEvolver for CanonicalSkillEvolver {
+    fn observe(&mut self, event: RuntimeEvent) -> Result<EvolutionReceipt, EvolutionError> {
+        validate_event(&event)?;
+        self.observed_events.push(event);
+
+        Ok(EvolutionReceipt {
+            accepted: true,
+            message: "event recorded; canonical evolver can self-approve and upsert skills"
+                .to_string(),
+        })
+    }
+
+    fn propose(&self, scope: EvolutionScope) -> Result<Vec<SkillProposal>, EvolutionError> {
+        validate_scope(&scope)?;
+
+        Ok(self
+            .observed_events
+            .iter()
+            .filter(|event| event_matches_scope(&scope, event))
+            .take(scope.max_proposals)
+            .map(|event| SkillProposal {
+                proposal_id: format!(
+                    "canonical-{}-{}",
+                    stable_id_part(&scope.agent_id),
+                    stable_id_part(&event.event_id)
+                ),
+                title: format!("{} reusable workflow", scope.agent_id),
+                trigger: format!("repeatable task observed in {}", event.task_id),
+                procedure: vec![
+                    "Review preserved provenance before applying the workflow.".to_string(),
+                    format!("Repeat the successful task pattern: {}", event.summary),
+                    "Verify the result and record the outcome before maintenance.".to_string(),
+                ],
+                evidence_event_ids: vec![event.event_id.clone()],
+                dry_run: false,
+                writes_skills: true,
+                requires_approval: false,
+                provenance: vec![super::SkillProposalProvenance {
+                    source_event_id: event.event_id.clone(),
+                    source_task_id: event.task_id.clone(),
+                    source_kind: event.kind.clone(),
+                    source_summary: event.summary.clone(),
+                    source_metadata: event.metadata.clone(),
+                }],
+            })
+            .collect())
+    }
+
+    fn validate(&self, proposal: &SkillProposal) -> Result<ValidationReport, EvolutionError> {
+        Ok(self.self_approve(proposal)?.receipt.validation_report)
+    }
+
+    fn solidify(&mut self, proposal: SkillProposal) -> Result<SkillId, EvolutionError> {
+        let receipt = self.solidify_with_receipt(proposal)?;
+        Ok(SkillId(receipt.skill_id))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StoredSkillRecord {
+    skill_id: String,
+    title: String,
+    trigger: String,
+    version: u32,
+    status: SkillLifecycleStatus,
+    path: PathBuf,
+}
+
+fn duplicate_decision(
+    proposal: &SkillProposal,
+    existing_records: &[StoredSkillRecord],
+) -> DuplicateDecision {
+    let candidate_id = canonical_skill_id_for(&proposal.title, &proposal.proposal_id);
+    let candidate_title = normalize_match_text(&proposal.title);
+    let candidate_trigger = normalize_match_text(&proposal.trigger);
+
+    for record in existing_records {
+        if record.skill_id == candidate_id {
+            return DuplicateDecision {
+                duplicate_found: true,
+                canonical_skill_id: record.skill_id.clone(),
+                existing_path: Some(record.path.clone()),
+                reason: "canonical_id_match".to_string(),
+            };
+        }
+        if !candidate_title.is_empty() && normalize_match_text(&record.title) == candidate_title {
+            return DuplicateDecision {
+                duplicate_found: true,
+                canonical_skill_id: record.skill_id.clone(),
+                existing_path: Some(record.path.clone()),
+                reason: "normalized_title_match".to_string(),
+            };
+        }
+        if !candidate_trigger.is_empty()
+            && normalize_match_text(&record.trigger) == candidate_trigger
+        {
+            return DuplicateDecision {
+                duplicate_found: true,
+                canonical_skill_id: record.skill_id.clone(),
+                existing_path: Some(record.path.clone()),
+                reason: "normalized_trigger_match".to_string(),
+            };
+        }
+    }
+
+    DuplicateDecision {
+        duplicate_found: false,
+        canonical_skill_id: candidate_id,
+        existing_path: None,
+        reason: "new_canonical_skill".to_string(),
+    }
+}
+
+fn render_skill_markdown(
+    skill_id: &str,
+    version: u32,
+    status: SkillLifecycleStatus,
+    proposal: &SkillProposal,
+    decision: &SkillSelfApprovalDecision,
+) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("skill_id: {}\n", skill_id));
+    out.push_str(&format!("canonical_id: {}\n", skill_id));
+    out.push_str(&format!("title: {}\n", yaml_scalar(&proposal.title)));
+    out.push_str(&format!("trigger: {}\n", yaml_scalar(&proposal.trigger)));
+    out.push_str(&format!("version: {}\n", version));
+    out.push_str(&format!("status: {}\n", status.as_str()));
+    out.push_str(&format!("score: {}\n", decision.scorecard.total_score));
+    out.push_str(&format!("approval_source: {}\n", decision.approval_source));
+    out.push_str("source_proposal_ids:\n");
+    out.push_str(&format!("  - {}\n", proposal.proposal_id));
+    out.push_str("evidence_event_ids:\n");
+    for event_id in &proposal.evidence_event_ids {
+        out.push_str(&format!("  - {}\n", event_id));
+    }
+    out.push_str("---\n\n");
+    out.push_str(&format!("# {}\n\n", proposal.title));
+    out.push_str("## Trigger\n\n");
+    out.push_str(&proposal.trigger);
+    out.push_str("\n\n## Procedure\n\n");
+    for step in &proposal.procedure {
+        out.push_str(&format!("- {}\n", step));
+    }
+    out.push_str("\n## Provenance\n\n");
+    for item in &proposal.provenance {
+        out.push_str(&format!(
+            "- event={} task={} kind={:?}\n",
+            item.source_event_id, item.source_task_id, item.source_kind
+        ));
+    }
+    out.push_str("\n## Maintenance\n\n");
+    out.push_str(&format!(
+        "- status={} version={} score={}\n",
+        status.as_str(),
+        version,
+        decision.scorecard.total_score
+    ));
+    out.push_str("- duplicate policy: update the canonical skill instead of creating copies.\n");
+    out.push_str(
+        "- retirement policy: deprecate or retire in place; never delete skill history.\n",
+    );
+    out
+}
+
+fn update_lifecycle_frontmatter(
+    existing: &str,
+    record: &StoredSkillRecord,
+    target_status: SkillLifecycleStatus,
+    reason: &str,
+    score: Option<u16>,
+) -> String {
+    let mut lines = existing.lines().map(String::from).collect::<Vec<_>>();
+    if lines.first().map(String::as_str) == Some("---") {
+        let mut in_frontmatter = true;
+        let mut saw_status = false;
+        let mut saw_version = false;
+        let mut insert_at = 1;
+        for (index, line) in lines.iter_mut().enumerate().skip(1) {
+            if line == "---" {
+                insert_at = index;
+                in_frontmatter = false;
+                break;
+            }
+            if let Some((key, _)) = line.split_once(':') {
+                match key.trim() {
+                    "status" => {
+                        *line = format!("status: {}", target_status.as_str());
+                        saw_status = true;
+                    }
+                    "version" => {
+                        *line = format!("version: {}", record.version + 1);
+                        saw_version = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if !in_frontmatter {
+            let mut additions = Vec::new();
+            if !saw_status {
+                additions.push(format!("status: {}", target_status.as_str()));
+            }
+            if !saw_version {
+                additions.push(format!("version: {}", record.version + 1));
+            }
+            additions.push(format!("retirement_reason: {}", yaml_scalar(reason)));
+            if let Some(score) = score {
+                additions.push(format!("retirement_score: {}", score));
+            }
+            for addition in additions.into_iter().rev() {
+                lines.insert(insert_at, addition);
+            }
+            let mut updated = lines.join("\n");
+            updated.push('\n');
+            return updated;
+        }
+    }
+
+    let mut updated = String::new();
+    updated.push_str("---\n");
+    updated.push_str(&format!("skill_id: {}\n", record.skill_id));
+    updated.push_str(&format!("canonical_id: {}\n", record.skill_id));
+    updated.push_str(&format!("title: {}\n", yaml_scalar(&record.title)));
+    updated.push_str(&format!("trigger: {}\n", yaml_scalar(&record.trigger)));
+    updated.push_str(&format!("version: {}\n", record.version + 1));
+    updated.push_str(&format!("status: {}\n", target_status.as_str()));
+    updated.push_str(&format!("retirement_reason: {}\n", yaml_scalar(reason)));
+    if let Some(score) = score {
+        updated.push_str(&format!("retirement_score: {}\n", score));
+    }
+    updated.push_str("---\n\n");
+    updated.push_str(existing);
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated
+}
+
+fn parse_record(path: &Path, content: &str) -> StoredSkillRecord {
+    let mut skill_id = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| "skill".to_string());
+    let mut title = heading_title(content).unwrap_or_else(|| skill_id.replace('-', " "));
+    let mut trigger = String::new();
+    let mut version = 1;
+    let mut status = SkillLifecycleStatus::Active;
+
+    if let Some(frontmatter) = frontmatter_lines(content) {
+        for line in frontmatter {
+            if let Some((key, value)) = line.split_once(':') {
+                let value = unquote_yaml_scalar(value.trim());
+                match key.trim() {
+                    "skill_id" | "canonical_id" => skill_id = stable_id_part(&value),
+                    "title" => title = value,
+                    "trigger" => trigger = value,
+                    "version" => version = value.parse::<u32>().unwrap_or(1),
+                    "status" => status = SkillLifecycleStatus::from_str(&value),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    StoredSkillRecord {
+        skill_id,
+        title,
+        trigger,
+        version,
+        status,
+        path: path.to_path_buf(),
+    }
+}
+
+fn frontmatter_lines(content: &str) -> Option<Vec<&str>> {
+    let mut lines = content.lines();
+    if lines.next()? != "---" {
+        return None;
+    }
+    let mut frontmatter = Vec::new();
+    for line in lines {
+        if line == "---" {
+            return Some(frontmatter);
+        }
+        frontmatter.push(line);
+    }
+    None
+}
+
+fn heading_title(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        line.strip_prefix("# ")
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn dimension(name: &str, max_score: u16, score: u16, reason: &str) -> SkillScoreDimension {
+    SkillScoreDimension {
+        name: name.to_string(),
+        score: score.min(max_score),
+        max_score,
+        reason: reason.to_string(),
+    }
+}
+
+fn required_text_score(max_score: u16, values: &[&str]) -> u16 {
+    if values.iter().all(|value| !value.trim().is_empty()) {
+        max_score
+    } else {
+        0
+    }
+}
+
+fn boundary_score(proposal: &SkillProposal) -> u16 {
+    let text = proposal_text(proposal);
+    let keywords = [
+        "approval",
+        "approve",
+        "governance",
+        "risk",
+        "boundary",
+        "secret",
+        "delete",
+        "write",
+        "solidify",
+        "verify",
+        "test",
+        "audit",
+    ];
+    let hits = keywords
+        .iter()
+        .filter(|keyword| text.contains(**keyword))
+        .count();
+    match hits {
+        0 => 5,
+        1 => 10,
+        _ => 15,
+    }
+}
+
+fn keyword_score(proposal: &SkillProposal, max_score: u16, keywords: &[&str]) -> u16 {
+    let text = proposal_text(proposal);
+    if keywords.iter().any(|keyword| text.contains(*keyword)) {
+        max_score
+    } else {
+        max_score / 2
+    }
+}
+
+fn specificity_score(proposal: &SkillProposal) -> u16 {
+    let average_len = proposal
+        .procedure
+        .iter()
+        .map(|step| step.trim().len())
+        .sum::<usize>()
+        / proposal.procedure.len().max(1);
+    if average_len >= 24 {
+        15
+    } else if average_len >= 12 {
+        10
+    } else {
+        5
+    }
+}
+
+fn proposal_text(proposal: &SkillProposal) -> String {
+    let mut parts = vec![proposal.title.as_str(), proposal.trigger.as_str()];
+    parts.extend(proposal.procedure.iter().map(String::as_str));
+    parts.join(" ").to_ascii_lowercase()
+}
+
+fn event_matches_scope(scope: &EvolutionScope, event: &RuntimeEvent) -> bool {
+    match &scope.task_kind {
+        Some(task_kind) => match event.metadata.get("task_kind") {
+            Some(event_task_kind) => event_task_kind == task_kind,
+            None => true,
+        },
+        None => true,
+    }
+}
+
+fn canonical_skill_id_for(title: &str, fallback: &str) -> String {
+    let from_title = stable_id_part(&normalize_match_text(title));
+    if from_title == "skill" {
+        stable_id_part(fallback)
+    } else {
+        from_title
+    }
+}
+
+fn normalize_match_text(value: &str) -> String {
+    let mut words = BTreeSet::new();
+    for word in value
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(str::trim)
+        .filter(|word| !word.is_empty())
+    {
+        words.insert(word.to_ascii_lowercase());
+    }
+    words.into_iter().collect::<Vec<_>>().join("-")
+}
+
+fn stable_id_part(value: &str) -> String {
+    let normalized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+
+    let collapsed = normalized
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if collapsed.is_empty() {
+        "skill".to_string()
+    } else {
+        collapsed
+    }
+}
+
+fn yaml_scalar(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn unquote_yaml_scalar(value: &str) -> String {
+    value
+        .trim_matches('"')
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+fn storage_error(err: std::io::Error) -> EvolutionError {
+    EvolutionError::StorageError(err.to_string())
+}

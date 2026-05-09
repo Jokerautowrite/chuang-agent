@@ -165,16 +165,19 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .contracts
         .iter()
         .any(|contract| contract.name == "skill_proposal_review"
-            && contract.dry_run
+            && contract.evidence.contains("writable lifecycle")
+            && !contract.dry_run
             && !contract.writes_core_memory));
     assert!(status
         .local_contract_readiness
         .contracts
         .iter()
-        .any(|contract| contract.name == "skill_approval_flow"
-            && contract.dry_run
+        .any(|contract| contract.name == "skill_lifecycle_write_retire"
+            && contract.evidence.contains("skill lifecycle write/retire")
+            && !contract.dry_run
             && !contract.writes_core_memory
-            && contract.boundary == "approval_receipt_only"));
+            && contract.writes_repo_files
+            && contract.boundary == "self_maintained_upsert_and_retire"));
     assert!(status
         .local_contract_readiness
         .contracts

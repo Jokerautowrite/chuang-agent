@@ -2,9 +2,15 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+mod canonical;
 mod dry_run;
 mod noop;
 
+pub use canonical::{
+    CanonicalSkillEvolver, DuplicateDecision, SkillLifecycleStatus, SkillRetirementReceipt,
+    SkillRetirementRequest, SkillScoreCard, SkillScoreDimension, SkillSelfApprovalDecision,
+    SkillUpsertKind, SkillUpsertReceipt,
+};
 pub use dry_run::DryRunProposalEvolver;
 pub use noop::NoopEvolver;
 
@@ -89,7 +95,7 @@ impl SkillApprovalReceipt {
             approval_source: "pending_operator_approval".to_string(),
             approved_at: None,
             approval_note: Some(
-                "skill propose only emits a local review ticket; solidify remains refused"
+                "skill propose only emits a local review ticket; canonical solidify is handled by the write path"
                     .to_string(),
             ),
         }
@@ -339,6 +345,7 @@ pub enum EvolutionError {
     InvalidScope(String),
     InvalidProposal(String),
     ValidationRejected(Vec<String>),
+    StorageError(String),
 }
 
 pub trait SkillEvolver {
