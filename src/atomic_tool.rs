@@ -99,7 +99,7 @@ pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
             kind: AtomicToolKind::Mouse,
             name: "mouse",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
+            status: AtomicToolStatus::Mapped,
             implementation: Some("actuator.click"),
             description: "Mouse-level desktop operation such as click or coordinate action.",
         },
@@ -107,7 +107,7 @@ pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
             kind: AtomicToolKind::Keyboard,
             name: "keyboard",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
+            status: AtomicToolStatus::Mapped,
             implementation: Some("actuator.input_text"),
             description: "Keyboard text input or key-level interaction through the actuator port.",
         },
@@ -115,7 +115,7 @@ pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
             kind: AtomicToolKind::Screenshot,
             name: "screenshot",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
+            status: AtomicToolStatus::Mapped,
             implementation: Some("actuator.screenshot"),
             description: "Capture visual evidence for observation and verification.",
         },
@@ -123,7 +123,7 @@ pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
             kind: AtomicToolKind::Locate,
             name: "locate",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
+            status: AtomicToolStatus::Mapped,
             implementation: Some("actuator.observe"),
             description: "Locate UI state or target elements from visual/context evidence.",
         },
@@ -156,16 +156,16 @@ pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
             kind: AtomicToolKind::Wait,
             name: "wait",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
-            implementation: None,
+            status: AtomicToolStatus::Mapped,
+            implementation: Some("tool_runtime.wait"),
             description: "Wait or poll for state change before continuing an operation.",
         },
         AtomicToolManifest {
             kind: AtomicToolKind::HumanSuspend,
             name: "human_suspend",
             source: "GenericAgent",
-            status: AtomicToolStatus::InterfaceOnly,
-            implementation: None,
+            status: AtomicToolStatus::Mapped,
+            implementation: Some("tool_runtime.human_suspend"),
             description: "Pause safely and ask the human for help when state is uncertain.",
         },
     ]
@@ -240,12 +240,12 @@ impl AtomicToolRegistry {
 
     pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
         let mapped = self.mapped_atomic_names().join(", ");
-        let interface_only = self.interface_only_atomic_names().join("/");
         format!(
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
 辅助工具：list_dir, apply_patch。兼容旧名：read_file, write_file, shell_exec。\n\
-桌面原子工具 {interface_only} 目前只在 actuator 接口层登记，不能直接调用。\n\
+桌面原子工具 mouse/keyboard/screenshot/locate 已映射到 actuator 端口；真实桌面/浏览器动作仍要求配置过的 adapter、治理和审计。\n\
+人工暂停工具 human_suspend 可用于停止自动推进并返回需要人工介入的结构化结果。\n\
 输出协议：\n\
 1. 优先输出一行 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"...\"}}}}\n\
 2. 完成时，优先输出一行 ACTION: {{\"schema_version\":1,\"type\":\"final\",\"answer\":\"最终答复\"}}\n\
@@ -302,6 +302,7 @@ pub fn tool_call_atomic_kind(call: &ToolCall) -> ToolCallAtomicKind {
         ToolCall::Screenshot { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Screenshot),
         ToolCall::Locate { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Locate),
         ToolCall::Wait { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Wait),
+        ToolCall::HumanSuspend { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::HumanSuspend),
         ToolCall::ReadFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileRead),
         ToolCall::WriteFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileWrite),
         ToolCall::ShellExec { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::CodeExecute),
@@ -319,6 +320,7 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
         ToolCall::Wait { .. } => "wait",
+        ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",

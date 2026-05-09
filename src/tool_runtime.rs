@@ -54,6 +54,11 @@ pub enum ToolCall {
     Wait {
         millis: u64,
     },
+    HumanSuspend {
+        reason: String,
+        #[serde(default)]
+        prompt: Option<String>,
+    },
     ApplyPatch {
         patch: String,
     },
@@ -233,6 +238,8 @@ pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
     "secret",
     "target",
     "millis",
+    "reason",
+    "prompt",
     "patch",
     "command",
     "cwd",
@@ -428,9 +435,18 @@ impl ToolLoopReport {
         rounds: usize,
         calls: Vec<ToolExecutionRecord>,
     ) -> Self {
+        Self::with_status(workspace_root, rounds, calls, "completed")
+    }
+
+    pub fn with_status(
+        workspace_root: &Path,
+        rounds: usize,
+        calls: Vec<ToolExecutionRecord>,
+        status: &str,
+    ) -> Self {
         Self {
             schema_version: TOOL_LOOP_REPORT_SCHEMA_VERSION,
-            status: "completed".to_string(),
+            status: status.to_string(),
             workspace_root: workspace_root.display().to_string(),
             rounds,
             call_count: calls.len(),
@@ -460,11 +476,6 @@ impl ToolSurfaceStatus {
             .map(str::to_string)
             .collect::<Vec<_>>();
         let mut callable_tools = mapped_atomic_tools.clone();
-        callable_tools.push("mouse".to_string());
-        callable_tools.push("keyboard".to_string());
-        callable_tools.push("screenshot".to_string());
-        callable_tools.push("locate".to_string());
-        callable_tools.push("wait".to_string());
         callable_tools.push("list_dir".to_string());
         callable_tools.push("apply_patch".to_string());
         callable_tools.push("memory_recall".to_string());
@@ -670,6 +681,9 @@ fn execute_tool_call_with_registry_and_config(
         }
         ToolCall::Wait { millis } => {
             execute_wait(registry, call, config.actuator.as_ref(), *millis)
+        }
+        ToolCall::HumanSuspend { reason, prompt } => {
+            execute_human_suspend(registry, call, reason, prompt.as_deref())
         }
         ToolCall::ApplyPatch { patch } => {
             execute_apply_patch(workspace_root, registry, call, patch)
@@ -924,6 +938,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
         ToolCall::Wait { .. } => "wait",
+        ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",
@@ -1509,7 +1524,8 @@ fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> Actio
         | ToolCall::Keyboard { .. }
         | ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
-        | ToolCall::Wait { .. } => ActionKind::Observe,
+        | ToolCall::Wait { .. }
+        | ToolCall::HumanSuspend { .. } => ActionKind::Observe,
         ToolCall::WriteFile { .. } => ActionKind::LocalFileWrite,
         ToolCall::ApplyPatch { .. } => ActionKind::LocalFileWrite,
         ToolCall::ShellExec { command, .. } => {
@@ -1571,6 +1587,9 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
             target.as_deref().unwrap_or("screen")
         ),
         ToolCall::Wait { millis } => format!("actuator::wait millis={}", millis),
+        ToolCall::HumanSuspend { reason, .. } => {
+            format!("human::suspend reason={}", reason.trim())
+        }
         ToolCall::ApplyPatch { patch } => format!(
             "{}::apply_patch bytes={}",
             workspace_root.display(),
@@ -1610,6 +1629,11 @@ fn tool_summary(call: &ToolCall) -> String {
             format!("locate target={}", target.as_deref().unwrap_or("screen"))
         }
         ToolCall::Wait { millis } => format!("wait millis={}", millis),
+        ToolCall::HumanSuspend { reason, prompt } => format!(
+            "human_suspend reason={} prompt={}",
+            reason.trim(),
+            prompt.as_deref().unwrap_or("none").trim()
+        ),
         ToolCall::ApplyPatch { patch } => {
             format!("apply_patch bytes={}", patch.len())
         }
@@ -1638,6 +1662,7 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         | ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
         | ToolCall::Wait { .. }
+        | ToolCall::HumanSuspend { .. }
         | ToolCall::ApplyPatch { .. }
         | ToolCall::ShellExec { .. }
         | ToolCall::MemoryRecall { .. } => None,
@@ -1817,6 +1842,30 @@ fn execute_wait(
         None,
         false,
     )
+}
+
+fn execute_human_suspend(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    reason: &str,
+    prompt: Option<&str>,
+) -> ToolExecutionRecord {
+    let prompt = prompt.unwrap_or("none").trim();
+    let mut record = success_record(
+        registry,
+        call,
+        format!("human_suspend reason={}", reason.trim()),
+        Some(format!(
+            "human_input_required reason={} prompt={}",
+            reason.trim(),
+            prompt
+        )),
+        false,
+    );
+    record.ok = false;
+    record.failure_class = Some("human_input_required".to_string());
+    record.retryable = false;
+    record
 }
 
 fn execute_apply_patch(

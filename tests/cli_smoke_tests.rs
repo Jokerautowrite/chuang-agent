@@ -284,10 +284,22 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("[ \"$operator_status\" -ne 0 ] && [ \"$operator_status\" -ne 1 ]"));
     assert!(wrapper.contains("live_operator_checklist_status="));
     assert!(wrapper.contains("live_operator_checklist_blockers="));
+    assert!(wrapper.contains("live_operator_real_live_acceptance="));
+    assert!(wrapper.contains("live_operator_real_live_gap_count="));
     assert!(wrapper.contains("goal_run_status_overall="));
     assert!(wrapper.contains("third_test_candidate_smoke_ok"));
     assert!(wrapper.contains("boundaries[\"connects_real_feishu\"] is False"));
     assert!(wrapper.contains("boundaries[\"sends_feishu_messages\"] is False"));
+    assert!(wrapper.contains("boundaries[\"connects_real_provider\"] is False"));
+    assert!(wrapper.contains("boundaries[\"performs_desktop_actions\"] is False"));
+    assert!(wrapper.contains("boundaries[\"performs_browser_actions\"] is False"));
+    assert!(wrapper.contains("boundaries[\"connects_real_wiki\"] is False"));
+    assert!(wrapper.contains("boundaries[\"connects_real_gbrain\"] is False"));
+    assert!(wrapper.contains("real_live[\"complete\"] is False"));
+    assert!(wrapper.contains("real_live[\"status\"] == \"not_verified\""));
+    assert!(wrapper.contains("real_live[\"gap_count\"] == 6"));
+    assert!(wrapper
+        .contains("[\"feishu\", \"provider\", \"desktop\", \"browser\", \"wiki\", \"gbrain\"]"));
     assert!(wrapper.contains("boundaries[\"starts_services\"] is False"));
     assert!(wrapper.contains("boundaries[\"touches_services\"] is False"));
     assert!(!wrapper.contains("systemctl"));
@@ -521,6 +533,11 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert!(script.contains("CHUANG_LIVE_OPERATOR_ENV_FILE"));
     assert!(script.contains("\"connects_real_feishu\": False"));
     assert!(script.contains("\"sends_feishu_messages\": False"));
+    assert!(script.contains("\"connects_real_provider\": False"));
+    assert!(script.contains("\"performs_desktop_actions\": False"));
+    assert!(script.contains("\"performs_browser_actions\": False"));
+    assert!(script.contains("\"connects_real_wiki\": False"));
+    assert!(script.contains("\"connects_real_gbrain\": False"));
     assert!(script.contains("\"starts_services\": False"));
     assert!(script.contains("\"starts_workers\": False"));
     assert!(script.contains("\"dispatches_tasks\": False"));
@@ -538,6 +555,13 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert!(script.contains("cargo run --quiet -- status --json"));
     assert!(script.contains("local_readonly_evidence"));
     assert!(script.contains("scripts/chuang-live-readonly-preflight.sh"));
+    assert!(script.contains("real_live_acceptance"));
+    assert!(script.contains("completion_state"));
+    assert!(script.contains("not_verified"));
+    assert!(script.contains("must_not_count_as_complete"));
+    assert!(script.contains("wiki_source_contract"));
+    assert!(script.contains("gbrain_source_contract"));
+    assert!(script.contains("external_ai_dry_run"));
     assert!(script.contains("normal text to app-server"));
     assert!(script.contains("does not reuse Codex/Hermes credentials"));
     assert!(!script.contains("systemctl"));
@@ -605,6 +629,17 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert_eq!(data["readonly_boundaries"]["readonly"], true);
     assert_eq!(data["readonly_boundaries"]["connects_real_feishu"], false);
     assert_eq!(data["readonly_boundaries"]["sends_feishu_messages"], false);
+    assert_eq!(data["readonly_boundaries"]["connects_real_provider"], false);
+    assert_eq!(
+        data["readonly_boundaries"]["performs_desktop_actions"],
+        false
+    );
+    assert_eq!(
+        data["readonly_boundaries"]["performs_browser_actions"],
+        false
+    );
+    assert_eq!(data["readonly_boundaries"]["connects_real_wiki"], false);
+    assert_eq!(data["readonly_boundaries"]["connects_real_gbrain"], false);
     assert_eq!(data["readonly_boundaries"]["starts_services"], false);
     assert_eq!(data["readonly_boundaries"]["starts_workers"], false);
     assert_eq!(data["readonly_boundaries"]["dispatches_tasks"], false);
@@ -642,6 +677,18 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
         data["commands"]["bridge_capabilities_command"],
         "send /capabilities to the Chuang Feishu bot"
     );
+    assert_eq!(
+        data["commands"]["wiki_source_contract"],
+        "cargo run --quiet -- memory knowledge source-contract --source wiki --json"
+    );
+    assert_eq!(
+        data["commands"]["gbrain_source_contract"],
+        "cargo run --quiet -- memory knowledge source-contract --source gbrain --json"
+    );
+    assert!(data["commands"]["external_ai_dry_run"]
+        .as_str()
+        .unwrap_or("")
+        .contains("--dry-run --json"));
     let mounted = data["mounted_feishu_capabilities"]
         .as_array()
         .expect("mounted feishu capabilities should be an array");
@@ -698,6 +745,27 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     assert!(readonly_steps
         .iter()
         .any(|step| step == "complete local smoke"));
+    assert_eq!(data["real_live_acceptance"]["complete"], false);
+    assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 6);
+    assert_eq!(
+        data["real_live_acceptance"]["cannot_mark_complete_from_readonly_checklist"],
+        true
+    );
+    let live_gaps = data["real_live_acceptance"]["services"]
+        .as_array()
+        .expect("real live acceptance services should be array");
+    assert_eq!(live_gaps.len(), 6);
+    for id in ["feishu", "provider", "desktop", "browser", "wiki", "gbrain"] {
+        let gap = live_gaps
+            .iter()
+            .find(|item| item["id"] == id)
+            .expect("expected live gap should be present");
+        assert_eq!(gap["completion_state"], "not_verified");
+        assert_eq!(gap["must_not_count_as_complete"], true);
+        assert_eq!(gap["connects_real_service_in_checklist"], false);
+        assert_eq!(gap["prints_secret_values"], false);
+    }
     assert!(data["suggested_provider_env_file"].is_null());
     assert!(data["manual_steps"]
         .as_array()
@@ -717,6 +785,14 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
             .as_str()
             .unwrap_or("")
             .contains("provider_readiness_check")));
+    assert!(data["manual_steps"]
+        .as_array()
+        .expect("manual steps should be an array")
+        .iter()
+        .any(|step| step
+            .as_str()
+            .unwrap_or("")
+            .contains("real live acceptance as incomplete")));
 }
 
 #[test]

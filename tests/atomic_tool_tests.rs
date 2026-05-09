@@ -74,7 +74,7 @@ fn current_mvp_tools_map_into_ga_atomic_tool_layer() {
 }
 
 #[test]
-fn manifest_marks_implemented_and_interface_only_tools() {
+fn manifest_marks_all_ga_tools_mapped_to_runtime_ports() {
     let manifests = ga_atomic_tool_manifests();
     let mapped = manifests
         .iter()
@@ -85,25 +85,18 @@ fn manifest_marks_implemented_and_interface_only_tools() {
     assert_eq!(
         mapped,
         vec![
+            AtomicToolKind::Mouse,
+            AtomicToolKind::Keyboard,
+            AtomicToolKind::Screenshot,
+            AtomicToolKind::Locate,
             AtomicToolKind::FileRead,
             AtomicToolKind::FileWrite,
             AtomicToolKind::CodeExecute,
+            AtomicToolKind::Wait,
+            AtomicToolKind::HumanSuspend,
         ]
     );
-    assert!(manifests
-        .iter()
-        .find(|tool| tool.kind == AtomicToolKind::Mouse)
-        .expect("mouse tool")
-        .implementation
-        .is_some());
-    assert_eq!(
-        manifests
-            .iter()
-            .find(|tool| tool.kind == AtomicToolKind::HumanSuspend)
-            .expect("human suspend tool")
-            .status,
-        AtomicToolStatus::InterfaceOnly
-    );
+    assert!(manifests.iter().all(|tool| tool.implementation.is_some()));
 }
 
 #[test]
@@ -186,7 +179,8 @@ fn atomic_tool_registry_generates_tool_instruction_block() {
 
     assert!(instructions.contains("file_read, file_write, code_execute"));
     assert!(instructions.contains("辅助工具：list_dir"));
-    assert!(instructions.contains("mouse/keyboard/screenshot/locate/wait/human_suspend"));
+    assert!(instructions.contains("mouse, keyboard, screenshot, locate"));
+    assert!(instructions.contains("human_suspend"));
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains("/tmp/workspace"));
 }

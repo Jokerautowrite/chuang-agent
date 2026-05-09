@@ -231,6 +231,38 @@ where
                     protocol_error_message: None,
                 });
                 tool_calls.push(record);
+                if tool_calls
+                    .last()
+                    .and_then(|record| record.failure_class.as_deref())
+                    == Some("human_input_required")
+                {
+                    turn.user_input = original_input.clone();
+                    turn.result.response.body = tool_calls
+                        .last()
+                        .and_then(|record| record.output.clone())
+                        .unwrap_or_else(|| "human_input_required".to_string());
+                    insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                    insert_tool_metadata_with_status(
+                        &mut turn,
+                        workspace_root,
+                        round_index + 1,
+                        &tool_calls,
+                        &protocol_errors,
+                        &tool_events,
+                        &transcript,
+                        "human_input_required",
+                    )?;
+                    turn.result.response.meta.extra.insert(
+                        "tool_loop_status".to_string(),
+                        "human_input_required".to_string(),
+                    );
+                    turn.result
+                        .response
+                        .meta
+                        .extra
+                        .insert("human_input_required".to_string(), "true".to_string());
+                    return Ok(turn);
+                }
                 current_input = format!(
                     "原始用户请求:\n{}\n\n工具执行记录:\n{}\n\n请继续。若已完成，请输出 FINAL: <最终答复>。",
                     original_input,
@@ -523,7 +555,29 @@ fn insert_tool_metadata(
     tool_events: &[ToolLoopEvent],
     transcript: &[String],
 ) -> Result<(), String> {
-    let report = ToolLoopReport::completed(workspace_root, rounds, tool_calls.to_vec());
+    insert_tool_metadata_with_status(
+        turn,
+        workspace_root,
+        rounds,
+        tool_calls,
+        protocol_errors,
+        tool_events,
+        transcript,
+        "completed",
+    )
+}
+
+fn insert_tool_metadata_with_status(
+    turn: &mut ChuangKernelTurn,
+    workspace_root: &Path,
+    rounds: usize,
+    tool_calls: &[ToolExecutionRecord],
+    protocol_errors: &[ToolProtocolError],
+    tool_events: &[ToolLoopEvent],
+    transcript: &[String],
+    status: &str,
+) -> Result<(), String> {
+    let report = ToolLoopReport::with_status(workspace_root, rounds, tool_calls.to_vec(), status);
     turn.result
         .response
         .meta
@@ -555,6 +609,11 @@ fn insert_tool_metadata(
         "tool_report_json".to_string(),
         serde_json::to_string(&report).map_err(|e| format!("tool_report_json_failed: {e}"))?,
     );
+    turn.result
+        .response
+        .meta
+        .extra
+        .insert("tool_loop_status".to_string(), status.to_string());
     Ok(())
 }
 
@@ -1077,6 +1136,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
         ToolCall::Wait { .. } => "wait",
+        ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",
@@ -1874,6 +1934,77 @@ mod tests {
         let written = fs::read_to_string(workspace_root.join("notes/out.txt"))
             .expect("tool should have written output file");
         assert_eq!(written, "hello");
+    }
+
+    #[test]
+    fn run_with_options_stops_tool_loop_on_human_suspend() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-human-suspend-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            r#"ACTION: {"type":"tool_call","call":{"tool":"human_suspend","reason":"uncertain live state","prompt":"approve next action?"}}"#,
+            r#"ACTION: {"type":"final","answer":"this should not be reached"}"#,
+        ]);
+        let remaining_outputs = responder.outputs.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "如果状态不确定就暂停".to_string(),
+            Vec::new(),
+        )
+        .expect("human suspend should return the current turn");
+
+        assert!(turn.result.response.body.contains("human_input_required"));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("human_input_required")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("human_input_required")
+        );
+        let tool_report_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_report_json")
+            .expect("tool report json should exist");
+        assert!(tool_report_json.contains("\"status\":\"human_input_required\""));
+        assert!(tool_report_json.contains("\"failure_class\":\"human_input_required\""));
+        assert_eq!(
+            remaining_outputs
+                .lock()
+                .expect("sequence lock should succeed")
+                .len(),
+            1,
+            "tool loop should not ask the model for the next round after human_suspend"
+        );
     }
 
     #[test]

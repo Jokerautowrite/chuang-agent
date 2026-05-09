@@ -69,6 +69,13 @@ fn subagent_live_preflight_command(args: &[String]) -> Result<(), String> {
                 output.rehearsal.next_action
             );
             println!(
+                "worker_runtime live_worker_available={} worker_runtime_state={} adapter_entrypoint={} reason={}",
+                output.rehearsal.live_worker_available,
+                output.rehearsal.worker_runtime_state,
+                output.rehearsal.adapter_entrypoint,
+                output.rehearsal.worker_runtime_reason
+            );
+            println!(
                 "gate enabled={} env_value_state={} required_env={} default_enabled={} audit_label={} preflight_checks={} reason={}",
                 output.rehearsal.gate.enabled,
                 output.rehearsal.gate.env_value_state,

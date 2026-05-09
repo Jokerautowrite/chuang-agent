@@ -305,6 +305,7 @@ pub struct AtomicToolSurfaceStatus {
     pub mapped_atomic_tool_names: Vec<String>,
     pub interface_only_atomic_tool_names: Vec<String>,
     pub desktop_browser_interface_only_atomic_tool_names: Vec<String>,
+    pub desktop_browser_live_gated_atomic_tool_names: Vec<String>,
     pub interface_only_reason: String,
     pub local_cli_self_check_entrypoints: Vec<String>,
     pub manifest_schema_version: u16,
@@ -412,7 +413,7 @@ pub fn build_chuang_mvp_status(
     let provider_readiness = build_provider_readiness(config, &config_summary);
     let atomic_tools = AtomicToolSurfaceStatus {
         source: "GenericAgent".to_string(),
-        ok: atomic_manifests.len() == 9 && mapped_count == 3 && interface_only_count == 6,
+        ok: atomic_manifests.len() == 9 && mapped_count == 9 && interface_only_count == 0,
         total_count: atomic_manifests.len(),
         mapped_count,
         interface_only_count,
@@ -442,7 +443,12 @@ pub fn build_chuang_mvp_status(
             })
             .map(|tool| tool.name.to_string())
             .collect(),
-        interface_only_reason: "desktop/browser atoms are exposed as interface contracts only until an audited actuator adapter is configured".to_string(),
+        desktop_browser_live_gated_atomic_tool_names: atomic_manifests
+            .iter()
+            .filter(|tool| matches!(tool.name, "mouse" | "keyboard" | "screenshot" | "locate"))
+            .map(|tool| tool.name.to_string())
+            .collect(),
+        interface_only_reason: "all GA atoms are mapped to governed runtime ports; real desktop/browser execution still requires an audited actuator adapter, live gate, allowlist, and receipt".to_string(),
         local_cli_self_check_entrypoints: vec![
             "status --json".to_string(),
             "doctor --json".to_string(),

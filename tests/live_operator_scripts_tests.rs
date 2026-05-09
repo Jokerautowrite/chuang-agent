@@ -271,3 +271,91 @@ fn live_readonly_preflight_wrapper_includes_provider_readiness_evidence_and_stay
     assert!(!wrapper.contains(".codex-im/.env"));
     assert!(!wrapper.contains("hermes-gateway"));
 }
+
+#[test]
+fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claiming_live() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-live-operator-checklist-matrix-{}-{nanos}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let provider_env = temp_dir.join("provider.env");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
+    )
+    .expect("provider env should write");
+    let env_file = temp_dir.join("chuang-feishu.env");
+    fs::write(
+        &env_file,
+        format!(
+            "CHUANG_FEISHU_APP_ID=app-secret-value\nCHUANG_FEISHU_APP_SECRET=feishu-secret-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_PROVIDER_ENV_FILE={}\n",
+            manifest_dir.display(),
+            provider_env.display()
+        ),
+    )
+    .expect("operator env should write");
+
+    let output = Command::new("bash")
+        .arg(&script_path)
+        .arg("--json")
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &env_file)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("checklist should execute");
+    assert!(
+        output.status.success(),
+        "stderr: {} stdout: {}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value =
+        serde_json::from_str(&stdout).expect("checklist output should be json");
+    let matrix = data["external_live_acceptance_matrix"]
+        .as_array()
+        .expect("matrix should be an array");
+    let surfaces = matrix
+        .iter()
+        .map(|item| item["id"].as_str().expect("id should be string"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        surfaces,
+        vec!["feishu", "provider", "desktop", "browser", "wiki", "gbrain"]
+    );
+    assert_eq!(data["real_live_acceptance"]["complete"], false);
+    assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 6);
+    assert_eq!(data["real_live_acceptance"]["checklist_is_readonly"], true);
+    assert_eq!(
+        data["real_live_acceptance"]["cannot_mark_complete_from_readonly_checklist"],
+        true
+    );
+    for item in matrix {
+        assert_eq!(item["manual_live_required"], true);
+        assert_eq!(item["connects_real_service_in_checklist"], false);
+        assert_eq!(item["completion_state"], "not_verified");
+        assert_eq!(item["must_not_count_as_complete"], true);
+        assert_eq!(item["prints_secret_values"], false);
+        assert!(!item["readonly_probe"].as_str().unwrap_or("").is_empty());
+        assert!(
+            item["required_evidence"]
+                .as_array()
+                .expect("required evidence should be listed")
+                .len()
+                >= 2
+        );
+    }
+    assert!(!stdout.contains("app-secret-value"));
+    assert!(!stdout.contains("feishu-secret-value"));
+    assert!(!stdout.contains("provider-secret-value"));
+}

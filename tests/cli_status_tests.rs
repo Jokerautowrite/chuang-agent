@@ -82,21 +82,22 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("identity_root: "));
     assert!(stdout.contains("rules_root: ./rules"));
     assert!(stdout.contains(
-        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
+        "atomic_tools: source=GenericAgent ok=true total=9 mapped=9 interface_only=0 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
-    assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
-    assert!(stdout.contains("atomic_tools_executable: file_read,file_write,code_execute"));
+    assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
+    assert!(stdout.contains("atomic_tools_executable: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
+    assert!(stdout.contains("atomic_tools_interface_only: none"));
     assert!(stdout.contains(
-        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
+        "atomic_tools_desktop_browser_interface_only: none reason=all GA atoms are mapped to governed runtime ports; real desktop/browser execution still requires an audited actuator adapter, live gate, allowlist, and receipt"
     ));
     assert!(stdout.contains(
-        "atomic_tools_desktop_browser_interface_only: mouse,keyboard,screenshot,locate reason=desktop/browser atoms are exposed as interface contracts only until an audited actuator adapter is configured"
+        "atomic_tools_desktop_browser_live_gated: mouse,keyboard,screenshot,locate required=adapter,live_gate,allowlist,audit_receipt"
     ));
     assert!(stdout.contains(
         "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"
     ));
     assert!(stdout.contains("atomic_tool name=file_read status=mapped"));
-    assert!(stdout.contains("atomic_tool name=mouse status=interface_only"));
+    assert!(stdout.contains("atomic_tool name=mouse status=mapped"));
     assert!(stdout.contains("identity_snapshot_chars: user=0 memory=0"));
     assert!(stdout.contains("identity_bootstrap_chars: soul=0 story=0 first_wake=0 agents=0"));
     assert!(stdout.contains(
@@ -368,35 +369,52 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
-    assert_eq!(parsed["atomic_tools"]["mapped_count"], 3);
-    assert_eq!(parsed["atomic_tools"]["interface_only_count"], 6);
+    assert_eq!(parsed["atomic_tools"]["mapped_count"], 9);
+    assert_eq!(parsed["atomic_tools"]["interface_only_count"], 0);
     assert_eq!(
         parsed["atomic_tools"]["mapped_atomic_tool_names"],
-        serde_json::json!(["file_read", "file_write", "code_execute"])
-    );
-    assert_eq!(
-        parsed["atomic_tools"]["governed_executable_atomic_tool_names"],
-        serde_json::json!(["file_read", "file_write", "code_execute"])
-    );
-    assert_eq!(
-        parsed["atomic_tools"]["interface_only_atomic_tool_names"],
         serde_json::json!([
             "mouse",
             "keyboard",
             "screenshot",
             "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
             "wait",
             "human_suspend"
         ])
     );
     assert_eq!(
+        parsed["atomic_tools"]["governed_executable_atomic_tool_names"],
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
+            "wait",
+            "human_suspend"
+        ])
+    );
+    assert_eq!(
+        parsed["atomic_tools"]["interface_only_atomic_tool_names"],
+        serde_json::json!([])
+    );
+    assert_eq!(
         parsed["atomic_tools"]["desktop_browser_interface_only_atomic_tool_names"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        parsed["atomic_tools"]["desktop_browser_live_gated_atomic_tool_names"],
         serde_json::json!(["mouse", "keyboard", "screenshot", "locate"])
     );
     assert!(parsed["atomic_tools"]["interface_only_reason"]
         .as_str()
         .expect("interface only reason")
-        .contains("desktop/browser atoms are exposed as interface contracts only"));
+        .contains("all GA atoms are mapped to governed runtime ports"));
     assert_eq!(
         parsed["atomic_tools"]["local_cli_self_check_entrypoints"],
         serde_json::json!([
@@ -423,6 +441,16 @@ fn cli_status_can_render_json_without_secret_leak() {
         .expect("tool action call schema fields")
         .iter()
         .any(|field| field == "tool"));
+    assert!(parsed["atomic_tools"]["tool_action_call_schema_fields"]
+        .as_array()
+        .expect("tool action call schema fields")
+        .iter()
+        .any(|field| field == "reason"));
+    assert!(parsed["atomic_tools"]["tool_action_call_schema_fields"]
+        .as_array()
+        .expect("tool action call schema fields")
+        .iter()
+        .any(|field| field == "prompt"));
     assert_eq!(parsed["atomic_tools"]["tool_report_schema_version"], 6);
     assert!(parsed["atomic_tools"]["tool_call_schema_fields"]
         .as_array()

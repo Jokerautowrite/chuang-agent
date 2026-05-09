@@ -1232,16 +1232,30 @@ transport = "stub"
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(
         parsed["atomic_tools"]["governed_executable_atomic_tool_names"],
-        serde_json::json!(["file_read", "file_write", "code_execute"])
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
+            "wait",
+            "human_suspend"
+        ])
     );
     assert_eq!(
         parsed["atomic_tools"]["desktop_browser_interface_only_atomic_tool_names"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        parsed["atomic_tools"]["desktop_browser_live_gated_atomic_tool_names"],
         serde_json::json!(["mouse", "keyboard", "screenshot", "locate"])
     );
     assert!(parsed["atomic_tools"]["interface_only_reason"]
         .as_str()
         .expect("interface only reason should be text")
-        .contains("desktop/browser atoms are exposed as interface contracts only"));
+        .contains("all GA atoms are mapped to governed runtime ports"));
     assert_eq!(
         parsed["atomic_tools"]["local_cli_self_check_entrypoints"],
         serde_json::json!([
@@ -1735,14 +1749,15 @@ transport = "stub"
         "provider_readiness: ok=true state=ready kind=openai_compatible transport=stub fallback_configured=false"
     ));
     assert!(stdout.contains(
-        "atomic_tools: source=GenericAgent ok=true total=9 mapped=3 interface_only=6 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
+        "atomic_tools: source=GenericAgent ok=true total=9 mapped=9 interface_only=0 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
-    assert!(stdout.contains("atomic_tools_executable: file_read,file_write,code_execute"));
+    assert!(stdout.contains("atomic_tools_executable: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
+    assert!(stdout.contains("atomic_tools_interface_only: none"));
     assert!(stdout.contains(
-        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
+        "atomic_tools_desktop_browser_interface_only: none reason=all GA atoms are mapped to governed runtime ports; real desktop/browser execution still requires an audited actuator adapter, live gate, allowlist, and receipt"
     ));
     assert!(stdout.contains(
-        "atomic_tools_desktop_browser_interface_only: mouse,keyboard,screenshot,locate reason=desktop/browser atoms are exposed as interface contracts only until an audited actuator adapter is configured"
+        "atomic_tools_desktop_browser_live_gated: mouse,keyboard,screenshot,locate required=adapter,live_gate,allowlist,audit_receipt"
     ));
     assert!(stdout.contains(
         "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"

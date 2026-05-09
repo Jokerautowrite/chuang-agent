@@ -54,7 +54,7 @@ Rules:
 - Do not put secrets in logs or response text. `SecretOrPlainText::Secret` carries only a label.
 - Do not implement broad arbitrary shell passthrough. The adapter must own an explicit allowlist of tools/actions.
 - Real click/type/browser/desktop control belongs in the adapter, not in core runtime.
-- GA 原子工具里的 `mouse` / `keyboard` / `screenshot` / `locate` / `wait` / `human_suspend` 仍然是接口态工具；核心 `status` / `doctor` 会把它们明确列为 `interface_only`，不会误报成已映射可执行工具。
+- GA 原子工具里的 `mouse` / `keyboard` / `screenshot` / `locate` 已映射到 actuator port，`wait` / `human_suspend` 已映射到本地 runtime port；核心 `status` / `doctor` 会把 9 个 GA 工具列为 mapped，但真实桌面/浏览器动作仍必须经过 adapter、live gate、allowlist 和审计回执。
 - Malformed quoting or trailing escapes in `actuator_args` are rejected before spawn instead of being normalized.
 - Non-zero exit, timeout, malformed JSON, or missing required response fields are treated as actuator errors.
 - The checked-in example script is a safe fixture. It does not operate the real desktop.

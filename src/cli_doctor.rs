@@ -384,9 +384,15 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
         .map(|tool| tool.kind)
         .collect::<Vec<_>>();
     let expected_mapped = vec![
+        AtomicToolKind::Mouse,
+        AtomicToolKind::Keyboard,
+        AtomicToolKind::Screenshot,
+        AtomicToolKind::Locate,
         AtomicToolKind::FileRead,
         AtomicToolKind::FileWrite,
         AtomicToolKind::CodeExecute,
+        AtomicToolKind::Wait,
+        AtomicToolKind::HumanSuspend,
     ];
     if mapped != expected_mapped {
         return Err(format!(
@@ -399,14 +405,7 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
         .filter(|tool| tool.status == AtomicToolStatus::InterfaceOnly)
         .map(|tool| tool.kind)
         .collect::<Vec<_>>();
-    let expected_interface_only = vec![
-        AtomicToolKind::Mouse,
-        AtomicToolKind::Keyboard,
-        AtomicToolKind::Screenshot,
-        AtomicToolKind::Locate,
-        AtomicToolKind::Wait,
-        AtomicToolKind::HumanSuspend,
-    ];
+    let expected_interface_only = Vec::<AtomicToolKind>::new();
     if interface_only != expected_interface_only {
         return Err(format!(
             "doctor_atomic_tools_failed interface_only={interface_only:?} expected={expected_interface_only:?}"
@@ -440,6 +439,8 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
                 "secret",
                 "target",
                 "millis",
+                "reason",
+                "prompt",
                 "patch",
                 "command",
                 "cwd",
@@ -747,6 +748,15 @@ fn print_doctor(doctor: &DoctorCliOutput) {
                 .desktop_browser_interface_only_atomic_tool_names
         ),
         doctor.status.atomic_tools.interface_only_reason
+    );
+    println!(
+        "atomic_tools_desktop_browser_live_gated: {} required=adapter,live_gate,allowlist,audit_receipt",
+        format_name_list(
+            &doctor
+                .status
+                .atomic_tools
+                .desktop_browser_live_gated_atomic_tool_names
+        )
     );
     println!(
         "atomic_tools_self_check_entrypoints: {}",

@@ -302,6 +302,14 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.atomic_tools.interface_only_reason
         );
         println!(
+            "atomic_tools_desktop_browser_live_gated: {} required=adapter,live_gate,allowlist,audit_receipt",
+            format_text_list(
+                &status
+                    .atomic_tools
+                    .desktop_browser_live_gated_atomic_tool_names
+            )
+        );
+        println!(
             "atomic_tools_self_check_entrypoints: {}",
             format_text_list(&status.atomic_tools.local_cli_self_check_entrypoints)
         );

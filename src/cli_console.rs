@@ -120,6 +120,15 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
                 .interface_only_atomic_tool_names
         )
     );
+    println!(
+        "atomic_tools_desktop_browser_live_gated: {} required=adapter,live_gate,allowlist,audit_receipt",
+        format_name_list(
+            &snapshot
+                .status
+                .atomic_tools
+                .desktop_browser_live_gated_atomic_tool_names
+        )
+    );
     println!("subagent: {}", snapshot.status.config.subagent_kind);
     println!(
         "project_readiness: ok={} state={}",

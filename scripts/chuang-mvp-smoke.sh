@@ -55,8 +55,8 @@ assert data["atomic_tools"]["ok"] is True
 assert data["atomic_tools"]["manifest_schema_version"] == 1
 assert data["atomic_tools"]["tool_action_schema_version"] == 1
 assert data["atomic_tools"]["tool_report_schema_version"] == 6
-assert data["atomic_tools"]["mapped_atomic_tool_names"] == ["file_read", "file_write", "code_execute"]
-assert data["atomic_tools"]["interface_only_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "wait", "human_suspend"]
+assert data["atomic_tools"]["mapped_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "file_read", "file_write", "code_execute", "wait", "human_suspend"]
+assert data["atomic_tools"]["interface_only_atomic_tool_names"] == []
 assert data["goal_mode"]["ok"] is True
 assert data["goal_mode"]["cli_entrypoint"] == "run --goal TEXT"
 assert data["goal_run"]["ok"] is True
@@ -75,7 +75,11 @@ assert data["local_contract_readiness"]["writes_core_memory"] is False
 assert data["local_contract_readiness"]["executes_plugins"] is False
 local_contracts = {item["name"]: item for item in data["local_contract_readiness"]["contracts"]}
 assert local_contracts["knowledge_context_preview"]["read_only"] is True
-assert local_contracts["skill_proposal_review"]["dry_run"] is True
+assert local_contracts["skill_proposal_review"]["dry_run"] is False
+assert local_contracts["skill_proposal_review"]["boundary"] == "self_scored_review_and_dedup"
+assert local_contracts["skill_lifecycle_write_retire"]["state"] == "ready"
+assert local_contracts["skill_lifecycle_write_retire"]["boundary"] == "self_maintained_upsert_and_retire"
+assert local_contracts["skill_lifecycle_write_retire"]["writes_repo_files"] is True
 assert local_contracts["plugin_registry_evidence"]["executes_plugins"] is False
 assert local_contracts["external_knowledge_source_contracts"]["boundary"] == "adapter_contract_only"
 assert local_contracts["goal_mode_smoke_gate"]["boundary"] == "local_cli_smoke_only"
@@ -217,8 +221,8 @@ goal_run_readiness = checks_by_name["goal_run_readiness"]
 assert goal_run_readiness["ok"] is True
 assert "goal_id=mainline-mvp" in goal_run_readiness["detail"]
 assert "plan_exists=true" in goal_run_readiness["detail"]
-assert status["atomic_tools"]["mapped_atomic_tool_names"] == ["file_read", "file_write", "code_execute"]
-assert status["atomic_tools"]["interface_only_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "wait", "human_suspend"]
+assert status["atomic_tools"]["mapped_atomic_tool_names"] == ["mouse", "keyboard", "screenshot", "locate", "file_read", "file_write", "code_execute", "wait", "human_suspend"]
+assert status["atomic_tools"]["interface_only_atomic_tool_names"] == []
 assert status["project_readiness"]["ok"] is True
 assert status["project_readiness"]["overall_state"] == "ready"
 assert status["provider_readiness"]["ok"] is True

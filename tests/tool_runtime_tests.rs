@@ -143,6 +143,12 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
         ),
         ToolModelOutput::ToolCall(ToolCall::Wait { .. })
     ));
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"human_suspend","reason":"needs user confirmation","prompt":"approve?"}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::HumanSuspend { .. })
+    ));
 }
 
 #[test]
@@ -648,6 +654,29 @@ fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
         &config,
     );
     assert!(wait.ok, "wait should succeed: {}", wait.summary);
+
+    let human_suspend = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::HumanSuspend {
+            reason: "uncertain desktop state".to_string(),
+            prompt: Some("confirm next action".to_string()),
+        },
+        &config,
+    );
+    assert!(!human_suspend.ok);
+    assert_eq!(
+        human_suspend.failure_class.as_deref(),
+        Some("human_input_required")
+    );
+    assert_eq!(
+        human_suspend.atomic_tool_name.as_deref(),
+        Some("human_suspend")
+    );
+    assert!(human_suspend
+        .output
+        .as_deref()
+        .expect("human suspend should explain prompt")
+        .contains("confirm next action"));
 }
 
 #[test]
@@ -984,7 +1013,17 @@ fn execution_slot_wraps_registry_config_and_governed_execution() {
 
     assert_eq!(
         slot.registry().mapped_atomic_names(),
-        vec!["file_read", "file_write", "code_execute",]
+        vec![
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
+            "wait",
+            "human_suspend",
+        ]
     );
     assert!(slot
         .tool_instruction_block(&root)

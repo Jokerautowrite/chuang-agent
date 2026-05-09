@@ -141,6 +141,26 @@ fn actuator_command_contract_requires_allowlisted_action_and_audit_label() {
 }
 
 #[test]
+fn actuator_command_contract_keeps_real_execution_flag_visible() {
+    let dry_run_contract = ActuatorCommandContract {
+        allowed_actions: vec![ActuatorCommandKind::Observe],
+        audit_label: "actuator.operation.live".to_string(),
+        real_execution: false,
+    };
+    validate_actuator_command_contract(&dry_run_contract, ActuatorCommandKind::Observe)
+        .expect("dry-run actuator contract should validate");
+    assert!(!dry_run_contract.real_execution);
+
+    let live_contract = ActuatorCommandContract {
+        real_execution: true,
+        ..dry_run_contract
+    };
+    validate_actuator_command_contract(&live_contract, ActuatorCommandKind::Observe)
+        .expect("real execution flag is policy evidence, not an allowlist bypass");
+    assert!(live_contract.real_execution);
+}
+
+#[test]
 fn genesis_autocli_specs_expose_stable_audit_labels_without_browser_worker() {
     let actuator = AutoCliGenesisActuator::with_runner(
         GenesisConfig::new("/tmp/chuang-genesis-contract-profile"),

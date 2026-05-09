@@ -118,7 +118,8 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     assert_eq!(parsed["status"]["slots"]["execution"], "generic_agent_mvp");
     assert_eq!(parsed["status"]["atomic_tools"]["ok"], true);
     assert_eq!(parsed["status"]["atomic_tools"]["total_count"], 9);
-    assert_eq!(parsed["status"]["atomic_tools"]["mapped_count"], 3);
+    assert_eq!(parsed["status"]["atomic_tools"]["mapped_count"], 9);
+    assert_eq!(parsed["status"]["atomic_tools"]["interface_only_count"], 0);
     assert_eq!(parsed["status"]["release_readiness"]["ok"], true);
     assert_eq!(
         parsed["status"]["release_readiness"]["release_name"],
@@ -257,18 +258,21 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
     );
     assert_eq!(
         parsed["status"]["atomic_tools"]["mapped_atomic_tool_names"],
-        serde_json::json!(["file_read", "file_write", "code_execute"])
-    );
-    assert_eq!(
-        parsed["status"]["atomic_tools"]["interface_only_atomic_tool_names"],
         serde_json::json!([
             "mouse",
             "keyboard",
             "screenshot",
             "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
             "wait",
             "human_suspend"
         ])
+    );
+    assert_eq!(
+        parsed["status"]["atomic_tools"]["interface_only_atomic_tool_names"],
+        serde_json::json!([])
     );
     assert_eq!(
         parsed["status"]["atomic_tools"]["manifest_schema_version"],
@@ -376,15 +380,16 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("provider: fake"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains(
-        "atomic_tools: ok=true total=9 mapped=3 interface_only=6 action_schema_version=1 report_schema_version=6"
+        "atomic_tools: ok=true total=9 mapped=9 interface_only=0 action_schema_version=1 report_schema_version=6"
     ));
     assert!(stdout.contains(
         "provider_readiness: ok=true state=ready kind=fake transport=fake fallback_configured=false timeout_ms=none api_key_state=none"
     ));
-    assert!(stdout.contains("atomic_tools_mapped: file_read,file_write,code_execute"));
+    assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains(
-        "atomic_tools_interface_only: mouse,keyboard,screenshot,locate,wait,human_suspend"
+        "atomic_tools_desktop_browser_live_gated: mouse,keyboard,screenshot,locate required=adapter,live_gate,allowlist,audit_receipt"
     ));
+    assert!(stdout.contains("atomic_tools_interface_only: none"));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
     assert!(stdout.contains("channel_readiness: ok=true state=ready"));
     assert!(stdout.contains(

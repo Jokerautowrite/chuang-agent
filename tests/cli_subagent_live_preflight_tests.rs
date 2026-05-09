@@ -48,6 +48,19 @@ fn cli_subagent_live_preflight_is_readonly_and_reports_disabled_gate() {
     assert_eq!(rehearsal["ready_for_live"], false);
     assert_eq!(rehearsal["readonly"], true);
     assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["live_worker_available"], false);
+    assert_eq!(
+        rehearsal["worker_runtime_state"],
+        "configured_but_gate_disabled"
+    );
+    assert!(rehearsal["worker_runtime_reason"]
+        .as_str()
+        .expect("worker runtime reason")
+        .contains("CHUANG_CODEX_RUNNER_ENABLE is not enabled"));
+    assert!(rehearsal["adapter_entrypoint"]
+        .as_str()
+        .expect("adapter entrypoint")
+        .contains("subagent run-loop --runner command --runner-command scripts/chuang-codex-runner.py --approve-exec"));
     assert_eq!(rehearsal["gate_enabled"], false);
     assert_eq!(rehearsal["runner_allowlist_ok"], true);
     assert_eq!(rehearsal["capability_routing_ok"], true);
@@ -161,6 +174,15 @@ fn cli_subagent_live_preflight_is_ready_only_when_gate_is_explicitly_enabled() {
     assert_eq!(rehearsal["ready_for_live"], true);
     assert_eq!(rehearsal["readonly"], true);
     assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["live_worker_available"], false);
+    assert_eq!(
+        rehearsal["worker_runtime_state"],
+        "preflight_ready_no_worker_started"
+    );
+    assert!(rehearsal["worker_runtime_reason"]
+        .as_str()
+        .expect("worker runtime reason")
+        .contains("does not start or mark a live worker available"));
     assert_eq!(rehearsal["gate_enabled"], true);
     assert_eq!(rehearsal["runner_allowlist_ok"], true);
     assert_eq!(rehearsal["capability_routing_ok"], true);
@@ -256,6 +278,10 @@ fn cli_subagent_live_preflight_text_uses_stable_gate_field_names() {
     assert!(stdout.contains("ready_for_live=false"));
     assert!(stdout.contains("readonly=true"));
     assert!(stdout.contains("starts_external_worker=false"));
+    assert!(stdout.contains("worker_runtime live_worker_available=false"));
+    assert!(stdout.contains("worker_runtime_state=configured_but_gate_disabled"));
+    assert!(stdout.contains("adapter_entrypoint=subagent run-loop --runner command --runner-command scripts/chuang-codex-runner.py --approve-exec --capability rust"));
+    assert!(stdout.contains("CHUANG_CODEX_RUNNER_ENABLE is not enabled"));
     assert!(stdout.contains("gate_enabled=false"));
     assert!(stdout.contains("runner_allowlist_ok=true"));
     assert!(stdout.contains("capability_routing_ok=true"));
@@ -314,6 +340,8 @@ fn cli_subagent_live_preflight_requires_runner_allowlist_match() {
 
     assert_eq!(rehearsal["ok"], false);
     assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["live_worker_available"], false);
+    assert_eq!(rehearsal["worker_runtime_state"], "preflight_blocked");
     assert_eq!(rehearsal["gate"]["enabled"], true);
     assert_eq!(rehearsal["gate_enabled"], true);
     assert_eq!(rehearsal["runner_allowlist"]["ok"], false);
@@ -358,6 +386,8 @@ fn cli_subagent_live_preflight_rejects_capability_mismatch_even_when_gate_is_ena
 
     assert_eq!(rehearsal["ok"], false);
     assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["live_worker_available"], false);
+    assert_eq!(rehearsal["worker_runtime_state"], "preflight_blocked");
     assert_eq!(rehearsal["gate_enabled"], true);
     assert_eq!(rehearsal["gate"]["enabled"], true);
     assert_eq!(rehearsal["capability_routing_ok"], false);

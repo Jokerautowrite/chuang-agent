@@ -43,6 +43,18 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 - live external worker pool 仍是后续 audited adapter 边界，本地 run-loop 不连接真实外部平台。
 - 真实外部 worker runner 启用前先跑只读 `subagent live-preflight`，确认 live gate、runner allowlist、capability routing、ReportAdmission 证据和 forbidden capability rejection 都可见；该命令不启动真实 worker。
 
+## Live Worker 当前缺口
+
+当前 multi-worker 能证明的是本地队列、bounded `goal step`、`goal collect` 和 live-preflight-only 证据链，不是 live worker 池已经可用。真实 live subagent worker 还缺三层接入件：audited adapter 负责把外部 runner 纳入可审计边界，config 负责固定 runner command、scope、capability 和 stop/timeout，gate 负责默认关闭并要求显式审批。
+
+在这三层完成前，`live_runner_rehearsal_smoke_ok` 只能解释为 route/admission/governance 字段可见。它不能解释为真实 worker 已启动、真实桌面/browser 已执行、provider 已 live 调用，或 wiki/GBrain 已接通。
+
+三大 live gates 必须继续默认关闭：
+
+- `provider live`：只读 readiness 可以显示 `<set>/<missing>` 和 blocked reason，但不能发真实 provider 请求。
+- `subagent live runner`：preflight 可以验证 allowlist、capability route、ReportAdmission 和 governance receipt，但 `starts_external_worker=false` 仍是默认预期。
+- `desktop/browser actuator live action`：GA 9 tools 已 mapped 时只能说明工具槽位和路由可见；真实 desktop/browser live 需要单独 operator receipt、action allowlist 和 observe/apply 边界。
+
 ## 今晚可操作入口
 
 这个入口用于从 Feishu `/tools` / `/capabilities` 看到“goal/subagent 本地能力可见”之后，回到本地终端收一份可审计证据。它不改 Feishu bridge、不启动真实服务、不启用真实 runner、不删除或清理文件。

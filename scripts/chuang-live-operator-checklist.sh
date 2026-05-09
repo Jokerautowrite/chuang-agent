@@ -17,6 +17,11 @@ Environment overrides:
 Readonly boundaries:
   connects_real_feishu=false
   sends_feishu_messages=false
+  connects_real_provider=false
+  performs_desktop_actions=false
+  performs_browser_actions=false
+  connects_real_wiki=false
+  connects_real_gbrain=false
   starts_services=false
   starts_workers=false
   dispatches_tasks=false
@@ -85,6 +90,11 @@ BOUNDARIES = {
     "readonly": True,
     "connects_real_feishu": False,
     "sends_feishu_messages": False,
+    "connects_real_provider": False,
+    "performs_desktop_actions": False,
+    "performs_browser_actions": False,
+    "connects_real_wiki": False,
+    "connects_real_gbrain": False,
     "starts_services": False,
     "starts_workers": False,
     "dispatches_tasks": False,
@@ -191,6 +201,16 @@ commands = {
     "new_thread_command": "send /new to the Chuang Feishu bot",
     "bridge_tools_command": "send /tools to the Chuang Feishu bot",
     "bridge_capabilities_command": "send /capabilities to the Chuang Feishu bot",
+    "status_surface": f"cargo run --quiet -- status --config {workspace_root / 'config.toml'} --json",
+    "doctor_surface": f"cargo run --quiet -- doctor --config {workspace_root / 'config.toml'} --json",
+    "console_snapshot_surface": f"cargo run --quiet -- console snapshot --config {workspace_root / 'config.toml'} --json",
+    "knowledge_status": "cargo run --quiet -- memory knowledge status --json",
+    "wiki_source_contract": "cargo run --quiet -- memory knowledge source-contract --source wiki --json",
+    "gbrain_source_contract": "cargo run --quiet -- memory knowledge source-contract --source gbrain --json",
+    "external_ai_dry_run": (
+        "cargo run --quiet -- external-ai dispatch --platform <platform> "
+        "--task <non-secret bounded task> --context <non-secret bounded context> --dry-run --json"
+    ),
 }
 if suggested_provider_env_file is not None:
     commands["provider_env_next_step"] = (
@@ -215,6 +235,10 @@ manual_steps.extend(
         "send /new, then send one normal text message",
         "send /session and confirm the active chat binding changed after /new",
         "confirm the reply is not fake-responder and includes a runtime report id when applicable",
+        "record real live acceptance as incomplete until Feishu, provider, desktop, browser, wiki, and GBrain each have operator evidence",
+        "run status_surface and confirm release_readiness still says connects_real_external_services=false unless a separate live receipt exists",
+        "run knowledge_status, wiki_source_contract, and gbrain_source_contract to confirm wiki/GBrain remain documented/read-only unless audited live adapters are configured",
+        "run external_ai_dry_run only with non-secret bounded context; do not treat dry-run as real browser completion",
         "confirm Codex Feishu and Hermes channels still operate independently",
         "after the test, run final_verify before committing any follow-up changes",
     ]
@@ -298,6 +322,123 @@ local_readonly_evidence = {
     ],
 }
 
+external_live_acceptance_matrix = [
+    {
+        "id": "feishu",
+        "service": "Feishu Chuang bot",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["local_preflight"],
+        "local_evidence": ["local_preflight", "bridge_tools_command", "bridge_health_command"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "/health and /session operator transcript",
+            "/tools or /capabilities boundary transcript",
+            "normal non-secret text reply with runtime report id when applicable",
+            "Codex and Hermes credentials are not reused",
+        ],
+        "connects_real_service_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
+        "id": "provider",
+        "service": "OpenAI-compatible provider",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["provider_readiness_check"],
+        "local_evidence": ["provider_readiness_check", "status.provider_readiness"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "provider transport is not stub",
+            "api_key_state is <set> without printing the key",
+            "bounded live call receipt or runtime report id exists",
+            "no fake-responder fallback",
+        ],
+        "connects_real_service_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
+        "id": "desktop",
+        "service": "desktop actuator",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["status_surface"],
+        "local_evidence": ["status.live_adapter_gates", "actuator_command_contract"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "audit label and action receipt",
+            "governance allowed the exact desktop action",
+            "real_execution=true only in the external audited receipt",
+            "no desktop operation is performed by this checklist",
+        ],
+        "connects_real_service_in_checklist": False,
+        "performs_action_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
+        "id": "browser",
+        "service": "browser / external AI session",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["external_ai_dry_run"],
+        "local_evidence": ["external_ai_readiness", "genesis_actuator_contract"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "audited adapter manifest",
+            "platform session scope",
+            "browser transcript or snapshot reference",
+            "subagent report admission accepted",
+        ],
+        "connects_real_service_in_checklist": False,
+        "performs_action_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
+        "id": "wiki",
+        "service": "wiki external knowledge",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["wiki_source_contract"],
+        "local_evidence": ["memory_knowledge_source_contract_wiki"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "source contract is explicit",
+            "retrieval is read-only",
+            "hit provenance is visible",
+            "no automatic core-memory write",
+        ],
+        "connects_real_service_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
+        "id": "gbrain",
+        "service": "GBrain external knowledge",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": commands["gbrain_source_contract"],
+        "local_evidence": ["memory_knowledge_source_contract_gbrain"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "source contract is explicit",
+            "retrieval is read-only",
+            "hit provenance is visible",
+            "no automatic core-memory write",
+        ],
+        "connects_real_service_in_checklist": False,
+        "prints_secret_values": False,
+    },
+]
+
+real_live_acceptance = {
+    "complete": False,
+    "status": "not_verified",
+    "gap_count": len(external_live_acceptance_matrix),
+    "checklist_is_readonly": True,
+    "cannot_mark_complete_from_readonly_checklist": True,
+    "services": external_live_acceptance_matrix,
+    "summary": "real live acceptance remains incomplete until each service has separate operator evidence",
+}
+
 result = {
     "schema_version": 1,
     "ok": not blockers,
@@ -334,6 +475,8 @@ result = {
     "mounted_feishu_capabilities": mounted_feishu_capabilities,
     "provider_readiness_evidence": provider_readiness_evidence,
     "local_readonly_evidence": local_readonly_evidence,
+    "external_live_acceptance_matrix": external_live_acceptance_matrix,
+    "real_live_acceptance": real_live_acceptance,
     "blockers": blockers,
     "warnings": warnings,
     "commands": commands,
@@ -360,6 +503,23 @@ else:
         "script=scripts/chuang-live-readonly-preflight.sh "
         "starts_workers=false dispatches_tasks=false touches_services=false modifies_repo=false"
     )
+    print(
+        "external_live_acceptance_matrix="
+        "feishu,provider,desktop,browser,wiki,gbrain completion_state=not_verified "
+        "connects_real_service_in_checklist=false"
+    )
+    print(
+        "real_live_acceptance="
+        "complete=false status=not_verified checklist_is_readonly=true "
+        "cannot_mark_complete_from_readonly_checklist=true"
+    )
+    for gap in external_live_acceptance_matrix:
+        print(
+            "live_gap "
+            f"id={gap['id']} completion_state={gap['completion_state']} "
+            f"must_not_count_as_complete={str(gap['must_not_count_as_complete']).lower()} "
+            f"readonly_probe={gap['readonly_probe']}"
+        )
     if suggested_provider_env_file is not None:
         print(
             "suggested_provider_env_file="

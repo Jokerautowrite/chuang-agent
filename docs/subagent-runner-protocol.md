@@ -117,18 +117,21 @@ The stable JSON and text summary fields are:
 ```text
 ready_for_live
 readonly
+live_worker_available
+worker_runtime_state
 gate_enabled
 runner_allowlist_ok
 capability_routing_ok
 report_admission_ok
 forbidden_capabilities_ok
 approval_audit_prerequisites_ok
+adapter_entrypoint
 next_action
 ```
 
 JSON also keeps the detailed nested checks under `gate`, `runner_allowlist`, `capability_routing`, `report_admission`, `forbidden_capabilities`, and `approval_audit_prerequisites`. Text output uses the same stable field names for the summary line and then prints one evidence line per check.
 
-`ok=true` means the read-only rehearsal contract passed. `ready_for_live=true` additionally requires `CHUANG_CODEX_RUNNER_ENABLE=1`, so it must remain `false` when the gate env is unset or set to any non-enabling value. `ready_for_live=true` should only appear after explicit operator approval for the exact runner command and target dispatch. `status` / `doctor` also surface the same read-only boundary as `subagent_readiness.layers.live_runner_rehearsal`, which stays deferred for real worker execution.
+`ok=true` means the read-only rehearsal contract passed. `ready_for_live=true` additionally requires `CHUANG_CODEX_RUNNER_ENABLE=1`, so it must remain `false` when the gate env is unset or set to any non-enabling value. `live_worker_available` stays `false` for this command because preflight never starts or attaches a worker process. When the runner command, allowlist, capabilities, report admission, and audit prerequisites are configured but the gate is disabled, `worker_runtime_state=configured_but_gate_disabled`; the `adapter_entrypoint` field points at the command-runner adapter boundary that a later approved live adapter must wrap. `ready_for_live=true` should only appear after explicit operator approval for the exact runner command and target dispatch. `status` / `doctor` also surface the same read-only boundary as `subagent_readiness.layers.live_runner_rehearsal`, which stays deferred for real worker execution.
 
 Minimum live-gate acceptance check:
 

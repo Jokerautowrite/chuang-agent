@@ -36,15 +36,15 @@ file_write   -> tool_runtime.write_file
 code_execute -> tool_runtime.shell_exec
 ```
 
-当前接口态映射：
+当前映射：
 
 ```text
 mouse        -> actuator.click
 keyboard     -> actuator.input_text
 screenshot   -> actuator.screenshot
 locate       -> actuator.observe
-wait         -> not executable yet
-human_suspend -> not executable yet
+wait         -> tool_runtime.wait
+human_suspend -> tool_runtime.human_suspend
 ```
 
 `list_dir` 是辅助工具，不属于 GA 9 原子工具。
@@ -55,10 +55,10 @@ human_suspend -> not executable yet
 
 状态面和 doctor 现在会把原子工具拆成两组名单：
 
-- `mapped_atomic_tool_names`: `file_read`, `file_write`, `code_execute`
-- `interface_only_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `wait`, `human_suspend`
+- `mapped_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `file_read`, `file_write`, `code_execute`, `wait`, `human_suspend`
+- `interface_only_atomic_tool_names`: empty in the current local runtime contract
 
-这样可以直接区分“当前可执行映射”与“仅接口登记”的桌面能力，不再只靠 `status` 字段人工判断。
+这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：映射不等于真实桌面控制已放行，真实 click/type/screenshot/locate 仍由 actuator adapter、live gate、allowlist 和审计回执决定。
 
 ## 模型调用协议
 
@@ -95,6 +95,15 @@ ToolActionEnvelope::call_schema_fields()
   tool
   path
   content
+  x
+  y
+  text
+  secret
+  target
+  millis
+  reason
+  prompt
+  patch
   command
   cwd
   query
@@ -102,7 +111,7 @@ ToolActionEnvelope::call_schema_fields()
   limit
   ```
 
-  其中 `query/session_id/limit` 对应 `memory_recall` 这个只读辅助工具。
+  其中 `reason/prompt` 对应 `human_suspend`，`query/session_id/limit` 对应 `memory_recall` 这个只读辅助工具。
 
 兼容旧工具名：
 
@@ -112,7 +121,7 @@ write_file
 shell_exec
 ```
 
-暂不接受桌面接口态工具作为 `ACTION` 直接调用。
+`mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用，但只有在本轮 runtime 注入 actuator adapter 后才会执行；未配置 adapter 时返回结构化 `actuator_unconfigured`。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
 
 格式错误的 `ACTION` / `TOOL_CALL` 不会被当作最终回复；主进程会把 `protocol_error` 回灌给模型，要求它修正为正式 `ACTION` JSON 或输出 `FINAL:`。
 首轮普通文本仍可作为直接答复；一旦进入工具往返，后续普通文本会被视为 `plain_text_response` 协议错误，继续回灌给模型。
@@ -296,7 +305,7 @@ summary
 ## 当前边界
 
 - 不做真实桌面控制。
-- 不开放 `mouse/keyboard/screenshot/locate` 为可执行 `ACTION`。
+- `mouse/keyboard/screenshot/locate` 可调用 actuator port；真实桌面/browser live 执行仍需 adapter、live gate、allowlist 和 audit receipt。
 - 不新增第十个 Slot。
 - 子代理和外部智能体仍在下游阶段，不抢主进程 Execution Slot 主线。
 - BrowserWorker 旧线冻结；搜索/网页 AI 走 GenesisActuator 或统一身份引擎插件线。

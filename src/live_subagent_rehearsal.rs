@@ -16,6 +16,10 @@ pub struct LiveSubagentRehearsalReport {
     pub ready_for_live: bool,
     pub readonly: bool,
     pub starts_external_worker: bool,
+    pub live_worker_available: bool,
+    pub worker_runtime_state: String,
+    pub worker_runtime_reason: String,
+    pub adapter_entrypoint: String,
     pub gate_enabled: bool,
     pub runner_allowlist_ok: bool,
     pub capability_routing_ok: bool,
@@ -158,17 +162,32 @@ where
     let report_admission_ok = report_admission.ok;
     let forbidden_capabilities_ok = forbidden_capabilities.ok;
     let approval_audit_prerequisites_ok = approval_audit_prerequisites.ok;
-    let ready_for_live = gate_enabled
-        && runner_allowlist_ok
+    let configured_but_dry_run = runner_allowlist_ok
         && capability_routing_ok
         && report_admission_ok
         && forbidden_capabilities_ok
         && approval_audit_prerequisites_ok;
-    let ok = runner_allowlist.ok
-        && capability_routing.ok
-        && report_admission.ok
-        && forbidden_capabilities.ok
-        && approval_audit_prerequisites.ok;
+    let ready_for_live = gate_enabled && configured_but_dry_run;
+    let ok = configured_but_dry_run;
+    let live_worker_available = false;
+    let worker_runtime_state = if ready_for_live {
+        "preflight_ready_no_worker_started"
+    } else if configured_but_dry_run && !gate_enabled {
+        "configured_but_gate_disabled"
+    } else {
+        "preflight_blocked"
+    };
+    let worker_runtime_reason = if ready_for_live {
+        "read-only preflight checks pass, but this command does not start or mark a live worker available".to_string()
+    } else if configured_but_dry_run && !gate_enabled {
+        format!(
+            "runner command and capability route are configured, but {} is not enabled; live_worker_available remains false",
+            gate_check.required_env
+        )
+    } else {
+        "one or more preflight checks failed; live_worker_available remains false".to_string()
+    };
+    let adapter_entrypoint = build_adapter_entrypoint(&input);
     let next_action = if ready_for_live {
         "operator may run one approved live runner rehearsal with the exact allowlisted command and dispatch evidence".to_string()
     } else if !gate_check.enabled {
@@ -182,6 +201,10 @@ where
         ready_for_live,
         readonly: true,
         starts_external_worker: false,
+        live_worker_available,
+        worker_runtime_state: worker_runtime_state.to_string(),
+        worker_runtime_reason,
+        adapter_entrypoint,
         gate_enabled,
         runner_allowlist_ok,
         capability_routing_ok,
@@ -196,6 +219,23 @@ where
         approval_audit_prerequisites,
         next_action,
     }
+}
+
+fn build_adapter_entrypoint(input: &LiveSubagentRehearsalInput) -> String {
+    let capabilities = if input.worker_capabilities.is_empty() {
+        "--capability <declared-capability>".to_string()
+    } else {
+        input
+            .worker_capabilities
+            .iter()
+            .map(|capability| format!("--capability {capability}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    format!(
+        "subagent run-loop --runner {} --runner-command {} --approve-exec {}",
+        input.runner, input.runner_command, capabilities
+    )
 }
 
 fn build_runner_allowlist_check(

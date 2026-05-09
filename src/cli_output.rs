@@ -161,6 +161,14 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.atomic_tools.interface_only_reason
     );
     println!(
+        "atomic_tools_desktop_browser_live_gated: {} required=adapter,live_gate,allowlist,audit_receipt",
+        format_name_list(
+            &status
+                .atomic_tools
+                .desktop_browser_live_gated_atomic_tool_names
+        )
+    );
+    println!(
         "atomic_tools_self_check_entrypoints: {}",
         format_name_list(&status.atomic_tools.local_cli_self_check_entrypoints)
     );
