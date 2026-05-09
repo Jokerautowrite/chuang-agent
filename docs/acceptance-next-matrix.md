@@ -48,7 +48,7 @@ final verify 本地闭环通过
 | GA 9 tools mapped | ready | `/tools` / `/capabilities` 和本地诊断面显示 GA 9 工具映射、scope 和边界 | 否，自动和人工查看均可 | `ga_local_mapped_only=true`；只证明 mapped/routed；真实 desktop/browser live 仍需单独 receipt 和 action allowlist |
 | desktop/browser live gate | pending | `desktop_browser_live_gated=true`，等待 action allowlist、治理审批和 operator receipt | 是 | 当前不是 desktop/browser live ready，不允许由 mapped tools 或 dry-run adapter 代替 |
 | 人工 Feishu live check | candidate | 老爸用 Chuang 专用 Feishu 通道发 `/health`、`/session` 和一条普通测试消息，确认 app-server/session/channel 有真实 receipt | 是 | 只用 Chuang 专用 bot 和 env；不碰 Codex Feishu、不碰 Hermes、不打印 token |
-| provider env 对齐 | candidate | `scripts/chuang-provider-readiness-check.sh` 读取 `status --json`，人工确认 Chuang provider env 变量存在且配置名一致；输出只允许 `<set>/<missing>` | 是 | 不连接真实 provider；不在聊天、日志、文档或 patch 中泄露 secret；无 fallback 时必须显式报错 |
+| provider env 对齐 | candidate | `scripts/chuang-provider-readiness-check.sh` 读取 `status --json`，并在存在时自动吸收标准 `CHUANG_PROVIDER_ENV_FILE`；人工确认 Chuang provider env 变量存在且配置名一致；输出只允许 `<set>/<missing>` | 是 | 不连接真实 provider；不在聊天、日志、文档或 patch 中泄露 secret；无 fallback 时必须显式报错 |
 | live operator receipt | candidate | 人工执行 live cutover checklist，保存 request_id、operator、时间、允许范围、回退条件和结果摘要 | 是 | receipt 只记录审计元数据，不记录凭证、验证码或私密正文 |
 | single subagent live rehearsal | candidate | 在 live gate + allowlist 下只跑一个子代理 rehearsal，确认 report/proposal 被主控接收 | 是 | 单 worker、bounded、可停止；子代理不能直接写核心记忆，不能扩大成 runner 池 |
 | final verify after live rehearsal | candidate | live rehearsal 后再次运行 `sh scripts/chuang-final-verify.sh` 和本文档 diff check | 是 | live 尝试不能破坏本地合同；失败时先停在诊断，不做 cleanup/reset |

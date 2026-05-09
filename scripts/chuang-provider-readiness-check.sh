@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 FORMAT="text"
 STATUS_ARGS=()
+PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 
 usage() {
   cat <<'EOF'
@@ -49,6 +50,13 @@ while [ "$#" -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+if [ -f "$PROVIDER_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$PROVIDER_ENV_FILE"
+  set +a
+fi
 
 status_json="$(cargo run --quiet -- status "${STATUS_ARGS[@]}" --json)"
 

@@ -6,6 +6,7 @@ mode="text"
 work_dir="${TMPDIR:-/tmp}/chuang-agent-live-gaps-check-$$"
 status_json="$work_dir/status.json"
 preflight_json="$work_dir/live-preflight.json"
+provider_env_file="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 
 if [ "${1:-}" = "--json" ]; then
     mode="json"
@@ -35,6 +36,13 @@ mkdir -p "$work_dir"
 unset CHUANG_CODEX_RUNNER_ENABLE
 unset CHUANG_REAL_CONTROL_ENABLE
 unset CHUANG_REAL_ACTUATOR_ENABLE
+
+if [ -f "$provider_env_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$provider_env_file"
+    set +a
+fi
 
 cd "$root_dir"
 

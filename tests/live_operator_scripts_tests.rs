@@ -183,6 +183,102 @@ fn provider_readiness_check_reports_local_only_block_without_secret_values() {
 }
 
 #[test]
+fn provider_readiness_check_uses_provider_env_file_when_available() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-provider-readiness-check.sh");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-provider-readiness-check-{nanos}-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let provider_env = temp_dir.join("provider.env");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
+    )
+    .expect("provider env should write");
+
+    let output = Command::new("bash")
+        .arg(&script_path)
+        .arg("--json")
+        .arg("--config")
+        .arg(manifest_dir.join("config.toml"))
+        .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("provider readiness check should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value =
+        serde_json::from_str(&stdout).expect("provider readiness output should be json");
+
+    assert_eq!(data["ok"], true);
+    assert_eq!(data["api_key_state"], "<set>");
+    assert_eq!(data["connects_real_provider"], false);
+    assert_eq!(data["prints_secret_values"], false);
+    assert!(!stdout.contains("provider-secret-value"));
+}
+
+#[test]
+fn live_gaps_check_uses_provider_env_file_when_available() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-gaps-check.sh");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-live-gaps-check-{nanos}-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let provider_env = temp_dir.join("provider.env");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
+    )
+    .expect("provider env should write");
+
+    let output = Command::new("bash")
+        .arg(&script_path)
+        .arg("--json")
+        .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("live gaps check should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value =
+        serde_json::from_str(&stdout).expect("live gaps output should be json");
+
+    assert_eq!(data["ok"], true);
+    assert_eq!(data["provider_readiness"]["overall_state"], "ready");
+    assert_eq!(data["provider_readiness"]["api_key_state"], "<set>");
+    assert_eq!(data["matrix"][2]["state"], "pending");
+    assert!(!stdout.contains("provider-secret-value"));
+}
+
+#[test]
 fn candidate_verify_wrapper_only_treats_expected_provider_blocks_as_non_fatal() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-candidate-verify.sh"))

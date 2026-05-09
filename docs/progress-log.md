@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-09 补充 checkpoint
+- 2026-05-09 provider readiness check 口径再收口：`scripts/chuang-provider-readiness-check.sh` 现在会在存在时自动吸收标准 `CHUANG_PROVIDER_ENV_FILE`，仍只做只读 `status --json` 评估、不连接真实 provider、不打印 secret；`scripts/chuang-candidate-verify.sh` 因此在本机标准 provider env 文件可用时不再把“未手动 export”误报成 blocker，候选门禁更贴近真实操作路径。
 - 2026-05-09 并行子代理 A 状态面覆盖收口：`app-server health --json` 现在显式输出 `subagent_live_worker` status-only 摘要，和已有文本面保持同源；`status` / `doctor` / `console snapshot` / `app-server health` 的 JSON 与文本回归都锁定 `available=false`、`starts_worker=false` 和 no live worker reason，防止 status-only 配置被误读成真实 worker 可用。本轮只改状态输出和测试，不启动 worker、不连接外部服务、不碰 Hermes/Feishu。
 - 2026-05-09 文档与进度审计口径收口：`docs/subagent-runner-protocol.md`、`docs/third-test-candidate.md`、`docs/acceptance-next-matrix.md` 和 `docs/live-operator-test-runbook.md` 已统一状态词：`ga_local_mapped_only` 只代表 GA 9 tools 本地映射与命令面可见，`desktop_browser_live_gated` 代表真实桌面/浏览器动作仍在 live gate 与 receipt 之后，`live_worker_available=false` 是当前 preflight/rehearsal 合同，`real_external_acceptance_pending` 代表 Feishu/provider/desktop/browser/wiki/GBrain 真实验收仍未完成。本轮只改文档，不改核心代码，不连接真实服务，不声明 live 完成。
 - 2026-05-09 并行子代理 D 验收矩阵补强：新增 `scripts/chuang-live-gaps-check.sh`，只读 `status --json` 和 `subagent live-preflight --json`，输出 `local_contract=ready / preflight=ready_but_no_start / real_live=pending` 三段矩阵与 `live_gaps_check_ok` marker；`chuang-candidate-verify.sh` 和 `chuang-third-test-smoke.sh` 已接入该检查，用于防止 candidate/third-test 把本地合同或 ready-but-no-start 预检误写成真实 live。该入口会主动关闭 live gates，不启动 worker，不连接真实 Feishu/provider，不打印 secret。
