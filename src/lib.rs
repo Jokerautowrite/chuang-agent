@@ -6,6 +6,7 @@ pub mod atomic_tool;
 /// This module is intentionally exported for experiments and future plugins, but it must not
 /// become a dependency of the core runtime chain.
 pub mod browser_worker;
+pub mod capability_primer;
 pub mod channel_adapter;
 pub mod chuang_kernel;
 pub mod common;

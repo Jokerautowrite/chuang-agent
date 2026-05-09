@@ -10,6 +10,7 @@ const {
   buildToolsCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
+  loadCapabilityPrimerText,
   parseBridgeCommand,
   sanitizeErrorMessage,
 } = require("./chuang-feishu-bridge-commands");
@@ -76,6 +77,7 @@ assert.strictEqual(tools.commandName, "tools");
 assert(tools.replyText.includes("当前可见能力与边界"));
 assert(tools.replyText.includes("/capabilities"));
 assert(tools.replyText.includes("主链工具能力"));
+assert(tools.replyText.includes(loadCapabilityPrimerText()));
 assert(tools.replyText.includes("file_read"));
 assert(tools.replyText.includes("file_write"));
 assert(tools.replyText.includes("code_execute"));

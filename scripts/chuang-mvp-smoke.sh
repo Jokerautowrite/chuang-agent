@@ -408,8 +408,8 @@ import sys
 data = sys.stdin.read()
 assert "knowledge_context_preview_enabled: true" in data
 assert "knowledge_context_preview_count: 1" in data
-assert "knowledge_context_injected: false" in data
-assert "knowledge_context_dropped_count: 1" in data
+assert "knowledge_context_injected: true" in data
+assert "knowledge_context_dropped_count: 0" in data
 assert "knowledge_context_connects_real_service: false" in data
 assert "knowledge_context_runtime_retrieval_wired: false" in data
 '

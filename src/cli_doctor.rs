@@ -725,6 +725,10 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.provider_readiness.next_action
     );
     println!(
+        "runtime_capability_primer: {}",
+        doctor.status.runtime_capability_primer
+    );
+    println!(
         "atomic_tools_ok: {} manifest_schema_version={} action_schema_version={} report_schema_version={}",
         doctor.status.atomic_tools.ok,
         doctor.status.atomic_tools.manifest_schema_version,

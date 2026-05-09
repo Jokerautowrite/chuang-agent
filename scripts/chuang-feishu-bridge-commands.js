@@ -1,3 +1,8 @@
+const fs = require("fs");
+const path = require("path");
+
+const CAPABILITY_PRIMER_PATH = path.join(__dirname, "..", "assets", "capability_primer.txt");
+
 function parseBridgeCommand(text) {
   const normalized = normalizeText(text).toLowerCase();
   if (normalized === "/new") {
@@ -205,6 +210,7 @@ function buildLiveCheckCommandReply() {
 }
 
 function buildToolsCommandReply() {
+  const runtimeCapabilityPrimer = loadCapabilityPrimerText();
   return {
     commandName: "tools",
     threadId: "",
@@ -224,6 +230,8 @@ function buildToolsCommandReply() {
       "- 图片消息：先下载并 OCR，再进入 Chuang 主链。",
       "",
       "主链工具能力：",
+      "",
+      runtimeCapabilityPrimer,
       "",
       "- governed file tools：`file_read` / `file_write`。",
       "- governed code tool：`code_execute`。",
@@ -252,6 +260,14 @@ function buildToolsCommandReply() {
       "- App-server 或 bridge 的失败会以脱敏运维消息返回。",
     ].join("\n"),
   };
+}
+
+function loadCapabilityPrimerText() {
+  try {
+    return fs.readFileSync(CAPABILITY_PRIMER_PATH, "utf8").trim();
+  } catch (_error) {
+    return "默认能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent 派活。live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理与 live gate。";
+  }
 }
 
 function buildHelpCommandReply() {
@@ -299,6 +315,7 @@ module.exports = {
   buildReceiptCommandReply,
   buildNewSessionCommandReply,
   buildSessionCommandReply,
+  loadCapabilityPrimerText,
   parseBridgeCommand,
   sanitizeErrorMessage,
 };

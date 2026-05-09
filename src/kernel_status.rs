@@ -1,4 +1,5 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
+use crate::capability_primer::capability_primer_text;
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
 use crate::goal_mode::{GoalCheckpointPolicy, GoalFinalReportPolicy, GoalSpec};
 use crate::goal_run::GoalRunStore;
@@ -19,6 +20,7 @@ pub struct ChuangMvpStatus {
     pub config: ConfigSummary,
     pub slots: RuntimeSlotsSummary,
     pub kernel: ChuangKernelSnapshot,
+    pub runtime_capability_primer: String,
     pub plugin_registry: PluginRegistrySummary,
     pub local_contract_readiness: LocalContractReadinessStatus,
     pub provider_readiness: ProviderReadinessStatus,
@@ -561,6 +563,7 @@ pub fn build_chuang_mvp_status(
                 .as_ref()
                 .map(|snapshot| snapshot.agents_registry_exists),
         },
+        runtime_capability_primer: capability_primer_text(),
         plugin_registry,
         local_contract_readiness,
         provider_readiness,

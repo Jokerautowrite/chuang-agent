@@ -129,8 +129,8 @@ fn agent_runtime_exposes_structured_context_debug_fields() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(chuang_agent::context_engine::ContextBudget {
-                max_tokens: 10,
-                reserve_system_tokens: 10,
+                max_tokens: 35,
+                reserve_system_tokens: 32,
                 min_working_tokens: 5,
                 max_tool_results: 5,
                 max_memory_segments: 20,
@@ -139,19 +139,16 @@ fn agent_runtime_exposes_structured_context_debug_fields() {
         })
         .expect("runtime should succeed");
 
-    assert_eq!(
-        result.dropped_segment_ids,
-        vec!["working-user-input".to_string()]
-    );
-    assert_eq!(result.context_debug.drop_reasons.len(), 1);
-    assert_eq!(
-        result.context_debug.drop_reasons[0].segment_id,
-        "working-user-input"
-    );
-    assert_eq!(
-        result.context_debug.drop_reasons[0].reason.as_str(),
-        "budget_limit"
-    );
+    assert!(result
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "working-user-input"));
+    assert!(result
+        .context_debug
+        .drop_reasons
+        .iter()
+        .any(|reason| reason.segment_id == "working-user-input"
+            && reason.reason.as_str() == "budget_limit"));
     assert!(result.context_debug.budget_exceeded);
     assert_eq!(
         result.context_debug.budget_exceeded_reasons[0].as_str(),

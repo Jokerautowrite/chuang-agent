@@ -1,0 +1,1 @@
+默认能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent 派活。live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理与 live gate。

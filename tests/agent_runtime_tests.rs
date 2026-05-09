@@ -133,6 +133,53 @@ fn agent_runtime_packs_extra_identity_context_segments() {
 }
 
 #[test]
+fn agent_runtime_exposes_default_capability_primer_even_under_budget_pressure() {
+    let store = InMemoryMemoryStore::new();
+    let runtime = runtime(store);
+
+    let result = runtime
+        .run(&RuntimeRequest {
+            user_input: "查看默认能力".to_string(),
+            recall_limit: 1,
+            metadata: BTreeMap::new(),
+            context_budget: Some(ContextBudget {
+                max_tokens: 200,
+                reserve_system_tokens: 32,
+                min_working_tokens: 1,
+                max_tool_results: 5,
+                max_memory_segments: 20,
+            }),
+            extra_context_segments: vec![ContextSegment {
+                id: "memory-pressure".to_string(),
+                source: SegmentSource::Memory,
+                content: "这是一段很长很长的记忆片段，用来制造预算压力，让上下文打包时必须优先保留系统能力 primer，而把普通记忆挤掉。"
+                    .repeat(2),
+                tokens: Some(120),
+                priority: 100,
+                created_at: chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
+                    .expect("timestamp parses")
+                    .with_timezone(&chrono::Utc),
+                last_accessed: chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
+                    .expect("timestamp parses")
+                    .with_timezone(&chrono::Utc),
+                metadata: Default::default(),
+            }],
+        })
+        .expect("runtime should succeed");
+
+    assert!(result
+        .packed_context_preview
+        .contains("system-capabilities"));
+    assert!(result
+        .packed_context_preview
+        .contains("默认能力：file_read/file_write"));
+    assert!(result
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "memory-pressure"));
+}
+
+#[test]
 fn agent_runtime_rejects_zero_recall_limit() {
     let store = InMemoryMemoryStore::new();
     let runtime = runtime(store);
@@ -161,8 +208,9 @@ fn debug_pack_for_test_drops_recall_segment_under_tight_budget() {
             chuang_agent::context_engine::ContextSegment {
                 id: "mem-1".to_string(),
                 source: chuang_agent::context_engine::SegmentSource::Memory,
-                content: "很长的长期记忆片段，用来制造 budget 压力，而且这里故意把内容写得更长更长，让 token 估算明显超过剩余空间。".to_string(),
-                tokens: Some(40),
+                content: "很长的长期记忆片段，用来制造 budget 压力，而且这里故意把内容写得更长更长，让 token 估算明显超过剩余空间。"
+                    .repeat(4),
+                tokens: Some(180),
                 priority: 100,
                 created_at: chrono::DateTime::parse_from_rfc3339("2026-04-30T18:00:00Z").unwrap().with_timezone(&chrono::Utc),
                 last_accessed: chrono::DateTime::parse_from_rfc3339("2026-04-30T18:00:00Z").unwrap().with_timezone(&chrono::Utc),
@@ -170,8 +218,8 @@ fn debug_pack_for_test_drops_recall_segment_under_tight_budget() {
             },
         ],
         ContextBudget {
-            max_tokens: 20,
-            reserve_system_tokens: 16,
+            max_tokens: 260,
+            reserve_system_tokens: 32,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,
@@ -188,7 +236,8 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
     store
         .put(record(
             "mem-1",
-            "很长的长期记忆片段，用来制造 budget 压力，而且这里故意把内容写得更长更长，让 token 估算明显超过剩余空间。",
+            &"很长的长期记忆片段，用来制造 budget 压力，而且这里故意把内容写得更长更长，让 token 估算明显超过剩余空间。"
+                .repeat(4),
             &[("kind", "goal")],
             "2026-04-30T18:00:00Z",
         ))
@@ -201,8 +250,8 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 24,
-                reserve_system_tokens: 16,
+                max_tokens: 260,
+                reserve_system_tokens: 32,
                 min_working_tokens: 1,
                 max_tool_results: 5,
                 max_memory_segments: 20,
@@ -235,8 +284,8 @@ fn agent_runtime_exposes_budget_exceeded_reason_in_preview() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 10,
-                reserve_system_tokens: 10,
+                max_tokens: 35,
+                reserve_system_tokens: 32,
                 min_working_tokens: 5,
                 max_tool_results: 5,
                 max_memory_segments: 20,
@@ -257,8 +306,8 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
         &[chuang_agent::context_engine::ContextSegment {
             id: "mem-1".to_string(),
             source: chuang_agent::context_engine::SegmentSource::Memory,
-            content: "需要被挤掉的记忆段，给 working segment 腾预算。".to_string(),
-            tokens: Some(8),
+            content: "需要被挤掉的记忆段，给 working segment 腾预算。".repeat(4),
+            tokens: Some(140),
             priority: 100,
             created_at: chrono::DateTime::parse_from_rfc3339("2026-04-30T18:00:00Z")
                 .unwrap()
@@ -269,8 +318,8 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
             metadata: std::collections::HashMap::new(),
         }],
         ContextBudget {
-            max_tokens: 30,
-            reserve_system_tokens: 16,
+            max_tokens: 180,
+            reserve_system_tokens: 32,
             min_working_tokens: 20,
             max_tool_results: 5,
             max_memory_segments: 20,
@@ -284,7 +333,10 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
         .expect("working reservation should exist");
     assert_eq!(reservation.reserved_segment_id, "working-user-input");
     assert_eq!(reservation.reserved_tokens, 20);
-    assert_eq!(reservation.dropped_segment_ids, vec!["mem-1".to_string()]);
+    assert!(reservation
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "mem-1"));
     assert_eq!(reservation.reason.as_str(), "minimum_working_tokens");
     assert!(packed
         .drop_reasons

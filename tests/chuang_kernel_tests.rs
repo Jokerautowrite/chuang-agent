@@ -70,6 +70,10 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
     assert_eq!(turn.governance_decision, None);
     assert!(turn.result.prompt.contains("[chuang-agent-runtime]"));
     assert!(turn.result.packed_context_preview.contains("system-core"));
+    assert!(turn
+        .result
+        .packed_context_preview
+        .contains("system-capabilities"));
     assert!(turn.report.summary.contains("model=stub-responder"));
     assert_eq!(kernel.snapshot().turn_count, 1);
 }

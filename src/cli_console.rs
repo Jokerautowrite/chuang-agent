@@ -99,6 +99,10 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
     );
     println!("execution: {}", snapshot.status.slots.execution);
     println!(
+        "runtime_capability_primer: {}",
+        snapshot.status.runtime_capability_primer
+    );
+    println!(
         "atomic_tools: ok={} total={} mapped={} interface_only={} action_schema_version={} report_schema_version={}",
         snapshot.status.atomic_tools.ok,
         snapshot.status.atomic_tools.total_count,

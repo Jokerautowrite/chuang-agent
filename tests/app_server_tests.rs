@@ -1237,6 +1237,10 @@ transport = "stub"
         .as_str()
         .expect("provider next action should be text")
         .contains("real provider transport"));
+    assert!(parsed["runtime_capability_primer"]
+        .as_str()
+        .expect("runtime capability primer should be text")
+        .contains("file_read/file_write/code_execute/list_dir"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(
         parsed["atomic_tools"]["governed_executable_atomic_tool_names"],

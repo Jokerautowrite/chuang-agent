@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::capability_primer::capability_primer_segment;
 use crate::context_engine::{
     BudgetExceededReason, ContextBudget, ContextEngineKind, ContextPackError, ContextSegment,
     DropReason, PackedContext, SegmentSource,
@@ -132,6 +133,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
     ) -> Result<PackedContext, ContextPackError> {
         let mut segments = vec![
             build_system_segment(),
+            capability_primer_segment(),
             build_working_segment(&request.user_input),
         ];
         segments.extend(request.extra_context_segments.iter().cloned());
@@ -161,17 +163,22 @@ pub fn debug_pack_for_test(
     recall_segments: &[ContextSegment],
     context_budget: ContextBudget,
 ) -> Result<PackedContext, ContextPackError> {
-    let mut segments = vec![build_system_segment(), build_working_segment(user_input)];
+    let mut segments = vec![
+        build_system_segment(),
+        capability_primer_segment(),
+        build_working_segment(user_input),
+    ];
     segments.extend(recall_segments.iter().cloned());
     ContextEngineKind::DeterministicBudget.pack(context_budget, segments)
 }
 
 fn build_system_segment() -> ContextSegment {
+    let content = "你是创项目本地 Agent 内核，先闭环，再优化。".to_string();
     ContextSegment {
         id: "system-core".to_string(),
         source: SegmentSource::System,
-        content: "你是创项目本地 Agent 内核，先闭环，再优化。".to_string(),
-        tokens: Some(10),
+        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
+        content,
         priority: 255,
         created_at: default_timestamp(),
         last_accessed: default_timestamp(),

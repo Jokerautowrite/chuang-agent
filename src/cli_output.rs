@@ -129,6 +129,10 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.config.tool_shell_risk_rule_counts
     );
     println!(
+        "runtime_capability_primer: {}",
+        status.runtime_capability_primer
+    );
+    println!(
         "atomic_tools: source={} ok={} total={} mapped={} interface_only={} manifest_schema_version={} action_schema_version={} report_schema_version={}",
         status.atomic_tools.source,
         status.atomic_tools.ok,

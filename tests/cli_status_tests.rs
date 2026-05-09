@@ -84,6 +84,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "atomic_tools: source=GenericAgent ok=true total=9 mapped=9 interface_only=0 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
+    assert!(stdout.contains(
+        "runtime_capability_primer: 默认能力：file_read/file_write/code_execute/list_dir"
+    ));
     assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_executable: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_interface_only: none"));
@@ -385,6 +388,10 @@ fn cli_status_can_render_json_without_secret_leak() {
             && contract["read_only"] == true
             && contract["connects_real_service"] == false));
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
+    assert!(parsed["runtime_capability_primer"]
+        .as_str()
+        .expect("runtime capability primer should be text")
+        .contains("file_read/file_write/code_execute/list_dir"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 9);

@@ -48,6 +48,9 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.governance.dangerous_shell_decision, "needs_approval");
     assert_eq!(status.governance.secret_shell_decision, "draft_only");
     assert!(!status.governance.goal_run_executes);
+    assert!(status
+        .runtime_capability_primer
+        .contains("file_read/file_write/code_execute/list_dir"));
     assert!(status.atomic_tools.ok);
     assert_eq!(status.atomic_tools.manifest_schema_version, 1);
     assert_eq!(
