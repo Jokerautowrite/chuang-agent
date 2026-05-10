@@ -1,4 +1,7 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
+use crate::browser_read::{
+    unavailable_browser_read_status, BrowserReadStatus, BROWSER_READ_CONTRACT_VERSION,
+};
 use crate::capability_primer::capability_primer_text;
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
 use crate::goal_mode::{GoalCheckpointPolicy, GoalFinalReportPolicy, GoalSpec};
@@ -6,6 +9,10 @@ use crate::goal_run::GoalRunStore;
 use crate::governance::{
     risk_decision_parts, ActionKind, Governance, MarkdownRuleSet, ProposedAction,
     StaticRuleGovernance,
+};
+use crate::knowledge_read::{
+    preflight_knowledge_read_status, KnowledgeReadConfig, KnowledgeReadStatus,
+    KNOWLEDGE_READ_CONTRACT_VERSION,
 };
 use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
@@ -26,10 +33,13 @@ pub struct ChuangMvpStatus {
     pub provider_readiness: ProviderReadinessStatus,
     pub project_readiness: ProjectReadinessStatus,
     pub memory_readiness: MemoryReadinessStatus,
+    pub knowledge_readiness: KnowledgeReadinessStatus,
     pub memory_maintenance_receipt: MemoryMaintenanceReceiptStatus,
     pub channel_readiness: ChannelReadinessStatus,
     pub subagent_readiness: SubagentReadinessStatus,
     pub external_ai_readiness: ExternalAiReadinessStatus,
+    pub browser_readiness: BrowserReadinessStatus,
+    pub live_readiness: LiveReadinessStatus,
     pub live_adapter_gates: LiveAdapterGateStatus,
     pub atomic_tools: AtomicToolSurfaceStatus,
     pub governance: GovernanceReadinessStatus,
@@ -153,6 +163,28 @@ pub struct MemoryReadinessStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KnowledgeReadinessStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub contract_version: u16,
+    pub local_preview_ready: bool,
+    pub local_preview_boundary: String,
+    pub live_adapter_available: bool,
+    pub live_adapter_state: String,
+    pub live_adapter_kind: String,
+    pub live_sources: Vec<String>,
+    pub live_reason_code: String,
+    pub live_reason: String,
+    pub live_boundary: String,
+    pub local_preview_is_separate: bool,
+    pub connects_real_service: bool,
+    pub writes_automatically: bool,
+    pub real_adapter_required: bool,
+    pub current: String,
+    pub next_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MemoryMaintenanceReceiptStatus {
     pub available: bool,
     pub readable: bool,
@@ -269,6 +301,56 @@ pub struct ExternalAiLayerStatus {
     pub next_action: String,
     pub boundary: String,
     pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BrowserReadinessStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub contract_version: u16,
+    pub browser_read_adapter_available: bool,
+    pub browser_read_state: String,
+    pub browser_read_adapter_kind: String,
+    pub browser_read_capabilities: Vec<String>,
+    pub browser_read_reason_code: String,
+    pub browser_read_reason: String,
+    pub desktop_read_observation_ready: bool,
+    pub desktop_read_tools: Vec<String>,
+    pub desktop_read_boundary: String,
+    pub browser_read_boundary: String,
+    pub browser_read_does_not_use_desktop_read: bool,
+    pub real_adapter_required: bool,
+    pub current: String,
+    pub next_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveReadinessStatus {
+    pub ok: bool,
+    pub overall_state: String,
+    pub local_ready_scope: String,
+    pub ga_local_mapped_only: bool,
+    pub desktop_browser_live_gated: bool,
+    pub browser_worker_frozen: bool,
+    pub live_worker_available: bool,
+    pub real_external_acceptance_pending: bool,
+    pub provider_live_request_verified_by_status: bool,
+    pub mapped_does_not_mean_live: bool,
+    pub gated_does_not_mean_ready: bool,
+    pub frozen_does_not_mean_ready: bool,
+    pub ready_does_not_mean_live: bool,
+    pub current: String,
+    pub next_action: String,
+    pub terms: Vec<LiveReadinessTermStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveReadinessTermStatus {
+    pub term: String,
+    pub current_value: String,
+    pub means: String,
+    pub does_not_mean: String,
+    pub source_surface: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -450,7 +532,7 @@ pub fn build_chuang_mvp_status(
             .filter(|tool| matches!(tool.name, "mouse" | "keyboard" | "screenshot" | "locate"))
             .map(|tool| tool.name.to_string())
             .collect(),
-        interface_only_reason: "all GA atoms are mapped to governed runtime ports; real desktop/browser execution still requires an audited actuator adapter, live gate, allowlist, and receipt".to_string(),
+        interface_only_reason: "all GA atoms are mapped to governed runtime ports; real desktop/browser execution still requires an audited actuator adapter, live gate, allowlist, and receipt; read-only desktop/browser observation and live adapters stay separate".to_string(),
         local_cli_self_check_entrypoints: vec![
             "status --json".to_string(),
             "doctor --json".to_string(),
@@ -491,11 +573,22 @@ pub fn build_chuang_mvp_status(
         &goal_run,
     );
     let memory_readiness = build_memory_readiness(&config_summary);
+    let knowledge_readiness = build_knowledge_readiness(&config.external_knowledge);
     let memory_maintenance_receipt = build_memory_maintenance_receipt(&config_summary);
     let channel_readiness = build_channel_readiness();
     let subagent_readiness = build_subagent_readiness(&slots, &config_summary);
     let external_ai_readiness = build_external_ai_readiness();
+    let browser_readiness = build_browser_readiness(&atomic_tools);
     let live_adapter_gates = build_live_adapter_gate_status();
+    let live_readiness = build_live_readiness(
+        &atomic_tools,
+        &subagent_readiness,
+        &external_ai_readiness,
+        &browser_readiness,
+        &knowledge_readiness,
+        &provider_readiness,
+        &live_adapter_gates,
+    );
     let release_readiness = build_release_readiness(
         &project_readiness,
         &memory_readiness,
@@ -569,10 +662,13 @@ pub fn build_chuang_mvp_status(
         provider_readiness,
         project_readiness,
         memory_readiness,
+        knowledge_readiness,
         memory_maintenance_receipt,
         channel_readiness,
         subagent_readiness,
         external_ai_readiness,
+        browser_readiness,
+        live_readiness,
         live_adapter_gates,
         atomic_tools,
         governance,
@@ -763,9 +859,9 @@ fn build_local_contract_readiness() -> LocalContractReadinessStatus {
         local_contract(
             "knowledge_context_preview",
             "ready",
-            "memory knowledge preview-context and run --enable-knowledge-context-preview expose local readonly context evidence",
+            "memory knowledge preview-context and run --enable-knowledge-context-preview expose local read-only preview/source-contract evidence; live wiki/GBrain retrieval remains pending/gated",
             "local_markdown_text_preview_only",
-            "wire live wiki/GBrain retrieval only after audited readonly adapters are configured",
+            "wire live wiki/GBrain retrieval only after audited read-only contracts and operator receipts are configured",
             true,
             false,
             false,
@@ -815,9 +911,9 @@ fn build_local_contract_readiness() -> LocalContractReadinessStatus {
         local_contract(
             "external_knowledge_source_contracts",
             "ready",
-            "memory knowledge source-contract --source wiki|gbrain documents readonly adapter contracts",
+            "memory knowledge source-contract --source wiki|gbrain documents read-only adapter contracts while live retrieval stays pending/gated",
             "adapter_contract_only",
-            "connect live source adapters only after manual env/provider verification and provenance review",
+            "connect live source adapters only after manual env/provider verification, provenance review, and explicit operator approval",
             true,
             true,
             false,
@@ -1123,6 +1219,259 @@ fn build_external_ai_readiness() -> ExternalAiReadinessStatus {
         deferred_count,
         blocked_count,
         layers,
+    }
+}
+
+fn build_live_readiness(
+    atomic_tools: &AtomicToolSurfaceStatus,
+    subagent_readiness: &SubagentReadinessStatus,
+    external_ai_readiness: &ExternalAiReadinessStatus,
+    browser_readiness: &BrowserReadinessStatus,
+    knowledge_readiness: &KnowledgeReadinessStatus,
+    provider_readiness: &ProviderReadinessStatus,
+    live_adapter_gates: &LiveAdapterGateStatus,
+) -> LiveReadinessStatus {
+    let ga_local_mapped_only = atomic_tools.ok
+        && atomic_tools.mapped_count == atomic_tools.total_count
+        && atomic_tools.interface_only_count == 0;
+    let desktop_browser_live_gated = !atomic_tools
+        .desktop_browser_live_gated_atomic_tool_names
+        .is_empty()
+        && live_adapter_gates
+            .gates
+            .iter()
+            .any(|gate| gate.name == "actuator_operation" && !gate.enabled);
+    let browser_worker_frozen = external_ai_readiness
+        .layers
+        .iter()
+        .any(|layer| layer.name == "browser_worker_frozen" && layer.state == "ready");
+    let live_worker_available = subagent_readiness.live_worker_available;
+    let provider_live_request_verified_by_status = false;
+    let real_external_acceptance_pending = !live_worker_available
+        || desktop_browser_live_gated
+        || !browser_readiness.browser_read_adapter_available
+        || !knowledge_readiness.live_adapter_available
+        || !provider_live_request_verified_by_status
+        || live_adapter_gates.enabled_count == 0;
+    let ok = ga_local_mapped_only
+        && desktop_browser_live_gated
+        && browser_worker_frozen
+        && !live_worker_available
+        && real_external_acceptance_pending;
+
+    LiveReadinessStatus {
+        ok,
+        overall_state: if ok {
+            "local_ready_live_pending"
+        } else {
+            "live_readiness_terms_inconsistent"
+        }
+        .to_string(),
+        local_ready_scope:
+            "ready/local-ready only covers local contracts, smoke gates, status diagnostics, and read-only preflight".to_string(),
+        ga_local_mapped_only,
+        desktop_browser_live_gated,
+        browser_worker_frozen,
+        live_worker_available,
+        real_external_acceptance_pending,
+        provider_live_request_verified_by_status,
+        mapped_does_not_mean_live: true,
+        gated_does_not_mean_ready: true,
+        frozen_does_not_mean_ready: true,
+        ready_does_not_mean_live: true,
+        current: format!(
+            "local status is {}; provider status is {}; subagent worker is {}; real external acceptance remains pending",
+            "ready",
+            provider_readiness.overall_state,
+            subagent_readiness.worker_runtime_state
+        ),
+        next_action:
+            "keep mapped/gated/frozen/ready terms scoped separately; require live receipts before marking provider, Feishu, desktop/browser, wiki/GBrain, or runner pools live-ready"
+                .to_string(),
+        terms: vec![
+            live_readiness_term(
+                "ga_local_mapped_only",
+                ga_local_mapped_only.to_string(),
+                "GA 9 tools are mapped to local governed runtime ports and visible in status/tool surfaces",
+                "desktop/browser live execution or external service acceptance",
+                "atomic_tools",
+            ),
+            live_readiness_term(
+                "desktop_browser_live_gated",
+                desktop_browser_live_gated.to_string(),
+                "desktop/browser action execution remains behind actuator live gate, allowlist, governance, and receipt",
+                "actuator live action ready",
+                "atomic_tools + live_adapter_gates",
+            ),
+            live_readiness_term(
+                "browser_worker_frozen",
+                browser_worker_frozen.to_string(),
+                "the old BrowserWorker line is intentionally frozen and excluded from mainline live execution",
+                "browser automation ready or revived",
+                "external_ai_readiness",
+            ),
+            live_readiness_term(
+                "browser_read_unavailable",
+                (!browser_readiness.browser_read_adapter_available).to_string(),
+                "browser_read has a trait and status contract for URL/title/DOM, but no real adapter is configured",
+                "desktop_read observe/screenshot evidence or a successfully read URL/title/DOM",
+                "browser_readiness",
+            ),
+            live_readiness_term(
+                "knowledge_read_unavailable",
+                (!knowledge_readiness.live_adapter_available).to_string(),
+                "wiki/GBrain live read has a trait and status contract, but no real adapter is configured",
+                "local external knowledge preview or source-contract output",
+                "knowledge_readiness",
+            ),
+            live_readiness_term(
+                "live_worker_available",
+                live_worker_available.to_string(),
+                "whether a live subagent worker adapter is actually available to execute work",
+                "read-only preflight, local queue readiness, or rehearsal contract readiness",
+                "subagent_readiness",
+            ),
+            live_readiness_term(
+                "real_external_acceptance_pending",
+                real_external_acceptance_pending.to_string(),
+                "Feishu/provider/desktop/browser/wiki/GBrain/runner-pool live receipts are still required",
+                "local-ready, mapped, gated, frozen, or provider env <set>",
+                "release_readiness",
+            ),
+        ],
+    }
+}
+
+fn live_readiness_term(
+    term: &str,
+    current_value: String,
+    means: &str,
+    does_not_mean: &str,
+    source_surface: &str,
+) -> LiveReadinessTermStatus {
+    LiveReadinessTermStatus {
+        term: term.to_string(),
+        current_value,
+        means: means.to_string(),
+        does_not_mean: does_not_mean.to_string(),
+        source_surface: source_surface.to_string(),
+    }
+}
+
+fn build_browser_readiness(atomic_tools: &AtomicToolSurfaceStatus) -> BrowserReadinessStatus {
+    let browser_read = unavailable_browser_read_status("real_adapter_missing");
+    browser_readiness_from_status(&browser_read, atomic_tools)
+}
+
+fn build_knowledge_readiness(config: &KnowledgeReadConfig) -> KnowledgeReadinessStatus {
+    let wiki = preflight_knowledge_read_status(config, "wiki", "<missing>");
+    let gbrain = preflight_knowledge_read_status(config, "gbrain", "<missing>");
+    knowledge_readiness_from_status(&wiki, &gbrain)
+}
+
+fn knowledge_readiness_from_status(
+    wiki: &KnowledgeReadStatus,
+    gbrain: &KnowledgeReadStatus,
+) -> KnowledgeReadinessStatus {
+    let local_preview_ready = true;
+    let live_adapter_available = wiki.available || gbrain.available;
+    let ok = local_preview_ready
+        && !live_adapter_available
+        && wiki.local_preview_is_separate
+        && gbrain.local_preview_is_separate
+        && !wiki.connects_real_service
+        && !gbrain.connects_real_service
+        && !wiki.writes_automatically
+        && !gbrain.writes_automatically;
+
+    KnowledgeReadinessStatus {
+        ok,
+        overall_state: if ok {
+            "local_preview_ready_knowledge_read_unavailable"
+        } else {
+            "knowledge_read_terms_inconsistent"
+        }
+        .to_string(),
+        contract_version: KNOWLEDGE_READ_CONTRACT_VERSION,
+        local_preview_ready,
+        local_preview_boundary:
+            "memory knowledge search/preview-context only reads local files and does not connect real wiki/GBrain"
+                .to_string(),
+        live_adapter_available,
+        live_adapter_state: if live_adapter_available {
+            "ready".to_string()
+        } else {
+            "unavailable".to_string()
+        },
+        live_adapter_kind: if live_adapter_available {
+            if wiki.available {
+                wiki.adapter_kind.clone()
+            } else {
+                gbrain.adapter_kind.clone()
+            }
+        } else {
+            "unavailable".to_string()
+        },
+        live_sources: vec!["wiki".to_string(), "gbrain".to_string()],
+        live_reason_code: if !wiki.available {
+            wiki.reason_code.clone()
+        } else {
+            gbrain.reason_code.clone()
+        },
+        live_reason: if !wiki.available {
+            wiki.reason.clone()
+        } else {
+            gbrain.reason.clone()
+        },
+        live_boundary: "knowledge_read_wiki_gbrain_live_contract".to_string(),
+        local_preview_is_separate: true,
+        connects_real_service: false,
+        writes_automatically: false,
+        real_adapter_required: true,
+        current: "local preview/source-contract is ready; real wiki/GBrain live read adapter is unavailable or not yet wired".to_string(),
+        next_action: "add audited read-only wiki/GBrain adapter with endpoint, credential loading, provenance, and receipts; until then return structured unavailable instead of claiming live reads".to_string(),
+    }
+}
+
+fn browser_readiness_from_status(
+    browser_read: &BrowserReadStatus,
+    atomic_tools: &AtomicToolSurfaceStatus,
+) -> BrowserReadinessStatus {
+    let desktop_read_tools = atomic_tools
+        .desktop_browser_live_gated_atomic_tool_names
+        .iter()
+        .filter(|name| matches!(name.as_str(), "screenshot" | "locate"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let desktop_read_observation_ready = !desktop_read_tools.is_empty();
+    let ok = desktop_read_observation_ready
+        && !browser_read.available
+        && browser_read.desktop_read_is_separate
+        && browser_read.does_not_use_actuator_observe;
+
+    BrowserReadinessStatus {
+        ok,
+        overall_state: if ok {
+            "desktop_read_ready_browser_read_unavailable"
+        } else {
+            "browser_read_terms_inconsistent"
+        }
+        .to_string(),
+        contract_version: BROWSER_READ_CONTRACT_VERSION,
+        browser_read_adapter_available: browser_read.available,
+        browser_read_state: browser_read.state.clone(),
+        browser_read_adapter_kind: browser_read.adapter_kind.clone(),
+        browser_read_capabilities: browser_read.capabilities.clone(),
+        browser_read_reason_code: browser_read.reason_code.clone(),
+        browser_read_reason: browser_read.reason.clone(),
+        desktop_read_observation_ready,
+        desktop_read_tools,
+        desktop_read_boundary: "actuator.observe/screenshot read-only evidence; may expose screen/window evidence but not DOM, URL, or browser title guarantees".to_string(),
+        browser_read_boundary: browser_read.boundary.clone(),
+        browser_read_does_not_use_desktop_read: browser_read.does_not_use_actuator_observe,
+        real_adapter_required: true,
+        current: "desktop_read observation tools are mapped; browser_read URL/title/DOM live adapter is unavailable".to_string(),
+        next_action: "add an audited CDP/Playwright/browser adapter later; until then return structured unavailable instead of claiming DOM, URL, or title reads".to_string(),
     }
 }
 
@@ -1636,8 +1985,8 @@ fn build_memory_readiness(config: &ConfigSummary) -> MemoryReadinessStatus {
             "external_knowledge",
             "ready",
             "docs/external-knowledge-adapter.md",
-            "external-brain boundary is documented and local markdown/text search exposes read-only provenance-bearing hits without connecting live services",
-            "wire live wiki/GBrain only through audited read-only adapters after local provenance stays stable",
+            "external-brain boundary is documented and local markdown/text search exposes read-only provenance-bearing hits without connecting live services; live wiki/GBrain retrieval stays pending/gated",
+            "wire live wiki/GBrain retrieval only through audited read-only contracts after local provenance stays stable",
             false,
         ),
         memory_layer(

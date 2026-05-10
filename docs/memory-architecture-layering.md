@@ -122,6 +122,8 @@ memory lim extract --query TEXT [--session-id ID]：只读 dry-run 候选，输�
 
 用于承载大块资料、SOP、研究文档、项目知识。外脑不是提示词记忆，必须通过检索和导入进入当前任务。
 
+当前 Chuang 先落的是本地只读 preview / source-contract：能对 markdown/text 外脑根做 provenance 检索、preview-context 和合同展示，但 live wiki/GBrain retrieval 仍是 pending/gated，不能把 local-only 结果说成已经接通真实外脑。
+
 Hermes 当前参考：
 
 ```text

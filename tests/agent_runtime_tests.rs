@@ -133,7 +133,7 @@ fn agent_runtime_packs_extra_identity_context_segments() {
 }
 
 #[test]
-fn agent_runtime_exposes_default_capability_primer_even_under_budget_pressure() {
+fn agent_runtime_keeps_capability_primer_under_budget_pressure() {
     let store = InMemoryMemoryStore::new();
     let runtime = runtime(store);
 
@@ -143,7 +143,7 @@ fn agent_runtime_exposes_default_capability_primer_even_under_budget_pressure() 
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 200,
+                max_tokens: 310,
                 reserve_system_tokens: 32,
                 min_working_tokens: 1,
                 max_tool_results: 5,
@@ -170,13 +170,60 @@ fn agent_runtime_exposes_default_capability_primer_even_under_budget_pressure() 
     assert!(result
         .packed_context_preview
         .contains("system-capabilities"));
-    assert!(result
+    assert!(!result
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "system-capabilities"));
+    assert!(!result
         .packed_context_preview
-        .contains("默认能力：file_read/file_write"));
+        .contains("drop_reasons=system-capabilities:budget_limit"));
+    assert!(result.packed_context_preview.contains("memory-pressure"));
     assert!(result
         .dropped_segment_ids
         .iter()
         .any(|id| id == "memory-pressure"));
+}
+
+#[test]
+fn agent_runtime_surfaces_readonly_desktop_browser_and_knowledge_guidance_in_prompt() {
+    let store = InMemoryMemoryStore::new();
+    let runtime = runtime(store);
+
+    let result = runtime
+        .run(&RuntimeRequest {
+            user_input: "查看能力和工具说明".to_string(),
+            recall_limit: 1,
+            metadata: BTreeMap::new(),
+            context_budget: None,
+            extra_context_segments: Vec::new(),
+        })
+        .expect("runtime should succeed");
+
+    assert!(result.prompt.contains("[chuang-agent-runtime]"));
+    assert!(result.prompt.contains("[packed-context]"));
+    assert!(result.prompt.contains("system-capabilities"));
+    assert!(result.prompt.contains("普通对话默认注入同一份能力 primer"));
+    assert!(result
+        .prompt
+        .contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
+    assert!(result.prompt.contains("goal/subagent 派活"));
+    assert!(result
+        .prompt
+        .contains("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
+    assert!(result.prompt.contains("locate/screenshot=只读观察"));
+    assert!(result
+        .prompt
+        .contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
+    assert!(result.prompt.contains("memory/session=回溯补充"));
+    assert!(result
+        .packed_context_preview
+        .contains("system-capabilities"));
+    assert!(result
+        .packed_context_preview
+        .contains("locate/screenshot=只读观察"));
+    assert!(result
+        .packed_context_preview
+        .contains("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
 }
 
 #[test]
@@ -210,7 +257,7 @@ fn debug_pack_for_test_drops_recall_segment_under_tight_budget() {
                 source: chuang_agent::context_engine::SegmentSource::Memory,
                 content: "很长的长期记忆片段，用来制造 budget 压力，而且这里故意把内容写得更长更长，让 token 估算明显超过剩余空间。"
                     .repeat(4),
-                tokens: Some(180),
+                tokens: Some(240),
                 priority: 100,
                 created_at: chrono::DateTime::parse_from_rfc3339("2026-04-30T18:00:00Z").unwrap().with_timezone(&chrono::Utc),
                 last_accessed: chrono::DateTime::parse_from_rfc3339("2026-04-30T18:00:00Z").unwrap().with_timezone(&chrono::Utc),
@@ -218,7 +265,7 @@ fn debug_pack_for_test_drops_recall_segment_under_tight_budget() {
             },
         ],
         ContextBudget {
-            max_tokens: 260,
+            max_tokens: 310,
             reserve_system_tokens: 32,
             min_working_tokens: 1,
             max_tool_results: 5,
@@ -250,7 +297,7 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 260,
+                max_tokens: 310,
                 reserve_system_tokens: 32,
                 min_working_tokens: 1,
                 max_tool_results: 5,
@@ -266,7 +313,10 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
     assert!(result.packed_context_preview.contains("system-core"));
     assert!(result.packed_context_preview.contains("working-user-input"));
     assert!(result.packed_context_preview.contains("dropped="));
-    assert!(result.packed_context_preview.contains("drop_reasons=none"));
+    assert!(!result
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "system-capabilities"));
     assert!(result
         .packed_context_preview
         .contains("budget_exceeded=false"));
@@ -284,7 +334,7 @@ fn agent_runtime_exposes_budget_exceeded_reason_in_preview() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 35,
+                max_tokens: 270,
                 reserve_system_tokens: 32,
                 min_working_tokens: 5,
                 max_tool_results: 5,
@@ -318,7 +368,7 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
             metadata: std::collections::HashMap::new(),
         }],
         ContextBudget {
-            max_tokens: 180,
+            max_tokens: 300,
             reserve_system_tokens: 32,
             min_working_tokens: 20,
             max_tool_results: 5,

@@ -593,6 +593,7 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
         remember: false,
         session_id: None,
         remember_session: false,
+        conversation_history: Vec::new(),
         remember_identity: false,
         remember_experience: false,
         dispatch_subagent: false,
@@ -749,7 +750,7 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         )
     );
     println!(
-        "atomic_tools_interface_only: {}",
+        "atomic_tools_interface_only: {} (local surface only; live adapters separate)",
         format_name_list(&doctor.status.atomic_tools.interface_only_atomic_tool_names)
     );
     println!(
@@ -881,6 +882,15 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.local_contract_readiness.writes_core_memory,
         doctor.status.local_contract_readiness.executes_plugins
     );
+    for contract in &doctor.status.local_contract_readiness.contracts {
+        if contract.name == "knowledge_context_preview"
+            || contract.name == "external_knowledge_source_contracts"
+        {
+            println!(
+                "local_contract_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+            );
+        }
+    }
     println!(
         "release_readiness: ok={} name={} state={} ready={} partial={} deferred={} blocked={}",
         doctor.status.release_readiness.ok,
@@ -924,6 +934,13 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.memory_readiness.deferred_count,
         doctor.status.memory_readiness.blocked_count
     );
+    for layer in &doctor.status.memory_readiness.layers {
+        if layer.name == "external_knowledge" {
+            println!(
+                "memory_layer_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+            );
+        }
+    }
     println!(
         "channel_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
         doctor.status.channel_readiness.ok,

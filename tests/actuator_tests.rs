@@ -59,7 +59,15 @@ fn fake_actuator_observe_and_screenshot_return_evidence_refs() {
     let screenshot = actuator.screenshot(ScreenshotTarget::Screen).unwrap();
 
     assert_eq!(observation.evidence_ref.unwrap().uri, "fake://observation");
+    assert_eq!(
+        observation.audit_message.as_deref(),
+        Some("fake actuator observation")
+    );
     assert_eq!(screenshot.uri, "fake://screenshot");
+    assert_eq!(
+        screenshot.audit_message.as_deref(),
+        Some("fake actuator screenshot")
+    );
 }
 
 #[test]
@@ -131,8 +139,60 @@ else:
     let screenshot = actuator.screenshot(ScreenshotTarget::Screen).unwrap();
 
     assert_eq!(observation.summary, "screen observed");
+    assert_eq!(observation.audit_message.as_deref(), Some("ok"));
+    assert_eq!(
+        observation
+            .evidence_ref
+            .as_ref()
+            .and_then(|evidence_ref| evidence_ref.audit_message.as_deref()),
+        Some("ok")
+    );
     assert_eq!(handle.handle_id, "cmd://app/Feishu");
     assert_eq!(screenshot.uri, "cmd://screenshot");
+    assert_eq!(screenshot.audit_message.as_deref(), Some("ok"));
+}
+
+#[test]
+fn command_actuator_normalizes_read_only_audit_messages() {
+    let script = temp_script_path("adapter-audit");
+    fs::write(
+        &script,
+        r#"#!/bin/sh
+python3 -c '
+import json
+import sys
+request = json.load(sys.stdin)
+action = request.get("action")
+if action == "observe":
+    print(json.dumps({"observation":{"target":request["observe_target"],"summary":"screen observed","evidence_ref":{"uri":"cmd://observation","audit_message":"evidence audit"}},"app_handle":None,"evidence_ref":None,"message":None}))
+elif action == "screenshot":
+    print(json.dumps({"observation":None,"app_handle":None,"evidence_ref":{"uri":"cmd://screenshot"},"message":"   "}))
+else:
+    print(json.dumps({"observation":None,"app_handle":None,"evidence_ref":None,"message":"ok"}))
+'
+"#,
+    )
+    .expect("script should write");
+
+    let mut actuator = CommandActuator::new(ActuatorCommandConfig {
+        program: "sh".to_string(),
+        args: script.display().to_string(),
+        timeout_ms: 30_000,
+    });
+
+    let observation = actuator.observe(ObserveTarget::Screen).unwrap();
+    let screenshot = actuator.screenshot(ScreenshotTarget::Screen).unwrap();
+
+    assert_eq!(observation.audit_message.as_deref(), Some("evidence audit"));
+    assert_eq!(
+        observation
+            .evidence_ref
+            .as_ref()
+            .and_then(|evidence_ref| evidence_ref.audit_message.as_deref()),
+        Some("evidence audit")
+    );
+    assert_eq!(screenshot.uri, "cmd://screenshot");
+    assert_eq!(screenshot.audit_message, None);
 }
 
 #[test]
@@ -290,6 +350,113 @@ fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
     assert!(message.contains("allowed=true"));
     assert!(message.contains("dry_run=true"));
     assert!(message.contains("real_execution=false"));
+    assert!(message.contains("read_only=false"));
+    assert!(message.contains("live_gate_required=false"));
     assert!(message.contains("audit_label=actuator.operation.live"));
     assert!(message.contains("required_env=CHUANG_REAL_ACTUATOR_ENABLE"));
+}
+
+#[test]
+fn real_actuator_adapter_observe_is_readonly_and_structured() {
+    let allowlist = temp_script_path("real-actuator-observe").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [],
+  "input_allowed": false,
+  "click_allowed": false,
+  "screenshot_allowed": false
+}"#,
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+    let mut child = Command::new(adapter_path)
+        .args(["--json", "--allowlist"])
+        .arg(&allowlist)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("adapter should spawn");
+    let request = br#"{"action":"observe","observe_target":"Screen","open_app":null,"focus_target":null,"click_target":null,"input_target":null,"text":null,"screenshot_target":null}"#;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("stdin should be available"),
+        request,
+    )
+    .expect("request should write");
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("adapter should finish");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("response should be json");
+    assert!(response["observation"]["summary"]
+        .as_str()
+        .expect("summary should exist")
+        .contains("current_window_title="));
+    let message = response["message"].as_str().expect("message should exist");
+    assert!(message.contains("allowlisted read-only actuator observation"));
+    assert!(message.contains("dry_run=false"));
+    assert!(message.contains("real_execution=false"));
+    assert!(message.contains("read_only=true"));
+    assert!(message.contains("live_gate_required=false"));
+}
+
+#[test]
+fn real_actuator_adapter_screenshot_is_readonly_and_returns_evidence_boundary() {
+    let allowlist = temp_script_path("real-actuator-screenshot").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [],
+  "input_allowed": false,
+  "click_allowed": false,
+  "screenshot_allowed": true
+}"#,
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+    let mut child = Command::new(adapter_path)
+        .args(["--json", "--allowlist"])
+        .arg(&allowlist)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("adapter should spawn");
+    let request = br#"{"action":"screenshot","observe_target":null,"open_app":null,"focus_target":null,"click_target":null,"input_target":null,"text":null,"screenshot_target":"Screen"}"#;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("stdin should be available"),
+        request,
+    )
+    .expect("request should write");
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("adapter should finish");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("response should be json");
+    let message = response["message"].as_str().expect("message should exist");
+    assert!(message.contains("allowlisted read-only actuator observation"));
+    assert!(message.contains("action=screenshot"));
+    assert!(message.contains("read_only=true"));
+    assert!(message.contains("live_gate_required=false"));
+    let evidence_uri = response["evidence_ref"]["uri"]
+        .as_str()
+        .expect("evidence ref should exist");
+    assert!(
+        evidence_uri.starts_with("file://")
+            || evidence_uri == "chuang-actuator://screenshot/unavailable",
+        "unexpected evidence uri: {evidence_uri}"
+    );
 }

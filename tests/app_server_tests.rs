@@ -13,6 +13,90 @@ fn temp_workspace(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-agent-app-server-{name}-{nanos}"))
 }
 
+fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    let mut expected_len = None;
+    loop {
+        let read = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&buffer[..read]);
+        if expected_len.is_none() {
+            if let Some(header_end) = find_header_end(&request) {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                    })
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_len);
+            }
+        }
+        if expected_len
+            .map(|len| request.len() >= len)
+            .unwrap_or(false)
+        {
+            break;
+        }
+    }
+    request
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn write_basic_stub_workspace(workspace: &PathBuf) {
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang test soul\n").expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+    fs::write(
+        workspace.join("config.toml"),
+        r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-openai"
+base_url = "https://api.example.com/v1"
+model = "gpt-app-server-test"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "stub"
+"#,
+    )
+    .expect("config should write");
+}
+
 #[test]
 fn app_server_turn_uses_workspace_provider_config() {
     let workspace = temp_workspace("provider-config");
@@ -290,6 +374,146 @@ transport = "stub"
 }
 
 #[test]
+fn app_server_second_turn_injects_recent_thread_history() {
+    let workspace = temp_workspace("recent-thread-history");
+    write_basic_stub_workspace(&workspace);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"我给你一个暗号：anchor_alpha"}}}}"#,
+        workspace.display()
+    )
+    .expect("first turn/start should write");
+    writeln!(
+        stdin,
+        r#"{{"id":2,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"chuang-thread-1","text":"刚才那个暗号是什么？"}}}}"#,
+        workspace.display()
+    )
+    .expect("second turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let responses = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let first_turn = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("first turn response should be present");
+    assert_eq!(
+        first_turn["result"]["turn"]["runtimeObservability"]
+            ["recent_conversation_history_item_count"],
+        "0"
+    );
+    assert_eq!(
+        first_turn["result"]["turn"]["runtimeObservability"]
+            ["recent_conversation_history_injected"],
+        "false"
+    );
+
+    let second_turn = responses
+        .iter()
+        .find(|value| value["id"] == 2)
+        .expect("second turn response should be present");
+    assert_eq!(
+        second_turn["result"]["turn"]["providerMeta"]["recent_conversation_history_item_count"],
+        "2"
+    );
+    assert_eq!(
+        second_turn["result"]["turn"]["providerMeta"]["recent_conversation_history_turn_count"],
+        "1"
+    );
+    assert_eq!(
+        second_turn["result"]["turn"]["providerMeta"]["recent_conversation_history_injected"],
+        "true"
+    );
+    assert_eq!(
+        second_turn["result"]["turn"]["runtimeObservability"]
+            ["recent_conversation_history_item_count"],
+        "2"
+    );
+    assert_eq!(
+        second_turn["result"]["turn"]["runtimeObservability"]
+            ["recent_conversation_history_model_facing"],
+        "true"
+    );
+    assert_eq!(
+        second_turn["result"]["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn app_server_rejects_workspace_change_for_existing_thread() {
+    let workspace = temp_workspace("workspace-sticky");
+    let other_workspace = temp_workspace("workspace-sticky-other");
+    write_basic_stub_workspace(&workspace);
+    write_basic_stub_workspace(&other_workspace);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"先绑定这个工作区"}}}}"#,
+        workspace.display()
+    )
+    .expect("first turn/start should write");
+    writeln!(
+        stdin,
+        r#"{{"id":2,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"chuang-thread-1","text":"尝试换工作区"}}}}"#,
+        other_workspace.display()
+    )
+    .expect("second turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let responses = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let second_turn = responses
+        .iter()
+        .find(|value| value["id"] == 2)
+        .expect("second turn response should be present");
+    assert!(second_turn["error"]["message"]
+        .as_str()
+        .expect("error message should be string")
+        .contains("workspace_root_mismatch"));
+}
+
+#[test]
 fn app_server_turn_compacts_session_memory_hard_limit_without_failing_turn() {
     let workspace = temp_workspace("session-memory-limit");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
@@ -435,10 +659,7 @@ fn app_server_turn_surfaces_provider_fallback_diagnostics() {
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        let _ = read_http_request(&mut stream);
 
         let body = r#"{"error":{"message":"rate limited"}}"#;
         let response = format!(
@@ -728,10 +949,7 @@ fn app_server_turn_surfaces_capacity_metadata_on_plain_text_429() {
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        let _ = read_http_request(&mut stream);
 
         let body = "at capacity";
         let response = format!(
@@ -859,10 +1077,7 @@ fn app_server_turn_marks_200_missing_content_as_provider_error() {
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        let _ = read_http_request(&mut stream);
 
         let body = r#"{"id":"chatcmpl-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
         let response = format!(
@@ -986,10 +1201,7 @@ fn app_server_turn_surfaces_provider_timeout_reason_codes() {
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        let _ = read_http_request(&mut stream);
         thread::sleep(Duration::from_millis(1000));
     });
 
@@ -1157,6 +1369,10 @@ transport = "stub"
             "--json",
         ])
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .env(
+            "CHUANG_AGENT_WORKSPACE_ROOT",
+            workspace.display().to_string(),
+        )
         .env_remove("CHUANG_CODEX_RUNNER_ENABLE")
         .env_remove("CHUANG_REAL_CONTROL_ENABLE")
         .env_remove("CHUANG_REAL_ACTUATOR_ENABLE")
@@ -1229,6 +1445,27 @@ transport = "stub"
         parsed["provider_readiness"]["model_name"],
         "gpt-app-server-health"
     );
+    assert_eq!(
+        parsed["workspace"]["workspace_root"],
+        workspace.display().to_string()
+    );
+    assert_eq!(
+        parsed["workspace"]["app_server_child_root"],
+        workspace.display().to_string()
+    );
+    assert_eq!(
+        parsed["workspace"]["config_root"],
+        workspace.display().to_string()
+    );
+    assert_eq!(parsed["workspace"]["matches_config"], true);
+    assert_eq!(
+        parsed["workspace"]["config_source"],
+        "CHUANG_AGENT_WORKSPACE_ROOT"
+    );
+    assert_eq!(
+        parsed["workspace"]["config_path"],
+        workspace.join("config.toml").display().to_string()
+    );
     assert!(parsed["provider_readiness"]["current"]
         .as_str()
         .expect("provider current should be text")
@@ -1241,6 +1478,18 @@ transport = "stub"
         .as_str()
         .expect("runtime capability primer should be text")
         .contains("file_read/file_write/code_execute/list_dir"));
+    assert!(parsed["runtime_capability_primer"]
+        .as_str()
+        .expect("runtime capability primer should be text")
+        .contains("普通对话默认注入同一份能力 primer"));
+    assert!(parsed["runtime_capability_primer"]
+        .as_str()
+        .expect("runtime capability primer should be text")
+        .contains("locate/screenshot=只读观察"));
+    assert!(parsed["runtime_capability_primer"]
+        .as_str()
+        .expect("runtime capability primer should be text")
+        .contains("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(
         parsed["atomic_tools"]["governed_executable_atomic_tool_names"],
@@ -1487,6 +1736,54 @@ transport = "stub"
         parsed["rules_core_path"],
         workspace.join("rules/core.md").display().to_string()
     );
+}
+
+#[test]
+fn app_server_health_reports_workspace_config_mismatch() {
+    let workspace = temp_workspace("health-workspace-mismatch");
+    let configured_workspace = temp_workspace("health-configured-workspace");
+    write_basic_stub_workspace(&workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "app-server",
+            "health",
+            "--workspace-root",
+            workspace.to_str().expect("workspace path should be utf8"),
+            "--json",
+        ])
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .env(
+            "CHUANG_AGENT_WORKSPACE_ROOT",
+            configured_workspace.display().to_string(),
+        )
+        .env_remove("CHUANG_CODEX_RUNNER_ENABLE")
+        .env_remove("CHUANG_REAL_CONTROL_ENABLE")
+        .env_remove("CHUANG_REAL_ACTUATOR_ENABLE")
+        .output()
+        .expect("app-server health should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(
+        parsed["workspace"]["workspace_root"],
+        workspace.display().to_string()
+    );
+    assert_eq!(
+        parsed["workspace"]["app_server_child_root"],
+        workspace.display().to_string()
+    );
+    assert_eq!(
+        parsed["workspace"]["config_root"],
+        configured_workspace.display().to_string()
+    );
+    assert_eq!(parsed["workspace"]["matches_config"], false);
 }
 
 #[test]
@@ -1740,6 +2037,10 @@ transport = "stub"
             "--diagnostic",
         ])
         .env_remove("CHUANG_AGENT_APP_SERVER_TEXT_TEST_API_KEY")
+        .env(
+            "CHUANG_AGENT_WORKSPACE_ROOT",
+            workspace.display().to_string(),
+        )
         .env_remove("CHUANG_CODEX_RUNNER_ENABLE")
         .env_remove("CHUANG_REAL_CONTROL_ENABLE")
         .env_remove("CHUANG_REAL_ACTUATOR_ENABLE")
@@ -1754,6 +2055,12 @@ transport = "stub"
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("app_server_ok: true"));
+    assert!(stdout.contains(&format!("workspace_config_root: {}", workspace.display())));
+    assert!(stdout.contains(&format!(
+        "workspace_app_server_child_root: {}",
+        workspace.display()
+    )));
+    assert!(stdout.contains("workspace_matches_config: true"));
     assert!(stdout.contains("diagnostic_status: warning"));
     assert!(stdout.contains("diagnostic_summary:"));
     assert!(stdout.contains("next_actions:"));

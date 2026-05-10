@@ -28,7 +28,7 @@ use chuang_agent::tool_runtime::{
 use chuang_agent::{common::AgentId, common::TaskId};
 
 use crate::cli_memory::{preview_local_knowledge_context, MemoryKnowledgePreviewContextOutput};
-use crate::cli_types::{CliOptions, RememberedRecords, RunCliRequest};
+use crate::cli_types::{CliOptions, ConversationHistoryItem, RememberedRecords, RunCliRequest};
 
 pub(crate) fn run_with_options(
     request: &RunCliRequest,
@@ -59,6 +59,13 @@ pub(crate) fn run_with_options(
             .insert("memory_scope".to_string(), "session".to_string());
     }
 
+    let tool_workspace_root = request.workspace_root.clone().map(Ok).unwrap_or_else(|| {
+        std::env::current_dir().map_err(|e| format!("workspace_root_discovery_failed: {e}"))
+    })?;
+    runtime.metadata.insert(
+        "workspace_root".to_string(),
+        tool_workspace_root.display().to_string(),
+    );
     let mut slots = build_runtime_slots(&runtime)
         .map_err(|err| format!("config_invalid: {}: {}", err.field, err.message))?;
     let mut store = SqliteMemoryStore::open(&runtime.db_path)
@@ -66,10 +73,10 @@ pub(crate) fn run_with_options(
     seed_default_memory_if_empty(&mut store)?;
     let mut kernel =
         ChuangKernel::with_responder(kernel_config_from_runtime(&runtime)?, store, slots.provider);
-    let tool_workspace_root = request.workspace_root.clone().map(Ok).unwrap_or_else(|| {
-        std::env::current_dir().map_err(|e| format!("workspace_root_discovery_failed: {e}"))
-    })?;
     let mut runtime_context = goal_context_segments(request.goal_spec.as_ref())?;
+    runtime_context.extend(conversation_history_context_segments(
+        &request.conversation_history,
+    ));
     let knowledge_preview = knowledge_context_preview(request)?;
     if let Some(preview) = &knowledge_preview {
         runtime_context.extend(knowledge_preview_context_segments(preview));
@@ -97,6 +104,7 @@ pub(crate) fn run_with_options(
     .map_err(|e| format!("runtime_failed: {e:?}"))
     .and_then(|mut turn| {
         insert_knowledge_context_metadata(&mut turn, knowledge_preview.as_ref())?;
+        insert_conversation_history_metadata(&mut turn, &request.conversation_history);
         remember_turn_if_requested(&request.options, &mut kernel, turn, request)
     })
 }
@@ -148,6 +156,111 @@ fn load_identity_bootstrap_snapshot(
     })
 }
 
+fn conversation_history_context_segments(
+    history: &[ConversationHistoryItem],
+) -> Vec<ContextSegment> {
+    let content = render_conversation_history(history);
+    if content.is_empty() {
+        return Vec::new();
+    }
+    vec![ContextSegment {
+        id: "recent-conversation-history".to_string(),
+        source: chuang_agent::context_engine::SegmentSource::Working,
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+        content,
+        priority: 241,
+        created_at: default_cli_context_timestamp(),
+        last_accessed: default_cli_context_timestamp(),
+        metadata: std::collections::HashMap::from([(
+            "kind".to_string(),
+            "recent_conversation_history".to_string(),
+        )]),
+    }]
+}
+
+fn render_conversation_history(history: &[ConversationHistoryItem]) -> String {
+    let rendered = history
+        .iter()
+        .filter_map(|item| {
+            let role = item.role.trim();
+            let text = item.text.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let role = match role {
+                "user" | "assistant" | "system" | "tool" => role,
+                _ => "note",
+            };
+            Some(format!("{role}: {}", truncate_history_text(text, 1200)))
+        })
+        .collect::<Vec<_>>();
+    if rendered.is_empty() {
+        return String::new();
+    }
+    format!(
+        "[recent-conversation-history]\n说明：这是同一 thread/session 的最近原文对话，优先用于理解“继续/刚才/他说的”等承接短句。\n{}",
+        rendered.join("\n")
+    )
+}
+
+fn truncate_history_text(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
+fn insert_conversation_history_metadata(
+    turn: &mut ChuangKernelTurn,
+    history: &[ConversationHistoryItem],
+) {
+    let non_empty_item_count = history
+        .iter()
+        .filter(|item| !item.text.trim().is_empty())
+        .count();
+    let user_item_count = history
+        .iter()
+        .filter(|item| item.role.trim() == "user" && !item.text.trim().is_empty())
+        .count();
+    let dropped = turn
+        .result
+        .dropped_segment_ids
+        .iter()
+        .any(|id| id == "recent-conversation-history");
+    let injected = non_empty_item_count > 0 && !dropped;
+
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert(
+        "recent_conversation_history_item_count".to_string(),
+        non_empty_item_count.to_string(),
+    );
+    extra.insert(
+        "recent_conversation_history_turn_count".to_string(),
+        user_item_count.to_string(),
+    );
+    extra.insert(
+        "recent_conversation_history_injected".to_string(),
+        injected.to_string(),
+    );
+    extra.insert(
+        "recent_conversation_history_dropped".to_string(),
+        dropped.to_string(),
+    );
+    extra.insert(
+        "recent_conversation_history_model_facing".to_string(),
+        injected.to_string(),
+    );
+}
+
+fn default_cli_context_timestamp() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-04-30T00:00:00Z")
+        .expect("static cli context timestamp should parse")
+        .with_timezone(&chrono::Utc)
+}
+
 fn run_governed_turn_with_tools<S, R, G>(
     kernel: &mut ChuangKernel<S, R>,
     governance: &mut G,
@@ -170,6 +283,47 @@ where
     turn_context.push(tool_instruction_segment(workspace_root));
     let execution_slot = ExecutionSlot::generic_agent_mvp(tool_config);
     let mut current_input = original_input.clone();
+    let mut last_turn: Option<ChuangKernelTurn> = None;
+    let mut last_plain_text_answer: Option<String> = None;
+    if should_auto_observe_desktop(&original_input) {
+        let call = ToolCall::Locate {
+            target: Some("screen".to_string()),
+        };
+        let outcome = execution_slot.execute_or_reject_with_governance(
+            workspace_root,
+            governance,
+            &call,
+            "cli",
+            "pre-model:tool:1",
+        )?;
+        let record = outcome.record;
+        transcript.push(format!(
+            "call={} output={}",
+            tool_call_name(&record.call),
+            record.output.as_deref().unwrap_or("")
+        ));
+        tool_events.push(ToolLoopEvent {
+            round: 1,
+            kind: "tool_call".to_string(),
+            tool_name: Some(tool_call_name(&record.call).to_string()),
+            atomic_tool_name: record.atomic_tool_name.clone(),
+            decision: Some(risk_decision_label(&outcome.decision)),
+            ok: Some(record.ok),
+            failure_class: record.failure_class.clone(),
+            duration_ms: Some(record.duration_ms),
+            retryable: Some(record.retryable),
+            summary: Some(record.summary.clone()),
+            protocol_error_code: None,
+            protocol_error_message: None,
+        });
+        tool_calls.push(record);
+        current_input = format!(
+            "{}\nreq:{}\ntool:{}\nFINAL:<最终答复>",
+            read_only_capability_banner(),
+            original_input,
+            transcript.join("\n")
+        );
+    }
 
     for round_index in 0..max_tool_rounds {
         let mut turn = kernel
@@ -268,6 +422,7 @@ where
                     original_input,
                     transcript.join("\n")
                 );
+                last_turn = Some(turn);
                 continue;
             }
             ToolModelOutput::ProtocolError(error) => {
@@ -295,6 +450,7 @@ where
                     original_input,
                     transcript.join("\n")
                 );
+                last_turn = Some(turn);
                 continue;
             }
             ToolModelOutput::PlainText(_) => {
@@ -302,6 +458,7 @@ where
                     insert_tool_surface_metadata(&mut turn, workspace_root)?;
                     return Ok(turn);
                 }
+                last_plain_text_answer = Some(body.clone());
                 let raw = body.clone();
                 let error = ToolProtocolError {
                     code: "plain_text_response".to_string(),
@@ -333,12 +490,91 @@ where
                     original_input,
                     transcript.join("\n")
                 );
+                last_turn = Some(turn);
                 continue;
             }
         }
     }
 
+    if let (Some(mut turn), Some(answer)) = (last_turn, last_plain_text_answer) {
+        turn.result.response.body = answer;
+        turn.user_input = original_input;
+        insert_tool_surface_metadata(&mut turn, workspace_root)?;
+        insert_tool_metadata_with_status(
+            &mut turn,
+            workspace_root,
+            max_tool_rounds,
+            &tool_calls,
+            &protocol_errors,
+            &tool_events,
+            &transcript,
+            "implicit_final_plain_text",
+        )?;
+        return Ok(turn);
+    }
+
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+fn should_auto_observe_desktop(user_input: &str) -> bool {
+    let text = user_input.to_lowercase();
+    let asks_observation = [
+        "桌面",
+        "屏幕",
+        "窗口",
+        "当前窗口",
+        "窗口标题",
+        "页面",
+        "网页",
+        "浏览器",
+        "截图",
+        "看一下",
+        "看下",
+        "只读",
+        "observe",
+        "screenshot",
+        "locate",
+        "current window",
+        "current page",
+        "screen",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+    let asks_read_only = [
+        "只读",
+        "不要点击",
+        "不点击",
+        "不要输入",
+        "不输入",
+        "不要提交",
+        "不提交",
+        "不要发送",
+        "不发送",
+        "不要删除",
+        "不删除",
+        "不要修改",
+        "不修改",
+        "read-only",
+        "readonly",
+        "do not click",
+        "don't click",
+        "without clicking",
+        "do not type",
+        "don't type",
+        "without typing",
+        "do not submit",
+        "don't submit",
+        "without submitting",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+    let asks_mutation = [
+        "点击", "输入", "提交", "发送", "删除", "修改", "click", "type", "submit", "send", "delete",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+
+    asks_observation && (!asks_mutation || asks_read_only)
 }
 
 fn goal_context_segments(goal_spec: Option<&GoalSpec>) -> Result<Vec<ContextSegment>, String> {
@@ -370,37 +606,49 @@ fn knowledge_preview_context_segments(
     preview
         .segments
         .iter()
-        .map(|segment| ContextSegment {
-            id: format!("external-knowledge-{}", segment.segment_id),
-            source: SegmentSource::Memory,
-            content: format!(
-                "[external_knowledge_preview]\npath={}:{}\nscore={}\npreview={}",
+        .map(|segment| {
+            let content = format!(
+                "[external_knowledge_preview]\nboundary=local_readonly_context_preview_only\nmodel_facing=true\nlive_wiki_gbrain_connected=false\npath={}:{}\nscore={}\npreview={}",
                 segment.path, segment.line, segment.score, segment.preview
-            ),
-            tokens: Some(segment.token_estimate.min(u16::MAX as usize) as u16),
-            priority: 170,
-            created_at: now,
-            last_accessed: now,
-            metadata: std::collections::HashMap::from([
-                ("kind".to_string(), "external_knowledge_preview".to_string()),
-                ("adapter".to_string(), preview.adapter.clone()),
-                ("path".to_string(), segment.path.clone()),
-                ("line".to_string(), segment.line.to_string()),
-                ("read_only".to_string(), segment.read_only.to_string()),
-                (
-                    "connects_real_service".to_string(),
-                    segment.connects_real_service.to_string(),
-                ),
-                (
-                    "writes_automatically".to_string(),
-                    segment.writes_automatically.to_string(),
-                ),
-                ("runtime_injection_applied".to_string(), "true".to_string()),
-                (
-                    "runtime_retrieval_wired".to_string(),
-                    segment.runtime_retrieval_wired.to_string(),
-                ),
-            ]),
+            );
+            ContextSegment {
+                id: format!("external-knowledge-{}", segment.segment_id),
+                source: SegmentSource::Memory,
+                tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+                content,
+                priority: 170,
+                created_at: now,
+                last_accessed: now,
+                metadata: std::collections::HashMap::from([
+                    ("kind".to_string(), "external_knowledge_preview".to_string()),
+                    ("adapter".to_string(), preview.adapter.clone()),
+                    (
+                        "source_boundary".to_string(),
+                        "local_markdown_text_preview_only".to_string(),
+                    ),
+                    ("model_facing".to_string(), "true".to_string()),
+                    (
+                        "live_wiki_gbrain_connected".to_string(),
+                        "false".to_string(),
+                    ),
+                    ("path".to_string(), segment.path.clone()),
+                    ("line".to_string(), segment.line.to_string()),
+                    ("read_only".to_string(), segment.read_only.to_string()),
+                    (
+                        "connects_real_service".to_string(),
+                        segment.connects_real_service.to_string(),
+                    ),
+                    (
+                        "writes_automatically".to_string(),
+                        segment.writes_automatically.to_string(),
+                    ),
+                    ("runtime_injection_applied".to_string(), "true".to_string()),
+                    (
+                        "runtime_retrieval_wired".to_string(),
+                        segment.runtime_retrieval_wired.to_string(),
+                    ),
+                ]),
+            }
         })
         .collect()
 }
@@ -450,6 +698,18 @@ fn insert_knowledge_context_metadata(
         extra.insert(
             "knowledge_context_dropped_segment_ids".to_string(),
             "[]".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_model_facing".to_string(),
+            "false".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_source_boundary".to_string(),
+            "disabled_or_not_requested".to_string(),
+        );
+        extra.insert(
+            "knowledge_context_live_wiki_gbrain_connected".to_string(),
+            "false".to_string(),
         );
         return Ok(());
     };
@@ -509,6 +769,18 @@ fn insert_knowledge_context_metadata(
         "knowledge_context_dropped_segment_ids".to_string(),
         serde_json::to_string(&dropped_preview_segment_ids)
             .map_err(|e| format!("knowledge_context_dropped_segment_ids_json_failed: {e}"))?,
+    );
+    extra.insert(
+        "knowledge_context_model_facing".to_string(),
+        (injected_segment_count > 0).to_string(),
+    );
+    extra.insert(
+        "knowledge_context_source_boundary".to_string(),
+        "local_markdown_text_preview_only".to_string(),
+    );
+    extra.insert(
+        "knowledge_context_live_wiki_gbrain_connected".to_string(),
+        "false".to_string(),
     );
     extra.insert("knowledge_context_root".to_string(), preview.root.clone());
     extra.insert("knowledge_context_query".to_string(), preview.query.clone());
@@ -672,9 +944,9 @@ fn tool_instruction_segment(workspace_root: &Path) -> ContextSegment {
     let now = chrono::Utc::now();
     ContextSegment {
         id: "tool-instructions".to_string(),
-        source: SegmentSource::ToolResult,
-        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
-        priority: 240,
+        source: SegmentSource::Identity,
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+        priority: 252,
         created_at: now,
         last_accessed: now,
         metadata: std::collections::HashMap::from([(
@@ -1126,6 +1398,10 @@ fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemo
     }
 }
 
+fn read_only_capability_banner() -> &'static str {
+    "[cap]locate/screenshot;wiki/gbrain(read-only)"
+}
+
 fn tool_call_name(call: &ToolCall) -> &'static str {
     match call {
         ToolCall::ListDir { .. } => "list_dir",
@@ -1202,6 +1478,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1289,6 +1566,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1353,6 +1631,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1370,6 +1649,12 @@ mod tests {
         assert!(result
             .packed_context_preview
             .contains("external-knowledge-knowledge-segment-1"));
+        assert!(result
+            .packed_context_preview
+            .contains("boundary=local_readonly_context_preview_only"));
+        assert!(result
+            .packed_context_preview
+            .contains("live_wiki_gbrain_connected=false"));
         assert!(result
             .packed_context_preview
             .contains("runtime knowledge context marker"));
@@ -1423,6 +1708,33 @@ mod tests {
                 .response
                 .meta
                 .extra
+                .get("knowledge_context_model_facing")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_source_boundary")
+                .map(String::as_str),
+            Some("local_markdown_text_preview_only")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_live_wiki_gbrain_connected")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
                 .get("knowledge_context_connects_real_service")
                 .map(String::as_str),
             Some("false")
@@ -1455,8 +1767,8 @@ mod tests {
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            max_tokens: 11,
-            reserve_system_tokens: 10,
+            max_tokens: 2700,
+            reserve_system_tokens: 32,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,
@@ -1468,6 +1780,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1546,6 +1859,15 @@ mod tests {
                 .map(String::as_str),
             Some(r#"["external-knowledge-knowledge-segment-1"]"#)
         );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("knowledge_context_model_facing")
+                .map(String::as_str),
+            Some("false")
+        );
     }
 
     #[test]
@@ -1565,6 +1887,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: true,
             dispatch_subagent: false,
@@ -1607,6 +1930,7 @@ mod tests {
             remember: false,
             session_id: Some("alpha".to_string()),
             remember_session: true,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1629,6 +1953,7 @@ mod tests {
             remember: false,
             session_id: Some("alpha".to_string()),
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1684,6 +2009,7 @@ mod tests {
             remember: false,
             session_id: Some("beta".to_string()),
             remember_session: true,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1719,6 +2045,7 @@ mod tests {
             remember: false,
             session_id: Some("alpha".to_string()),
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1755,6 +2082,7 @@ mod tests {
             remember: false,
             session_id: Some("alpha".to_string()),
             remember_session: true,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -1833,6 +2161,7 @@ mod tests {
             remember: false,
             session_id: None,
             remember_session: true,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,
@@ -2005,6 +2334,405 @@ mod tests {
             1,
             "tool loop should not ask the model for the next round after human_suspend"
         );
+    }
+
+    #[test]
+    fn run_with_options_adds_desktop_observation_hint_for_screen_requests() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-desktop-observation-hint-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = CaptureResponder::new(r#"ACTION: {"type":"final","answer":"ok"}"#);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "请看一下当前窗口标题".to_string(),
+            Vec::new(),
+        )
+        .expect("desktop observation turn should succeed");
+
+        assert_eq!(turn.result.response.body, "ok");
+        assert!(turn
+            .result
+            .packed_context_preview
+            .contains("locate/screenshot=只读观察"));
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert!(captured[0].prompt.contains("locate/screenshot=只读观察"));
+        assert!(captured[0]
+            .prompt
+            .contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
+    }
+
+    #[test]
+    fn run_with_options_exposes_capability_surface_for_read_only_checks() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-capability-surface-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = CaptureResponder::new(r#"ACTION: {"type":"final","answer":"ok"}"#);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "请做一次只读检查".to_string(),
+            Vec::new(),
+        )
+        .expect("capability surface turn should succeed");
+
+        assert_eq!(turn.result.response.body, "ok");
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert!(captured[0]
+            .prompt
+            .contains("[cap]locate/screenshot;wiki/gbrain(read-only)"));
+        assert!(captured[0].prompt.contains("req:请做一次只读检查"));
+        assert!(captured[0].prompt.contains("tool:call=locate output="));
+        assert!(captured[0].prompt.contains("FINAL:<最终答复>"));
+    }
+
+    #[test]
+    fn run_with_options_auto_observes_desktop_before_model_answer() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-auto-observe-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            "我看不了当前窗口",
+            r#"ACTION: {"type":"final","answer":"当前窗口已通过工具观察。"}"#,
+        ]);
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig {
+                actuator: Some(chuang_agent::runtime_config::ActuatorConfig::Fake),
+                ..ToolExecutionConfig::default()
+            },
+            "请做一次只读桌面检查，回复当前窗口标题".to_string(),
+            Vec::new(),
+        )
+        .expect("auto observe turn should succeed");
+
+        assert_eq!(turn.result.response.body, "当前窗口已通过工具观察。");
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_protocol_error_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        let tool_calls_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .expect("tool calls json should exist");
+        assert!(tool_calls_json.contains("\"tool_name\":\"locate\""));
+        assert!(tool_calls_json.contains("\"atomic_tool_name\":\"locate\""));
+        assert!(tool_calls_json.contains("fake observation"));
+        let tool_trace = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_trace")
+            .expect("tool trace should exist");
+        assert!(tool_trace.contains("fake observation"));
+    }
+
+    #[test]
+    fn run_with_options_auto_observes_read_only_requests_with_negated_actions() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-auto-observe-negated-actions-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            "当前会话没有桌面工具",
+            r#"ACTION: {"type":"final","answer":"已完成只读检查。"}"#,
+        ]);
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig {
+                actuator: Some(chuang_agent::runtime_config::ActuatorConfig::Fake),
+                ..ToolExecutionConfig::default()
+            },
+            "请做一次只读桌面和浏览器检查，不要点击、不输入、不提交任何内容。".to_string(),
+            Vec::new(),
+        )
+        .expect("auto observe turn should succeed");
+
+        assert_eq!(turn.result.response.body, "已完成只读检查。");
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_trace")
+            .expect("tool trace should exist")
+            .contains("call=locate"));
+    }
+
+    #[test]
+    fn run_with_options_injects_session_context_for_bound_turns() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-session-context-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = CaptureResponder::new(r#"ACTION: {"type":"final","answer":"ok"}"#);
+        let captured = responder.captured.clone();
+        let mut config = test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        config
+            .metadata
+            .insert("session_id".to_string(), "thread-1".to_string());
+        config
+            .metadata
+            .insert("memory_scope".to_string(), "session".to_string());
+        config.metadata.insert(
+            "workspace_root".to_string(),
+            workspace_root.display().to_string(),
+        );
+        let mut kernel = ChuangKernel::with_responder(
+            config,
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "保持会话上下文".to_string(),
+            Vec::new(),
+        )
+        .expect("session context turn should succeed");
+
+        assert_eq!(turn.result.response.body, "ok");
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert!(captured[0].prompt.contains("[session-context]"));
+        assert!(captured[0].prompt.contains("session_id=thread-1"));
+        assert!(captured[0].prompt.contains("memory_scope=session"));
+        assert!(captured[0]
+            .prompt
+            .contains(&format!("workspace_root={}", workspace_root.display())));
+    }
+
+    #[test]
+    fn run_with_options_injects_recent_conversation_history() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-recent-history-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = CaptureResponder::new(r#"ACTION: {"type":"final","answer":"ok"}"#);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let history = vec![
+            ConversationHistoryItem {
+                role: "user".to_string(),
+                text: "第一句：我叫这个变量 anchor_alpha".to_string(),
+            },
+            ConversationHistoryItem {
+                role: "assistant".to_string(),
+                text: "记住了 anchor_alpha。".to_string(),
+            },
+        ];
+
+        let mut turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "继续刚才那个".to_string(),
+            conversation_history_context_segments(&history),
+        )
+        .expect("history context turn should succeed");
+
+        insert_conversation_history_metadata(&mut turn, &history);
+
+        assert_eq!(turn.result.response.body, "ok");
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert!(captured[0].prompt.contains("[recent-conversation-history]"));
+        assert!(captured[0].prompt.contains("anchor_alpha"));
+        assert_eq!(captured[0].user_input, "继续刚才那个");
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("recent_conversation_history_item_count")
+                .map(String::as_str),
+            Some("2")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("recent_conversation_history_injected")
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn run_with_options_keeps_session_tool_and_recent_history_under_budget_pressure() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-context-pressure-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
+        runtime.context_budget = chuang_agent::context_engine::ContextBudget {
+            max_tokens: 3600,
+            reserve_system_tokens: 64,
+            min_working_tokens: 1,
+            max_tool_results: 5,
+            max_memory_segments: 20,
+        };
+
+        let mut store = SqliteMemoryStore::open(&runtime.db_path)
+            .expect("sqlite store should open for pressure seed");
+        store
+            .put(chuang_agent::memory_store::MemoryRecord {
+                id: "pressure-memory".to_string(),
+                content: format!(
+                    "alpha_session_guard PRESSURE-MEM-KEEP-OUT {}",
+                    "x".repeat(6000)
+                ),
+                metadata: BTreeMap::from([("kind".to_string(), "goal".to_string())]),
+                created_at: "2026-04-30T18:00:00Z".to_string(),
+                expires_at: None,
+            })
+            .expect("pressure memory should seed");
+        drop(store);
+
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "请回忆 alpha_session_guard".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("thread-pressure".to_string()),
+            remember_session: false,
+            conversation_history: vec![
+                ConversationHistoryItem {
+                    role: "user".to_string(),
+                    text: "刚才我们确认 workspace_root 不能丢".to_string(),
+                },
+                ConversationHistoryItem {
+                    role: "assistant".to_string(),
+                    text: "保留 workspace_root 和 session 上下文".to_string(),
+                },
+            ],
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+        };
+
+        let (result, _) = run_with_options(&request).expect("run should succeed");
+
+        assert!(result.prompt.contains("[session-context]"));
+        assert!(result.prompt.contains("[tool-instructions]"));
+        assert!(result.prompt.contains("[recent-conversation-history]"));
+        assert!(result.prompt.contains("workspace_root="));
+        assert!(result.prompt.contains("thread-pressure"));
+        assert!(result.prompt.contains("workspace_root"));
+        assert!(!result.prompt.contains("PRESSURE-MEM-KEEP-OUT"));
     }
 
     #[test]
@@ -2342,6 +3070,66 @@ mod tests {
             .contains("\"kind\":\"protocol_error\""));
     }
 
+    #[test]
+    fn run_with_options_falls_back_to_last_plain_text_when_tool_loop_exhausts() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-tool-plain-text-fallback-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"write_file","path":"notes/plain.txt","content":"hello"}}"#,
+                "最后我就直接说这句普通话",
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "请先写完再收口".to_string(),
+            Vec::new(),
+        )
+        .expect("plain text fallback should succeed");
+
+        assert_eq!(turn.result.response.body, "最后我就直接说这句普通话");
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("implicit_final_plain_text")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_protocol_error_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("plain_text_response"));
+    }
+
     fn test_runtime(db_path: PathBuf, identity_root: PathBuf) -> RuntimeConfig {
         let mut runtime = RuntimeConfig::new(db_path);
         runtime.identity_memory =
@@ -2367,7 +3155,7 @@ mod tests {
 
     fn goal_context_test_budget() -> chuang_agent::context_engine::ContextBudget {
         chuang_agent::context_engine::ContextBudget {
-            max_tokens: 2048,
+            max_tokens: 4096,
             reserve_system_tokens: 64,
             min_working_tokens: 1,
             max_tool_results: 5,

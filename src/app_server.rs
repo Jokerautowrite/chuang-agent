@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::cli_runtime::kernel_config_from_runtime;
 use crate::cli_runtime::run_with_options;
-use crate::cli_types::{CliOptions, RunCliRequest};
+use crate::cli_types::{CliOptions, ConversationHistoryItem, RunCliRequest};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
@@ -157,6 +157,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
     }
 
     let normalized_workspace_root = normalize_workspace_root(&workspace_root);
+    let workspace_status = workspace_status_for_root(&normalized_workspace_root);
     let runtime = if diagnostic {
         build_runtime_for_workspace_with_options(
             &normalized_workspace_root,
@@ -187,6 +188,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "server": "chuang-agent-app-server",
         "version": env!("CARGO_PKG_VERSION"),
         "workspace_root": normalized_workspace_root,
+        "workspace": workspace_status,
         "model": provider_summary_model_name(&runtime),
         "diagnostic_mode": diagnostic,
         "diagnostic_status": diagnostic_status,
@@ -229,6 +231,22 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         println!(
             "workspace_root: {}",
             result["workspace_root"].as_str().unwrap_or("")
+        );
+        println!(
+            "workspace_config_root: {}",
+            result["workspace"]["config_root"].as_str().unwrap_or("")
+        );
+        println!(
+            "workspace_app_server_child_root: {}",
+            result["workspace"]["app_server_child_root"]
+                .as_str()
+                .unwrap_or("")
+        );
+        println!(
+            "workspace_matches_config: {}",
+            result["workspace"]["matches_config"]
+                .as_bool()
+                .unwrap_or(false)
         );
         println!("model: {}", result["model"].as_str().unwrap_or(""));
         println!(
@@ -585,11 +603,12 @@ fn handle_initialize() -> Value {
 }
 
 fn handle_model_list(params: &Value) -> Result<Value, String> {
-    let workspace_root = params
-        .get("workspaceRoot")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .to_string();
+    let workspace_root = normalize_workspace_root(
+        params
+            .get("workspaceRoot")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
     let runtime = build_runtime_for_workspace(&workspace_root)?;
     let model_name = provider_summary_model_name(&runtime);
     Ok(json!({
@@ -653,11 +672,10 @@ fn handle_thread_list(state: &AppServerState) -> Value {
 
 fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value, String> {
     let thread_id = normalize_text(params.get("threadId").and_then(|value| value.as_str()));
-    let workspace_root = params
+    let requested_workspace_root = params
         .get("workspaceRoot")
         .and_then(|value| value.as_str())
-        .map(normalize_workspace_root)
-        .unwrap_or_default();
+        .map(normalize_workspace_root);
     let input_text = extract_turn_input_text(params);
     if input_text.is_empty() {
         return Err("turn/start requires non-empty input".to_string());
@@ -665,6 +683,8 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let goal_spec = extract_turn_goal(params)?;
 
     let thread_id = if thread_id.is_empty() {
+        let workspace_root =
+            requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
         let thread = create_thread(
             state,
             workspace_root.clone(),
@@ -672,27 +692,39 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         );
         thread.id
     } else {
-        if !state.threads.contains_key(&thread_id) {
+        if let Some(thread) = state.threads.get(&thread_id) {
+            if let Some(requested_workspace_root) = requested_workspace_root.as_deref() {
+                ensure_thread_workspace_matches(thread, requested_workspace_root)?;
+            }
+            thread_id
+        } else {
+            let workspace_root =
+                requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
             let thread = create_thread(
                 state,
                 workspace_root.clone(),
                 thread_display_name(&workspace_root),
             );
             thread.id
-        } else {
-            thread_id
         }
     };
+    let workspace_root = state
+        .threads
+        .get(&thread_id)
+        .map(|thread| thread.workspace_root.clone())
+        .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
 
     let runtime = build_runtime_for_workspace(&workspace_root)?;
     let runtime = override_runtime_model(runtime, params);
     let context_max_tokens = runtime.context_budget.max_tokens;
     let started_at = Instant::now();
+    let conversation_history = recent_thread_history(state, &thread_id, 6);
     let tool_run = run_turn_with_tools(
         &runtime,
         &thread_id,
         &workspace_root,
         &input_text,
+        conversation_history,
         goal_spec,
     )?;
     let result = tool_run.result.clone();
@@ -854,6 +886,7 @@ fn run_turn_with_tools(
     thread_id: &str,
     workspace_root: &str,
     original_input: &str,
+    conversation_history: Vec<ConversationHistoryItem>,
     goal_spec: Option<GoalSpec>,
 ) -> Result<ToolLoopResult, String> {
     let request = RunCliRequest {
@@ -865,6 +898,7 @@ fn run_turn_with_tools(
         remember: false,
         session_id: Some(thread_id.to_string()),
         remember_session: true,
+        conversation_history,
         remember_identity: false,
         remember_experience: false,
         dispatch_subagent: false,
@@ -973,6 +1007,19 @@ fn create_thread(
     thread
 }
 
+fn ensure_thread_workspace_matches(
+    thread: &ThreadState,
+    requested_workspace_root: &str,
+) -> Result<(), String> {
+    if thread.workspace_root == requested_workspace_root {
+        return Ok(());
+    }
+    Err(format!(
+        "workspace_root_mismatch: thread_id={} thread_workspace={} requested_workspace={}",
+        thread.id, thread.workspace_root, requested_workspace_root
+    ))
+}
+
 fn next_turn_id(state: &mut AppServerState) -> String {
     state.next_turn_seq += 1;
     format!("chuang-turn-{}", state.next_turn_seq)
@@ -985,6 +1032,38 @@ fn thread_turn_id(state: &AppServerState, thread_id: &str) -> Option<String> {
         .turns
         .last()
         .map(|turn| turn.id.clone())
+}
+
+fn recent_thread_history(
+    state: &AppServerState,
+    thread_id: &str,
+    max_turns: usize,
+) -> Vec<ConversationHistoryItem> {
+    let Some(thread) = state.threads.get(thread_id) else {
+        return Vec::new();
+    };
+    thread
+        .turns
+        .iter()
+        .rev()
+        .take(max_turns)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .flat_map(|turn| {
+            [
+                ConversationHistoryItem {
+                    role: "user".to_string(),
+                    text: turn.user_text.clone(),
+                },
+                ConversationHistoryItem {
+                    role: "assistant".to_string(),
+                    text: turn.assistant_text.clone(),
+                },
+            ]
+        })
+        .filter(|item| !item.text.trim().is_empty())
+        .collect()
 }
 
 fn thread_to_json(thread: &ThreadState) -> Value {
@@ -1228,6 +1307,37 @@ fn resolve_path_if_relative(base_dir: &Path, path: PathBuf) -> PathBuf {
     }
 }
 
+fn workspace_status_for_root(workspace_root: &str) -> Value {
+    let workspace_root =
+        resolve_path_if_relative(Path::new("."), workspace_base_dir(workspace_root));
+    let configured_workspace_root = std::env::var("CHUANG_AGENT_WORKSPACE_ROOT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(|path| resolve_path_if_relative(Path::new("."), path));
+    let config_source = if configured_workspace_root.is_some() {
+        "CHUANG_AGENT_WORKSPACE_ROOT"
+    } else {
+        "workspace_root_arg"
+    };
+    let config_root = configured_workspace_root
+        .clone()
+        .unwrap_or_else(|| workspace_root.clone());
+    let app_server_child_root = workspace_root.clone();
+    let workspace_root = workspace_root.display().to_string();
+    let app_server_child_root = app_server_child_root.display().to_string();
+    let config_root = config_root.display().to_string();
+    json!({
+        "workspace_root": workspace_root,
+        "app_server_child_root": app_server_child_root,
+        "config_root": config_root,
+        "config_source": config_source,
+        "config_path": PathBuf::from(&workspace_root).join("config.toml").display().to_string(),
+        "matches_config": workspace_root == config_root,
+    })
+}
+
 fn workspace_base_dir(workspace_root: &str) -> PathBuf {
     let trimmed = workspace_root.trim();
     if trimmed.is_empty() {
@@ -1239,13 +1349,14 @@ fn workspace_base_dir(workspace_root: &str) -> PathBuf {
 
 fn normalize_workspace_root(raw: &str) -> String {
     let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        std::env::current_dir()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|_| ".".to_string())
+    let path = if trimmed.is_empty() {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     } else {
-        trimmed.to_string()
-    }
+        PathBuf::from(trimmed)
+    };
+    resolve_path_if_relative(Path::new("."), path)
+        .display()
+        .to_string()
 }
 
 fn thread_display_name(workspace_root: &str) -> String {

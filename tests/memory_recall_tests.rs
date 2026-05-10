@@ -153,6 +153,14 @@ fn recall_pipeline_builds_memory_segments_from_hits() {
         result.segments[0].metadata.get("kind"),
         Some(&"goal".to_string())
     );
+    assert_eq!(
+        result.segments[0].metadata.get("memory_boundary"),
+        Some(&"recall_only_no_writeback".to_string())
+    );
+    assert_eq!(
+        result.segments[0].metadata.get("decay_review_only"),
+        Some(&"true".to_string())
+    );
 }
 
 #[test]
@@ -188,8 +196,11 @@ fn recall_pipeline_builds_agent_input_block_from_hits() {
     assert!(result.agent_input.contains("query=创项目"));
     assert!(result
         .agent_input
-        .contains("[mem-1] 创项目最小闭环已经先跑起来。"));
+        .contains("boundary=recall_only archive_read_only=true maintenance_writeback=false"));
     assert!(result
         .agent_input
-        .contains("[mem-2] 创项目后面再继续优化并准备开源。"));
+        .contains("[mem-1] layer=internal_identity writeback_target=manual_review_only"));
+    assert!(result
+        .agent_input
+        .contains("创项目后面再继续优化并准备开源。"));
 }

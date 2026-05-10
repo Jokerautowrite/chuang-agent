@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
 
 FORMAT="text"
 
@@ -140,22 +140,24 @@ workspace_root = Path(
     or os.environ.get("CHUANG_AGENT_WORKSPACE_ROOT")
     or ROOT
 ).expanduser()
+default_provider_env_file = Path("~/.config/chuang-agent/provider.env").expanduser()
 provider_env_file = env_values.get("CHUANG_PROVIDER_ENV_FILE") or os.environ.get("CHUANG_PROVIDER_ENV_FILE", "")
-provider_values, provider_error = parse_provider_env(provider_env_file)
 suggested_provider_env_file = None
 if not provider_env_file:
-    candidate_provider_env_file = Path("~/.config/chuang-agent/provider.env").expanduser()
+    provider_env_file = str(default_provider_env_file)
     suggested_provider_env_file = {
-        "path": str(candidate_provider_env_file),
-        "exists": candidate_provider_env_file.is_file(),
-        "state": state(candidate_provider_env_file if candidate_provider_env_file.is_file() else ""),
+        "path": str(default_provider_env_file),
+        "exists": default_provider_env_file.is_file(),
+        "state": state(default_provider_env_file if default_provider_env_file.is_file() else ""),
     }
+provider_env_path = Path(provider_env_file).expanduser()
+provider_values, provider_error = parse_provider_env(provider_env_file)
 connection_mode = env_values.get("CHUANG_FEISHU_CONNECTION_MODE", "websocket")
 
 feishu_required_states = {name: state(env_values.get(name)) for name in FEISHU_REQUIRED}
 feishu_optional_states = {name: state(env_values.get(name)) for name in FEISHU_OPTIONAL}
 provider_required_states = {
-    "CHUANG_PROVIDER_ENV_FILE": state(provider_env_file),
+    "CHUANG_PROVIDER_ENV_FILE": state(provider_env_path if provider_env_path.is_file() else ""),
     "CODEX_PPTOKEN_API_KEY": state(provider_values.get("CODEX_PPTOKEN_API_KEY")),
 }
 forbidden_in_file = [name for name in FORBIDDEN_FEISHU_NAMES if name in env_values]
@@ -449,7 +451,7 @@ result = {
         "env_file": str(ENV_FILE),
         "workspace_root": str(workspace_root),
         "workspace_config": str(workspace_root / "config.toml"),
-        "provider_env_file": provider_env_file or "",
+        "provider_env_file": str(provider_env_path),
     },
     "checks": {
         "feishu_env_file": {
@@ -466,7 +468,7 @@ result = {
             "config_exists": (workspace_root / "config.toml").is_file(),
         },
         "provider_env_file": {
-            "exists": bool(provider_env_file) and Path(provider_env_file).expanduser().is_file(),
+            "exists": provider_env_path.is_file(),
             "error": provider_error or None,
             "required": provider_required_states,
             "contains_feishu_credential_names": any(name in provider_values for name in FEISHU_REQUIRED + FEISHU_OPTIONAL),
@@ -490,7 +492,7 @@ else:
     print(f"chuang_live_operator_checklist status={status} ok={str(not blockers).lower()} readonly=true")
     print(f"env_file={ENV_FILE}")
     print(f"workspace_root={workspace_root}")
-    print(f"provider_env_file={provider_env_file or '<missing>'}")
+    print(f"provider_env_file={provider_env_path if provider_env_file else '<missing>'}")
     print("mounted_feishu_capabilities=/health,/tools,/capabilities,/new,/session")
     print(
         "provider_readiness_evidence="

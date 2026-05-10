@@ -228,6 +228,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         remember: false,
         session_id: Some(thread_id.clone()),
         remember_session: true,
+        conversation_history: Vec::new(),
         remember_identity: false,
         remember_experience: false,
         dispatch_subagent: false,

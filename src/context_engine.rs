@@ -14,7 +14,7 @@ pub struct ContextSegment {
     pub id: String,
     pub source: SegmentSource,
     pub content: String,
-    pub tokens: Option<u16>,
+    pub tokens: Option<u32>,
     pub priority: u8,
     pub created_at: DateTime<Utc>,
     pub last_accessed: DateTime<Utc>,
@@ -33,9 +33,9 @@ pub enum SegmentSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextBudget {
-    pub max_tokens: u16,
-    pub reserve_system_tokens: u16,
-    pub min_working_tokens: u16,
+    pub max_tokens: u32,
+    pub reserve_system_tokens: u32,
+    pub min_working_tokens: u32,
     pub max_tool_results: usize,
     pub max_memory_segments: usize,
 }
@@ -43,7 +43,7 @@ pub struct ContextBudget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackedContext {
     pub segments: Vec<ContextSegment>,
-    pub total_tokens: u16,
+    pub total_tokens: u32,
     pub dropped_ids: Vec<String>,
     pub drop_reasons: Vec<DropReason>,
     pub budget_exceeded: bool,
@@ -63,7 +63,7 @@ pub struct ContextPackTraceStep {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkingReservation {
     pub reserved_segment_id: String,
-    pub reserved_tokens: u16,
+    pub reserved_tokens: u32,
     pub dropped_segment_ids: Vec<String>,
     pub reason: WorkingReservationReason,
 }
@@ -92,6 +92,7 @@ pub enum DropReasonKind {
     BudgetLimit,
     ToolResultTrim,
     MemoryTrim,
+    DuplicateContent,
 }
 
 impl DropReasonKind {
@@ -100,6 +101,7 @@ impl DropReasonKind {
             Self::BudgetLimit => "budget_limit",
             Self::ToolResultTrim => "tool_result_trim",
             Self::MemoryTrim => "memory_trim",
+            Self::DuplicateContent => "duplicate_content",
         }
     }
 }
@@ -175,8 +177,16 @@ impl ContextPacker {
             output_count: normalized.len(),
             dropped_count: 0,
         });
+        let before_dedupe_dropped = dropped_ids.len();
+        let deduped = self.deduplicate_segments(normalized, &mut dropped_ids, &mut drop_reasons);
+        trace.push(ContextPackTraceStep {
+            name: "dedupe",
+            input_count: original_count,
+            output_count: deduped.len(),
+            dropped_count: dropped_ids.len().saturating_sub(before_dedupe_dropped),
+        });
         let before_trim_dropped = dropped_ids.len();
-        let trimmed = self.trim_segments(normalized, &mut dropped_ids, &mut drop_reasons);
+        let trimmed = self.trim_segments(deduped, &mut dropped_ids, &mut drop_reasons);
         trace.push(ContextPackTraceStep {
             name: "trim",
             input_count: original_count,
@@ -188,7 +198,7 @@ impl ContextPacker {
             .iter()
             .filter(|segment| matches!(segment.source, SegmentSource::System))
             .map(|segment| segment.tokens.unwrap_or(0))
-            .sum::<u16>();
+            .sum::<u32>();
 
         if system_tokens > self.budget.reserve_system_tokens
             || system_tokens > self.budget.max_tokens
@@ -199,8 +209,24 @@ impl ContextPacker {
             });
         }
 
-        let mut sorted = trimmed.clone();
-        sorted.sort_by_key(|segment| {
+        let mut protected = Vec::new();
+        let mut regular = Vec::new();
+        for segment in trimmed.clone() {
+            if is_reserved_segment(&segment) {
+                protected.push(segment);
+            } else {
+                regular.push(segment);
+            }
+        }
+
+        protected.sort_by_key(|segment| {
+            (
+                Reverse(segment.priority),
+                Reverse(segment.last_accessed),
+                Reverse(segment.created_at),
+            )
+        });
+        regular.sort_by_key(|segment| {
             (
                 Reverse(segment.priority),
                 Reverse(segment.last_accessed),
@@ -209,23 +235,42 @@ impl ContextPacker {
         });
         trace.push(ContextPackTraceStep {
             name: "rank",
-            input_count: trimmed.len(),
-            output_count: sorted.len(),
+            input_count: original_count,
+            output_count: protected.len() + regular.len(),
             dropped_count: 0,
         });
+
+        let protected_tokens = protected
+            .iter()
+            .map(|segment| segment.tokens.unwrap_or(0))
+            .sum::<u32>();
+        if protected_tokens > self.budget.max_tokens {
+            return Err(ContextPackError::BudgetExceeded {
+                required_system_tokens: protected_tokens,
+                max_tokens: self.budget.max_tokens,
+            });
+        }
+
+        let mut packed = Vec::new();
+        let mut total_tokens = 0u32;
+        for segment in protected {
+            total_tokens = total_tokens.saturating_add(segment.tokens.unwrap_or(0));
+            packed.push(segment);
+        }
 
         let before_reservation_dropped = dropped_ids.len();
         let mut budget_exceeded_reasons = Vec::new();
         let working_reservation = self.reserve_minimum_working_segments(
-            &sorted,
+            &regular,
+            total_tokens,
             &mut dropped_ids,
             &mut drop_reasons,
             &mut budget_exceeded_reasons,
         );
         trace.push(ContextPackTraceStep {
             name: "reserve_working",
-            input_count: sorted.len(),
-            output_count: sorted.len(),
+            input_count: regular.len(),
+            output_count: regular.len(),
             dropped_count: dropped_ids.len().saturating_sub(before_reservation_dropped),
         });
         let reserved_working_ids = working_reservation
@@ -233,17 +278,15 @@ impl ContextPacker {
             .map(|reservation| vec![reservation.reserved_segment_id.clone()])
             .unwrap_or_default();
 
-        let mut packed = Vec::new();
-        let mut total_tokens = 0u16;
-        let reserved_tokens = sorted
+        let reserved_tokens = regular
             .iter()
             .filter(|segment| reserved_working_ids.contains(&segment.id))
             .map(|segment| segment.tokens.unwrap_or(0))
-            .sum::<u16>();
+            .sum::<u32>();
 
-        let merge_input_count = sorted.len();
+        let merge_input_count = regular.len();
         let before_merge_dropped = dropped_ids.len();
-        for segment in sorted {
+        for segment in regular {
             let tokens = segment.tokens.unwrap_or(0);
             if reserved_working_ids.contains(&segment.id) {
                 total_tokens = total_tokens.saturating_add(tokens);
@@ -368,9 +411,56 @@ impl ContextPacker {
             .collect()
     }
 
+    fn deduplicate_segments(
+        &self,
+        segments: Vec<ContextSegment>,
+        dropped_ids: &mut Vec<String>,
+        drop_reasons: &mut Vec<DropReason>,
+    ) -> Vec<ContextSegment> {
+        let mut kept = Vec::<ContextSegment>::new();
+        let mut seen = HashMap::<String, usize>::new();
+
+        for segment in segments {
+            if !dedupe_candidate(&segment) {
+                kept.push(segment);
+                continue;
+            }
+
+            let key = normalize_dedupe_key(&segment.content);
+            if key.is_empty() {
+                kept.push(segment);
+                continue;
+            }
+
+            let Some(existing_index) = seen.get(&key).copied() else {
+                seen.insert(key, kept.len());
+                kept.push(segment);
+                continue;
+            };
+
+            if segment_rank_key(&segment) > segment_rank_key(&kept[existing_index]) {
+                let dropped = std::mem::replace(&mut kept[existing_index], segment);
+                dropped_ids.push(dropped.id.clone());
+                drop_reasons.push(DropReason {
+                    segment_id: dropped.id,
+                    reason: DropReasonKind::DuplicateContent,
+                });
+            } else {
+                dropped_ids.push(segment.id.clone());
+                drop_reasons.push(DropReason {
+                    segment_id: segment.id,
+                    reason: DropReasonKind::DuplicateContent,
+                });
+            }
+        }
+
+        kept
+    }
+
     fn reserve_minimum_working_segments(
         &self,
         sorted: &[ContextSegment],
+        base_tokens: u32,
         dropped_ids: &mut Vec<String>,
         drop_reasons: &mut Vec<DropReason>,
         budget_exceeded_reasons: &mut Vec<BudgetExceededReason>,
@@ -378,12 +468,6 @@ impl ContextPacker {
         if self.budget.min_working_tokens == 0 {
             return None;
         }
-
-        let system_tokens = sorted
-            .iter()
-            .filter(|segment| matches!(segment.source, SegmentSource::System))
-            .map(|segment| segment.tokens.unwrap_or(0))
-            .sum::<u16>();
 
         let candidate = sorted
             .iter()
@@ -396,19 +480,23 @@ impl ContextPacker {
         };
 
         let candidate_tokens = candidate.tokens.unwrap_or(0);
-        if system_tokens.saturating_add(candidate_tokens) > self.budget.max_tokens {
+        if base_tokens.saturating_add(candidate_tokens) > self.budget.max_tokens {
             budget_exceeded_reasons.push(BudgetExceededReason::MinWorkingTokensUnmet);
             return None;
         }
 
         let mut reservation_drops = Vec::new();
-        let budget_after_reservation = self.budget.max_tokens - candidate_tokens;
+        let budget_after_reservation = self
+            .budget
+            .max_tokens
+            .saturating_sub(base_tokens)
+            .saturating_sub(candidate_tokens);
         for segment in sorted.iter().filter(|segment| segment.id != candidate.id) {
             let tokens = segment.tokens.unwrap_or(0);
             if matches!(segment.source, SegmentSource::System) {
                 continue;
             }
-            if tokens > budget_after_reservation.saturating_sub(system_tokens) {
+            if tokens > budget_after_reservation {
                 dropped_ids.push(segment.id.clone());
                 reservation_drops.push(segment.id.clone());
                 drop_reasons.push(DropReason {
@@ -426,9 +514,46 @@ impl ContextPacker {
         })
     }
 
-    fn estimate_tokens(&self, content: &str) -> u16 {
-        content.chars().count().min(u16::MAX as usize) as u16
+    fn estimate_tokens(&self, content: &str) -> u32 {
+        content.chars().count().min(u32::MAX as usize) as u32
     }
+}
+
+fn dedupe_candidate(segment: &ContextSegment) -> bool {
+    matches!(
+        segment.source,
+        SegmentSource::Identity | SegmentSource::Memory | SegmentSource::Goal
+    )
+}
+
+fn is_reserved_segment(segment: &ContextSegment) -> bool {
+    if matches!(segment.source, SegmentSource::System) {
+        return true;
+    }
+
+    match segment.id.as_str() {
+        "system-capabilities"
+        | "tool-instructions"
+        | "session-context"
+        | "recent-conversation-history" => true,
+        _ => matches!(
+            segment.metadata.get("kind").map(String::as_str),
+            Some(
+                "capability_primer"
+                    | "tool_protocol"
+                    | "session_context"
+                    | "recent_conversation_history"
+            )
+        ),
+    }
+}
+
+fn normalize_dedupe_key(content: &str) -> String {
+    content.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn segment_rank_key(segment: &ContextSegment) -> (u8, DateTime<Utc>, DateTime<Utc>) {
+    (segment.priority, segment.last_accessed, segment.created_at)
 }
 
 impl PackedContext {
@@ -501,7 +626,7 @@ fn render_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextPackError {
     BudgetExceeded {
-        required_system_tokens: u16,
-        max_tokens: u16,
+        required_system_tokens: u32,
+        max_tokens: u32,
     },
 }

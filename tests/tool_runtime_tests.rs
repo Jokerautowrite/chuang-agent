@@ -8,7 +8,7 @@ use chuang_agent::tool_runtime::{
     parse_tool_action_envelope, parse_tool_action_envelope_result, parse_tool_call,
     parse_tool_model_output, proposed_action_for_tool_call, ExecutionSlot, MemoryToolContext,
     ShellRiskRules, ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport,
-    ToolModelOutput, WriteOperation,
+    ToolModelOutput, ToolSurfaceStatus, WriteOperation,
 };
 use chuang_agent::workspace_file_adapter::WorkspaceFileAdapter;
 
@@ -200,7 +200,29 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
     assert!(instructions.contains("mouse/keyboard/screenshot/locate"));
+    assert!(instructions.contains("当前屏幕、窗口标题、页面内容"));
+    assert!(instructions.contains("桌面/浏览器只读观察工具"));
+    assert!(instructions.contains("只用于取证，不执行点击或输入"));
+    assert!(instructions.contains("桌面/浏览器只读观察：screenshot, locate"));
     assert!(instructions.contains("进入工具往返"));
+}
+
+#[test]
+fn tool_surface_status_exposes_read_only_desktop_browser_tools() {
+    let root = temp_workspace("surface-status");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let surface = ToolSurfaceStatus::generic_agent_mvp(&root);
+
+    assert_eq!(
+        surface.desktop_browser_read_only_atomic_tools,
+        vec!["screenshot".to_string(), "locate".to_string()]
+    );
+
+    let surface_json = serde_json::to_value(&surface).expect("surface should serialize");
+    assert_eq!(
+        surface_json["desktop_browser_read_only_atomic_tools"],
+        serde_json::json!(["screenshot", "locate"])
+    );
 }
 
 #[test]
@@ -638,6 +660,18 @@ fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
         "screenshot should succeed: {}",
         screenshot.summary
     );
+    let screenshot_output: serde_json::Value = serde_json::from_str(
+        screenshot
+            .output
+            .as_deref()
+            .expect("screenshot should return structured evidence output"),
+    )
+    .expect("screenshot output should be json");
+    assert_eq!(screenshot_output["evidence_uri"], "fake://screenshot");
+    assert_eq!(
+        screenshot_output["audit_message"],
+        "fake actuator screenshot"
+    );
 
     let locate = chuang_agent::tool_runtime::execute_tool_call_with_config(
         &root,
@@ -647,6 +681,16 @@ fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
         &config,
     );
     assert!(locate.ok, "locate should succeed: {}", locate.summary);
+    let locate_output: serde_json::Value = serde_json::from_str(
+        locate
+            .output
+            .as_deref()
+            .expect("locate should return structured evidence output"),
+    )
+    .expect("locate output should be json");
+    assert_eq!(locate_output["summary"], "fake observation");
+    assert_eq!(locate_output["evidence_uri"], "fake://observation");
+    assert_eq!(locate_output["audit_message"], "fake actuator observation");
 
     let wait = chuang_agent::tool_runtime::execute_tool_call_with_config(
         &root,

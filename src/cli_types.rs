@@ -26,11 +26,18 @@ pub(crate) struct RunCliRequest {
     pub(crate) remember: bool,
     pub(crate) session_id: Option<String>,
     pub(crate) remember_session: bool,
+    pub(crate) conversation_history: Vec<ConversationHistoryItem>,
     pub(crate) remember_identity: bool,
     pub(crate) remember_experience: bool,
     pub(crate) dispatch_subagent: bool,
     pub(crate) goal_spec: Option<GoalSpec>,
     pub(crate) knowledge_context: Option<KnowledgeContextCliRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConversationHistoryItem {
+    pub(crate) role: String,
+    pub(crate) text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

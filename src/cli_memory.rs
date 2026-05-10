@@ -215,19 +215,20 @@ fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
             MemoryKnowledgeSourceOutput {
                 name: "wiki".to_string(),
                 state: "documented_only".to_string(),
-                current: "external-brain source is documented but no live adapter is configured"
+                current: "external-brain source is documented but live retrieval is pending/gated"
                     .to_string(),
             },
             MemoryKnowledgeSourceOutput {
                 name: "gbrain".to_string(),
                 state: "documented_only".to_string(),
-                current: "knowledge base boundary is documented; runtime retrieval stays deferred"
-                    .to_string(),
+                current:
+                    "knowledge base boundary is documented; runtime retrieval stays pending/gated"
+                        .to_string(),
             },
         ],
         next_actions: vec![
-            "add a read-only local knowledge adapter contract".to_string(),
-            "add provenance-bearing search before runtime injection".to_string(),
+            "keep local read-only preview and source-contract explicit".to_string(),
+            "add provenance-bearing search before any live runtime injection".to_string(),
             "keep automatic sync and memory writeback disabled".to_string(),
         ],
     };
@@ -243,7 +244,7 @@ fn memory_knowledge_status_command(args: &[String]) -> Result<(), String> {
                 status.writes_automatically
             );
             println!(
-                "runtime_retrieval_wired: {} doc: {}",
+                "runtime_retrieval_wired: {} doc: {} live_retrieval_pending_gated=true",
                 status.runtime_retrieval_wired, status.doc
             );
             for source in &status.sources {
@@ -311,6 +312,7 @@ fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
         dry_run: true,
         writes_automatically: false,
         explicit_writeback_required: true,
+        boundary: memory_maintenance_boundary(),
         query: request.queries.first().cloned().unwrap_or_default(),
         queries: request.queries,
         session_id: request.session_id,
@@ -338,6 +340,16 @@ fn memory_maintenance_report_command(args: &[String]) -> Result<(), String> {
                 output.explicit_writeback_required,
                 output.batch_count,
                 output.decay_candidate_count
+            );
+            println!(
+                "memory_layering archive={} maintenance={} decay={} writeback={} core_memory_rewrite_allowed={} archive_mutation_allowed={} automatic_writeback={}",
+                output.boundary.archive_layer,
+                output.boundary.maintenance_layer,
+                output.boundary.decay_boundary,
+                output.boundary.writeback_target,
+                output.boundary.core_memory_rewrite_allowed,
+                output.boundary.archive_mutation_allowed,
+                output.boundary.automatic_writeback
             );
             println!(
                 "identity_health root={} user={}/{} memory={}/{} experiences_chars={}",
@@ -488,6 +500,7 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
         writes_automatically: false,
         explicit_writeback_required: true,
         approved_writeback: request.approve_writeback,
+        boundary: memory_maintenance_boundary(),
         query: request.queries.first().cloned().unwrap_or_default(),
         queries: request.queries,
         session_id: request.session_id,
@@ -533,6 +546,16 @@ fn memory_maintenance_apply_command(args: &[String]) -> Result<(), String> {
                 output.approval.approval_source.as_deref().unwrap_or("none"),
                 output.approval.writeback_scope,
                 output.approval.writes_automatically
+            );
+            println!(
+                "memory_layering archive={} maintenance={} decay={} writeback={} core_memory_rewrite_allowed={} archive_mutation_allowed={} automatic_writeback={}",
+                output.boundary.archive_layer,
+                output.boundary.maintenance_layer,
+                output.boundary.decay_boundary,
+                output.boundary.writeback_target,
+                output.boundary.core_memory_rewrite_allowed,
+                output.boundary.archive_mutation_allowed,
+                output.boundary.automatic_writeback
             );
             for candidate_id in &output.duplicate_candidate_ids {
                 println!("duplicate_candidate_id: {candidate_id}");
@@ -690,6 +713,23 @@ fn build_maintenance_recommendations(
     }
     recommendations.push("do not run automatic rewrite from maintenance report".to_string());
     recommendations
+}
+
+fn memory_maintenance_boundary() -> MemoryMaintenanceBoundaryOutput {
+    MemoryMaintenanceBoundaryOutput {
+        archive_layer: "history_session_archive".to_string(),
+        archive_source: "sqlite turn_summary records".to_string(),
+        archive_read_only: true,
+        archive_mutation_allowed: false,
+        maintenance_layer: "maintenance_runtime".to_string(),
+        maintenance_mode: "dry_run_report_then_explicit_apply".to_string(),
+        decay_boundary: "review_only_not_writeback_candidate".to_string(),
+        decay_writeback_allowed: false,
+        writeback_target: "experiences.md".to_string(),
+        lim_writeback_requires_approval: true,
+        core_memory_rewrite_allowed: false,
+        automatic_writeback: false,
+    }
 }
 
 fn session_memory_search_command(args: &[String]) -> Result<(), String> {
@@ -1824,6 +1864,7 @@ struct MemoryMaintenanceReportOutput {
     dry_run: bool,
     writes_automatically: bool,
     explicit_writeback_required: bool,
+    boundary: MemoryMaintenanceBoundaryOutput,
     query: String,
     queries: Vec<String>,
     session_id: Option<String>,
@@ -1844,6 +1885,7 @@ struct MemoryMaintenanceApplyOutput {
     writes_automatically: bool,
     explicit_writeback_required: bool,
     approved_writeback: bool,
+    boundary: MemoryMaintenanceBoundaryOutput,
     query: String,
     queries: Vec<String>,
     session_id: Option<String>,
@@ -1875,6 +1917,22 @@ struct MemoryMaintenanceApprovalOutput {
     approved_at: Option<String>,
     writeback_scope: String,
     writes_automatically: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct MemoryMaintenanceBoundaryOutput {
+    archive_layer: String,
+    archive_source: String,
+    archive_read_only: bool,
+    archive_mutation_allowed: bool,
+    maintenance_layer: String,
+    maintenance_mode: String,
+    decay_boundary: String,
+    decay_writeback_allowed: bool,
+    writeback_target: String,
+    lim_writeback_requires_approval: bool,
+    core_memory_rewrite_allowed: bool,
+    automatic_writeback: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

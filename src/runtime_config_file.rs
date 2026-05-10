@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hermes_memory::{DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS};
+use crate::knowledge_read::{KnowledgeReadConfig, KnowledgeReadSourceConfig};
 use crate::provider_openai_compatible::ProviderTransport;
 use crate::runtime_config::{
     ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
@@ -164,11 +165,24 @@ pub fn parse_runtime_config_file_with_options(
     if values.contains_key("control.kind") || values.contains_key("control") {
         config.control_plane = parse_control_plane(&values)?;
     }
+    if has_any(
+        &values,
+        &[
+            "external_knowledge.wiki.endpoint",
+            "external_knowledge.wiki.token_env",
+            "external_knowledge.wiki.timeout_ms",
+            "external_knowledge.gbrain.endpoint",
+            "external_knowledge.gbrain.token_env",
+            "external_knowledge.gbrain.timeout_ms",
+        ],
+    ) {
+        config.external_knowledge = parse_external_knowledge(&values)?;
+    }
     if let Some(value) = get_any(&values, &["context.engine", "context_engine"]) {
         config.context_engine = parse_context_engine(value)?;
     }
     if let Some(value) = get_any(&values, &["context.max_tokens", "context_max_tokens"]) {
-        config.context_budget.max_tokens = parse_u16("context.max_tokens", value)?;
+        config.context_budget.max_tokens = parse_u32("context.max_tokens", value)?;
     }
     if let Some(value) = get_any(
         &values,
@@ -178,13 +192,13 @@ pub fn parse_runtime_config_file_with_options(
         ],
     ) {
         config.context_budget.reserve_system_tokens =
-            parse_u16("context.reserve_system_tokens", value)?;
+            parse_u32("context.reserve_system_tokens", value)?;
     }
     if let Some(value) = get_any(
         &values,
         &["context.min_working_tokens", "context_min_working_tokens"],
     ) {
-        config.context_budget.min_working_tokens = parse_u16("context.min_working_tokens", value)?;
+        config.context_budget.min_working_tokens = parse_u32("context.min_working_tokens", value)?;
     }
     if let Some(value) = get_any(
         &values,
@@ -622,6 +636,31 @@ fn parse_control_plane(
     }
 }
 
+fn parse_external_knowledge(
+    values: &BTreeMap<String, String>,
+) -> Result<KnowledgeReadConfig, RuntimeConfigFileError> {
+    Ok(KnowledgeReadConfig {
+        wiki: parse_external_knowledge_source(values, "wiki")?,
+        gbrain: parse_external_knowledge_source(values, "gbrain")?,
+    })
+}
+
+fn parse_external_knowledge_source(
+    values: &BTreeMap<String, String>,
+    source: &str,
+) -> Result<KnowledgeReadSourceConfig, RuntimeConfigFileError> {
+    let endpoint_key = format!("external_knowledge.{source}.endpoint");
+    let token_env_key = format!("external_knowledge.{source}.token_env");
+    let timeout_key = format!("external_knowledge.{source}.timeout_ms");
+    Ok(KnowledgeReadSourceConfig {
+        endpoint: get_any(values, &[&endpoint_key]).cloned(),
+        token_env: get_any(values, &[&token_env_key]).cloned(),
+        timeout_ms: get_any(values, &[&timeout_key])
+            .map(|value| parse_u64(&timeout_key, value))
+            .transpose()?,
+    })
+}
+
 fn parse_context_engine(raw: &str) -> Result<ContextEngineConfig, RuntimeConfigFileError> {
     match raw {
         "deterministic_budget" => Ok(ContextEngineConfig::DeterministicBudget),
@@ -633,8 +672,8 @@ fn parse_context_engine(raw: &str) -> Result<ContextEngineConfig, RuntimeConfigF
     }
 }
 
-fn parse_u16(key: &str, raw: &str) -> Result<u16, RuntimeConfigFileError> {
-    raw.parse::<u16>()
+fn parse_u32(key: &str, raw: &str) -> Result<u32, RuntimeConfigFileError> {
+    raw.parse::<u32>()
         .map_err(|_| RuntimeConfigFileError::InvalidValue {
             key: key.to_string(),
             value: raw.to_string(),

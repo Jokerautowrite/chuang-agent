@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 
 use crate::context_engine::{ContextSegment, SegmentSource};
-use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
+use crate::memory_store::{
+    MemoryLayerBoundary, MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecallRequest {
@@ -87,12 +89,20 @@ impl<S: MemoryStore> MemoryRecallPipeline<S> {
             "[memory-recall]".to_string(),
             format!("query={}", request.query_text),
             format!("hits={}", ranked_hits.len()),
+            "boundary=recall_only archive_read_only=true maintenance_writeback=false decay_review=false".to_string(),
         ];
 
         for hit in &ranked_hits {
+            let boundary = MemoryLayerBoundary::for_record(&hit.record);
             agent_input_lines.push(format!(
-                "{}. [{}] {}",
-                hit.rank, hit.record.id, hit.record.content
+                "{}. [{}] layer={} writeback_target={} archive_read_only={} decay_review_only={} {}",
+                hit.rank,
+                hit.record.id,
+                boundary.layer.as_str(),
+                boundary.writeback_target,
+                boundary.archive_read_only,
+                boundary.decay_review_only,
+                hit.record.content
             ));
         }
 
@@ -108,6 +118,32 @@ impl<S: MemoryStore> MemoryRecallPipeline<S> {
 }
 
 fn recall_hit_to_segment(hit: &RecallHit) -> ContextSegment {
+    let boundary = MemoryLayerBoundary::for_record(&hit.record);
+    let mut metadata = hit.record.metadata.clone();
+    metadata
+        .entry("memory_layer".to_string())
+        .or_insert_with(|| boundary.layer.as_str().to_string());
+    metadata.insert(
+        "memory_boundary".to_string(),
+        "recall_only_no_writeback".to_string(),
+    );
+    metadata.insert(
+        "archive_read_only".to_string(),
+        boundary.archive_read_only.to_string(),
+    );
+    metadata.insert(
+        "maintenance_writeback_allowed".to_string(),
+        boundary.maintenance_writeback_allowed.to_string(),
+    );
+    metadata.insert(
+        "decay_review_only".to_string(),
+        boundary.decay_review_only.to_string(),
+    );
+    metadata.insert(
+        "writeback_target".to_string(),
+        boundary.writeback_target.to_string(),
+    );
+
     ContextSegment {
         id: hit.record.id.clone(),
         source: SegmentSource::Memory,
@@ -116,7 +152,7 @@ fn recall_hit_to_segment(hit: &RecallHit) -> ContextSegment {
         priority: map_score_to_priority(hit.score),
         created_at: parse_timestamp(&hit.record.created_at),
         last_accessed: parse_timestamp(&hit.record.created_at),
-        metadata: hit.record.metadata.clone().into_iter().collect(),
+        metadata: metadata.into_iter().collect(),
     }
 }
 
@@ -128,8 +164,8 @@ fn map_score_to_priority(score: u32) -> u8 {
     }
 }
 
-fn estimate_tokens(content: &str) -> u16 {
-    content.chars().count().min(u16::MAX as usize) as u16
+fn estimate_tokens(content: &str) -> u32 {
+    content.chars().count().min(u32::MAX as usize) as u32
 }
 
 fn parse_timestamp(value: &str) -> DateTime<Utc> {

@@ -231,12 +231,13 @@ function buildToolsCommandReply() {
       "",
       "主链工具能力：",
       "",
+      "- 普通文本转发到主链时，会默认注入同一份能力 primer，不需要先发 `/tools`。",
+      "",
       runtimeCapabilityPrimer,
       "",
-      "- governed file tools：`file_read` / `file_write`。",
-      "- governed code tool：`code_execute`。",
-      "- auxiliary listing：`list_dir`。",
+      "- governed file/code/list tools：`file_read` / `file_write` / `code_execute` / `list_dir`。",
       "- memory/session：会话记忆召回与显式写回诊断。",
+      "- goal/subagent：`goal` 派活和 `subagent` 派活入口。",
       "- provider/runtime：OpenAI-compatible provider、治理回执、runtime report。",
       "",
       "goal/subagent 派活入口：",
@@ -266,7 +267,13 @@ function loadCapabilityPrimerText() {
   try {
     return fs.readFileSync(CAPABILITY_PRIMER_PATH, "utf8").trim();
   } catch (_error) {
-    return "默认能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent 派活。live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理与 live gate。";
+    return [
+      "普通对话默认注入同一份能力 primer，不需要先发 /tools 也要按这份边界回答。",
+      "",
+      "可用能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent。",
+      "只读观察：locate/screenshot。",
+      "边界：live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt；subagent 只派活，不直接写 core memory。",
+    ].join("\n");
   }
 }
 

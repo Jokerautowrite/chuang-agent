@@ -77,11 +77,14 @@ assert.strictEqual(tools.commandName, "tools");
 assert(tools.replyText.includes("当前可见能力与边界"));
 assert(tools.replyText.includes("/capabilities"));
 assert(tools.replyText.includes("主链工具能力"));
+assert(tools.replyText.includes("普通文本转发到主链时，会默认注入同一份能力 primer"));
 assert(tools.replyText.includes(loadCapabilityPrimerText()));
 assert(tools.replyText.includes("file_read"));
 assert(tools.replyText.includes("file_write"));
 assert(tools.replyText.includes("code_execute"));
 assert(tools.replyText.includes("list_dir"));
+assert(tools.replyText.includes("locate/screenshot=只读观察"));
+assert(tools.replyText.includes("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
 assert(tools.replyText.includes("会话记忆召回"));
 assert(tools.replyText.includes("provider/runtime"));
 assert(tools.replyText.includes("goal/subagent 派活入口"));
@@ -122,7 +125,17 @@ assert.strictEqual(health.commandName, "health");
 const healthReply = buildHealthCommandReply({
   bridgeReady: true,
   workspaceRoot: "/home/user/projects/chuang-agent",
-  appServer: { running: true, lastError: "token=secret-value app_secret=hidden" },
+  appServer: {
+    running: true,
+    workspaceRoot: "/home/user/projects/chuang-agent",
+    lastError: "token=secret-value app_secret=hidden",
+  },
+  workspace: {
+    bridgeRoot: "/home/user/projects/chuang-agent",
+    appServerRoot: "/home/user/projects/chuang-agent",
+    inboundRoot: "/home/user/projects/chuang-agent",
+    rootsMatch: true,
+  },
   session: { bound: true, threadId: "chuang-thread-9" },
   env: {
     appIdState: "<set>",
@@ -132,6 +145,7 @@ const healthReply = buildHealthCommandReply({
 });
 assert(healthReply.replyText.includes("健康诊断"));
 assert(healthReply.replyText.includes("app-server：running"));
+assert(healthReply.replyText.includes("workspace：/home/user/projects/chuang-agent"));
 assert(healthReply.replyText.includes("session：bound chuang-thread-9"));
 assert(healthReply.replyText.includes("CODEX_PPTOKEN_API_KEY=<set>"));
 assert(!healthReply.replyText.includes("secret-value"));

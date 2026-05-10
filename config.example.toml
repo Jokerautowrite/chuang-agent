@@ -55,7 +55,7 @@ apply_args = "./scripts/chuang-control-adapter-example.sh apply --json"
 control_timeout_ms = 30000
 
 context_engine = "deterministic_budget"
-context_max_tokens = 512
+context_max_tokens = 272000
 context_reserve_system_tokens = 32
 context_min_working_tokens = 1
 context_max_tool_results = 5

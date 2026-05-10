@@ -24,6 +24,7 @@ cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- channel feishu-check \
 
 export NODE_PATH="$FEISHU_SDK_MODULES${NODE_PATH:+:$NODE_PATH}"
 export CHUANG_AGENT_ROOT="$ROOT"
+export CHUANG_AGENT_WORKSPACE_ROOT="${CHUANG_AGENT_WORKSPACE_ROOT:-$ROOT}"
 export CHUANG_FEISHU_ENV_FILE="$ENV_FILE"
 export CHUANG_PROVIDER_ENV_FILE="$PROVIDER_ENV_FILE"
 

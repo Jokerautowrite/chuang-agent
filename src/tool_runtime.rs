@@ -272,6 +272,7 @@ pub struct ToolSurfaceStatus {
     pub workspace_root: String,
     pub callable_tools: Vec<String>,
     pub mapped_atomic_tools: Vec<String>,
+    pub desktop_browser_read_only_atomic_tools: Vec<String>,
     pub interface_only_atomic_tools: Vec<String>,
     pub action_schema_version: u16,
     pub report_schema_version: u16,
@@ -475,6 +476,11 @@ impl ToolSurfaceStatus {
             .into_iter()
             .map(str::to_string)
             .collect::<Vec<_>>();
+        let desktop_browser_read_only_atomic_tools = registry
+            .desktop_browser_read_only_atomic_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         let mut callable_tools = mapped_atomic_tools.clone();
         callable_tools.push("list_dir".to_string());
         callable_tools.push("apply_patch".to_string());
@@ -487,6 +493,7 @@ impl ToolSurfaceStatus {
             workspace_root: workspace_root.display().to_string(),
             callable_tools,
             mapped_atomic_tools,
+            desktop_browser_read_only_atomic_tools,
             interface_only_atomic_tools: registry
                 .interface_only_atomic_names()
                 .into_iter()
@@ -1780,7 +1787,12 @@ fn execute_screenshot(
     };
     match actuator.screenshot(screenshot_target) {
         Ok(evidence_ref) => {
-            record.output = Some(evidence_ref.uri);
+            record.output = Some(actuator_evidence_output(
+                None,
+                Some(&evidence_ref.uri),
+                evidence_ref.audit_message.as_deref(),
+            ));
+            refresh_record_output_stats(&mut record);
         }
         Err(error) => {
             record.ok = false;
@@ -1817,7 +1829,22 @@ fn execute_locate(
     };
     match actuator.observe(observe_target) {
         Ok(observation) => {
-            record.output = Some(observation.summary);
+            let evidence_uri = observation
+                .evidence_ref
+                .as_ref()
+                .map(|evidence_ref| evidence_ref.uri.as_str());
+            let audit_message = observation.audit_message.as_deref().or_else(|| {
+                observation
+                    .evidence_ref
+                    .as_ref()
+                    .and_then(|evidence_ref| evidence_ref.audit_message.as_deref())
+            });
+            record.output = Some(actuator_evidence_output(
+                Some(&observation.summary),
+                evidence_uri,
+                audit_message,
+            ));
+            refresh_record_output_stats(&mut record);
         }
         Err(error) => {
             record.ok = false;
@@ -1826,6 +1853,24 @@ fn execute_locate(
         }
     }
     record
+}
+
+fn actuator_evidence_output(
+    summary: Option<&str>,
+    evidence_uri: Option<&str>,
+    audit_message: Option<&str>,
+) -> String {
+    serde_json::json!({
+        "summary": summary,
+        "evidence_uri": evidence_uri,
+        "audit_message": audit_message,
+    })
+    .to_string()
+}
+
+fn refresh_record_output_stats(record: &mut ToolExecutionRecord) {
+    record.output_bytes = record.output.as_ref().map(|value| value.len());
+    record.output_lines = record.output.as_ref().map(|value| count_lines(value));
 }
 
 fn execute_wait(

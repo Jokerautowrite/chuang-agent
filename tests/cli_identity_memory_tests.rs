@@ -686,6 +686,56 @@ fn cli_memory_knowledge_preview_context_is_read_only_preview_contract() {
 }
 
 #[test]
+fn cli_run_knowledge_context_preview_is_model_facing_local_only_boundary() {
+    let root = temp_root("knowledge-run-preview");
+    let config_path = write_fake_config(&root);
+    let knowledge_root = root.join("knowledge");
+    std::fs::create_dir_all(&knowledge_root).expect("knowledge root should be created");
+    std::fs::write(
+        knowledge_root.join("wiki.md"),
+        "model-facing knowledge preview marker remains local only\n",
+    )
+    .expect("knowledge doc should write");
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--context-max-tokens",
+            "5000",
+            "--input",
+            "检查外脑上下文边界",
+            "--enable-knowledge-context-preview",
+            "--knowledge-context-root",
+            knowledge_root
+                .to_str()
+                .expect("knowledge root should be utf8"),
+            "--knowledge-context-query",
+            "model-facing",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("knowledge_context_preview_enabled: true"));
+    assert!(stdout.contains("knowledge_context_injected: true"));
+    assert!(stdout.contains("knowledge_context_model_facing: true"));
+    assert!(stdout.contains("knowledge_context_source_boundary: local_markdown_text_preview_only"));
+    assert!(stdout.contains("knowledge_context_live_wiki_gbrain_connected: false"));
+    assert!(stdout.contains("knowledge_context_connects_real_service: false"));
+    assert!(stdout.contains("knowledge_context_runtime_retrieval_wired: false"));
+}
+
+#[test]
 fn cli_memory_knowledge_source_contract_documents_wiki_gbrain_boundary() {
     let output = Command::new("cargo")
         .args([

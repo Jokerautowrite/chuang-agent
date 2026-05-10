@@ -123,6 +123,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             remember: false,
             session_id: None,
             remember_session: false,
+            conversation_history: Vec::new(),
             remember_identity: false,
             remember_experience: false,
             dispatch_subagent: false,

@@ -95,7 +95,7 @@ impl CommandActuator {
 
 impl Actuator for CommandActuator {
     fn observe(&mut self, target: ObserveTarget) -> Result<Observation, ActuatorError> {
-        self.run(ActuatorCommandRequest {
+        let response = self.run(ActuatorCommandRequest {
             action: "observe".to_string(),
             observe_target: Some(target),
             open_app: None,
@@ -104,9 +104,34 @@ impl Actuator for CommandActuator {
             input_target: None,
             text: None,
             screenshot_target: None,
-        })?
-        .observation
-        .ok_or_else(|| actuator_error("actuator observe response missing observation"))
+        })?;
+        let response_message = response
+            .message
+            .as_deref()
+            .and_then(non_empty_audit_message);
+        let mut observation = response
+            .observation
+            .ok_or_else(|| actuator_error("actuator observe response missing observation"))?;
+        if observation.audit_message.is_none() {
+            observation.audit_message = response_message.map(str::to_string).or_else(|| {
+                observation
+                    .evidence_ref
+                    .as_ref()
+                    .and_then(|evidence_ref| {
+                        evidence_ref
+                            .audit_message
+                            .as_deref()
+                            .and_then(non_empty_audit_message)
+                    })
+                    .map(str::to_string)
+            });
+        }
+        if let Some(evidence_ref) = observation.evidence_ref.as_mut() {
+            if evidence_ref.audit_message.is_none() {
+                evidence_ref.audit_message = response_message.map(str::to_string);
+            }
+        }
+        Ok(observation)
     }
 
     fn open_app(&mut self, request: OpenAppRequest) -> Result<AppHandle, ActuatorError> {
@@ -171,7 +196,7 @@ impl Actuator for CommandActuator {
     }
 
     fn screenshot(&mut self, target: ScreenshotTarget) -> Result<EvidenceRef, ActuatorError> {
-        self.run(ActuatorCommandRequest {
+        let response = self.run(ActuatorCommandRequest {
             action: "screenshot".to_string(),
             observe_target: None,
             open_app: None,
@@ -180,15 +205,33 @@ impl Actuator for CommandActuator {
             input_target: None,
             text: None,
             screenshot_target: Some(target),
-        })?
-        .evidence_ref
-        .ok_or_else(|| actuator_error("actuator screenshot response missing evidence_ref"))
+        })?;
+        let response_message = response
+            .message
+            .as_deref()
+            .and_then(non_empty_audit_message);
+        let mut evidence_ref = response
+            .evidence_ref
+            .ok_or_else(|| actuator_error("actuator screenshot response missing evidence_ref"))?;
+        if evidence_ref.audit_message.is_none() {
+            evidence_ref.audit_message = response_message.map(str::to_string);
+        }
+        Ok(evidence_ref)
     }
 }
 
 fn actuator_error(message: impl Into<String>) -> ActuatorError {
     ActuatorError {
         message: message.into(),
+    }
+}
+
+fn non_empty_audit_message(message: &str) -> Option<&str> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 

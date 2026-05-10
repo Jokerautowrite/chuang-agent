@@ -158,6 +158,19 @@ fn memory_maintenance_report_batches_multiple_queries_without_writing() {
     assert_eq!(parsed["dry_run"], true);
     assert_eq!(parsed["writes_automatically"], false);
     assert_eq!(parsed["explicit_writeback_required"], true);
+    assert_eq!(
+        parsed["boundary"]["archive_layer"],
+        "history_session_archive"
+    );
+    assert_eq!(parsed["boundary"]["archive_read_only"], true);
+    assert_eq!(parsed["boundary"]["archive_mutation_allowed"], false);
+    assert_eq!(
+        parsed["boundary"]["decay_boundary"],
+        "review_only_not_writeback_candidate"
+    );
+    assert_eq!(parsed["boundary"]["decay_writeback_allowed"], false);
+    assert_eq!(parsed["boundary"]["core_memory_rewrite_allowed"], false);
+    assert_eq!(parsed["boundary"]["automatic_writeback"], false);
     assert_eq!(parsed["queries"].as_array().expect("queries").len(), 2);
     assert_eq!(parsed["batch_count"], 2);
     assert_eq!(parsed["lim_candidate_count"], 2);
@@ -206,6 +219,12 @@ fn memory_maintenance_apply_dry_run_previews_selected_candidates_without_writeba
     assert_eq!(parsed["dry_run"], true);
     assert_eq!(parsed["approved_writeback"], false);
     assert_eq!(parsed["writes_automatically"], false);
+    assert_eq!(
+        parsed["boundary"]["maintenance_mode"],
+        "dry_run_report_then_explicit_apply"
+    );
+    assert_eq!(parsed["boundary"]["writeback_target"], "experiences.md");
+    assert_eq!(parsed["boundary"]["lim_writeback_requires_approval"], true);
     assert_eq!(parsed["approval"]["required"], true);
     assert_eq!(parsed["approval"]["approved"], false);
     assert_eq!(parsed["approval"]["writes_automatically"], false);

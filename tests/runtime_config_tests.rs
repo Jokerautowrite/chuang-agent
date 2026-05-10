@@ -38,7 +38,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.identity_user_max_chars, 1375);
     assert_eq!(summary.identity_memory_max_chars, 2200);
     assert_eq!(summary.context_engine_kind, "deterministic_budget");
-    assert_eq!(summary.context_max_tokens, 512);
+    assert_eq!(summary.context_max_tokens, 272000);
     assert_eq!(summary.context_reserve_system_tokens, 32);
     assert_eq!(summary.context_min_working_tokens, 1);
     assert_eq!(summary.context_max_tool_results, 5);

@@ -8,6 +8,7 @@ use crate::context_engine::{
 use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
 use crate::memory_store::MemoryStore;
 use crate::responder::{Responder, ResponderMeta, ResponderOutput, ResponderRequest};
+use crate::runtime_config::default_context_budget as runtime_default_context_budget;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequest {
@@ -34,7 +35,7 @@ pub struct RuntimeResult {
     pub recall_hit_count: usize,
     pub context_engine_kind: String,
     pub packed_context_preview: String,
-    pub packed_token_count: u16,
+    pub packed_token_count: u32,
     pub dropped_segment_ids: Vec<String>,
     pub context_debug: ContextDebugInfo,
 }
@@ -177,7 +178,7 @@ fn build_system_segment() -> ContextSegment {
     ContextSegment {
         id: "system-core".to_string(),
         source: SegmentSource::System,
-        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
         content,
         priority: 255,
         created_at: default_timestamp(),
@@ -191,7 +192,7 @@ fn build_working_segment(user_input: &str) -> ContextSegment {
         id: "working-user-input".to_string(),
         source: SegmentSource::Working,
         content: format!("当前用户输入：{}", user_input),
-        tokens: Some(user_input.chars().count().min(u16::MAX as usize) as u16),
+        tokens: Some(user_input.chars().count().min(u32::MAX as usize) as u32),
         priority: 220,
         created_at: default_timestamp(),
         last_accessed: default_timestamp(),
@@ -200,13 +201,7 @@ fn build_working_segment(user_input: &str) -> ContextSegment {
 }
 
 fn default_context_budget() -> ContextBudget {
-    ContextBudget {
-        max_tokens: 512,
-        reserve_system_tokens: 32,
-        min_working_tokens: 1,
-        max_tool_results: 5,
-        max_memory_segments: 20,
-    }
+    runtime_default_context_budget()
 }
 
 fn default_timestamp() -> chrono::DateTime<chrono::Utc> {

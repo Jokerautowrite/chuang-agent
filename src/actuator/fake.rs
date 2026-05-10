@@ -30,7 +30,9 @@ impl Actuator for FakeActuator {
             summary: "fake observation".to_string(),
             evidence_ref: Some(EvidenceRef {
                 uri: "fake://observation".to_string(),
+                audit_message: Some("fake actuator observation".to_string()),
             }),
+            audit_message: Some("fake actuator observation".to_string()),
         })
     }
 
@@ -69,6 +71,7 @@ impl Actuator for FakeActuator {
         self.record(format!("screenshot:{target:?}"));
         Ok(EvidenceRef {
             uri: "fake://screenshot".to_string(),
+            audit_message: Some("fake actuator screenshot".to_string()),
         })
     }
 }

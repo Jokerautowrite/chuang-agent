@@ -180,8 +180,8 @@ fn render_optional<T: ToString>(value: Option<T>) -> String {
         .unwrap_or_else(|| "unset".to_string())
 }
 
-fn estimate_goal_tokens(content: &str) -> u16 {
-    content.chars().count().div_ceil(4).min(u16::MAX as usize) as u16
+fn estimate_goal_tokens(content: &str) -> u32 {
+    content.chars().count().div_ceil(4).min(u32::MAX as usize) as u32
 }
 
 fn sanitize_segment_id(raw: &str) -> String {

@@ -22,7 +22,7 @@ GenericAgent  -> 手+魂：人类级桌面操作工具 + 观察 -> 提炼 -> 固
 2. 记忆协议：核心记忆、用户画像、经验、故事、外脑、原始会话如何分层。
 3. 执行协议：主 Agent、子 Agent、工具、权限、报告如何流转。
 4. 风险协议：删除、网络、支付、密钥、系统配置如何拦截和审计。
-5. 进化协议：什么能从一次任务沉淀成长期技能，如何验证、回滚、淘汰。
+5. 进化协议：什么能从一次任务沉淀成长期技能，如何验证、固化、监控、退役、回滚。
 
 ## 1. Codex CLI 审计：取骨
 
@@ -359,10 +359,16 @@ Governance Layer
   - risk gate / secret guard / deletion ban / approval policy / audit log
 
 Evolution Layer
-  - observe / propose / validate / solidify / decay / rollback
+  - observe / propose / validate / solidify / monitor / decay / rollback
 ```
 
 治理层必须单独存在，不能散落在 prompt 里。创项目一旦执行力超过 Hermes/OpenClaw，最大风险不是“不够强”，而是“太强且无统一刹车”。
+### 最小技能生命周期口径
+
+- `monitor` 是只读盘点：列出 active / deprecated / retired 技能，标出 decay 候选和 rollback 候选。
+- `decay` 由 `retire` / `deprecate` 承担，要求保留历史，不删除文件。
+- `rollback` 是显式恢复：基于保留的版本快照恢复为新的 active 版本，并继续保留审计痕迹。
+
 
 ## 6. V0.1 推荐落地顺序
 

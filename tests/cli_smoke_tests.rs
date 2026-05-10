@@ -218,6 +218,12 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     let live_gaps_check = wrapper
         .find("bash scripts/chuang-live-gaps-check.sh")
         .expect("candidate verify should run live gaps check");
+    let operator_checklist = wrapper
+        .find("[candidate-verify] live operator checklist readonly summary")
+        .expect("candidate verify should run live operator checklist readonly summary");
+    let goal_run_status = wrapper
+        .find("[candidate-verify] goal run status readonly summary")
+        .expect("candidate verify should run goal run status readonly summary");
     let provider_readiness = wrapper
         .find("provider readiness check")
         .expect("candidate verify should include provider readiness check");
@@ -227,9 +233,23 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
 
     assert!(complete_local_smoke < live_runner_rehearsal);
     assert!(live_runner_rehearsal < live_gaps_check);
-    assert!(live_gaps_check < provider_readiness);
+    assert!(live_gaps_check < operator_checklist);
+    assert!(operator_checklist < goal_run_status);
+    assert!(goal_run_status < provider_readiness);
     assert!(provider_readiness < marker);
     assert!(wrapper.contains("[candidate-verify] live gaps check"));
+    assert!(wrapper.contains("scripts/chuang-live-operator-checklist.sh --json"));
+    assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
+    assert!(wrapper.contains("cannot_mark_complete_from_readonly_checklist"));
+    assert!(wrapper.contains("candidate_live_operator_real_live_acceptance"));
+    assert!(wrapper.contains("candidate_goal_run_status_overall"));
+    assert!(wrapper.contains("connects_real_feishu\"] is False"));
+    assert!(wrapper.contains("connects_real_provider\"] is False"));
+    assert!(wrapper.contains("performs_desktop_actions\"] is False"));
+    assert!(wrapper.contains("performs_browser_actions\"] is False"));
+    assert!(wrapper.contains("dispatches_tasks\"] is False"));
+    assert!(wrapper.contains("starts_worker\"] is False"));
+    assert!(wrapper.contains("touches_services\"] is False"));
     assert!(wrapper.contains("scripts/chuang-provider-readiness-check.sh"));
     assert!(wrapper.contains("if [ -f \"$provider_readiness_check\" ]; then"));
     assert!(wrapper.contains("if bash \"$provider_readiness_check\"; then"));
@@ -876,7 +896,7 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
 }
 
 #[test]
-fn live_operator_checklist_suggests_default_provider_env_when_missing() {
+fn live_operator_checklist_uses_default_provider_env_when_missing() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
 
@@ -931,24 +951,22 @@ fn live_operator_checklist_suggests_default_provider_env_when_missing() {
         .expect("live operator checklist should execute");
 
     assert!(
-        !output.status.success(),
+        output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"suggested_provider_env_file\""));
-    assert!(stdout.contains(provider_env.display().to_string().as_str()));
     assert!(!stdout.contains("secret-provider-value"));
     assert!(!stdout.contains("secret-feishu-value"));
 
     let data: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("checklist output should be json");
-    assert_eq!(data["ok"], false);
-    assert_eq!(data["status"], "blocked");
+    assert_eq!(data["ok"], true);
+    assert_eq!(data["status"], "ready");
     assert_eq!(
         data["paths"]["provider_env_file"],
-        serde_json::Value::String(String::new())
+        provider_env.display().to_string()
     );
     assert_eq!(
         data["suggested_provider_env_file"]["path"],
@@ -963,6 +981,15 @@ fn live_operator_checklist_suggests_default_provider_env_when_missing() {
             provider_env.display()
         )
     );
+    assert_eq!(data["checks"]["provider_env_file"]["exists"], true);
+    assert_eq!(
+        data["checks"]["provider_env_file"]["required"]["CHUANG_PROVIDER_ENV_FILE"],
+        "<set>"
+    );
+    assert_eq!(
+        data["checks"]["provider_env_file"]["required"]["CODEX_PPTOKEN_API_KEY"],
+        "<set>"
+    );
     assert!(data["manual_steps"]
         .as_array()
         .expect("manual steps should be an array")
@@ -971,6 +998,93 @@ fn live_operator_checklist_suggests_default_provider_env_when_missing() {
             .as_str()
             .unwrap_or("")
             .contains(provider_env.display().to_string().as_str())));
+}
+
+#[test]
+fn live_operator_checklist_still_blocks_when_default_provider_env_is_missing() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-live-operator-checklist-default-provider-missing-{}-{nanos}",
+        std::process::id()
+    ));
+    let workspace = root.join("workspace");
+    let home_dir = root.join("home");
+    let provider_env = home_dir.join(".config/chuang-agent/provider.env");
+    let feishu_env = root.join("chuang-feishu.env");
+    fs::create_dir_all(&workspace).expect("workspace should be created");
+    fs::create_dir_all(&home_dir).expect("home dir should be created");
+    fs::write(
+        workspace.join("config.toml"),
+        "provider = \"openai_compatible\"\n",
+    )
+    .expect("workspace config should write");
+    fs::write(
+        &feishu_env,
+        format!(
+            "CHUANG_FEISHU_APP_ID=cli_a_test\nCHUANG_FEISHU_APP_SECRET=secret-feishu-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_FEISHU_CONNECTION_MODE=websocket\n",
+            workspace.display()
+        ),
+    )
+    .expect("feishu env should write");
+
+    let output = Command::new("bash")
+        .arg(script_path)
+        .arg("--json")
+        .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &feishu_env)
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .env("HOME", &home_dir)
+        .env_remove("CHUANG_PROVIDER_ENV_FILE")
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("live operator checklist should execute");
+
+    assert!(
+        !output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"suggested_provider_env_file\""));
+    assert!(!stdout.contains("secret-feishu-value"));
+
+    let data: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("checklist output should be json");
+    assert_eq!(data["ok"], false);
+    assert_eq!(data["status"], "blocked");
+    assert_eq!(
+        data["paths"]["provider_env_file"],
+        provider_env.display().to_string()
+    );
+    assert_eq!(
+        data["suggested_provider_env_file"]["path"],
+        provider_env.display().to_string()
+    );
+    assert_eq!(data["suggested_provider_env_file"]["exists"], false);
+    assert_eq!(data["suggested_provider_env_file"]["state"], "<missing>");
+    assert_eq!(data["checks"]["provider_env_file"]["exists"], false);
+    assert_eq!(
+        data["checks"]["provider_env_file"]["required"]["CHUANG_PROVIDER_ENV_FILE"],
+        "<missing>"
+    );
+    assert_eq!(
+        data["commands"]["provider_env_next_step"],
+        format!(
+            "set CHUANG_PROVIDER_ENV_FILE to {} in the Chuang Feishu env, or export it explicitly before rerunning the checklist",
+            provider_env.display()
+        )
+    );
+    assert!(data["blockers"]
+        .as_array()
+        .expect("blockers should be an array")
+        .iter()
+        .any(|blocker| blocker == "provider_env_file_missing"));
 }
 
 #[test]

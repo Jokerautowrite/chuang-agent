@@ -391,6 +391,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         remember,
         session_id,
         remember_session,
+        conversation_history: Vec::new(),
         remember_identity,
         remember_experience,
         dispatch_subagent,
@@ -976,9 +977,9 @@ fn parse_cli_options_with_options(
     let mut subagent_kind: Option<String> = None;
     let mut subagent_queue_root: Option<PathBuf> = None;
     let mut context_engine: Option<String> = None;
-    let mut context_max_tokens: Option<u16> = None;
-    let mut context_reserve_system_tokens: Option<u16> = None;
-    let mut context_min_working_tokens: Option<u16> = None;
+    let mut context_max_tokens: Option<u32> = None;
+    let mut context_reserve_system_tokens: Option<u32> = None;
+    let mut context_min_working_tokens: Option<u32> = None;
     let mut context_max_tool_results: Option<usize> = None;
     let mut context_max_memory_segments: Option<usize> = None;
 
@@ -1038,17 +1039,17 @@ fn parse_cli_options_with_options(
             }
             "--context-max-tokens" => {
                 let value = take_value_or_usage(args, &mut index)?;
-                context_max_tokens = Some(parse_u16_flag("--context-max-tokens", &value)?);
+                context_max_tokens = Some(parse_u32_flag("--context-max-tokens", &value)?);
             }
             "--context-reserve-system-tokens" => {
                 let value = take_value_or_usage(args, &mut index)?;
                 context_reserve_system_tokens =
-                    Some(parse_u16_flag("--context-reserve-system-tokens", &value)?);
+                    Some(parse_u32_flag("--context-reserve-system-tokens", &value)?);
             }
             "--context-min-working-tokens" => {
                 let value = take_value_or_usage(args, &mut index)?;
                 context_min_working_tokens =
-                    Some(parse_u16_flag("--context-min-working-tokens", &value)?);
+                    Some(parse_u32_flag("--context-min-working-tokens", &value)?);
             }
             "--context-max-tool-results" => {
                 let value = take_value_or_usage(args, &mut index)?;
@@ -1274,6 +1275,11 @@ fn parse_subagent_tool_policy(raw: Option<&str>) -> Result<SubagentToolPolicy, S
 
 fn parse_u16_flag(flag: &str, raw: &str) -> Result<u16, String> {
     raw.parse::<u16>()
+        .map_err(|_| format!("{flag} must be a positive integer"))
+}
+
+fn parse_u32_flag(flag: &str, raw: &str) -> Result<u32, String> {
+    raw.parse::<u32>()
         .map_err(|_| format!("{flag} must be a positive integer"))
 }
 

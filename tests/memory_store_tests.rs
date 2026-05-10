@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::memory_store::{
-    InMemoryMemoryStore, MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
+    classify_memory_layer, InMemoryMemoryStore, MemoryLayer, MemoryLayerBoundary, MemoryQuery,
+    MemoryRecord, MemoryStore, MemoryStoreError,
 };
 
 fn record(
@@ -132,4 +133,31 @@ fn memory_store_rejects_zero_limit_query() {
         err,
         MemoryStoreError::InvalidQuery("limit_must_be_positive")
     );
+}
+
+#[test]
+fn memory_store_classifies_archive_and_decay_boundaries() {
+    let archive = record(
+        "turn-1",
+        "历史会话归档只能被维护报告读取",
+        &[("kind", "turn_summary")],
+        None,
+    );
+    assert_eq!(classify_memory_layer(&archive), MemoryLayer::HistoryArchive);
+    let archive_boundary = MemoryLayerBoundary::for_record(&archive);
+    assert!(archive_boundary.archive_read_only);
+    assert!(!archive_boundary.maintenance_writeback_allowed);
+    assert_eq!(archive_boundary.writeback_target, "none");
+
+    let hot_memory = record(
+        "hot-1",
+        "核心热记忆衰减只能走人工 review",
+        &[("memory_layer", "internal_identity")],
+        None,
+    );
+    let hot_boundary = MemoryLayerBoundary::for_record(&hot_memory);
+    assert_eq!(hot_boundary.layer, MemoryLayer::InternalIdentity);
+    assert!(hot_boundary.decay_review_only);
+    assert!(!hot_boundary.maintenance_writeback_allowed);
+    assert_eq!(hot_boundary.writeback_target, "manual_review_only");
 }

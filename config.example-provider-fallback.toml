@@ -36,7 +36,7 @@ fallback_error_classes = "transport,tls"
 
 subagent = "fake"
 context_engine = "deterministic_budget"
-context_max_tokens = 512
+context_max_tokens = 272000
 context_reserve_system_tokens = 32
 context_min_working_tokens = 1
 context_max_tool_results = 5

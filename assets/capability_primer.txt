@@ -1,1 +1,1 @@
-默认能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent 派活。live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理与 live gate。
+普通对话默认注入同一份能力 primer。file_read/file_write/code_execute/list_dir=受治理工作区读写/执行；locate/screenshot=只读观察；memory/session=回溯补充；goal/subagent 派活；subagent 只 dispatch/list/run-once/run-loop/report/collect；桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt。

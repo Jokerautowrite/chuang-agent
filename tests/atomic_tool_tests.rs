@@ -180,6 +180,8 @@ fn atomic_tool_registry_generates_tool_instruction_block() {
     assert!(instructions.contains("file_read, file_write, code_execute"));
     assert!(instructions.contains("辅助工具：list_dir"));
     assert!(instructions.contains("mouse, keyboard, screenshot, locate"));
+    assert!(instructions.contains("当前屏幕、窗口标题、页面内容"));
+    assert!(instructions.contains("locate / screenshot 是只读观察工具"));
     assert!(instructions.contains("human_suspend"));
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains("/tmp/workspace"));

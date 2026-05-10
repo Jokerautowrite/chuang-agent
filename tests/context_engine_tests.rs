@@ -17,7 +17,7 @@ fn segment(
     id: &str,
     source: SegmentSource,
     content: &str,
-    tokens: Option<u16>,
+    tokens: Option<u32>,
     priority: u8,
     created_at: &str,
     last_accessed: &str,
@@ -34,7 +34,7 @@ fn segment(
     }
 }
 
-fn budget(max_tokens: u16, reserve_system_tokens: u16, min_working_tokens: u16) -> ContextBudget {
+fn budget(max_tokens: u32, reserve_system_tokens: u32, min_working_tokens: u32) -> ContextBudget {
     ContextBudget {
         max_tokens,
         reserve_system_tokens,
@@ -182,6 +182,60 @@ fn pack_normalizes_missing_tokens_before_budget_merge() {
 }
 
 #[test]
+fn pack_deduplicates_exact_content_before_budget_merge() {
+    let packer = ContextPacker::new(budget(20, 10, 0));
+
+    let packed = packer
+        .pack(vec![
+            segment(
+                "memory-old",
+                SegmentSource::Memory,
+                "same fact",
+                Some(9),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-new",
+                SegmentSource::Memory,
+                "same   fact",
+                Some(9),
+                120,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "working-1",
+                SegmentSource::Working,
+                "work",
+                Some(4),
+                220,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    assert!(packed
+        .segments
+        .iter()
+        .any(|segment| segment.id == "memory-new"));
+    assert!(!packed
+        .segments
+        .iter()
+        .any(|segment| segment.id == "memory-old"));
+    assert!(packed.dropped_ids.iter().any(|id| id == "memory-old"));
+    assert!(packed.drop_reasons.iter().any(|reason| {
+        reason.segment_id == "memory-old" && reason.reason.as_str() == "duplicate_content"
+    }));
+    assert!(packed
+        .trace
+        .iter()
+        .any(|step| step.name == "dedupe" && step.dropped_count == 1));
+}
+
+#[test]
 fn pack_keeps_system_segments_even_when_other_segments_are_dropped() {
     let packer = ContextPacker::new(budget(40, 10, 0));
     let result = packer.pack(vec![
@@ -221,6 +275,98 @@ fn pack_keeps_system_segments_even_when_other_segments_are_dropped() {
         .iter()
         .any(|segment| segment.id == "system-1"));
     assert!(packed.dropped_ids.iter().any(|id| id == "memory-1"));
+}
+
+#[test]
+fn pack_keeps_reserved_tool_session_and_history_segments_under_budget_pressure() {
+    let packer = ContextPacker::new(budget(240, 16, 0));
+    let packed = packer
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system instruction",
+                Some(10),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "system-capabilities",
+                SegmentSource::Identity,
+                "capability primer",
+                Some(120),
+                254,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "session-context",
+                SegmentSource::Identity,
+                "session and workspace context",
+                Some(20),
+                253,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "tool-instructions",
+                SegmentSource::Identity,
+                "tool instructions",
+                Some(30),
+                252,
+                "2026-04-30T18:00:03Z",
+                "2026-04-30T18:00:03Z",
+            ),
+            segment(
+                "recent-conversation-history",
+                SegmentSource::Working,
+                "recent chat history",
+                Some(40),
+                241,
+                "2026-04-30T18:00:04Z",
+                "2026-04-30T18:00:04Z",
+            ),
+            segment(
+                "memory-pressure",
+                SegmentSource::Memory,
+                "very long memory",
+                Some(80),
+                100,
+                "2026-04-30T18:00:05Z",
+                "2026-04-30T18:00:05Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let ids: Vec<String> = packed
+        .segments
+        .iter()
+        .map(|segment| segment.id.clone())
+        .collect();
+    for id in [
+        "system-1",
+        "system-capabilities",
+        "session-context",
+        "tool-instructions",
+        "recent-conversation-history",
+    ] {
+        assert!(ids.iter().any(|kept| kept == id), "{id} should be kept");
+    }
+    assert!(packed.dropped_ids.iter().any(|id| id == "memory-pressure"));
+    assert!(!packed
+        .dropped_ids
+        .iter()
+        .any(|id| id == "system-capabilities"));
+    assert!(!packed.dropped_ids.iter().any(|id| id == "session-context"));
+    assert!(!packed
+        .dropped_ids
+        .iter()
+        .any(|id| id == "tool-instructions"));
+    assert!(!packed
+        .dropped_ids
+        .iter()
+        .any(|id| id == "recent-conversation-history"));
 }
 
 #[test]
@@ -555,6 +701,7 @@ fn pack_records_first_version_pipeline_trace_and_rendered_prompt() {
         trace_names,
         vec![
             "normalize_tokens",
+            "dedupe",
             "trim",
             "rank",
             "reserve_working",
@@ -567,7 +714,7 @@ fn pack_records_first_version_pipeline_trace_and_rendered_prompt() {
         .any(|step| step.name == "trim" && step.dropped_count == 2));
 
     let rendered = packed.render_prompt();
-    assert!(rendered.contains("pack_trace=normalize_tokens:6->6(-0),trim:6->4(-2)"));
+    assert!(rendered.contains("pack_trace=normalize_tokens:6->6(-0),dedupe:6->6(-0),trim:6->4(-2)"));
     assert!(rendered.contains("drop_reasons=tool-old:tool_result_trim,memory-old:memory_trim"));
     assert!(rendered.contains("- Working/p220 [working-1] work"));
 }

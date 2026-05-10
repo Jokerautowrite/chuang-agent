@@ -735,6 +735,168 @@ fn cli_skill_retire_text_reports_deprecation_boundary() {
 }
 
 #[test]
+fn cli_skill_monitor_reports_decay_and_rollback_candidates() {
+    let skills_root = test_skills_root("monitor");
+    let solidify = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-monitor-1",
+            "--task-id",
+            "task-monitor-1",
+            "--summary",
+            "准备进入监控和淘汰流程的技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+    assert!(
+        solidify.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&solidify.stderr)
+    );
+
+    let retire = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "retire",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "stale after monitor review",
+            "--status",
+            "retired",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill retire should execute");
+    assert!(
+        retire.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&retire.stderr)
+    );
+
+    let monitor = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "monitor",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill monitor should execute");
+    assert!(
+        monitor.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&monitor.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&monitor.stdout).expect("monitor json");
+    assert_eq!(parsed["monitored"], true);
+    assert_eq!(parsed["skill_count"], 1);
+    assert_eq!(parsed["active_count"], 0);
+    assert_eq!(parsed["retired_count"], 1);
+    assert_eq!(parsed["decay_candidate_count"], 1);
+    assert_eq!(parsed["rollback_candidate_count"], 1);
+    assert_eq!(parsed["skills"][0]["status"], "retired");
+    assert_eq!(parsed["skills"][0]["decay_candidate"], true);
+    assert_eq!(parsed["skills"][0]["rollback_available"], true);
+    assert_eq!(parsed["skills"][0]["has_previous_version_snapshot"], true);
+}
+
+#[test]
+fn cli_skill_rollback_restores_retired_skill_in_place() {
+    let skills_root = test_skills_root("rollback");
+    let solidify = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-rollback-1",
+            "--task-id",
+            "task-rollback-1",
+            "--summary",
+            "准备回滚的技能",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+    assert!(
+        solidify.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&solidify.stderr)
+    );
+
+    let retire = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "retire",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "rollback test retirement",
+            "--status",
+            "retired",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill retire should execute");
+    assert!(
+        retire.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&retire.stderr)
+    );
+
+    let rollback = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "rollback",
+            "--skill-id",
+            "dry_run_skill_candidate_for_xiaoce",
+            "--reason",
+            "restore after monitor review",
+            "--rollback-at",
+            "2026-05-09T22:00:00+08:00",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill rollback should execute");
+    assert!(
+        rollback.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&rollback.stdout).expect("rollback json");
+    assert_eq!(parsed["lifecycle_updated"], true);
+    assert_eq!(parsed["writes_skill_files"], true);
+    assert_eq!(parsed["deletes_skill_files"], false);
+    assert_eq!(parsed["receipt"]["status"], "active");
+    assert_eq!(parsed["receipt"]["previous_status"], "retired");
+    assert_eq!(parsed["receipt"]["restored_from_snapshot"], true);
+    assert_eq!(parsed["boundary"]["restores_previous_version"], true);
+
+    let path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
+    let content = fs::read_to_string(&path).expect("rolled back skill should remain readable");
+    assert!(path.exists());
+    assert!(content.contains("status: active"));
+    assert!(content.contains("rollback_reason: restore after monitor review"));
+    assert!(content.contains("rollback_from_version: 2"));
+    assert!(content.contains("rollback_source_version: 1"));
+    assert!(content.contains("<<<CHUANG-SNAPSHOT-BEGIN>>>"));
+}
+
+#[test]
 fn cli_skill_deprecate_updates_seeded_canonical_file_without_deleting() {
     let skills_root = test_skills_root("deprecate-seeded");
     let path = seed_cli_canonical_skill(&skills_root, 6);

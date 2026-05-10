@@ -5,6 +5,7 @@ use crate::context_engine::{ContextBudget, ContextEngineKind};
 use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
+use crate::knowledge_read::KnowledgeReadConfig;
 use crate::provider_openai_compatible::ProviderTransport;
 use crate::subagent_queue::FileSubagentQueueConfig;
 use crate::tool_runtime::ShellRiskRules;
@@ -29,6 +30,7 @@ pub struct RuntimeConfig {
     pub subagent_queue: SubagentQueueConfig,
     pub evolution: EvolutionConfig,
     pub control_plane: ControlPlaneConfig,
+    pub external_knowledge: KnowledgeReadConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +174,12 @@ pub struct ConfigSummary {
     pub evolution_kind: String,
     pub control_plane_kind: String,
     pub control_command_timeout_ms: Option<u64>,
+    pub external_knowledge_wiki_endpoint: Option<String>,
+    pub external_knowledge_wiki_token_env: Option<String>,
+    pub external_knowledge_wiki_timeout_ms: Option<u64>,
+    pub external_knowledge_gbrain_endpoint: Option<String>,
+    pub external_knowledge_gbrain_token_env: Option<String>,
+    pub external_knowledge_gbrain_timeout_ms: Option<u64>,
     pub actuator_command_timeout_ms: Option<u64>,
     pub identity_memory_kind: String,
     pub identity_memory_root: String,
@@ -191,9 +199,9 @@ pub struct ConfigSummary {
     pub db_path: String,
     pub recall_limit: usize,
     pub context_engine_kind: String,
-    pub context_max_tokens: u16,
-    pub context_reserve_system_tokens: u16,
-    pub context_min_working_tokens: u16,
+    pub context_max_tokens: u32,
+    pub context_reserve_system_tokens: u32,
+    pub context_min_working_tokens: u32,
     pub context_max_tool_results: usize,
     pub context_max_memory_segments: usize,
     pub api_key_state: Option<String>,
@@ -249,6 +257,7 @@ impl RuntimeConfig {
             },
             evolution: EvolutionConfig::Noop,
             control_plane: ControlPlaneConfig::FakeLocal,
+            external_knowledge: KnowledgeReadConfig::disabled(),
         }
     }
 
@@ -306,6 +315,32 @@ impl RuntimeConfig {
             evolution_kind: self.evolution.kind().to_string(),
             control_plane_kind: self.control_plane.kind().to_string(),
             control_command_timeout_ms: self.control_plane.command_timeout_ms(),
+            external_knowledge_wiki_endpoint: self
+                .external_knowledge
+                .wiki
+                .endpoint
+                .as_ref()
+                .map(|value| value.to_string()),
+            external_knowledge_wiki_token_env: self
+                .external_knowledge
+                .wiki
+                .token_env
+                .as_ref()
+                .map(|value| value.to_string()),
+            external_knowledge_wiki_timeout_ms: self.external_knowledge.wiki.timeout_ms,
+            external_knowledge_gbrain_endpoint: self
+                .external_knowledge
+                .gbrain
+                .endpoint
+                .as_ref()
+                .map(|value| value.to_string()),
+            external_knowledge_gbrain_token_env: self
+                .external_knowledge
+                .gbrain
+                .token_env
+                .as_ref()
+                .map(|value| value.to_string()),
+            external_knowledge_gbrain_timeout_ms: self.external_knowledge.gbrain.timeout_ms,
             actuator_command_timeout_ms: self.actuator.command_timeout_ms(),
             identity_memory_kind: identity_memory.kind,
             identity_memory_root: identity_memory.root,
@@ -390,6 +425,22 @@ impl RuntimeConfig {
         if matches!(self.control_plane, ControlPlaneConfig::FakeLocal) {
             warnings.push(
                 "control_plane=fake_local is a placeholder; configure command control for real service control"
+                    .to_string(),
+            );
+        }
+        if self.external_knowledge.wiki.endpoint.is_some()
+            || self.external_knowledge.wiki.token_env.is_some()
+        {
+            warnings.push(
+                "external_knowledge.wiki is configured; live read remains unavailable until endpoint, token env, and an audited adapter are all wired"
+                    .to_string(),
+            );
+        }
+        if self.external_knowledge.gbrain.endpoint.is_some()
+            || self.external_knowledge.gbrain.token_env.is_some()
+        {
+            warnings.push(
+                "external_knowledge.gbrain is configured; live read remains unavailable until endpoint, token env, and an audited adapter are all wired"
                     .to_string(),
             );
         }
@@ -961,7 +1012,7 @@ fn mask_key_state(api_key: &str) -> String {
 
 pub fn default_context_budget() -> ContextBudget {
     ContextBudget {
-        max_tokens: 512,
+        max_tokens: 272000,
         reserve_system_tokens: 32,
         min_working_tokens: 1,
         max_tool_results: 5,

@@ -17,7 +17,7 @@ pub fn capability_primer_segment() -> ContextSegment {
     ContextSegment {
         id: DEFAULT_CAPABILITY_PRIMER_ID.to_string(),
         source: SegmentSource::Identity,
-        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
         content,
         priority: 254,
         created_at: now,

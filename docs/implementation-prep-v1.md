@@ -334,6 +334,13 @@ src/
 - 超限但可截断 preview → `truncated=true`
 - 截断后仍超限 → 主控补写失败报告
 
+## 3.4 Skill 生命周期测试
+### monitor / decay / rollback
+- `skill solidify` 更新已有 canonical skill 时必须保留 `Previous Version Snapshot`，为后续回滚提供证据面。
+- `skill retire` / `skill deprecate` 只能原位标记状态，不能删除文件，且要保留可恢复内容。
+- `skill monitor` 应只读输出 active / deprecated / retired 数量，以及 decay 候选和 rollback 候选。
+- `skill rollback` 应基于保留的快照恢复为新的 active 版本，并保留 rollback 记录。
+
 ---
 
 # 4. 收口判断

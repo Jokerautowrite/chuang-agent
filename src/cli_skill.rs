@@ -19,6 +19,8 @@ pub(crate) fn skill_command(args: &[String]) -> Result<(), String> {
         Some("approve") => skill_approve_command(&args[1..]),
         Some("solidify") => skill_solidify_command(&args[1..]),
         Some("retire") | Some("deprecate") => skill_retire_command(&args[1..]),
+        Some("monitor") => skill_monitor_command(&args[1..]),
+        Some("rollback") => skill_rollback_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -465,6 +467,86 @@ fn skill_retire_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn skill_monitor_command(args: &[String]) -> Result<(), String> {
+    let request = parse_skill_monitor(args)?;
+    let output = build_skill_monitor_output(&request.skills_root)?;
+
+    match request.output {
+        ControlOutputFormat::Json => print_json(&output)?,
+        ControlOutputFormat::Text => {
+            println!(
+                "skill_monitor monitored=true skills_root={} skills={} active={} deprecated={} retired={} decay_candidates={} rollback_candidates={}",
+                output.skills_root,
+                output.skill_count,
+                output.active_count,
+                output.deprecated_count,
+                output.retired_count,
+                output.decay_candidate_count,
+                output.rollback_candidate_count
+            );
+            println!(
+                "boundary reads_existing_skills=true writes_skill_files=false emits_decay_candidates=true emits_rollback_candidates=true connects_llm=false connects_external_service=false"
+            );
+            for skill in &output.skills {
+                println!(
+                    "skill id={} status={} version={} path={} score={} snapshot={} decay_candidate={} rollback_available={}",
+                    skill.skill_id,
+                    skill.status,
+                    skill.version,
+                    skill.path,
+                    skill.score.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+                    skill.has_previous_version_snapshot,
+                    skill.decay_candidate,
+                    skill.rollback_available
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn skill_rollback_command(args: &[String]) -> Result<(), String> {
+    let request = parse_skill_rollback(args)?;
+    let receipt = rollback_skill_file(&request)?;
+    let output = SkillRollbackOutput {
+        lifecycle_updated: true,
+        writes_skill_files: true,
+        deletes_skill_files: false,
+        receipt,
+        boundary: SkillRollbackBoundary {
+            reads_existing_skills: true,
+            writes_skill_files: true,
+            deletes_skill_files: false,
+            restores_previous_version: true,
+            connects_llm: false,
+            connects_external_service: false,
+        },
+    };
+
+    match request.output {
+        ControlOutputFormat::Json => print_json(&output)?,
+        ControlOutputFormat::Text => {
+            println!(
+                "skill_rollback lifecycle_updated=true writes_skill_files=true deletes_skill_files=false skill_id={} status={} previous_status={} version={} previous_version={} restored_from_snapshot={} reason={} path={}",
+                output.receipt.skill_id,
+                output.receipt.status,
+                output.receipt.previous_status.as_deref().unwrap_or("unknown"),
+                output.receipt.version,
+                output.receipt.previous_version,
+                output.receipt.restored_from_snapshot,
+                output.receipt.reason,
+                output.receipt.path
+            );
+            println!(
+                "boundary reads_existing_skills=true writes_skill_files=true deletes_skill_files=false restores_previous_version=true connects_llm=false connects_external_service=false"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn build_skill_review(request: &SkillProposeRequest) -> Result<SkillReviewBuild, String> {
     let mut evolver = DryRunProposalEvolver::new();
     evolver
@@ -787,6 +869,85 @@ fn parse_skill_retire(args: &[String]) -> Result<SkillRetireRequest, String> {
         reason,
         status,
         retired_at,
+    })
+}
+
+fn parse_skill_monitor(args: &[String]) -> Result<SkillMonitorRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut skills_root = default_skills_root();
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--skills-root" => {
+                let value = take_value(args, &mut index, "--skills-root")?;
+                if value.trim().is_empty() {
+                    return Err("skill monitor --skills-root must not be empty".to_string());
+                }
+                skills_root = PathBuf::from(value);
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(SkillMonitorRequest {
+        output,
+        skills_root,
+    })
+}
+
+fn parse_skill_rollback(args: &[String]) -> Result<SkillRollbackRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut skills_root = default_skills_root();
+    let mut skill_id: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut rollback_at: Option<String> = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--skills-root" => {
+                let value = take_value(args, &mut index, "--skills-root")?;
+                if value.trim().is_empty() {
+                    return Err("skill rollback --skills-root must not be empty".to_string());
+                }
+                skills_root = PathBuf::from(value);
+            }
+            "--skill-id" => {
+                skill_id = Some(take_value(args, &mut index, "--skill-id")?);
+            }
+            "--reason" => {
+                reason = Some(take_value(args, &mut index, "--reason")?);
+            }
+            "--rollback-at" => {
+                rollback_at = Some(take_value(args, &mut index, "--rollback-at")?);
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let skill_id = require_non_empty("skill rollback", "--skill-id", skill_id)?;
+    if !is_safe_skill_id(&skill_id) {
+        return Err(
+            "skill rollback --skill-id must be ascii letters, numbers, '-' or '_'".to_string(),
+        );
+    }
+    let reason = require_non_empty("skill rollback", "--reason", reason)?;
+
+    Ok(SkillRollbackRequest {
+        output,
+        skills_root,
+        skill_id,
+        reason,
+        rollback_at,
     })
 }
 
@@ -1117,7 +1278,7 @@ fn render_skill_markdown(
     if let Some(previous_content) = previous_content {
         if !previous_content.trim().is_empty() {
             content.push_str("\n## Previous Version Snapshot\n\n");
-            content.push_str("Previous content was replaced by this canonical upsert. The latest active form above is authoritative.\n");
+            content.push_str(&render_previous_version_snapshot(previous_content));
         }
     }
     content
@@ -1151,7 +1312,240 @@ fn render_retired_skill_markdown(
         "> Lifecycle notice: this skill is `{status}`. Reason: {reason}. The file is preserved for audit and possible future restoration.\n\n"
     ));
     content.push_str(body.trim_start());
+    if !previous_content.trim().is_empty() {
+        content.push_str("\n\n## Previous Version Snapshot\n\n");
+        content.push_str(&render_previous_version_snapshot(previous_content));
+    }
     content
+}
+
+const SKILL_SNAPSHOT_BEGIN: &str = "<<<CHUANG-SNAPSHOT-BEGIN>>>";
+const SKILL_SNAPSHOT_END: &str = "<<<CHUANG-SNAPSHOT-END>>>";
+
+fn render_previous_version_snapshot(previous_content: &str) -> String {
+    let encoded =
+        serde_json::to_string(previous_content.trim_end()).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        "{begin}\n{encoded}\n{end}\n",
+        begin = SKILL_SNAPSHOT_BEGIN,
+        end = SKILL_SNAPSHOT_END
+    )
+}
+
+fn extract_previous_version_snapshot(content: &str) -> Option<String> {
+    let begin = content.find(SKILL_SNAPSHOT_BEGIN)? + SKILL_SNAPSHOT_BEGIN.len();
+    let after_begin = content[begin..]
+        .strip_prefix('\n')
+        .unwrap_or(&content[begin..]);
+    let end = after_begin.find(SKILL_SNAPSHOT_END)?;
+    let encoded = after_begin[..end].trim();
+    serde_json::from_str(encoded).ok()
+}
+
+fn rollback_skill_file(
+    request: &SkillRollbackRequest,
+) -> Result<SkillRollbackReceiptOutput, String> {
+    let path = skill_path(&request.skills_root, &request.skill_id)?;
+    if !path.exists() {
+        return Err(format!("skill_rollback_not_found: {}", path.display()));
+    }
+    let current_content =
+        fs::read_to_string(&path).map_err(|err| format!("skill_rollback_read_failed: {err}"))?;
+    let restored_content = extract_previous_version_snapshot(&current_content)
+        .ok_or_else(|| format!("skill_rollback_snapshot_missing: {}", path.display()))?;
+    let current_version = extract_skill_version(&current_content).unwrap_or(0);
+    let source_version = extract_skill_version(&restored_content).unwrap_or(0);
+    let restored_version = current_version + 1;
+    let mut rewritten = rewrite_skill_frontmatter_for_rollback(
+        &restored_content,
+        restored_version,
+        source_version,
+        &request.reason,
+        request.rollback_at.as_deref(),
+        current_version,
+    )?;
+    if !current_content.trim().is_empty() {
+        rewritten.push_str("\n## Previous Version Snapshot\n\n");
+        rewritten.push_str(&render_previous_version_snapshot(&current_content));
+    }
+    fs::write(&path, rewritten.as_bytes())
+        .map_err(|err| format!("skill_rollback_write_failed: {err}"))?;
+
+    Ok(SkillRollbackReceiptOutput {
+        skill_id: request.skill_id.clone(),
+        path: path.display().to_string(),
+        previous_status: extract_lifecycle_value(&current_content, "status"),
+        status: "active".to_string(),
+        reason: request.reason.clone(),
+        previous_version: current_version,
+        source_version,
+        version: restored_version,
+        restored_from_snapshot: true,
+        bytes_written: rewritten.len(),
+    })
+}
+
+fn build_skill_monitor_output(skills_root: &Path) -> Result<SkillMonitorOutput, String> {
+    let mut skills = Vec::new();
+    if skills_root.exists() {
+        for entry in fs::read_dir(skills_root)
+            .map_err(|err| format!("skill_monitor_read_dir_failed: {err}"))?
+        {
+            let entry = entry.map_err(|err| format!("skill_monitor_read_dir_failed: {err}"))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            let content = fs::read_to_string(&path)
+                .map_err(|err| format!("skill_monitor_read_failed: {err}"))?;
+            skills.push(build_skill_monitor_entry(&path, &content));
+        }
+    }
+    skills.sort_by(|left, right| left.skill_id.cmp(&right.skill_id));
+    let active_count = skills
+        .iter()
+        .filter(|skill| skill.status == "active")
+        .count();
+    let deprecated_count = skills
+        .iter()
+        .filter(|skill| skill.status == "deprecated")
+        .count();
+    let retired_count = skills
+        .iter()
+        .filter(|skill| skill.status == "retired")
+        .count();
+    let decay_candidate_count = skills.iter().filter(|skill| skill.decay_candidate).count();
+    let rollback_candidate_count = skills
+        .iter()
+        .filter(|skill| skill.rollback_available)
+        .count();
+
+    Ok(SkillMonitorOutput {
+        monitored: true,
+        skills_root: skills_root.display().to_string(),
+        skill_count: skills.len(),
+        active_count,
+        deprecated_count,
+        retired_count,
+        decay_candidate_count,
+        rollback_candidate_count,
+        skills,
+        boundary: SkillMonitorBoundary {
+            reads_existing_skills: true,
+            writes_skill_files: false,
+            emits_decay_candidates: true,
+            emits_rollback_candidates: true,
+            connects_llm: false,
+            connects_external_service: false,
+        },
+    })
+}
+
+fn build_skill_monitor_entry(path: &Path, content: &str) -> SkillMonitorEntry {
+    let skill_id = extract_lifecycle_value(content, "skill_id").unwrap_or_else(|| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("skill")
+            .to_string()
+    });
+    let status = extract_lifecycle_value(content, "status").unwrap_or_else(|| "active".to_string());
+    let version = extract_skill_version(content).unwrap_or(0);
+    let score = extract_lifecycle_value(content, "score")
+        .or_else(|| extract_lifecycle_value(content, "retirement_score"))
+        .and_then(|raw| raw.parse::<u16>().ok());
+    let has_previous_version_snapshot = extract_previous_version_snapshot(content).is_some();
+    let decay_candidate = status != "active" || score.map_or(false, |score| score < 75);
+    let rollback_available = has_previous_version_snapshot;
+
+    SkillMonitorEntry {
+        skill_id,
+        path: path.display().to_string(),
+        status,
+        version,
+        score,
+        has_previous_version_snapshot,
+        decay_candidate,
+        rollback_available,
+    }
+}
+
+fn rewrite_skill_frontmatter_for_rollback(
+    content: &str,
+    version: u32,
+    source_version: u32,
+    reason: &str,
+    rollback_at: Option<&str>,
+    previous_version: u32,
+) -> Result<String, String> {
+    let mut lines = content.lines().map(String::from).collect::<Vec<_>>();
+    if lines.first().map(|line| line.as_str()) != Some("---") {
+        return Err("skill_rollback_snapshot_missing_frontmatter".to_string());
+    }
+
+    let mut saw_status = false;
+    let mut saw_version = false;
+    let mut insert_at = None;
+    for (index, line) in lines.iter_mut().enumerate().skip(1) {
+        if line == "---" {
+            insert_at = Some(index);
+            break;
+        }
+        if let Some((key, _)) = line.split_once(':') {
+            match key.trim() {
+                "status" => {
+                    *line = "status: active".to_string();
+                    saw_status = true;
+                }
+                "version" => {
+                    *line = format!("version: {version}");
+                    saw_version = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    let insert_at = insert_at
+        .ok_or_else(|| "skill_rollback_snapshot_missing_frontmatter_closure".to_string())?;
+
+    let mut additions = Vec::new();
+    if !saw_status {
+        additions.push("status: active".to_string());
+    }
+    if !saw_version {
+        additions.push(format!("version: {version}"));
+    }
+    additions.push(format!("rollback_reason: {}", sanitize_yaml_scalar(reason)));
+    additions.push(format!("rollback_from_version: {previous_version}"));
+    additions.push(format!("rollback_source_version: {source_version}"));
+    if let Some(rollback_at) = rollback_at {
+        additions.push(format!(
+            "rollback_at: {}",
+            sanitize_yaml_scalar(rollback_at)
+        ));
+    }
+
+    let mut has_version_inserted = false;
+    let mut has_status_inserted = false;
+    for addition in additions.into_iter().rev() {
+        if addition.starts_with("version:") {
+            has_version_inserted = true;
+        }
+        if addition.starts_with("status:") {
+            has_status_inserted = true;
+        }
+        lines.insert(insert_at, addition);
+    }
+
+    if !has_status_inserted && !saw_status {
+        lines.insert(insert_at, "status: active".to_string());
+    }
+    if !has_version_inserted && !saw_version {
+        lines.insert(insert_at, format!("version: {version}"));
+    }
+
+    let mut updated = lines.join("\n");
+    updated.push('\n');
+    Ok(updated)
 }
 
 fn strip_frontmatter(content: &str) -> &str {
@@ -1277,6 +1671,19 @@ struct SkillRetireRequest {
     reason: String,
     status: String,
     retired_at: Option<String>,
+}
+
+struct SkillMonitorRequest {
+    output: ControlOutputFormat,
+    skills_root: PathBuf,
+}
+
+struct SkillRollbackRequest {
+    output: ControlOutputFormat,
+    skills_root: PathBuf,
+    skill_id: String,
+    reason: String,
+    rollback_at: Option<String>,
 }
 
 struct SkillReviewBuild {
@@ -1457,6 +1864,75 @@ struct SkillRetireReceiptOutput {
     previous_status: Option<String>,
     bytes_written: usize,
     version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillMonitorOutput {
+    monitored: bool,
+    skills_root: String,
+    skill_count: usize,
+    active_count: usize,
+    deprecated_count: usize,
+    retired_count: usize,
+    decay_candidate_count: usize,
+    rollback_candidate_count: usize,
+    skills: Vec<SkillMonitorEntry>,
+    boundary: SkillMonitorBoundary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillMonitorBoundary {
+    reads_existing_skills: bool,
+    writes_skill_files: bool,
+    emits_decay_candidates: bool,
+    emits_rollback_candidates: bool,
+    connects_llm: bool,
+    connects_external_service: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillMonitorEntry {
+    skill_id: String,
+    path: String,
+    status: String,
+    version: u32,
+    score: Option<u16>,
+    has_previous_version_snapshot: bool,
+    decay_candidate: bool,
+    rollback_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillRollbackOutput {
+    lifecycle_updated: bool,
+    writes_skill_files: bool,
+    deletes_skill_files: bool,
+    receipt: SkillRollbackReceiptOutput,
+    boundary: SkillRollbackBoundary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillRollbackBoundary {
+    reads_existing_skills: bool,
+    writes_skill_files: bool,
+    deletes_skill_files: bool,
+    restores_previous_version: bool,
+    connects_llm: bool,
+    connects_external_service: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillRollbackReceiptOutput {
+    skill_id: String,
+    status: String,
+    reason: String,
+    path: String,
+    previous_status: Option<String>,
+    previous_version: u32,
+    source_version: u32,
+    version: u32,
+    restored_from_snapshot: bool,
+    bytes_written: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

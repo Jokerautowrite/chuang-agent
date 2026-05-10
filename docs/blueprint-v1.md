@@ -136,7 +136,7 @@ Governance Layer
   解决：什么不能乱做，什么需要确认，什么必须审计
 
 Evolution Layer
-  解决：哪些经验能沉淀为技能，如何验证、固化、淘汰
+  解决：哪些经验能沉淀为技能，如何验证、固化、监控、退役、回滚
 
 Interface Layer
   解决：飞书、桌面控制台、CLI、HTTP/RPC 如何接入同一内核

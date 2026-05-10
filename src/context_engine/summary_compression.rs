@@ -43,7 +43,7 @@ fn compress_segments(mut segments: Vec<ContextSegment>) -> Vec<ContextSegment> {
         let compressed_content =
             truncate_chars(&segment.content, SUMMARY_COMPRESSION_PREVIEW_CHARS);
         segment.content = format!("{compressed_content}...");
-        segment.tokens = Some(segment.content.chars().count().min(u16::MAX as usize) as u16);
+        segment.tokens = Some(segment.content.chars().count().min(u32::MAX as usize) as u32);
         segment
             .metadata
             .insert("summary_compressed".to_string(), "true".to_string());

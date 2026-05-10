@@ -84,9 +84,11 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "atomic_tools: source=GenericAgent ok=true total=9 mapped=9 interface_only=0 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
-    assert!(stdout.contains(
-        "runtime_capability_primer: 默认能力：file_read/file_write/code_execute/list_dir"
-    ));
+    assert!(stdout.contains("runtime_capability_primer: 普通对话默认注入同一份能力 primer"));
+    assert!(stdout.contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
+    assert!(stdout.contains("goal/subagent 派活"));
+    assert!(stdout.contains("locate/screenshot=只读观察"));
+    assert!(stdout.contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
     assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_executable: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_interface_only: none"));
@@ -118,7 +120,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
     assert!(stdout.contains(
-        "context_budget: max=512 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
+        "context_budget: max=272000 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
     ));
     assert!(stdout.contains("control_plane: fake_local"));
     assert!(stdout.contains(
@@ -147,6 +149,9 @@ fn cli_status_prints_mvp_health_summary() {
         "local_contract name=external_knowledge_source_contracts state=ready boundary=adapter_contract_only"
     ));
     assert!(stdout.contains(
+        "local_contract_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+    ));
+    assert!(stdout.contains(
         "local_contract name=goal_mode_smoke_gate state=ready boundary=local_cli_smoke_only"
     ));
     assert!(stdout.contains("project_readiness: ok=true state=mvp_ready_with_partial_modules"));
@@ -166,6 +171,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains("memory_layer name=internal_identity state=ready"));
     assert!(stdout.contains("memory_layer name=external_knowledge state=ready storage=docs/external-knowledge-adapter.md"));
+    assert!(stdout.contains(
+        "memory_layer_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+    ));
     assert!(stdout.contains(
         "memory_layer name=maintenance_loop state=ready storage=docs/memory-maintenance-loop.md"
     ));
@@ -388,10 +396,17 @@ fn cli_status_can_render_json_without_secret_leak() {
             && contract["read_only"] == true
             && contract["connects_real_service"] == false));
     assert_eq!(parsed["atomic_tools"]["source"], "GenericAgent");
-    assert!(parsed["runtime_capability_primer"]
+    let runtime_capability_primer = parsed["runtime_capability_primer"]
         .as_str()
-        .expect("runtime capability primer should be text")
-        .contains("file_read/file_write/code_execute/list_dir"));
+        .expect("runtime capability primer should be text");
+    assert!(runtime_capability_primer
+        .contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
+    assert!(runtime_capability_primer.contains("普通对话默认注入同一份能力 primer"));
+    assert!(runtime_capability_primer.contains("memory/session=回溯补充"));
+    assert!(runtime_capability_primer.contains("goal/subagent 派活"));
+    assert!(runtime_capability_primer.contains("locate/screenshot=只读观察"));
+    assert!(runtime_capability_primer
+        .contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 9);
@@ -798,6 +813,146 @@ fn cli_status_can_render_json_without_secret_leak() {
         .expect("external ai layers should be an array")
         .iter()
         .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "ready"));
+    assert_eq!(parsed["browser_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["browser_readiness"]["overall_state"],
+        "desktop_read_ready_browser_read_unavailable"
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["desktop_read_observation_ready"],
+        true
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["desktop_read_tools"],
+        serde_json::json!(["screenshot", "locate"])
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["browser_read_adapter_available"],
+        false
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["browser_read_reason_code"],
+        "real_adapter_missing"
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["browser_read_capabilities"],
+        serde_json::json!(["url", "title", "dom_text"])
+    );
+    assert_eq!(
+        parsed["browser_readiness"]["browser_read_does_not_use_desktop_read"],
+        true
+    );
+    assert!(parsed["browser_readiness"]["browser_read_reason"]
+        .as_str()
+        .expect("browser read reason")
+        .contains("must not infer URL, title, or DOM"));
+    assert_eq!(parsed["knowledge_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["knowledge_readiness"]["overall_state"],
+        "local_preview_ready_knowledge_read_unavailable"
+    );
+    assert_eq!(parsed["knowledge_readiness"]["local_preview_ready"], true);
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_adapter_available"],
+        false
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_sources"],
+        serde_json::json!(["wiki", "gbrain"])
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_reason_code"],
+        "endpoint_missing"
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["local_preview_is_separate"],
+        true
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["connects_real_service"],
+        false
+    );
+    assert!(parsed["knowledge_readiness"]["live_reason"]
+        .as_str()
+        .expect("knowledge read reason")
+        .contains("endpoint is missing"));
+    assert_eq!(parsed["live_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["live_readiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(parsed["live_readiness"]["ga_local_mapped_only"], true);
+    assert_eq!(parsed["live_readiness"]["desktop_browser_live_gated"], true);
+    assert_eq!(parsed["live_readiness"]["browser_worker_frozen"], true);
+    assert_eq!(parsed["live_readiness"]["live_worker_available"], false);
+    assert_eq!(
+        parsed["live_readiness"]["real_external_acceptance_pending"],
+        true
+    );
+    assert_eq!(
+        parsed["live_readiness"]["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(parsed["live_readiness"]["mapped_does_not_mean_live"], true);
+    assert_eq!(parsed["live_readiness"]["gated_does_not_mean_ready"], true);
+    assert_eq!(parsed["live_readiness"]["frozen_does_not_mean_ready"], true);
+    assert_eq!(parsed["live_readiness"]["ready_does_not_mean_live"], true);
+    let live_terms = parsed["live_readiness"]["terms"]
+        .as_array()
+        .expect("live readiness terms should be an array");
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "ga_local_mapped_only"
+            && term["current_value"] == "true"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("desktop/browser live execution")));
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "desktop_browser_live_gated"
+            && term["current_value"] == "true"
+            && term["does_not_mean"] == "actuator live action ready"));
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "browser_worker_frozen"
+            && term["current_value"] == "true"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("browser automation ready")));
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "browser_read_unavailable"
+            && term["current_value"] == "true"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("desktop_read observe/screenshot evidence")));
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "knowledge_read_unavailable"
+            && term["current_value"] == "true"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("local external knowledge preview")));
+    assert!(live_terms
+        .iter()
+        .any(|term| term["term"] == "live_worker_available"
+            && term["current_value"] == "false"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("read-only preflight")));
+    assert!(live_terms.iter().any(|term| {
+        term["term"] == "real_external_acceptance_pending"
+            && term["current_value"] == "true"
+            && term["does_not_mean"]
+                .as_str()
+                .expect("does_not_mean")
+                .contains("local-ready, mapped, gated, frozen")
+    }));
     assert!(!stdout.contains("test-secret-key"));
 }
 

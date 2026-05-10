@@ -1,6 +1,7 @@
 pub mod actuator;
 pub mod agent_runtime;
 pub mod atomic_tool;
+pub mod browser_read;
 /// Adapter/plugin line for browser-backed external workers.
 ///
 /// This module is intentionally exported for experiments and future plugins, but it must not
@@ -16,6 +17,7 @@ pub mod control_plane;
 pub mod control_surface;
 pub mod control_workflow;
 pub mod external_ai_dispatch;
+pub mod external_knowledge;
 pub mod genesis_actuator;
 pub mod goal_dispatch;
 pub mod goal_mode;
@@ -23,6 +25,7 @@ pub mod goal_run;
 pub mod governance;
 pub mod hermes_memory;
 pub mod kernel_status;
+pub mod knowledge_read;
 pub mod lifecycle;
 pub mod live_adapter_gate;
 pub mod live_subagent_rehearsal;

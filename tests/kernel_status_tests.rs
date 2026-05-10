@@ -50,7 +50,13 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(!status.governance.goal_run_executes);
     assert!(status
         .runtime_capability_primer
-        .contains("file_read/file_write/code_execute/list_dir"));
+        .contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
+    assert!(status
+        .runtime_capability_primer
+        .contains("locate/screenshot=只读观察"));
+    assert!(status
+        .runtime_capability_primer
+        .contains("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
     assert!(status.atomic_tools.ok);
     assert_eq!(status.atomic_tools.manifest_schema_version, 1);
     assert_eq!(
@@ -117,6 +123,103 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .atomic_tools
         .interface_only_reason
         .contains("all GA atoms are mapped to governed runtime ports"));
+    assert!(status.browser_readiness.ok);
+    assert_eq!(
+        status.browser_readiness.overall_state,
+        "desktop_read_ready_browser_read_unavailable"
+    );
+    assert_eq!(status.browser_readiness.contract_version, 1);
+    assert!(status.browser_readiness.desktop_read_observation_ready);
+    assert_eq!(
+        status.browser_readiness.desktop_read_tools,
+        vec!["screenshot".to_string(), "locate".to_string()]
+    );
+    assert!(!status.browser_readiness.browser_read_adapter_available);
+    assert_eq!(status.browser_readiness.browser_read_state, "unavailable");
+    assert_eq!(
+        status.browser_readiness.browser_read_adapter_kind,
+        "unavailable"
+    );
+    assert_eq!(
+        status.browser_readiness.browser_read_boundary,
+        "browser_read_dom_url_title_contract"
+    );
+    assert_eq!(
+        status.browser_readiness.browser_read_capabilities,
+        vec![
+            "url".to_string(),
+            "title".to_string(),
+            "dom_text".to_string()
+        ]
+    );
+    assert_eq!(
+        status.browser_readiness.browser_read_reason_code,
+        "real_adapter_missing"
+    );
+    assert!(status
+        .browser_readiness
+        .browser_read_reason
+        .contains("must not infer URL, title, or DOM"));
+    assert!(status
+        .browser_readiness
+        .current
+        .contains("desktop_read observation tools are mapped"));
+    assert!(status
+        .browser_readiness
+        .next_action
+        .contains("audited CDP/Playwright/browser adapter"));
+    assert!(status
+        .browser_readiness
+        .desktop_read_boundary
+        .contains("not DOM, URL, or browser title guarantees"));
+    assert!(
+        status
+            .browser_readiness
+            .browser_read_does_not_use_desktop_read
+    );
+    assert!(status.browser_readiness.real_adapter_required);
+    assert!(status.knowledge_readiness.ok);
+    assert_eq!(
+        status.knowledge_readiness.overall_state,
+        "local_preview_ready_knowledge_read_unavailable"
+    );
+    assert_eq!(status.knowledge_readiness.contract_version, 1);
+    assert!(status.knowledge_readiness.local_preview_ready);
+    assert!(!status.knowledge_readiness.live_adapter_available);
+    assert_eq!(status.knowledge_readiness.live_adapter_state, "unavailable");
+    assert_eq!(
+        status.knowledge_readiness.live_sources,
+        vec!["wiki".to_string(), "gbrain".to_string()]
+    );
+    assert_eq!(
+        status.knowledge_readiness.live_reason_code,
+        "endpoint_missing"
+    );
+    assert_eq!(status.knowledge_readiness.live_adapter_kind, "unavailable");
+    assert_eq!(
+        status.knowledge_readiness.local_preview_boundary,
+        "memory knowledge search/preview-context only reads local files and does not connect real wiki/GBrain"
+    );
+    assert_eq!(
+        status.knowledge_readiness.live_boundary,
+        "knowledge_read_wiki_gbrain_live_contract"
+    );
+    assert!(status
+        .knowledge_readiness
+        .live_reason
+        .contains("endpoint is missing"));
+    assert!(status
+        .knowledge_readiness
+        .current
+        .contains("local preview/source-contract is ready"));
+    assert!(status
+        .knowledge_readiness
+        .next_action
+        .contains("audited read-only wiki/GBrain adapter"));
+    assert!(status.knowledge_readiness.local_preview_is_separate);
+    assert!(!status.knowledge_readiness.connects_real_service);
+    assert!(!status.knowledge_readiness.writes_automatically);
+    assert!(status.knowledge_readiness.real_adapter_required);
     assert_eq!(
         status.atomic_tools.local_cli_self_check_entrypoints,
         vec![
@@ -472,6 +575,60 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .layers
         .iter()
         .any(|layer| layer.name == "unified_identity_engine" && layer.state == "ready"));
+    assert!(status.live_readiness.ok);
+    assert_eq!(
+        status.live_readiness.overall_state,
+        "local_ready_live_pending"
+    );
+    assert_eq!(
+        status.live_readiness.local_ready_scope,
+        "ready/local-ready only covers local contracts, smoke gates, status diagnostics, and read-only preflight"
+    );
+    assert!(status.live_readiness.ga_local_mapped_only);
+    assert!(status.live_readiness.desktop_browser_live_gated);
+    assert!(status.live_readiness.browser_worker_frozen);
+    assert!(!status.live_readiness.live_worker_available);
+    assert!(status.live_readiness.real_external_acceptance_pending);
+    assert!(
+        !status
+            .live_readiness
+            .provider_live_request_verified_by_status
+    );
+    assert!(status.live_readiness.mapped_does_not_mean_live);
+    assert!(status.live_readiness.gated_does_not_mean_ready);
+    assert!(status.live_readiness.frozen_does_not_mean_ready);
+    assert!(status.live_readiness.ready_does_not_mean_live);
+    assert!(status.live_readiness.terms.iter().any(|term| {
+        term.term == "ga_local_mapped_only"
+            && term.current_value == "true"
+            && term
+                .does_not_mean
+                .contains("desktop/browser live execution")
+    }));
+    assert!(status.live_readiness.terms.iter().any(|term| {
+        term.term == "desktop_browser_live_gated"
+            && term.current_value == "true"
+            && term.does_not_mean == "actuator live action ready"
+    }));
+    assert!(status.live_readiness.terms.iter().any(|term| {
+        term.term == "browser_worker_frozen"
+            && term.current_value == "true"
+            && term.does_not_mean.contains("browser automation ready")
+    }));
+    assert!(status.live_readiness.terms.iter().any(|term| {
+        term.term == "live_worker_available"
+            && term.current_value == "false"
+            && term
+                .does_not_mean
+                .contains("read-only preflight, local queue readiness")
+    }));
+    assert!(status.live_readiness.terms.iter().any(|term| {
+        term.term == "real_external_acceptance_pending"
+            && term.current_value == "true"
+            && term
+                .does_not_mean
+                .contains("local-ready, mapped, gated, frozen")
+    }));
     assert!(status.goal_mode.ok);
     assert_eq!(status.goal_mode.cli_entrypoint, "run --goal TEXT");
     assert_eq!(status.goal_mode.default_goal_id, "mainline-mvp");

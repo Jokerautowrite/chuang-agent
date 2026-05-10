@@ -19,5 +19,5 @@
   ],
   "input_allowed": false,
   "click_allowed": false,
-  "screenshot_allowed": false
+  "screenshot_allowed": true
 }

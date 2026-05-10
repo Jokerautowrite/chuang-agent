@@ -117,6 +117,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "local_contract_readiness: ok=true state=ready contracts=6 ready=6 partial=0 deferred=0 blocked=0 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
     assert!(stdout.contains(
+        "local_contract_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+    ));
+    assert!(stdout.contains(
         "release_readiness: ok=true name=second_test_version state=second_test_version_ready"
     ));
     assert!(stdout.contains("release_acceptance: count=7"));
@@ -127,6 +130,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "third_test_candidate: ok=true state=local_gate_ready_requires_manual_live_check local_gate_ready=true smoke_script=scripts/chuang-third-test-smoke.sh marker=third_test_candidate_smoke_ok requires_manual_live_check=true connects_real_external_services=false operator_env_blocks_100_percent=true real_live_ready=false"
     ));
     assert!(stdout.contains("memory_readiness: ok=true state=ready layers=5"));
+    assert!(stdout.contains(
+        "memory_layer_boundary: local_read_only_preview_source_contract live_retrieval_pending_gated"
+    ));
     assert!(stdout.contains("channel_readiness: ok=true state=ready layers=5"));
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"

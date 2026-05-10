@@ -44,7 +44,7 @@ const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
 const ENV_FILE =
   process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
 const WORKSPACE_ROOT =
-  process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT;
+  normalizeWorkspaceRoot(process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT);
 const PROVIDER_ENV_FILE =
   process.env.CHUANG_PROVIDER_ENV_FILE || path.join(os.homedir(), ".config/chuang-agent/provider.env");
 const SESSION_STATE_FILE =
@@ -57,6 +57,11 @@ const EVENT_LOG_FILE =
 let cachedTesseractLanguages = null;
 
 loadEnv();
+
+function normalizeWorkspaceRoot(raw) {
+  const trimmed = String(raw || "").trim();
+  return path.resolve(trimmed || ".");
+}
 
 function loadEnv() {
   const envPaths = [
@@ -74,7 +79,7 @@ function loadEnv() {
 
 class AppServerClient {
   constructor(rootDir) {
-    this.rootDir = rootDir;
+    this.rootDir = normalizeWorkspaceRoot(rootDir);
     this.nextId = 1;
     this.pending = new Map();
     this.buffer = "";
@@ -87,9 +92,14 @@ class AppServerClient {
     if (this.child) {
       this.child.kill();
     }
+    const childEnv = {
+      ...process.env,
+      CHUANG_AGENT_WORKSPACE_ROOT: this.rootDir,
+      CHUANG_FEISHU_WORKSPACE_ROOT: this.rootDir,
+    };
     this.child = spawn("cargo", ["run", "--quiet", "--manifest-path", path.join(ROOT, "Cargo.toml"), "--", "app-server"], {
       cwd: this.rootDir,
-      env: process.env,
+      env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.startedAt = new Date().toISOString();
@@ -105,6 +115,7 @@ class AppServerClient {
     this.child.on("exit", (code, signal) => {
       const error = new Error(`app-server exited: code=${code} signal=${signal || ""}`.trim());
       this.lastError = error.message;
+      this.child = null;
       for (const [, pending] of this.pending.entries()) {
         pending.reject(error);
       }
@@ -147,6 +158,14 @@ class AppServerClient {
     const id = String(this.nextId++);
     const payload = JSON.stringify({ id, method, params });
     return new Promise((resolve, reject) => {
+      if (!this.child || this.child.exitCode !== null || this.child.killed) {
+        try {
+          this.restart();
+        } catch (error) {
+          reject(error);
+          return;
+        }
+      }
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(`${payload}\n`);
     });
@@ -156,6 +175,10 @@ class AppServerClient {
     return {
       running: Boolean(this.child && this.child.exitCode === null && !this.child.killed),
       startedAt: this.startedAt,
+      workspaceRoot: this.rootDir,
+      childWorkspaceRoot: this.rootDir,
+      configuredWorkspaceRoot: WORKSPACE_ROOT,
+      workspaceRootMatchesConfig: this.rootDir === WORKSPACE_ROOT,
       pendingCount: this.pending.size,
       lastError: this.lastError,
     };
@@ -425,10 +448,21 @@ class ChuangFeishuBridge {
 
   buildHealthDiagnostics(inbound, effectiveThreadId = "") {
     const binding = inbound?.chatId ? this.sessionStore.getBinding(inbound.chatId) : null;
+    const appServerStatus = this.appServer.status();
     return {
       bridgeReady: true,
       workspaceRoot: WORKSPACE_ROOT,
-      appServer: this.appServer.status(),
+      bridgeWorkspaceRoot: WORKSPACE_ROOT,
+      appServer: appServerStatus,
+      workspace: {
+        bridgeRoot: WORKSPACE_ROOT,
+        appServerRoot: appServerStatus.workspaceRoot,
+        appServerChildRoot: appServerStatus.childWorkspaceRoot,
+        configuredRoot: WORKSPACE_ROOT,
+        inboundRoot: inbound?.workspaceRoot || WORKSPACE_ROOT,
+        rootsMatch: appServerStatus.workspaceRootMatchesConfig,
+        appServerMatchesConfig: appServerStatus.workspaceRootMatchesConfig,
+      },
       session: binding
         ? { ...binding, bound: true }
         : {

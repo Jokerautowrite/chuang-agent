@@ -23,6 +23,57 @@ bash scripts/chuang-live-runner-rehearsal-smoke.sh
 printf '%s\n' "[candidate-verify] live gaps check"
 bash scripts/chuang-live-gaps-check.sh
 
+printf '%s\n' "[candidate-verify] live operator checklist readonly summary"
+operator_status=0
+operator_json="$(bash scripts/chuang-live-operator-checklist.sh --json)" || operator_status=$?
+if [ "$operator_status" -ne 0 ] && [ "$operator_status" -ne 1 ]; then
+    printf '%s\n' "[candidate-verify] live operator checklist failed unexpectedly with status $operator_status"
+    exit "$operator_status"
+fi
+printf '%s' "$operator_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+boundaries = data["readonly_boundaries"]
+assert boundaries["readonly"] is True
+assert boundaries["connects_real_feishu"] is False
+assert boundaries["sends_feishu_messages"] is False
+assert boundaries["connects_real_provider"] is False
+assert boundaries["performs_desktop_actions"] is False
+assert boundaries["performs_browser_actions"] is False
+assert boundaries["connects_real_wiki"] is False
+assert boundaries["connects_real_gbrain"] is False
+assert boundaries["starts_services"] is False
+assert boundaries["modifies_repo"] is False
+assert boundaries["prints_secret_values"] is False
+real_live = data["real_live_acceptance"]
+assert real_live["complete"] is False
+assert real_live["status"] == "not_verified"
+assert real_live["cannot_mark_complete_from_readonly_checklist"] is True
+print("candidate_live_operator_checklist_status=" + str(data["status"]))
+print("candidate_live_operator_real_live_acceptance=" + str(real_live["status"]))
+'
+
+printf '%s\n' "[candidate-verify] goal run status readonly summary"
+goal_status_json="$(bash scripts/chuang-goal-run-status.sh --json)"
+printf '%s' "$goal_status_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+boundaries = data["readonly_boundaries"]
+assert boundaries["readonly"] is True
+assert boundaries["dispatches_tasks"] is False
+assert boundaries["starts_worker"] is False
+assert boundaries["restarts_worker"] is False
+assert boundaries["modifies_repo"] is False
+assert boundaries["deletes_logs"] is False
+assert boundaries["touches_services"] is False
+print("candidate_goal_run_status_overall=" + str(data["overall_status"]))
+print("candidate_goal_run_status_ok=" + str(data["ok"]).lower())
+'
+
 printf '%s\n' "[candidate-verify] provider readiness check"
 if [ -f "$provider_readiness_check" ]; then
     if bash "$provider_readiness_check"; then

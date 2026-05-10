@@ -55,7 +55,7 @@ pub struct ContextDebugSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkingReservationDebug {
     pub reserved_segment_id: String,
-    pub reserved_tokens: u16,
+    pub reserved_tokens: u32,
     pub dropped_segment_ids: Vec<String>,
     pub reason: String,
 }

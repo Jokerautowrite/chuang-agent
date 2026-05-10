@@ -76,7 +76,7 @@ pub struct ChuangKernelSnapshot {
     pub turn_count: u64,
     pub recall_limit: usize,
     pub metadata_keys: Vec<String>,
-    pub context_budget_max_tokens: Option<u16>,
+    pub context_budget_max_tokens: Option<u32>,
     pub memory_write_max_chars: Option<usize>,
     pub identity_user_chars: Option<usize>,
     pub identity_memory_chars: Option<usize>,
@@ -461,34 +461,38 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 segments.push(identity_segment(
                     "identity-first-wake",
                     "FIRST_WAKE.md",
-                    &snapshot.first_wake,
-                    250,
+                    &compact_identity_bootstrap_content(&snapshot.first_wake, 220, 8),
+                    251,
                 ));
             }
             if !snapshot.soul.trim().is_empty() {
                 segments.push(identity_segment(
                     "identity-soul",
                     "SOUL.md",
-                    &snapshot.soul,
-                    248,
+                    &compact_identity_bootstrap_content(&snapshot.soul, 160, 6),
+                    250,
                 ));
             }
             if !snapshot.story.trim().is_empty() {
                 segments.push(identity_segment(
                     "identity-story",
                     "STORY.md",
-                    &snapshot.story,
-                    242,
+                    &compact_identity_bootstrap_content(&snapshot.story, 180, 8),
+                    248,
                 ));
             }
             if !snapshot.agents_registry.trim().is_empty() {
                 segments.push(identity_segment(
                     "identity-agents",
                     "agents.toml",
-                    &snapshot.agents_registry,
-                    205,
+                    &compact_identity_bootstrap_content(&snapshot.agents_registry, 180, 8),
+                    247,
                 ));
             }
+        }
+
+        if let Some(segment) = self.session_context_segment() {
+            segments.push(segment);
         }
 
         if let Some(snapshot) = &self.config.identity_snapshot {
@@ -511,6 +515,64 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         }
 
         segments
+    }
+
+    fn session_context_segment(&self) -> Option<ContextSegment> {
+        let session_id = self
+            .config
+            .metadata
+            .get("session_id")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let workspace_root = self
+            .config
+            .metadata
+            .get("workspace_root")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let memory_scope = self
+            .config
+            .metadata
+            .get("memory_scope")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        if session_id.is_none() && workspace_root.is_none() && memory_scope.is_none() {
+            return None;
+        }
+
+        let mut lines = vec!["[session-context]".to_string()];
+        if let Some(value) = &session_id {
+            lines.push(format!("session_id={value}"));
+        }
+        if let Some(value) = &workspace_root {
+            lines.push(format!("workspace_root={value}"));
+        }
+        if let Some(value) = &memory_scope {
+            lines.push(format!("memory_scope={value}"));
+        }
+        lines.push("continue=current chat/thread and workspace".to_string());
+        lines.push(
+            "if identity/tool context is missing, recover from workspace/memory first".to_string(),
+        );
+        let content = lines.join("\n");
+        let now = default_identity_timestamp();
+        Some(ContextSegment {
+            id: "session-context".to_string(),
+            source: SegmentSource::Identity,
+            content,
+            tokens: None,
+            priority: 253,
+            created_at: now,
+            last_accessed: now,
+            metadata: std::collections::HashMap::from([(
+                "kind".to_string(),
+                "session_context".to_string(),
+            )]),
+        })
     }
 
     fn propose_runtime_turn_action(&self, turn_id: &str) -> ProposedAction {
@@ -601,7 +663,7 @@ fn identity_segment(id: &str, source_file: &str, content: &str, priority: u8) ->
         id: id.to_string(),
         source: SegmentSource::Identity,
         content: content.to_string(),
-        tokens: Some(content.chars().count().min(u16::MAX as usize) as u16),
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
         priority,
         created_at: default_identity_timestamp(),
         last_accessed: default_identity_timestamp(),
@@ -609,6 +671,22 @@ fn identity_segment(id: &str, source_file: &str, content: &str, priority: u8) ->
             .into_iter()
             .collect(),
     }
+}
+
+fn compact_identity_bootstrap_content(content: &str, max_chars: usize, max_lines: usize) -> String {
+    let mut lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let mut compacted = lines.by_ref().take(max_lines).collect::<Vec<_>>().join(" ");
+    if lines.next().is_some() {
+        if !compacted.is_empty() {
+            compacted.push_str(" ...");
+        } else {
+            compacted.push_str("...");
+        }
+    }
+    truncate_chars(&compacted, max_chars)
 }
 
 fn sanitize_record_id_part(raw: &str) -> String {

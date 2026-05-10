@@ -154,6 +154,66 @@ secret_access = " .env.local, vault token"
 }
 
 #[test]
+fn config_file_parses_external_knowledge_read_contract_fields() {
+    let config = parse_runtime_config_file(
+        r#"
+db_path = "./tmp/chuang.db"
+identity_memory_root = "./tmp/identity"
+
+[external_knowledge.wiki]
+endpoint = "https://wiki.example.com/api"
+token_env = "CHUANG_WIKI_TOKEN"
+timeout_ms = 5000
+
+[external_knowledge.gbrain]
+endpoint = "https://gbrain.example.com/api"
+token_env = "CHUANG_GBRAIN_TOKEN"
+timeout_ms = 7000
+"#,
+    )
+    .expect("config should parse");
+
+    assert_eq!(
+        config.external_knowledge.wiki.endpoint.as_deref(),
+        Some("https://wiki.example.com/api")
+    );
+    assert_eq!(
+        config.external_knowledge.wiki.token_env.as_deref(),
+        Some("CHUANG_WIKI_TOKEN")
+    );
+    assert_eq!(config.external_knowledge.wiki.timeout_ms, Some(5000));
+    assert_eq!(
+        config.external_knowledge.gbrain.endpoint.as_deref(),
+        Some("https://gbrain.example.com/api")
+    );
+    assert_eq!(
+        config.external_knowledge.gbrain.token_env.as_deref(),
+        Some("CHUANG_GBRAIN_TOKEN")
+    );
+    assert_eq!(config.external_knowledge.gbrain.timeout_ms, Some(7000));
+
+    let summary = config.summary();
+    assert_eq!(
+        summary.external_knowledge_wiki_endpoint.as_deref(),
+        Some("https://wiki.example.com/api")
+    );
+    assert_eq!(
+        summary.external_knowledge_wiki_token_env.as_deref(),
+        Some("CHUANG_WIKI_TOKEN")
+    );
+    assert_eq!(summary.external_knowledge_wiki_timeout_ms, Some(5000));
+    assert_eq!(
+        summary.external_knowledge_gbrain_endpoint.as_deref(),
+        Some("https://gbrain.example.com/api")
+    );
+    assert_eq!(
+        summary.external_knowledge_gbrain_token_env.as_deref(),
+        Some("CHUANG_GBRAIN_TOKEN")
+    );
+    assert_eq!(summary.external_knowledge_gbrain_timeout_ms, Some(7000));
+}
+
+#[test]
 fn config_file_parses_section_subagent_live_worker_status_only_shape() {
     let config = parse_runtime_config_file(
         r#"

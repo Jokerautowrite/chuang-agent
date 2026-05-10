@@ -234,6 +234,100 @@ fn cli_channel_simulate_can_forward_goal_context() {
 }
 
 #[test]
+fn cli_channel_simulate_surfaces_tool_context_and_readonly_guidance() {
+    let workspace = temp_workspace("simulate-tool-surface");
+    write_workspace_config(&workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("simulate")
+        .arg("--workspace-root")
+        .arg(&workspace)
+        .arg("--message-id")
+        .arg("msg-surface-1")
+        .arg("--sender-id")
+        .arg("user-1")
+        .arg("--thread-id")
+        .arg("thread-surface-1")
+        .arg("--text")
+        .arg("还在吗？")
+        .arg("--json")
+        .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
+        .output()
+        .expect("channel simulate should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["tool_surface"]["available"], true);
+    assert_eq!(parsed["tool_surface"]["governed"], true);
+    assert_eq!(parsed["tool_surface"]["instruction_context_injected"], true);
+    assert_eq!(
+        parsed["tool_surface"]["mapped_atomic_tools"],
+        serde_json::json!([
+            "mouse",
+            "keyboard",
+            "screenshot",
+            "locate",
+            "file_read",
+            "file_write",
+            "code_execute",
+            "wait",
+            "human_suspend"
+        ])
+    );
+    assert!(parsed["tool_surface"]["callable_tools"]
+        .as_array()
+        .expect("callable tools should be array")
+        .iter()
+        .any(|tool| tool == "locate"));
+    assert!(parsed["tool_surface"]["callable_tools"]
+        .as_array()
+        .expect("callable tools should be array")
+        .iter()
+        .any(|tool| tool == "screenshot"));
+    assert!(parsed["tool_surface"]["callable_tools"]
+        .as_array()
+        .expect("callable tools should be array")
+        .iter()
+        .any(|tool| tool == "memory_recall"));
+    assert_eq!(
+        parsed["runtime_observability"]["tool_surface_available"],
+        "true"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["tool_surface_governed"],
+        "true"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["tool_instruction_context_injected"],
+        "true"
+    );
+    assert!(
+        parsed["runtime_observability"]["tool_surface_callable_tools"]
+            .as_str()
+            .expect("tool surface callable tools")
+            .contains("locate")
+    );
+    assert!(
+        parsed["runtime_observability"]["tool_surface_callable_tools"]
+            .as_str()
+            .expect("tool surface callable tools")
+            .contains("screenshot")
+    );
+    assert!(
+        parsed["runtime_observability"]["tool_surface_callable_tools"]
+            .as_str()
+            .expect("tool surface callable tools")
+            .contains("memory_recall")
+    );
+}
+
+#[test]
 fn cli_channel_simulate_rejects_empty_text() {
     let workspace = temp_workspace("empty-text");
     write_workspace_config(&workspace);
