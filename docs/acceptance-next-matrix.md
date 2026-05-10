@@ -102,9 +102,9 @@ final verify 本地闭环通过
 | provider evidence | live request verified | `scripts/chuang-provider-readiness-check.sh --json` -> `overall_state=ready`、`transport=native`、`api_key_state=<set>`；Feishu 普通文本 `哈喽` -> `gpt-5.5`、API 1 次、runtime report `report-turn-1` | readiness/env 对齐已通过，且 Feishu 主链已拿到一次真实 provider 响应；仍需把 provider receipt 纳入最终 operator receipt，不代表 desktop/browser/wiki/GBrain 已验收 |
 | subagent evidence | 已完成 | `cargo test -q --test cli_subagent_live_preflight_tests`；`scripts/chuang-live-runner-readiness-view.sh --json`；`sh scripts/chuang-live-runner-rehearsal-smoke.sh` -> `live_runner_rehearsal_smoke_ok` | gate/allowlist/capability/report admission rehearsal 已有；readiness view 和 rehearsal 仍不是 runner 池 ready，下一步只允许 bounded single worker evidence |
 | GA 9 tools evidence | 已完成但非 live | `/tools` / `/capabilities` 和本地诊断面可见 mapped 工具 | `ga_local_mapped_only=true`；映射完成不等于真实 desktop/browser live；缺真实桌面/browser action receipt |
-| desktop/browser live evidence | pending | `desktop_browser_live_gated=true`，待 action allowlist、governance receipt 和 operator receipt | 真实桌面/浏览器验收仍 pending；不能由 mapped 工具或本地 dry-run 代替 |
+| desktop/browser live evidence | readonly boundary checked, visual evidence pending | `desktop_browser_live_gated=true`；`scripts/chuang-real-actuator-adapter.py` 的 observe/screenshot 返回 `read_only=true`、`live_gate_required=false`，但当前终端无图形 `DISPLAY`，窗口标题和截图 evidence 为 unavailable | 真实桌面/浏览器验收仍 pending；只读边界已过，本机图形 evidence 需要在桌面会话里采集，不能由 mapped 工具或 unavailable evidence 代替 |
 | BrowserWorker evidence | frozen | `status --json` -> `live_readiness.browser_worker_frozen=true` | 冻结旧路径，不表示 browser live-ready |
-| wiki/GBrain evidence | 后置缺 live | 待补真实只读账号、provenance/evidence 和 operator receipt | 本地知识检索口径不能代替 wiki/GBrain live 接通证据 |
+| wiki/GBrain evidence | source-contract ready, live adapter missing | `memory knowledge source-contract --source wiki|gbrain --json` -> `read_only=true`、`connects_real_service=false`、`live_adapter_configured=false` | 本地 source-contract 不能代替 wiki/GBrain live 接通证据；仍需真实只读账号、provenance/evidence 和 operator receipt |
 | console/watchdog evidence | 已完成 | `cargo test -q --test cli_console_tests` 和 `./scripts/chuang-goal-watchdog.sh --once` | 长跑状态有只读入口；不派活、不重启、不提交 |
 | memory evidence | 已完成 | `cargo test -q --test memory_maintenance_cli_tests` | 写回仍需 `--approve-writeback`；live rehearsal 不得让子代理直写核心记忆 |
 
