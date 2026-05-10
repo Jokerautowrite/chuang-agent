@@ -85,6 +85,17 @@ assert real_live["complete"] is False
 assert real_live["status"] == "not_verified"
 assert real_live["gap_count"] == 6
 assert real_live["cannot_mark_complete_from_readonly_checklist"] is True
+assert real_live["operator_receipt_template"] == "scripts/chuang-live-operator-receipt.sh --json"
+assert real_live["operator_receipt_template_can_mark_complete"] is False
+assert real_live["required_receipt_service_ids"] == [
+    "feishu",
+    "provider",
+    "subagent_live_rehearsal",
+    "desktop",
+    "browser",
+    "wiki",
+    "gbrain",
+]
 service_ids = [item["id"] for item in real_live["services"]]
 assert service_ids == ["feishu", "provider", "desktop", "browser", "wiki", "gbrain"]
 print("live_operator_checklist_status=" + str(data["status"]))
@@ -92,6 +103,50 @@ print("live_operator_checklist_ok=" + str(data["ok"]).lower())
 print("live_operator_checklist_blockers=" + str(len(data.get("blockers", []))))
 print("live_operator_real_live_acceptance=" + str(real_live["status"]))
 print("live_operator_real_live_gap_count=" + str(real_live["gap_count"]))
+'
+
+printf '%s\n' "[third-test] live operator receipt readonly template"
+receipt_json="$(bash scripts/chuang-live-operator-receipt.sh --json)"
+printf '%s' "$receipt_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["schema_version"] == 1
+assert data["acceptance_status"] == "not_verified"
+assert data["can_mark_real_live_ready"] is False
+assert data["cannot_mark_complete_without_operator_evidence"] is True
+boundaries = data["boundaries"]
+assert boundaries["readonly"] is True
+assert boundaries["connects_real_feishu"] is False
+assert boundaries["sends_feishu_messages"] is False
+assert boundaries["connects_real_provider"] is False
+assert boundaries["starts_workers"] is False
+assert boundaries["performs_desktop_actions"] is False
+assert boundaries["performs_browser_actions"] is False
+assert boundaries["connects_real_wiki"] is False
+assert boundaries["connects_real_gbrain"] is False
+assert boundaries["reads_secret_values"] is False
+assert boundaries["prints_secret_values"] is False
+assert boundaries["modifies_repo"] is False
+assert boundaries["deletes_files"] is False
+assert boundaries["reuses_codex_or_hermes_credentials"] is False
+service_ids = [item["id"] for item in data["service_receipts"]]
+assert service_ids == [
+    "feishu",
+    "provider",
+    "subagent_live_rehearsal",
+    "desktop",
+    "browser",
+    "wiki",
+    "gbrain",
+]
+assert data["service_receipts"][0]["evidence"]["runtime_report_id"] == "<fill_after_test>"
+assert data["service_receipts"][1]["evidence"]["api_key_state"] == "<set|missing>"
+assert data["service_receipts"][2]["evidence"]["allowlist_receipt_ref"] == "<fill_after_test>"
+assert data["service_receipts"][5]["evidence"]["writes_core_memory"] is False
+print("live_operator_receipt_acceptance_status=" + str(data["acceptance_status"]))
+print("live_operator_receipt_service_count=" + str(len(data["service_receipts"])))
 '
 
 printf '%s\n' "[third-test] goal run status readonly summary"

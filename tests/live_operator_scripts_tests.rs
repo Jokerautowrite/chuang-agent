@@ -41,10 +41,23 @@ fn live_operator_receipt_script_is_readonly_and_template_only() {
     assert!(script.contains("Readonly receipt template for a manual Chuang live test."));
     assert!(script.contains("CHUANG_LIVE_OPERATOR"));
     assert!(script.contains("CHUANG_LIVE_ENV_FILE"));
+    assert!(script.contains("CHUANG_LIVE_OPERATOR_ENV_FILE"));
+    assert!(script.contains("CHUANG_FEISHU_ENV_FILE"));
+    assert!(script.contains("CHUANG_LIVE_REQUEST_ID"));
     assert!(script.contains("\"connects_real_feishu\": False"));
+    assert!(script.contains("\"sends_feishu_messages\": False"));
+    assert!(script.contains("\"connects_real_provider\": False"));
+    assert!(script.contains("\"starts_workers\": False"));
+    assert!(script.contains("\"dispatches_tasks\": False"));
+    assert!(script.contains("\"performs_desktop_actions\": False"));
+    assert!(script.contains("\"performs_browser_actions\": False"));
+    assert!(script.contains("\"connects_real_wiki\": False"));
+    assert!(script.contains("\"connects_real_gbrain\": False"));
     assert!(script.contains("\"reads_secret_values\": False"));
+    assert!(script.contains("\"prints_secret_values\": False"));
     assert!(script.contains("\"starts_services\": False"));
     assert!(script.contains("\"stops_services\": False"));
+    assert!(script.contains("\"touches_services\": False"));
     assert!(script.contains("\"modifies_repo\": False"));
     assert!(script.contains("\"deletes_files\": False"));
     assert!(script.contains("\"reuses_codex_or_hermes_credentials\": False"));
@@ -75,6 +88,7 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
         .arg(&script_path)
         .arg("--json")
         .env("CHUANG_LIVE_OPERATOR", "operator-x")
+        .env("CHUANG_LIVE_REQUEST_ID", "live-request-123")
         .env("CHUANG_LIVE_ENV_FILE", &env_file)
         .env("CHUANG_AGENT_ROOT", &manifest_dir)
         .current_dir(&manifest_dir)
@@ -93,9 +107,18 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
 
     assert_eq!(data["schema_version"], 1);
     assert!(data["tested_at"].as_str().is_some());
+    assert_eq!(data["request_id"], "live-request-123");
     assert_eq!(data["operator"], "operator-x");
     assert_eq!(data["env_file"], env_file.display().to_string());
     assert_eq!(data["workspace_root"], manifest_dir.display().to_string());
+    assert_eq!(data["approval_scope"], "<fill_exact_live_scope>");
+    assert_eq!(
+        data["rollback_condition"],
+        "<fill_abort_or_rollback_condition>"
+    );
+    assert_eq!(data["acceptance_status"], "not_verified");
+    assert_eq!(data["can_mark_real_live_ready"], false);
+    assert_eq!(data["cannot_mark_complete_without_operator_evidence"], true);
     assert_eq!(data["preflight_status"], "<fill_after_test>");
     assert_eq!(data["health_status"], "<fill_after_test>");
     assert_eq!(data["new_thread_status"], "<fill_after_test>");
@@ -109,15 +132,85 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
     assert_eq!(data["notes"], serde_json::json!([]));
     assert_eq!(data["blockers"], serde_json::json!([]));
     assert_eq!(data["boundaries"]["readonly"], true);
+    assert_eq!(data["readonly_boundaries"], data["boundaries"]);
     assert_eq!(data["boundaries"]["connects_real_feishu"], false);
+    assert_eq!(data["boundaries"]["sends_feishu_messages"], false);
+    assert_eq!(data["boundaries"]["connects_real_provider"], false);
+    assert_eq!(data["boundaries"]["starts_workers"], false);
+    assert_eq!(data["boundaries"]["dispatches_tasks"], false);
+    assert_eq!(data["boundaries"]["performs_desktop_actions"], false);
+    assert_eq!(data["boundaries"]["performs_browser_actions"], false);
+    assert_eq!(data["boundaries"]["connects_real_wiki"], false);
+    assert_eq!(data["boundaries"]["connects_real_gbrain"], false);
     assert_eq!(data["boundaries"]["reads_secret_values"], false);
+    assert_eq!(data["boundaries"]["prints_secret_values"], false);
     assert_eq!(data["boundaries"]["starts_services"], false);
     assert_eq!(data["boundaries"]["stops_services"], false);
+    assert_eq!(data["boundaries"]["touches_services"], false);
     assert_eq!(data["boundaries"]["modifies_repo"], false);
     assert_eq!(data["boundaries"]["deletes_files"], false);
     assert_eq!(
         data["boundaries"]["reuses_codex_or_hermes_credentials"],
         false
+    );
+    let service_ids: Vec<&str> = data["service_receipts"]
+        .as_array()
+        .expect("service receipts should be an array")
+        .iter()
+        .map(|item| {
+            item["id"]
+                .as_str()
+                .expect("service receipt id should be a string")
+        })
+        .collect();
+    assert_eq!(
+        service_ids,
+        vec![
+            "feishu",
+            "provider",
+            "subagent_live_rehearsal",
+            "desktop",
+            "browser",
+            "wiki",
+            "gbrain"
+        ]
+    );
+    for service in data["service_receipts"]
+        .as_array()
+        .expect("service receipts should be an array")
+    {
+        assert_eq!(service["status"], "<not_verified|verified|blocked>");
+    }
+    assert_eq!(
+        data["service_evidence"]["feishu"]["runtime_report_id"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["provider"]["api_key_state"],
+        "<set|missing>"
+    );
+    assert_eq!(
+        data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["wiki"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(
+        data["service_evidence"]["gbrain"]["writes_core_memory"],
+        false
+    );
+    assert_eq!(data["real_live_acceptance"]["complete"], false);
+    assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 7);
+    assert_eq!(
+        data["real_live_acceptance"]["cannot_mark_complete_from_template"],
+        true
+    );
+    assert_eq!(
+        data["real_live_acceptance"]["requires_operator_evidence"],
+        true
     );
     assert!(!stdout.contains("CHUANG_LIVE_PLACEHOLDER=1"));
 }

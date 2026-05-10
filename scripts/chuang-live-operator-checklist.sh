@@ -196,6 +196,7 @@ commands = {
     "provider_readiness_check": (
         f"bash scripts/chuang-provider-readiness-check.sh --config {workspace_root / 'config.toml'}"
     ),
+    "operator_receipt_template": "scripts/chuang-live-operator-receipt.sh --json",
     "final_verify": "sh scripts/chuang-final-verify.sh",
     "goal_status": "scripts/chuang-goal-run-status.sh --json",
     "bridge_health_command": "send /health to the Chuang Feishu bot",
@@ -229,6 +230,7 @@ if suggested_provider_env_file is not None:
 manual_steps.extend(
     [
         "run provider_readiness_check and confirm provider_kind, transport, request_timeout_ms, api_key_state, current, and next_action are visible without secret values",
+        "generate operator_receipt_template and fill request_id, approval_scope, rollback_condition, and per-service evidence after manual live checks",
         "run local_readiness_gate and confirm it reports watchdog readonly evidence, diagnostics, provider readiness check, and complete local smoke",
         "start or confirm the Chuang-only Feishu bridge outside this checklist",
         "send /health to the Chuang bot and confirm secrets show only <set>/<missing>",
@@ -437,6 +439,17 @@ real_live_acceptance = {
     "gap_count": len(external_live_acceptance_matrix),
     "checklist_is_readonly": True,
     "cannot_mark_complete_from_readonly_checklist": True,
+    "operator_receipt_template": commands["operator_receipt_template"],
+    "operator_receipt_template_can_mark_complete": False,
+    "required_receipt_service_ids": [
+        "feishu",
+        "provider",
+        "subagent_live_rehearsal",
+        "desktop",
+        "browser",
+        "wiki",
+        "gbrain",
+    ],
     "services": external_live_acceptance_matrix,
     "summary": "real live acceptance remains incomplete until each service has separate operator evidence",
 }
@@ -513,7 +526,8 @@ else:
     print(
         "real_live_acceptance="
         "complete=false status=not_verified checklist_is_readonly=true "
-        "cannot_mark_complete_from_readonly_checklist=true"
+        "cannot_mark_complete_from_readonly_checklist=true "
+        "operator_receipt_template_can_mark_complete=false"
     )
     for gap in external_live_acceptance_matrix:
         print(

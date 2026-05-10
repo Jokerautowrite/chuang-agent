@@ -51,8 +51,88 @@ real_live = data["real_live_acceptance"]
 assert real_live["complete"] is False
 assert real_live["status"] == "not_verified"
 assert real_live["cannot_mark_complete_from_readonly_checklist"] is True
+assert real_live["operator_receipt_template"] == "scripts/chuang-live-operator-receipt.sh --json"
+assert real_live["operator_receipt_template_can_mark_complete"] is False
 print("candidate_live_operator_checklist_status=" + str(data["status"]))
 print("candidate_live_operator_real_live_acceptance=" + str(real_live["status"]))
+'
+
+printf '%s\n' "[candidate-verify] live operator receipt readonly template"
+receipt_json="$(bash scripts/chuang-live-operator-receipt.sh --json)"
+printf '%s' "$receipt_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+required = [
+    "tested_at",
+    "request_id",
+    "operator",
+    "env_file",
+    "workspace_root",
+    "approval_scope",
+    "rollback_condition",
+    "acceptance_status",
+    "preflight_status",
+    "health_status",
+    "new_thread_status",
+    "session_status",
+    "runtime_report_id",
+    "provider_status",
+    "codex_hermes_isolation",
+    "notes",
+    "blockers",
+    "boundaries",
+    "readonly_boundaries",
+    "service_evidence",
+    "service_receipts",
+    "real_live_acceptance",
+]
+for key in required:
+    assert key in data, key
+assert data["schema_version"] == 1
+assert data["acceptance_status"] == "not_verified"
+assert data["can_mark_real_live_ready"] is False
+assert data["cannot_mark_complete_without_operator_evidence"] is True
+for key in ["preflight_status", "health_status", "new_thread_status", "session_status", "runtime_report_id", "provider_status"]:
+    assert data[key] == "<fill_after_test>"
+boundaries = data["boundaries"]
+assert boundaries == data["readonly_boundaries"]
+for key in [
+    "readonly",
+]:
+    assert boundaries[key] is True
+for key in [
+    "connects_real_feishu",
+    "sends_feishu_messages",
+    "connects_real_provider",
+    "starts_workers",
+    "dispatches_tasks",
+    "performs_desktop_actions",
+    "performs_browser_actions",
+    "connects_real_wiki",
+    "connects_real_gbrain",
+    "reads_secret_values",
+    "prints_secret_values",
+    "starts_services",
+    "stops_services",
+    "touches_services",
+    "modifies_repo",
+    "deletes_files",
+    "reuses_codex_or_hermes_credentials",
+]:
+    assert boundaries[key] is False, key
+service_ids = [item["id"] for item in data["service_receipts"]]
+assert service_ids == ["feishu", "provider", "subagent_live_rehearsal", "desktop", "browser", "wiki", "gbrain"]
+assert sorted(data["service_evidence"].keys()) == sorted(service_ids)
+real_live = data["real_live_acceptance"]
+assert real_live["complete"] is False
+assert real_live["status"] == "not_verified"
+assert real_live["gap_count"] == 7
+assert real_live["cannot_mark_complete_from_template"] is True
+assert real_live["requires_operator_evidence"] is True
+print("candidate_live_operator_receipt_status=" + str(data["acceptance_status"]))
+print("candidate_live_operator_receipt_services=" + str(len(service_ids)))
 '
 
 printf '%s\n' "[candidate-verify] goal run status readonly summary"

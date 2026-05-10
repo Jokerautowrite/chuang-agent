@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-10 knowledge/browser/actuator/app-server 收口
+- live operator receipt flow 继续增强：`scripts/chuang-live-operator-receipt.sh --json` 现在输出 `request_id`、`approval_scope`、`rollback_condition`、`readonly_boundaries`、`service_evidence`、`service_receipts` 和 `real_live_acceptance`，覆盖 Feishu/provider/single subagent rehearsal/desktop/browser/wiki/GBrain 七类 evidence 槽位；模板仍固定 `can_mark_real_live_ready=false`，不连接真实服务、不读 secret、不启动 worker、不修改仓库。`scripts/chuang-candidate-verify.sh` 和 `scripts/chuang-third-test-smoke.sh` 已纳入 receipt 模板结构断言，`/receipt` 飞书文案和 smoke 同步更新。
 - provider readiness 诊断再补一层：`status --json` 现在在不读取 secret、不 source env 文件的前提下，暴露 `provider_env_file` / `provider_env_file_state`，用于解释“当前进程 api key missing，但默认 `~/.config/chuang-agent/provider.env` 存在，可通过 `scripts/chuang-provider-readiness-check.sh` 吸收”的状态差异；这仍不代表发起真实 provider 请求。
 - `knowledge_read` 已从旧的 `external_knowledge` 预览概念里拆出真实 wiki/GBrain live-read 合同：`src/knowledge_read.rs` 提供 fake/unavailable adapter、结构化 `knowledge_read_unavailable`、wiki/gbrain 双源 preflight，`RuntimeConfig.external_knowledge` 和配置文件解析已统一到 `KnowledgeReadConfig`，`status --json` 通过 `knowledge_readiness` 明确展示“本地 preview 可用，但真实 wiki/GBrain adapter 未配置”。当前仍不声明已连接真实 wiki/GBrain。
 - `knowledge_read` 的 preflight 语义继续收紧：即使 endpoint、token env 和 token 状态都齐全，在真实 adapter 未接线前也只返回 `preflight_ready_adapter_missing` / `available=false`，避免把“配置已齐”误报为“live 查询可用”。

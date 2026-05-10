@@ -1,6 +1,6 @@
 # Acceptance Next Matrix
 
-更新时间：2026-05-09
+更新时间：2026-05-10
 
 快速入口：见 [第三测试版候选一页入口](./third-test-candidate.md) 和 [Live Operator Test Runbook](./live-operator-test-runbook.md)。
 
@@ -20,7 +20,7 @@ final verify 本地闭环通过
 
 第三测试版候选新增本地 wrapper：`sh scripts/chuang-third-test-smoke.sh`。它只串联 clean worktree gate、final verify、live-readiness 只读预检、`live-gaps` 矩阵、operator checklist 只读摘要和 goal run status 只读摘要；operator env blocked 只作为状态输出，不作为本地合同失败。该 wrapper 不连接真实 Feishu、不读 secret、不启动服务，最终 marker 为 `third_test_candidate_smoke_ok`。
 
-今晚候选验收另有 dirty-tree friendly 入口：`sh scripts/chuang-candidate-verify.sh`。它串联 complete-local smoke、live runner rehearsal smoke、`live-gaps` 矩阵、operator checklist 只读摘要、goal run status 只读摘要和 provider readiness check；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>` 状态，不连接真实 provider、不打印 secret。缺 provider env 时按候选现场状态报告 blocker，但不会伪装成本地合同失败。
+今晚候选验收另有 dirty-tree friendly 入口：`sh scripts/chuang-candidate-verify.sh`。它串联 complete-local smoke、live runner rehearsal smoke、`live-gaps` 矩阵、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>` 状态，不连接真实 provider、不打印 secret。缺 provider env 时按候选现场状态报告 blocker，但不会伪装成本地合同失败。
 
 第三测试版候选不是“所有 live adapter 全开”，而是 100% 前最后一跳：用最小真实链路证明老爸可以通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，并最终回到本地 verify 绿。真实 runner 池、桌面 mutation、服务控制、wiki/GBrain live 仍后置，不纳入第三测试版必须项。
 
@@ -51,12 +51,13 @@ final verify 本地闭环通过
 | final verify 本地门禁 | ready | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 否，自动复验即可 | 证明本地合同闭环，不证明 live Feishu 或真实 runner |
 | live-readiness 只读预检 | local-preflight-ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | 否，自动复验即可 | 只读预检，不连接真实 Feishu、不读 secret、不控制服务；不等于 live-ready |
 | Feishu `/tools` 可见能力 | ready | 在 Chuang 专用 Feishu 会话发送 `/tools` 或 `/capabilities`，可见 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界 | 否，已作为 bridge 命令面可复验；live 侧可继续截图/receipt 留证 | 只展示当前能力与边界，不执行本地检查、不修改服务、不打印 secret |
+| operator receipt template | ready | `scripts/chuang-live-operator-receipt.sh --json` 输出 `request_id`、`approval_scope`、`rollback_condition`、`readonly_boundaries`、`service_evidence`、`service_receipts` 和 `real_live_acceptance` | 否，自动复验模板结构即可 | 只生成模板，不连接服务；`can_mark_real_live_ready=false`，不能代替人工 evidence |
 | GA 9 tools mapped | `ga_local_mapped_only` | `/tools` / `/capabilities` 和本地诊断面显示 GA 9 工具映射、scope 和边界 | 否，自动和人工查看均可 | 只证明 mapped/routed；真实 desktop/browser live 仍需单独 receipt 和 action allowlist |
 | desktop/browser live gate | `desktop_browser_live_gated` | `desktop_browser_live_gated=true`，等待 action allowlist、治理审批和 operator receipt | 是 | 当前不是 desktop/browser live ready，不允许由 mapped tools 或 dry-run adapter 代替 |
 | BrowserWorker old path | `browser_worker_frozen` | `status --json` -> `live_readiness.browser_worker_frozen=true` | 否，自动复验即可 | 冻结是排除边界，不是 browser automation live-ready |
 | 人工 Feishu live check | candidate | 老爸用 Chuang 专用 Feishu 通道发 `/health`、`/session` 和一条普通测试消息，确认 app-server/session/channel 有真实 receipt | 是 | 只用 Chuang 专用 bot 和 env；不碰 Codex Feishu、不碰 Hermes、不打印 token |
 | provider env 对齐 | readiness-only | `scripts/chuang-provider-readiness-check.sh` 读取 `status --json`，并在存在时自动吸收标准 `CHUANG_PROVIDER_ENV_FILE`；人工确认 Chuang provider env 变量存在且配置名一致；输出只允许 `<set>/<missing>` | 是 | 不连接真实 provider；不在聊天、日志、文档或 patch 中泄露 secret；无 fallback 时必须显式报错；`provider_live_request_verified_by_status=false` |
-| live operator receipt | candidate | 人工执行 live cutover checklist，保存 request_id、operator、时间、允许范围、回退条件和结果摘要 | 是 | receipt 只记录审计元数据，不记录凭证、验证码或私密正文 |
+| live operator receipt | candidate | 人工执行 live cutover checklist，保存 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要 | 是 | receipt 只记录审计元数据，不记录凭证、验证码或私密正文；模板本身不能标记 real live ready |
 | single subagent live rehearsal | candidate | 在 live gate + allowlist 下只跑一个子代理 rehearsal，确认 report/proposal 被主控接收 | 是 | 单 worker、bounded、可停止；子代理不能直接写核心记忆，不能扩大成 runner 池 |
 | final verify after live rehearsal | candidate | live rehearsal 后再次运行 `sh scripts/chuang-final-verify.sh` 和本文档 diff check | 是 | live 尝试不能破坏本地合同；失败时先停在诊断，不做 cleanup/reset |
 
@@ -66,7 +67,7 @@ final verify 本地闭环通过
 
 1. Chuang 专用 Feishu live 通道真实收发一次，并拿到可审计 receipt。
 2. Chuang provider env 与运行配置对齐，所有 secret 只显示为 `<set>`。
-3. live operator receipt 完整记录审批范围、执行人、时间、request_id、结果和回退条件。
+3. live operator receipt 完整记录审批范围、执行人、时间、request_id、结果、回退条件和 Feishu/provider/subagent/desktop/browser/wiki/GBrain 的 evidence ref。
 4. 单个子代理 live rehearsal 通过 gate、allowlist、capability routing 和 report admission。
 5. live rehearsal 后本地 final verify 仍通过。
 
@@ -87,7 +88,7 @@ final verify 本地闭环通过
 | final verify | 已完成 | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 本地门禁可作为 live 前后对照 |
 | live-readiness preflight | local-preflight-ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | live 前只读排查入口已收口，但不是 live-ready |
 | live-gaps matrix | 已完成 | `bash scripts/chuang-live-gaps-check.sh` -> `marker=live_gaps_check_ok` | 明确区分本地合同 ready、preflight ready-but-no-start、real live pending；不连接真实服务、不启动 worker |
-| candidate verify | 已完成 | `sh scripts/chuang-candidate-verify.sh`，并包含 `scripts/chuang-live-gaps-check.sh`、operator checklist 只读摘要、goal run status 只读摘要和 `scripts/chuang-provider-readiness-check.sh` | 本地候选门禁已经覆盖 live gaps、operator/goal 只读摘要和 provider readiness 只读状态；缺 env 会显式报告 blocker |
+| candidate verify | 已完成 | `sh scripts/chuang-candidate-verify.sh`，并包含 `scripts/chuang-live-gaps-check.sh`、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 `scripts/chuang-provider-readiness-check.sh` | 本地候选门禁已经覆盖 live gaps、operator/goal 只读摘要、receipt 模板结构和 provider readiness 只读状态；缺 env 会显式报告 blocker |
 | Feishu evidence | 已完成 | `node --check scripts/chuang-feishu-live-preflight.js && node scripts/chuang-feishu-live-preflight-smoke.js && node scripts/chuang-feishu-command-smoke.js` | 本地命令和诊断链已可复验；`/tools` 已列出当前可见能力与边界 |
 | Feishu live contact | 已完成 | 老爸在 Chuang 专用 Feishu 会话中确认已联系上；本地 `chuang-feishu-bot.service` active | 说明 bridge 已挂上；后续重点是 `/health`、`/session`、普通任务 runtime report 和 receipt 证据 |
 | provider evidence | 已完成 | `cargo test -q --test slot_registry_tests --test runtime_report_tests`；`scripts/chuang-provider-readiness-check.sh` | fallback/capacity/retryable 诊断合同已存在；provider readiness check 已进入候选门禁；live 前仍要人工确认 env 对齐 |
