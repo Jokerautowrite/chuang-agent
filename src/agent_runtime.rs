@@ -9,6 +9,9 @@ use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallReques
 use crate::memory_store::MemoryStore;
 use crate::responder::{Responder, ResponderMeta, ResponderOutput, ResponderRequest};
 use crate::runtime_config::default_context_budget as runtime_default_context_budget;
+use crate::tool_loop_meta::{
+    derive_tool_protocol_correction_context, derive_tool_protocol_typed_failure,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequest {
@@ -151,11 +154,31 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
 }
 
 fn map_runtime_response(output: ResponderOutput) -> RuntimeResponse {
+    let mut meta = output.meta;
+    if !meta.extra.contains_key("tool_protocol_correction_context") {
+        if let Some(correction) = derive_tool_protocol_correction_context(&meta.extra) {
+            meta.extra
+                .insert("tool_protocol_correction_context".to_string(), correction);
+        }
+    }
+    if !meta.extra.contains_key("tool_protocol_typed_failure_code")
+        || !meta
+            .extra
+            .contains_key("tool_protocol_typed_failure_message")
+    {
+        if let Some((code, message)) = derive_tool_protocol_typed_failure(&meta.extra) {
+            meta.extra
+                .insert("tool_protocol_typed_failure_code".to_string(), code);
+            meta.extra
+                .insert("tool_protocol_typed_failure_message".to_string(), message);
+        }
+    }
+
     RuntimeResponse {
         model_name: output.model_name,
         body: output.body,
         trace: output.trace,
-        meta: output.meta,
+        meta,
     }
 }
 

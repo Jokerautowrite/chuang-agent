@@ -15,9 +15,13 @@ use crate::knowledge_read::{
     KNOWLEDGE_READ_CONTRACT_VERSION,
 };
 use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
+use crate::permission_profile_slot::{
+    decide_descriptor_risk, local_ga_profile, PermissionDecision, PermissionTag, ToolDescriptorRisk,
+};
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
 use crate::runtime_config::{ConfigError, ConfigSummary, ProviderConfig, RuntimeConfig};
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
+use crate::tool_registry_slot::default_tool_registry_slot;
 use crate::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use serde::Serialize;
 use std::env;
@@ -43,11 +47,34 @@ pub struct ChuangMvpStatus {
     pub live_readiness: LiveReadinessStatus,
     pub live_adapter_gates: LiveAdapterGateStatus,
     pub atomic_tools: AtomicToolSurfaceStatus,
+    pub policy_tool_status: PolicyToolStatusSurface,
     pub governance: GovernanceReadinessStatus,
     pub release_readiness: ReleaseReadinessStatus,
     pub third_test_candidate: ThirdTestCandidateReadinessStatus,
     pub goal_mode: GoalModeStatus,
     pub goal_run: GoalRunReadinessStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PolicyToolStatusSurface {
+    pub active_permission_profile: String,
+    pub policy_source: String,
+    pub local_ga_default_decision: String,
+    pub local_ga_normal_local_action_default: String,
+    pub local_ga_high_risk_boundary_summary: String,
+    pub tool_descriptor_count: usize,
+    pub ga_tool_descriptor_mapped_count: usize,
+    pub ga_tool_descriptor_missing: Vec<String>,
+    pub ga_tool_descriptors: Vec<GaToolDescriptorStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GaToolDescriptorStatus {
+    pub name: String,
+    pub read_only: bool,
+    pub mutating: bool,
+    pub destructive: bool,
+    pub local_ga_decision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -566,6 +593,7 @@ pub fn build_chuang_mvp_status(
             .collect(),
         manifests: atomic_manifests,
     };
+    let policy_tool_status = build_policy_tool_status_surface(&atomic_tools.manifests);
     let project_readiness = build_project_readiness(
         &config_summary,
         &slots,
@@ -674,12 +702,119 @@ pub fn build_chuang_mvp_status(
         live_readiness,
         live_adapter_gates,
         atomic_tools,
+        policy_tool_status,
         governance,
         release_readiness,
         third_test_candidate,
         goal_mode,
         goal_run,
     })
+}
+
+fn decision_label(decision: PermissionDecision) -> &'static str {
+    match decision {
+        PermissionDecision::Allow => "allow",
+        PermissionDecision::AllowWithAudit => "allow_with_audit",
+        PermissionDecision::RequireApproval => "require_approval",
+        PermissionDecision::RequireApprovalOrProjectTrust => "require_approval_or_project_trust",
+        PermissionDecision::RequireApprovalOrDeny => "require_approval_or_deny",
+        PermissionDecision::RequireExplicitTargetApproval => "require_explicit_target_approval",
+    }
+}
+
+fn tag_label(tag: PermissionTag) -> &'static str {
+    match tag {
+        PermissionTag::ExternalSend => "external_send",
+        PermissionTag::PublicPost => "public_post",
+        PermissionTag::Payment => "payment",
+        PermissionTag::Order => "order",
+        PermissionTag::VerificationCode => "verification_code",
+        PermissionTag::Delete => "delete",
+        PermissionTag::Cleanup => "cleanup",
+        PermissionTag::Reset => "reset",
+        PermissionTag::Uninstall => "uninstall",
+        PermissionTag::Purge => "purge",
+        PermissionTag::ServiceControl => "service_control",
+        PermissionTag::NetworkChange => "network_change",
+        PermissionTag::SecretAccess => "secret_access",
+        _ => "other",
+    }
+}
+
+fn build_policy_tool_status_surface(
+    ga_manifests: &[AtomicToolManifest],
+) -> PolicyToolStatusSurface {
+    let profile = local_ga_profile();
+    let registry = default_tool_registry_slot();
+    let mut ga_tool_descriptors = Vec::new();
+    let mut ga_tool_descriptor_missing = Vec::new();
+
+    for manifest in ga_manifests {
+        if let Some(descriptor) = registry
+            .descriptors
+            .iter()
+            .find(|descriptor| descriptor.name == manifest.name)
+        {
+            let risk = ToolDescriptorRisk {
+                name: descriptor.name,
+                risk_tags: descriptor.risk_tags,
+                read_only: descriptor.read_only,
+                mutating: descriptor.mutating,
+                destructive: descriptor.destructive,
+                external_commit: descriptor.external_commit,
+                requires_approval: descriptor.requires_approval,
+            };
+            let local_ga_decision = decide_descriptor_risk(&profile, &risk);
+            ga_tool_descriptors.push(GaToolDescriptorStatus {
+                name: descriptor.name.to_string(),
+                read_only: descriptor.read_only,
+                mutating: descriptor.mutating,
+                destructive: descriptor.destructive,
+                local_ga_decision: decision_label(local_ga_decision.decision).to_string(),
+            });
+        } else {
+            ga_tool_descriptor_missing.push(manifest.name.to_string());
+        }
+    }
+
+    let mut high_risk_defaults = Vec::new();
+    for rule in profile.rules {
+        if matches!(
+            rule.tag,
+            PermissionTag::ExternalSend
+                | PermissionTag::PublicPost
+                | PermissionTag::Payment
+                | PermissionTag::Order
+                | PermissionTag::VerificationCode
+                | PermissionTag::Delete
+                | PermissionTag::Cleanup
+                | PermissionTag::Reset
+                | PermissionTag::Uninstall
+                | PermissionTag::Purge
+                | PermissionTag::ServiceControl
+                | PermissionTag::NetworkChange
+                | PermissionTag::SecretAccess
+        ) {
+            high_risk_defaults.push(format!(
+                "{}={}",
+                tag_label(rule.tag),
+                decision_label(rule.decision)
+            ));
+        }
+    }
+
+    PolicyToolStatusSurface {
+        active_permission_profile: profile.name.to_string(),
+        policy_source: "runtime_default".to_string(),
+        local_ga_default_decision: decision_label(profile.default_decision).to_string(),
+        local_ga_normal_local_action_default:
+            "file_write/code_execute/open_app/click/input=allow_with_audit".to_string(),
+        local_ga_high_risk_boundary_summary: high_risk_defaults.join(","),
+        tool_descriptor_count: registry.descriptors.len(),
+        ga_tool_descriptor_mapped_count: ga_tool_descriptors.len(),
+        ga_tool_descriptor_missing,
+        ga_tool_descriptors,
+    }
 }
 
 fn build_release_readiness(

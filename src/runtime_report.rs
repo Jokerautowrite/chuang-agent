@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use crate::agent_runtime::{ContextDebugInfo, RuntimeResult};
 use crate::subagent_report::{
@@ -93,11 +94,23 @@ fn tool_events_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
                     event.get("kind").and_then(|value| value.as_str()) == Some("protocol_error")
                 })
                 .count();
+            let typed_failure_count = events
+                .iter()
+                .filter(|event| {
+                    event.get("kind").and_then(|value| value.as_str()) == Some("tool_call")
+                        && event.get("ok").and_then(|value| value.as_bool()) == Some(false)
+                        && event
+                            .get("failure_class")
+                            .and_then(|value| value.as_str())
+                            .is_some_and(is_typed_failure_class)
+                })
+                .count();
             format!(
-                "tool_events count={} tool_calls={} protocol_errors={}",
+                "tool_events count={} tool_calls={} protocol_errors={} typed_failures={}",
                 events.len(),
                 tool_call_count,
-                protocol_error_count
+                protocol_error_count,
+                typed_failure_count
             )
         })
         .unwrap_or_else(|_| "tool_events present but could not be parsed".to_string());
@@ -112,6 +125,7 @@ fn tool_events_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
 pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, String> {
     let extra = &result.response.meta.extra;
     let mut metadata = BTreeMap::new();
+    let typed_failures = collect_typed_failures(extra);
     metadata.insert("model_name".to_string(), result.response.model_name.clone());
     metadata.insert(
         "recall_hit_count".to_string(),
@@ -229,6 +243,16 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
     metadata
         .entry("tool_protocol_error_count".to_string())
         .or_insert_with(|| "0".to_string());
+    metadata.insert(
+        "tool_typed_failure_count".to_string(),
+        typed_failures.len().to_string(),
+    );
+    if !typed_failures.is_empty() {
+        metadata.insert(
+            "tool_typed_failure_classes".to_string(),
+            typed_failures.into_iter().collect::<Vec<_>>().join(","),
+        );
+    }
 
     metadata
 }
@@ -240,7 +264,7 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     }
 
     let description = format!(
-        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={}",
+        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={} tool_typed_failures={}",
         observability
             .get("model_name")
             .map(String::as_str)
@@ -265,6 +289,10 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         observability
             .get("tool_protocol_error_count")
             .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("tool_typed_failure_count")
+            .map(String::as_str)
             .unwrap_or("0")
     );
 
@@ -273,6 +301,72 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         locator: "runtime_meta.observability".to_string(),
         description: Some(description),
     }]
+}
+
+fn collect_typed_failures(extra: &BTreeMap<String, String>) -> BTreeSet<String> {
+    let mut classes = BTreeSet::new();
+    if let Ok(Some(report)) = crate::tool_loop_meta::parse_json_value(extra, "tool_report_json") {
+        append_typed_failures_from_report(&mut classes, &report);
+    }
+    if let Ok(calls) = crate::tool_loop_meta::parse_json_vec_value(extra, "tool_calls_json") {
+        append_typed_failures_from_calls(&mut classes, &calls);
+    }
+    if let Ok(events) = crate::tool_loop_meta::parse_json_vec_value(extra, "tool_events_json") {
+        append_typed_failures_from_events(&mut classes, &events);
+        if events.iter().any(|event| {
+            event.get("kind").and_then(|value| value.as_str()) == Some("protocol_error")
+        }) {
+            classes.insert("protocol_error".to_string());
+        }
+    }
+    classes
+}
+
+fn append_typed_failures_from_report(classes: &mut BTreeSet<String>, report: &serde_json::Value) {
+    let calls = report
+        .get("calls")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    append_typed_failures_from_calls(classes, &calls);
+}
+
+fn append_typed_failures_from_calls(classes: &mut BTreeSet<String>, calls: &[serde_json::Value]) {
+    for call in calls {
+        if call.get("ok").and_then(|value| value.as_bool()) == Some(false) {
+            if let Some(class) = call.get("failure_class").and_then(|value| value.as_str()) {
+                if is_typed_failure_class(class) {
+                    classes.insert(class.to_string());
+                }
+            }
+        }
+    }
+}
+
+fn append_typed_failures_from_events(classes: &mut BTreeSet<String>, events: &[serde_json::Value]) {
+    for event in events {
+        if event.get("kind").and_then(|value| value.as_str()) == Some("tool_call")
+            && event.get("ok").and_then(|value| value.as_bool()) == Some(false)
+        {
+            if let Some(class) = event.get("failure_class").and_then(|value| value.as_str()) {
+                if is_typed_failure_class(class) {
+                    classes.insert(class.to_string());
+                }
+            }
+        }
+    }
+}
+
+fn is_typed_failure_class(class: &str) -> bool {
+    matches!(
+        class,
+        "adapter_unavailable"
+            | "permission_denied"
+            | "protocol_error"
+            | "timeout"
+            | "invalid_output"
+            | "nonzero_exit"
+    )
 }
 
 fn map_drop_reasons(debug: &ContextDebugInfo) -> Vec<(String, String)> {

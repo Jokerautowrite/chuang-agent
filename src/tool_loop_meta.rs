@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +81,51 @@ pub fn parse_json_vec_value(
     key: &str,
 ) -> Result<Vec<Value>, String> {
     parse_json_vec::<Value>(extra, key)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct ToolProtocolErrorLite {
+    code: String,
+    message: String,
+}
+
+pub fn derive_tool_protocol_correction_context(extra: &BTreeMap<String, String>) -> Option<String> {
+    let errors =
+        parse_json_vec::<ToolProtocolErrorLite>(extra, "tool_protocol_errors_json").ok()?;
+    let last = errors.last()?;
+    let hint = match last.code.as_str() {
+        "invalid_action_json" => {
+            if last.message.contains("trailing text") {
+                "上轮输出含 ACTION 后 trailing 文本。下一轮只输出一个结构：ACTION JSON 或 FINAL。"
+            } else {
+                "上轮 ACTION JSON 非法。下一轮只输出合法 ACTION JSON，或直接 FINAL。"
+            }
+        }
+        "plain_text_response" => "上轮是普通文本。下一轮只能输出 ACTION JSON 或 FINAL。",
+        "missing_action_prefix" => "上轮缺少 ACTION 前缀。下一轮请输出 ACTION: {...} 或 FINAL。",
+        "invalid_legacy_tool_call_json" => {
+            "上轮 TOOL_CALL JSON 非法。请改为 ACTION JSON，或直接 FINAL。"
+        }
+        "unsupported_action_schema_version" => {
+            "上轮 ACTION schema_version 不支持。请用当前 schema_version。"
+        }
+        _ => "上轮工具协议不合规。下一轮只输出一个结构：ACTION JSON 或 FINAL。",
+    };
+    Some(hint.to_string())
+}
+
+pub fn derive_tool_protocol_typed_failure(
+    extra: &BTreeMap<String, String>,
+) -> Option<(String, String)> {
+    let status = extra.get("tool_loop_status").map(|value| value.as_str())?;
+    match status {
+        "implicit_final_plain_text" | "tool_loop_exhausted" | "exhausted" => Some((
+            "missing_final".to_string(),
+            "tool loop exhausted without valid FINAL; only fallback plain text available"
+                .to_string(),
+        )),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

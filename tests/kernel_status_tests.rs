@@ -255,6 +255,87 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .tool_call_schema_fields
         .iter()
         .any(|field| field == "atomic_tool_name"));
+    assert_eq!(
+        status.policy_tool_status.active_permission_profile,
+        "local_ga"
+    );
+    assert_eq!(status.policy_tool_status.policy_source, "runtime_default");
+    assert_eq!(
+        status.policy_tool_status.local_ga_default_decision,
+        "require_approval"
+    );
+    assert_eq!(
+        status
+            .policy_tool_status
+            .local_ga_normal_local_action_default,
+        "file_write/code_execute/open_app/click/input=allow_with_audit"
+    );
+    assert_eq!(status.policy_tool_status.tool_descriptor_count, 12);
+    assert_eq!(status.policy_tool_status.ga_tool_descriptor_mapped_count, 9);
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptor_missing
+        .is_empty());
+    assert!(status
+        .policy_tool_status
+        .local_ga_high_risk_boundary_summary
+        .contains("external_send=require_approval"));
+    assert!(status
+        .policy_tool_status
+        .local_ga_high_risk_boundary_summary
+        .contains("service_control=require_approval_or_deny"));
+    assert!(status
+        .policy_tool_status
+        .local_ga_high_risk_boundary_summary
+        .contains("delete=require_explicit_target_approval"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "mouse"
+            && !tool.read_only
+            && tool.mutating
+            && tool.local_ga_decision == "allow_with_audit"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "keyboard"
+            && !tool.read_only
+            && tool.mutating
+            && tool.local_ga_decision == "allow_with_audit"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "locate"
+            && tool.read_only
+            && !tool.mutating
+            && tool.local_ga_decision == "allow"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "screenshot"
+            && tool.read_only
+            && !tool.mutating
+            && tool.local_ga_decision == "allow"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "file_write"
+            && !tool.read_only
+            && tool.mutating
+            && tool.local_ga_decision == "allow_with_audit"));
+    assert!(status
+        .policy_tool_status
+        .ga_tool_descriptors
+        .iter()
+        .any(|tool| tool.name == "code_execute"
+            && !tool.read_only
+            && tool.mutating
+            && tool.local_ga_decision == "allow_with_audit"));
     assert!(status.plugin_registry.available);
     assert!(status.plugin_registry.ok);
     assert_eq!(status.plugin_registry.plugin_count, 5);

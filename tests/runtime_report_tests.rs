@@ -59,7 +59,7 @@ fn runtime_report_builder_carries_runtime_debug_fields() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(chuang_agent::context_engine::ContextBudget {
-                max_tokens: 280,
+                max_tokens: 348,
                 reserve_system_tokens: 240,
                 min_working_tokens: 5,
                 max_tool_results: 5,
@@ -120,7 +120,7 @@ fn runtime_report_builder_carries_working_reservation_debug() {
             metadata: std::collections::HashMap::new(),
         }],
         chuang_agent::context_engine::ContextBudget {
-            max_tokens: 300,
+            max_tokens: 364,
             reserve_system_tokens: 240,
             min_working_tokens: 20,
             max_tool_results: 5,
@@ -423,6 +423,10 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
         observability.get("tool_protocol_error_count"),
         Some(&"0".to_string())
     );
+    assert_eq!(
+        observability.get("tool_typed_failure_count"),
+        Some(&"0".to_string())
+    );
 
     let report = build_runtime_report(&result, "report-obs", "task-obs", "agent-obs", None);
     let artifact = report
@@ -434,6 +438,91 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert!(description.contains("provider=local-openai-compatible"));
     assert!(description.contains("goal=mainline-mvp"));
     assert!(description.contains("session=thread-a"));
+    assert!(description.contains("tool_typed_failures=0"));
+}
+
+#[test]
+fn runtime_report_observability_meta_includes_typed_execution_failures() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "tool_events_json".to_string(),
+        r#"[
+            {"kind":"tool_call","ok":false,"failure_class":"adapter_unavailable"},
+            {"kind":"tool_call","ok":false,"failure_class":"timeout"},
+            {"kind":"protocol_error","protocol_error_code":"plain_text_response"}
+        ]"#
+        .to_string(),
+    );
+    extra.insert(
+        "tool_calls_json".to_string(),
+        r#"[{"ok":false,"failure_class":"invalid_output"}]"#.to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "gpt-observable".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: Some("local-openai-compatible".to_string()),
+                recall_hit_count: Some(0),
+                finish_reason: Some("stop".to_string()),
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 20,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("tool_typed_failure_count"),
+        Some(&"4".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_typed_failure_classes"),
+        Some(&"adapter_unavailable,invalid_output,protocol_error,timeout".to_string())
+    );
+
+    let report = build_runtime_report(
+        &result,
+        "report-typed-failure",
+        "task-typed-failure",
+        "agent-typed-failure",
+        None,
+    );
+    let observability_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.observability")
+        .expect("observability artifact should exist");
+    let description = observability_artifact
+        .description
+        .as_deref()
+        .expect("description");
+    assert!(description.contains("tool_typed_failures=4"));
+
+    let tool_events_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.tool_events_json")
+        .expect("tool events artifact should exist");
+    let events_description = tool_events_artifact
+        .description
+        .as_deref()
+        .expect("description");
+    assert!(events_description.contains("typed_failures=2"));
 }
 
 #[test]

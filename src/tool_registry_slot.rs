@@ -75,7 +75,9 @@ const READ_ONLY_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "rea
 const WRITE_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "write", "audit"];
 const CODE_EXECUTE_RISK_TAGS: &[&str] = &["workspace", "code_execution", "shell", "audit"];
 const READ_ONLY_DESKTOP_RISK_TAGS: &[&str] = &["desktop", "observation", "read_only"];
-const DESKTOP_INTERACTION_RISK_TAGS: &[&str] = &["desktop", "interaction", "audit"];
+const OPEN_APP_RISK_TAGS: &[&str] = &["desktop", "interaction", "open_app", "audit"];
+const MOUSE_RISK_TAGS: &[&str] = &["desktop", "interaction", "click", "audit"];
+const KEYBOARD_RISK_TAGS: &[&str] = &["desktop", "interaction", "input", "audit"];
 const RUNTIME_WAIT_RISK_TAGS: &[&str] = &["runtime", "delay", "read_only"];
 const HUMAN_SUSPEND_RISK_TAGS: &[&str] = &["runtime", "human_in_loop", "read_only"];
 const MEMORY_RECALL_RISK_TAGS: &[&str] = &["memory", "recall", "read_only"];
@@ -170,7 +172,7 @@ const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 12] = [
         external_commit: false,
         concurrent_safe: false,
         requires_approval: false,
-        risk_tags: DESKTOP_INTERACTION_RISK_TAGS,
+        risk_tags: OPEN_APP_RISK_TAGS,
     },
     ToolDescriptor {
         name: "mouse",
@@ -183,7 +185,7 @@ const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 12] = [
         external_commit: false,
         concurrent_safe: false,
         requires_approval: false,
-        risk_tags: DESKTOP_INTERACTION_RISK_TAGS,
+        risk_tags: MOUSE_RISK_TAGS,
     },
     ToolDescriptor {
         name: "keyboard",
@@ -196,7 +198,7 @@ const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 12] = [
         external_commit: false,
         concurrent_safe: false,
         requires_approval: false,
-        risk_tags: DESKTOP_INTERACTION_RISK_TAGS,
+        risk_tags: KEYBOARD_RISK_TAGS,
     },
     ToolDescriptor {
         name: "wait",
