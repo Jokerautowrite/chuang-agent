@@ -1,1 +1,1 @@
-默认注入能力 primer。file_read/file_write/code_execute/list_dir=治理内读写/执行；locate/screenshot=只读观察；open_app/mouse/keyboard=桌面交互，接 actuator，经 gate/allowlist/治理审计；memory/session=回溯；goal/subagent 派活；subagent=dispatch/list/run-once/run-loop/report/collect。
+默认注入能力 primer。file_read/file_write/code_execute/list_dir=治理内读写/执行；locate/screenshot=只读观察；open_app/mouse/keyboard=桌面交互，接 actuator，经 gate/allowlist/治理审计；普通本地能力默认直接执行，不因常规点击/输入/打开应用要求人工审批；删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝；memory/session=回溯；goal/subagent 派活；subagent=dispatch/list/run-once/run-loop/report/collect。

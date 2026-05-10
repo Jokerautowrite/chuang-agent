@@ -37,7 +37,7 @@ final verify 本地闭环通过
 | 状态词 | 当前值 | 含义 | 不能误报成 |
 | --- | --- | --- | --- |
 | `ga_local_mapped_only` | true | GA 9 tools 已完成本地 slot、route、命令面和诊断面映射 | 真实 desktop/browser live 已验收 |
-| `desktop_browser_live_gated` | true | 真实桌面/浏览器动作仍在 live gate、allowlist、治理和 receipt 之后 | actuator live action ready |
+| `desktop_browser_live_gated` | true | 真实桌面/浏览器动作仍在 live gate、allowlist、治理和审计之后；普通打开/点击/输入不再要求额外人工审批 | actuator live action ready |
 | `browser_worker_frozen` | true | 旧 BrowserWorker 线冻结且不在主执行路径 | browser automation ready 或已恢复 |
 | `live_runner_readiness_view` | read-only-view | 本地脚本只读汇总 live-preflight/status/doctor/app-server health 的 runner readiness 和 blocked reason | live runner ready |
 | `live_worker_available` | false | 当前 subagent preflight/rehearsal 不启动、不附着真实 worker | runner 池可用或 live worker 已上线 |
@@ -61,7 +61,7 @@ final verify 本地闭环通过
 | operator receipt template | ready | `scripts/chuang-live-operator-receipt.sh --json` 输出 `request_id`、`approval_scope`、`rollback_condition`、`readonly_boundaries`、`service_evidence`、`service_receipts` 和 `real_live_acceptance`；其中 `service_receipts` / `service_evidence` / `real_live_acceptance.services` 逐项对齐 Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 7 项 | 否，自动复验模板结构即可 | 只生成模板，不连接服务；`can_mark_real_live_ready=false`，不能代替人工 evidence |
 | operator receipt collector | local-readonly-merge | `scripts/chuang-live-operator-receipt-collect.sh --json --base-file PATH --overlay-file PATH ...` 或 stdin base + overlay files，输出完整 receipt JSON | 否，自动复验合并/校验结构即可 | 只合并 base/overlay partial receipt；保留 7 项 service receipt/evidence 和 `real_live_acceptance`，固定 `can_mark_real_live_ready=false`，不能代替真实外部 acceptance |
 | GA 9 tools mapped | `ga_local_mapped_only` | `/tools` / `/capabilities` 和本地诊断面显示 GA 9 工具映射、scope 和边界 | 否，自动和人工查看均可 | 只证明 mapped/routed；真实 desktop/browser live 仍需单独 receipt 和 action allowlist |
-| desktop/browser live gate | `desktop_browser_live_gated` | `desktop_browser_live_gated=true`，等待 action allowlist、治理审批和 operator receipt | 是 | 当前不是 desktop/browser live ready，不允许由 mapped tools 或 dry-run adapter 代替 |
+| desktop/browser live gate | `desktop_browser_live_gated` | `desktop_browser_live_gated=true`，等待 action allowlist、live gate 和审计回执；普通打开/点击/输入不要求额外人工审批 | 是 | 当前不是 desktop/browser live ready，不允许由 mapped tools 或 dry-run adapter 代替 |
 | BrowserWorker old path | `browser_worker_frozen` | `status --json` -> `live_readiness.browser_worker_frozen=true` | 否，自动复验即可 | 冻结是排除边界，不是 browser automation live-ready |
 | 人工 Feishu live check | candidate | 老爸用 Chuang 专用 Feishu 通道发 `/health`、`/session` 和一条普通测试消息，确认 app-server/session/channel 有真实 receipt | 是 | 只用 Chuang 专用 bot 和 env；不碰 Codex Feishu、不碰 Hermes、不打印 token |
 | provider env 对齐 | readiness-only | `scripts/chuang-provider-readiness-check.sh` 读取 `status --json`，并在存在时自动吸收标准 `CHUANG_PROVIDER_ENV_FILE`；人工确认 Chuang provider env 变量存在且配置名一致；输出只允许 `<set>/<missing>` | 是 | 不连接真实 provider；不在聊天、日志、文档或 patch 中泄露 secret；无 fallback 时必须显式报错；`provider_live_request_verified_by_status=false` |
@@ -84,7 +84,7 @@ final verify 本地闭环通过
 | 后置能力 | 后置原因 | 最早进入条件 | 验收边界 |
 | --- | --- | --- | --- |
 | 真实 runner 池 | 多 worker 并发会放大外部进程、登录态和任务副作用 | 单 worker rehearsal 有 receipt，stop/timeout/report admission 都可审计 | 先单 worker，再 bounded 并发；不把 rehearsal 结果解释成 runner 池 ready |
-| 桌面 mutation | 涉及真实 UI、登录态、验证码和不可逆操作 | observe-only、action allowlist、验证码规则和人工 receipt 稳定 | observe 可先行；点击/提交/修改类动作后置 |
+| 桌面 mutation | 涉及真实 UI、登录态、验证码和不可逆操作 | action allowlist、live gate、验证码规则和审计稳定 | 普通打开/点击/输入直接执行；验证码、账号级提交和不可逆操作仍需询问 |
 | 服务控制 apply | 涉及 start/stop/restart/change_model 等服务扰动 | Chuang-only allowlist、dry-run receipt、人工审批范围明确 | 不允许任意 systemd；不含 Codex Feishu 或 Hermes |
 | wiki/GBrain live | 涉及外部知识库权限、检索质量和写入策略 | 本地 knowledge search provenance/evidence 稳定，live 只读账号和审计面确认 | 先只读检索；不自动写外脑 |
 
@@ -102,7 +102,7 @@ final verify 本地闭环通过
 | provider evidence | live request verified | `scripts/chuang-provider-readiness-check.sh --json` -> `overall_state=ready`、`transport=native`、`api_key_state=<set>`；Feishu 普通文本 `哈喽` -> `gpt-5.5`、API 1 次、runtime report `report-turn-1` | readiness/env 对齐已通过，且 Feishu 主链已拿到一次真实 provider 响应；仍需把 provider receipt 纳入最终 operator receipt，不代表 desktop/browser/wiki/GBrain 已验收 |
 | subagent evidence | 已完成 | `cargo test -q --test cli_subagent_live_preflight_tests`；`scripts/chuang-live-runner-readiness-view.sh --json`；`sh scripts/chuang-live-runner-rehearsal-smoke.sh` -> `live_runner_rehearsal_smoke_ok` | gate/allowlist/capability/report admission rehearsal 已有；readiness view 和 rehearsal 仍不是 runner 池 ready，下一步只允许 bounded single worker evidence |
 | GA 9 tools evidence | 已完成但非 live | `/tools` / `/capabilities` 和本地诊断面可见 mapped 工具 | `ga_local_mapped_only=true`；映射完成不等于真实 desktop/browser live；缺真实桌面/browser action receipt |
-| desktop/browser live evidence | desktop read-only evidence verified, browser live read pending | `desktop_browser_live_gated=true`；Kubuntu X11 `DISPLAY=:0` + `XAUTHORITY=/run/user/1000/.Xauthority` 下，`scripts/chuang-real-actuator-adapter.py` observe 读取 `current_window_title=飞书`，screenshot 生成 1920x1080 PNG evidence，均为 `read_only=true` / `live_gate_required=false` | 桌面只读 observation 已有 evidence；真实 click/input 仍需 allowlist/governance/receipt，browser URL/title/DOM live read 仍缺 audited adapter，不能由桌面截图代替 |
+| desktop/browser live evidence | desktop read-only evidence verified, browser live read pending | `desktop_browser_live_gated=true`；Kubuntu X11 `DISPLAY=:0` + `XAUTHORITY=/run/user/1000/.Xauthority` 下，`scripts/chuang-real-actuator-adapter.py` observe 读取 `current_window_title=飞书`，screenshot 生成 1920x1080 PNG evidence，均为 `read_only=true` / `live_gate_required=false` | 桌面只读 observation 已有 evidence；真实 open/click/input 需要 allowlist/live gate/governance/audit，但不需要额外人工审批；browser URL/title/DOM live read 仍缺 audited adapter，不能由桌面截图代替 |
 | BrowserWorker evidence | frozen | `status --json` -> `live_readiness.browser_worker_frozen=true` | 冻结旧路径，不表示 browser live-ready |
 | wiki/GBrain evidence | source-contract ready, live adapter missing | `memory knowledge source-contract --source wiki|gbrain --json` -> `read_only=true`、`connects_real_service=false`、`live_adapter_configured=false` | 本地 source-contract 不能代替 wiki/GBrain live 接通证据；仍需真实只读账号、provenance/evidence 和 operator receipt |
 | console/watchdog evidence | 已完成 | `cargo test -q --test cli_console_tests` 和 `./scripts/chuang-goal-watchdog.sh --once` | 长跑状态有只读入口；不派活、不重启、不提交 |

@@ -256,11 +256,12 @@ function buildToolsCommandReply() {
       "- goal：`goal plan/show/dispatch/step/collect/checkpoint`。",
       "- subagent：`subagent dispatch/list/run-once/run-loop/report/collect`。",
       "- Feishu 普通文本可以发起主链任务；真正派活仍由 Chuang runtime/CLI 在治理和队列边界内执行。",
+      "- 默认执行模式：普通本地能力和常规桌面动作直接执行；删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。",
       "",
       "live runner 边界：",
       "",
       "- live runner 当前仍是 preflight-only / rehearsal-only。",
-      "- 不启用真实 runner 池，不做桌面 mutation，不做服务控制 apply。",
+      "- 不启用真实 runner 池，不做服务控制 apply；桌面动作由 actuator gate/allowlist 控制。",
       "- 子代理 live rehearsal 只能单 worker、allowlist、bounded、带 receipt。",
       "",
       "边界：",
@@ -282,8 +283,8 @@ function loadCapabilityPrimerText() {
       "普通对话默认注入能力 primer，不需要先发 /tools 也要按这份边界回答。",
       "",
       "可用能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent。",
-      "只读观察：locate/screenshot。",
-      "边界：live runner 仅 preflight/rehearsal；桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt；subagent 只派活，不直接写 core memory。",
+      "只读观察：locate/screenshot；桌面交互：open_app/mouse/keyboard。",
+      "边界：普通本地能力默认执行；高危删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问才询问或拒绝；subagent 只派活，不直接写 core memory。",
     ].join("\n");
   }
 }

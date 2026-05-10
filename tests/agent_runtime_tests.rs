@@ -143,7 +143,7 @@ fn agent_runtime_keeps_capability_primer_under_budget_pressure() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 310,
+                max_tokens: 390,
                 reserve_system_tokens: 32,
                 min_working_tokens: 1,
                 max_tool_results: 5,
@@ -263,7 +263,7 @@ fn debug_pack_for_test_drops_recall_segment_under_tight_budget() {
             },
         ],
         ContextBudget {
-            max_tokens: 310,
+            max_tokens: 390,
             reserve_system_tokens: 32,
             min_working_tokens: 1,
             max_tool_results: 5,
@@ -295,7 +295,7 @@ fn agent_runtime_exposes_context_pack_debug_artifacts() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 310,
+                max_tokens: 390,
                 reserve_system_tokens: 32,
                 min_working_tokens: 1,
                 max_tool_results: 5,
@@ -332,7 +332,7 @@ fn agent_runtime_exposes_budget_exceeded_reason_in_preview() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(ContextBudget {
-                max_tokens: 270,
+                max_tokens: 350,
                 reserve_system_tokens: 32,
                 min_working_tokens: 5,
                 max_tool_results: 5,
@@ -366,7 +366,7 @@ fn agent_runtime_exposes_working_reservation_reason_when_memory_is_dropped() {
             metadata: std::collections::HashMap::new(),
         }],
         ContextBudget {
-            max_tokens: 300,
+            max_tokens: 380,
             reserve_system_tokens: 32,
             min_working_tokens: 20,
             max_tool_results: 5,

@@ -561,7 +561,7 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
     let decision = record.decision.as_deref().unwrap_or("unknown");
     let failure_class = record.failure_class.as_deref().unwrap_or("tool_failed");
     format!(
-        "本轮没有完成真实动作。\n动作：{tool_name}\n结果：未执行点击、输入或修改。\n拦截原因：{failure_class}; {summary}\n治理决策：{decision}\n下一步：如果确实要执行真实桌面动作，需要先补 action allowlist、治理审批和 operator receipt；否则只能继续做只读 observe/screenshot 取证。",
+        "本轮没有完成真实动作。\n动作：{tool_name}\n结果：未执行点击、输入或修改。\n拦截原因：{failure_class}; {summary}\n治理决策：{decision}\n下一步：如果这是普通桌面动作，补齐 actuator adapter、live gate 和 action allowlist 后应直接执行，不需要人工审批；只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问老爸或拒绝。",
         summary = record.summary
     )
 }
@@ -3215,11 +3215,8 @@ mod tests {
         assert!(turn.result.response.body.contains("本轮没有完成真实动作"));
         assert!(turn.result.response.body.contains("未执行点击、输入或修改"));
         assert!(turn.result.response.body.contains("actuator_unconfigured"));
-        assert!(turn
-            .result
-            .response
-            .body
-            .contains("action allowlist、治理审批和 operator receipt"));
+        assert!(turn.result.response.body.contains("普通桌面动作"));
+        assert!(turn.result.response.body.contains("不需要人工审批"));
         assert_eq!(
             turn.result
                 .response

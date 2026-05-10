@@ -59,7 +59,7 @@
 - `status --json` / `doctor --json` 的 `local_contract_readiness`：汇总外脑 context preview、skill proposal review + lifecycle write/retire、plugin registry evidence、wiki/GBrain source contract 四个本地合同。当前正常状态是 `ready`，但字段会明确 `connects_real_external_services=false`、`writes_core_memory=false`、`executes_plugins=false`。
 - `status --json` / `doctor --json` 的 `channel_readiness`：按 app-server、channel simulate、Chuang 专用飞书桥、Codex/Hermes 隔离、rich messages 拆分状态。它只确认边界和脚本存在性，不代表真实飞书连接在线。
 - `status --json` / `doctor --json` 的 `subagent_readiness`：按 dispatch queue、report collect、command runner、multi-worker orchestration、external-AI downstream 拆分状态，并显式区分 `local_contract_ready` 与 `live_adapter_ready`。当前 `queued_external` 里本地协议合同可验收，但真实外部 worker/live adapter 仍未接入，协议层也不是自动执行器。
-- `status --json` / `doctor --json` 的 `live_adapter_gates`：统一列出 live subagent runner、control apply、actuator operation 的启用门禁。默认全部关闭，必须分别设置 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1` 才视为 live enabled，并且仍需走 allowlist、审批和审计边界。
+- `status --json` / `doctor --json` 的 `live_adapter_gates`：统一列出 live subagent runner、control apply、actuator operation 的启用门禁。必须分别设置 `CHUANG_CODEX_RUNNER_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_REAL_ACTUATOR_ENABLE=1` 才视为 live enabled，并且仍需走 allowlist、风险治理和审计边界。普通本地能力与常规桌面动作不要求额外人工审批；删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。
 - `data/skills/external_agent_dispatch_sop.md`：外部 AI 分身调度 Skill contract，定义平台选择、任务翻译、质量评级、追问上限、记忆写回和审计边界；它不是真实浏览器/HTTP adapter，不新增 core slot。
 - `data/skills/unified_identity_engine_adapter.md`：外部 AI 的 lower adapter contract，定义平台/session 复用、结构化输入输出、失败类和审计边界；它仍不是实际登录态执行器。
 - `cargo run -- doctor`：执行安全健康检查，校验配置、身份记忆、slot 装配、actuator observe、control list、隔离 fake runtime smoke 和隔离子代理队列 smoke。

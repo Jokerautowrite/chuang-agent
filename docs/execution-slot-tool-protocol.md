@@ -58,7 +58,7 @@ human_suspend -> tool_runtime.human_suspend
 - `mapped_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `file_read`, `file_write`, `code_execute`, `wait`, `human_suspend`
 - `interface_only_atomic_tool_names`: empty in the current local runtime contract
 
-这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：默认配置会把 GA 原子工具和 `open_app` 接到 command actuator；`locate` / `screenshot` 可直接做只读取证，`open_app` / `mouse` / `keyboard` 在 allowlist 中默认可用，但只有 `CHUANG_REAL_ACTUATOR_ENABLE=1` 打开时才会真实打开、点击或输入，否则返回 dry-run 审计回执。
+这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：默认配置会把 GA 原子工具和 `open_app` 接到 command actuator；`locate` / `screenshot` 可直接做只读取证，`open_app` / `mouse` / `keyboard` 在 allowlist 中默认可用，但只有 `CHUANG_REAL_ACTUATOR_ENABLE=1` 打开时才会真实打开、点击或输入，否则返回 dry-run 审计回执。普通打开应用、点击和输入不需要额外人工审批；高危删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问才询问或拒绝。
 
 ## 模型调用协议
 
@@ -123,7 +123,7 @@ write_file
 shell_exec
 ```
 
-`open_app` / `mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用；默认项目配置已注入 command actuator。未配置 adapter 时返回结构化 `actuator_unconfigured`；adapter 已配置但 live gate 未打开时，`open_app` / `mouse` / `keyboard` 返回 dry-run 审计回执，不执行真实打开、点击或输入。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
+`open_app` / `mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用；默认项目配置已注入 command actuator。未配置 adapter 时返回结构化 `actuator_unconfigured`；adapter 已配置但 live gate 未打开时，`open_app` / `mouse` / `keyboard` 返回 dry-run 审计回执，不执行真实打开、点击或输入。gate 和 allowlist 开启后，普通桌面动作默认直接执行，不再要求人工审批；`human_suspend` 可作为 `ACTION` 调用，用于高危或不确定场景返回 `human_input_required` 并停止自动推进。
 
 格式错误的 `ACTION` / `TOOL_CALL` 不会被当作最终回复；主进程会把 `protocol_error` 回灌给模型，要求它修正为正式 `ACTION` JSON 或输出 `FINAL:`。
 首轮普通文本仍可作为直接答复；一旦进入工具往返，后续普通文本会被视为 `plain_text_response` 协议错误，继续回灌给模型。
@@ -307,7 +307,7 @@ summary
 ## 当前边界
 
 - 不做真实桌面控制。
-- `mouse/keyboard/screenshot/locate` 可调用 actuator port；真实桌面/browser live 执行仍需 adapter、live gate、allowlist 和 audit receipt。
+- `open_app/mouse/keyboard/screenshot/locate` 可调用 actuator port；真实桌面/browser live 执行仍需 adapter、live gate、allowlist 和 audit receipt，但普通打开应用、点击和输入不需要额外人工审批。
 - 不新增第十个 Slot。
 - 子代理和外部智能体仍在下游阶段，不抢主进程 Execution Slot 主线。
 - BrowserWorker 旧线冻结；搜索/网页 AI 走 GenesisActuator 或统一身份引擎插件线。
