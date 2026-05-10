@@ -418,7 +418,7 @@ where
                     return Ok(turn);
                 }
                 current_input = format!(
-                    "原始用户请求:\n{}\n\n工具执行记录:\n{}\n\n请继续。若已完成，请输出 FINAL: <最终答复>。",
+                    "原始用户请求:\n{}\n\n工具执行记录:\n{}\n\n请继续。本次回复只能输出一个结构：一条 ACTION 或一条 FINAL；不要把 ACTION 和 FINAL 粘在一起。若已完成，请输出 FINAL: <最终答复>。",
                     original_input,
                     transcript.join("\n")
                 );
@@ -446,7 +446,7 @@ where
                 });
                 protocol_errors.push(error);
                 current_input = format!(
-                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。",
+                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。本次回复只能输出一个结构，不要把 ACTION 和 FINAL 粘在一起。",
                     original_input,
                     transcript.join("\n")
                 );
@@ -486,7 +486,7 @@ where
                 });
                 protocol_errors.push(error);
                 current_input = format!(
-                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。",
+                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。本次回复只能输出一个结构，不要把 ACTION 和 FINAL 粘在一起。",
                     original_input,
                     transcript.join("\n")
                 );

@@ -258,6 +258,9 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     assert!(instructions.contains("桌面/浏览器只读观察工具"));
     assert!(instructions.contains("open_app / mouse / keyboard 是交互工具"));
     assert!(instructions.contains("桌面/浏览器只读观察：screenshot, locate"));
+    assert!(instructions.contains("每次回复只能输出一个结构"));
+    assert!(instructions.contains("输出 tool_call 后必须等待工具结果"));
+    assert!(instructions.contains("不要把 ACTION 和 FINAL 粘在同一次输出里"));
     assert!(instructions.contains("进入工具往返"));
 }
 

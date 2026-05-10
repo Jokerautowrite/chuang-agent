@@ -75,6 +75,8 @@ ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"open_app","app_na
 ACTION: {"schema_version":1,"type":"final","answer":"最终答复"}
 ```
 
+每次模型回复只能输出一个结构：一条 `ACTION` 工具调用或一条 `FINAL`。输出 `tool_call` 后必须等待工具结果，再决定下一条 `ACTION` 或 `FINAL`；不能把 `ACTION: {...}` 和 `FINAL:` 粘在同一次输出里。
+
 `schema_version` 当前为 1；缺省时按 v1 兼容处理，高于当前支持版本会返回 `unsupported_action_schema_version` 协议错误。
 
 当前代码中的 action schema 常量：
@@ -89,6 +91,7 @@ ToolActionEnvelope::call_schema_fields()
 
 - `schema_version` 缺省时只兼容当前 v1，高于当前版本必须回灌 `unsupported_action_schema_version`。
 - `ACTION` 前缀缺失、JSON 错误、字段缺失、空 final answer 都必须变成 `protocol_error`，不得被当作普通最终回复。
+- `ACTION: {...}FINAL: ...` 属于模型输出错误；runtime 会尽量先执行第一段合法 `ACTION` 以防真实任务中断，但提示词和反馈必须要求模型下一轮只输出单个结构。
 - `schema_fields()` / `call_schema_fields()` 的顺序和内容是对控制台、通道、doctor 的契约，改字段时必须同步升级测试和文档。
   当前 `call_schema_fields()` 为：
 

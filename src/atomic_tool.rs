@@ -275,9 +275,12 @@ impl AtomicToolRegistry {
 1. 优先输出一行 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"...\"}}}}\n\
 2. 完成时，优先输出一行 ACTION: {{\"schema_version\":1,\"type\":\"final\",\"answer\":\"最终答复\"}}\n\
 3. 兼容旧协议：TOOL_CALL: {{\"tool\":\"...\"}} 或 FINAL: <最终答复>\n\
-4. 不要输出额外解释，不要输出 markdown 代码块。\n\
-5. 如果不需要工具，请直接用 FINAL 收口，不要输出普通段落。\n\
-6. 一旦进入工具往返，后续只能输出 ACTION 或 FINAL，不要输出普通文本。\n\
+4. 每次回复只能输出一个结构：一条 ACTION 工具调用或一条 FINAL；不要把 ACTION 和 FINAL 粘在同一次输出里。\n\
+5. 输出 tool_call 后必须等待工具结果，再决定下一条 ACTION 或 FINAL。\n\
+6. 不要输出额外解释，不要输出 markdown 代码块。\n\
+7. 如果不需要工具，请直接用 FINAL 收口，不要输出普通段落。\n\
+8. 一旦进入工具往返，后续只能输出 ACTION 或 FINAL，不要输出普通文本。\n\
+错误示例：ACTION: {{...}}FINAL: 已完成。\n\
 工作区根目录：{}\n\
 工具示例：\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"list_dir\",\"path\":\".\"}}}}\n\
