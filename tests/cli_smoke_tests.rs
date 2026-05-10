@@ -123,6 +123,37 @@ fn provider_readiness_check_is_status_only_and_secret_safe() {
 }
 
 #[test]
+fn feishu_bridge_script_discovers_desktop_env_without_host_specific_display() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fs::read_to_string(manifest_dir.join("scripts/chuang-feishu-bridge.sh"))
+        .expect("feishu bridge script should be readable");
+    let env_example =
+        fs::read_to_string(manifest_dir.join("ops/systemd/chuang-feishu-bridge.env.example"))
+            .expect("feishu bridge env example should be readable");
+    let service_example =
+        fs::read_to_string(manifest_dir.join("ops/systemd/chuang-feishu-bridge.service.example"))
+            .expect("feishu bridge service example should be readable");
+
+    assert!(script.contains("detect_desktop_env()"));
+    assert!(script.contains("uid=\"$(id -u)\""));
+    assert!(script.contains("XDG_RUNTIME_DIR"));
+    assert!(script.contains("XAUTHORITY"));
+    assert!(script.contains("/tmp/.X11-unix/X*"));
+    assert!(script.contains("WAYLAND_DISPLAY"));
+    assert!(script.contains("export DISPLAY=\":${socket##*/X}\""));
+    assert!(script.contains("export XAUTHORITY=\"$candidate\""));
+    assert!(script.contains("export XDG_RUNTIME_DIR=\"$runtime_dir\""));
+    assert!(!script.contains("DISPLAY=:0"));
+    assert!(!script.contains("/run/user/1000"));
+    assert!(!script.contains("XAUTHORITY=/run/user"));
+    assert!(env_example.contains("Desktop env is auto-detected"));
+    assert!(env_example.contains("/absolute/path/to/chuang-agent"));
+    assert!(service_example.contains("/absolute/path/to/chuang-agent"));
+    assert!(!env_example.contains("/home/user"));
+    assert!(!service_example.contains("/home/user"));
+}
+
+#[test]
 fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-smoke.sh");

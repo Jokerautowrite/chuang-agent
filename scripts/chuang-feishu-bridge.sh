@@ -6,6 +6,45 @@ ENV_FILE="${CHUANG_FEISHU_ENV_FILE:-$HOME/.codex-im/chuang-feishu-bridge.env}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-/home/user/.codex/codex-feishu-bridge/node_modules}"
 
+detect_desktop_env() {
+  uid="$(id -u)"
+  runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$uid}"
+  if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "$runtime_dir" ]; then
+    export XDG_RUNTIME_DIR="$runtime_dir"
+  fi
+
+  if [ -z "${XAUTHORITY:-}" ]; then
+    for candidate in \
+      "${XDG_RUNTIME_DIR:-}/.Xauthority" \
+      "/run/user/$uid/.Xauthority" \
+      "$HOME/.Xauthority"
+    do
+      if [ -n "$candidate" ] && [ -r "$candidate" ]; then
+        export XAUTHORITY="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then
+    for socket in /tmp/.X11-unix/X*; do
+      if [ -S "$socket" ]; then
+        export DISPLAY=":${socket##*/X}"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -d "${XDG_RUNTIME_DIR:-}" ]; then
+    for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
+      if [ -S "$socket" ]; then
+        export WAYLAND_DISPLAY="${socket##*/}"
+        break
+      fi
+    done
+  fi
+}
+
 if [ -f "$ENV_FILE" ]; then
   set -a
   . "$ENV_FILE"
@@ -17,6 +56,8 @@ if [ -f "$PROVIDER_ENV_FILE" ]; then
   . "$PROVIDER_ENV_FILE"
   set +a
 fi
+
+detect_desktop_env
 
 cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- channel feishu-check \
   --env-file "$ENV_FILE" \
