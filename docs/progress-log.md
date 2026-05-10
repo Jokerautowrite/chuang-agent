@@ -1,5 +1,10 @@
 # 协作进度日志
 
+## 2026-05-11 claude-rust Slot 审计
+- 已对 `/home/user/projects/claude-rust` 做代码级 Slot 审计，并新增 `docs/claude-rust-slot-audit-v1.md` 与 `docs/claude-rust-integration-plan-v1.md`：结论是 `claude-rust` 值得吸收，但不能整体替换 Chuang 主链；优先吸收 `Tool` trait / `ToolRegistry` / MCP fake adapter、`QueryEngine` 的流式 tool-use loop 与 overload retry、`permission` 的模式和 allow/deny pattern。
+- 对老爸给出的映射做了校准：`AgentLoop`、`Execution`、`Governance`、`Provider`、`Context` 映射成立；`GroupCoordinator` 需要降级为“有 nested sub-agent / explore adapter 原型”，`claude-rust-coordinator` 当前偏 scaffold，不是完整群体协同系统；`claude-rust-memory` 只是 JSON session repository，不适合作为 Chuang 核心记忆层。
+- 第一阶段集成计划锁定 M1/M2：先做 `ToolRegistrySlot` 设计与 fake contract，再做 MCP fake stdio adapter；禁止真实 MCP 绕过 Chuang governance/allowlist/audit，禁止 `Bypass` 模式成为开源默认。
+
 ## 2026-05-10 live 现场证据第一轮
 - Feishu 现场证据已推进：老爸在 Chuang 专用 Feishu 通道返回 `/health`、`/session`、`/tools` 结果，确认 bridge=ready、app-server=running、workspace=`/home/user/projects/chuang-agent`、session=`chuang-thread-1`，Feishu env 与 provider env 只显示 `<set>`，且 `/tools` 展示 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本、图片 OCR 和主链工具边界；这证明 Feishu 本地命令面与绑定证据可用。
 - provider readiness 本地只读检查通过：`scripts/chuang-provider-readiness-check.sh --json` 输出 `overall_state=ready`、`provider_kind=openai_compatible`、`transport=native`、`api_key_state=<set>`、`connects_real_provider=false`、`request_timeout_ms=120000`。同轮 Feishu 普通文本先遇到一次上游 `502 Bad Gateway`，随后老爸重试 `哈喽` 成功返回“哈喽，老爸，我在。有什么要我处理的？”，模型 `gpt-5.5`、耗时 2.0s、API 1 次、runtime report `report-turn-1`，因此 provider live request 证据从 blocked 修正为 verified。
