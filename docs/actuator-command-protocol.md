@@ -67,4 +67,8 @@ The repository includes a dry-run real adapter scaffold:
 scripts/chuang-real-actuator-adapter.py --json --allowlist config/actuator-allowlist.example.json
 ```
 
-Live `open_app` is disabled by default and only runs when `CHUANG_REAL_ACTUATOR_ENABLE=1` is set. Click, input, and screenshot must be explicitly enabled in the allowlist. The example allowlist keeps them disabled.
+`locate` and `screenshot` are read-only evidence actions. `mouse` and non-secret
+`keyboard` are allowlisted in the checked-in scaffold so the GA atomic tool line
+is usable by default, but they execute real desktop actions only when
+`CHUANG_REAL_ACTUATOR_ENABLE=1` is set in the service environment. With the gate
+closed they return dry-run audit evidence instead of clicking or typing.

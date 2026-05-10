@@ -84,11 +84,11 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "atomic_tools: source=GenericAgent ok=true total=9 mapped=9 interface_only=0 manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
-    assert!(stdout.contains("runtime_capability_primer: 普通对话默认注入同一份能力 primer"));
-    assert!(stdout.contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
+    assert!(stdout.contains("runtime_capability_primer: 普通对话默认注入能力 primer"));
+    assert!(stdout.contains("file_read/file_write/code_execute/list_dir=治理内读写/执行"));
     assert!(stdout.contains("goal/subagent 派活"));
     assert!(stdout.contains("locate/screenshot=只读观察"));
-    assert!(stdout.contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
+    assert!(stdout.contains("mouse/keyboard=GA 桌面交互"));
     assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_executable: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
     assert!(stdout.contains("atomic_tools_interface_only: none"));
@@ -400,13 +400,12 @@ fn cli_status_can_render_json_without_secret_leak() {
         .as_str()
         .expect("runtime capability primer should be text");
     assert!(runtime_capability_primer
-        .contains("file_read/file_write/code_execute/list_dir=受治理工作区读写/执行"));
-    assert!(runtime_capability_primer.contains("普通对话默认注入同一份能力 primer"));
-    assert!(runtime_capability_primer.contains("memory/session=回溯补充"));
+        .contains("file_read/file_write/code_execute/list_dir=治理内读写/执行"));
+    assert!(runtime_capability_primer.contains("普通对话默认注入能力 primer"));
+    assert!(runtime_capability_primer.contains("memory/session=回溯"));
     assert!(runtime_capability_primer.contains("goal/subagent 派活"));
     assert!(runtime_capability_primer.contains("locate/screenshot=只读观察"));
-    assert!(runtime_capability_primer
-        .contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
+    assert!(runtime_capability_primer.contains("mouse/keyboard=GA 桌面交互"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 9);

@@ -54,9 +54,9 @@ def handle_request(allowlist: dict, request: dict) -> dict:
     if action == "focus":
         return guarded_noop(allowlist, "focus_allowed", "focus")
     if action == "click":
-        return guarded_noop(allowlist, "click_allowed", "click")
+        return click_response(allowlist, request)
     if action == "input_text":
-        return guarded_noop(allowlist, "input_allowed", "input_text")
+        return input_response(allowlist, request)
     if action == "screenshot":
         if not allowlist.get("screenshot_allowed", False):
             raise SystemExit("screenshot not allowlisted")
@@ -142,6 +142,29 @@ def screenshot_evidence():
     )
 
 
+def click_response(allowlist: dict, request: dict) -> dict:
+    if not allowlist.get("click_allowed", False):
+        raise SystemExit("click not allowlisted")
+    if live_enabled():
+        x, y = extract_click_coordinates(request.get("click_target"))
+        run_xdotool(["mousemove", str(x), str(y)])
+        run_xdotool(["click", "1"])
+        return response(message=boundary_message("click", real_execution=True))
+    return response(message=boundary_message("click"))
+
+
+def input_response(allowlist: dict, request: dict) -> dict:
+    if not allowlist.get("input_allowed", False):
+        raise SystemExit("input_text not allowlisted")
+    if live_enabled():
+        text_value, is_secret = extract_input_text(request.get("text"))
+        if is_secret:
+            raise SystemExit("secret input is not supported by this command adapter")
+        run_xdotool(["type", "--clearmodifiers", "--delay", "0", text_value])
+        return response(message=boundary_message("input_text", real_execution=True))
+    return response(message=boundary_message("input_text"))
+
+
 def guarded_noop(allowlist: dict, key: str, action: str) -> dict:
     if not allowlist.get(key, False):
         raise SystemExit(f"{action} not allowlisted")
@@ -179,6 +202,32 @@ def sanitize_text(value: str) -> str:
     return " ".join(str(value).replace("\n", " ").replace("\r", " ").split())[:240]
 
 
+def extract_click_coordinates(click_target):
+    if not isinstance(click_target, dict):
+        raise SystemExit("click target missing coordinates")
+    coordinates = click_target.get("Coordinates")
+    if not isinstance(coordinates, dict):
+        raise SystemExit("click target missing Coordinates")
+    try:
+        return int(coordinates["x"]), int(coordinates["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"click target invalid coordinates: {exc}") from exc
+
+
+def extract_input_text(text_value):
+    if isinstance(text_value, dict):
+        plain = text_value.get("Plain")
+        if plain is not None:
+            return str(plain), False
+        secret = text_value.get("Secret")
+        if isinstance(secret, dict):
+            label = secret.get("label")
+            return "" if label is None else str(label), True
+    if isinstance(text_value, str):
+        return text_value, False
+    raise SystemExit("input text missing content")
+
+
 def find_app(allowlist: dict, app_name: str):
     for app in allowlist.get("apps", []):
         if app.get("app_name") == app_name:
@@ -200,6 +249,22 @@ def response(observation=None, app_handle=None, evidence_ref=None, message="ok")
 
 def live_enabled() -> bool:
     return os.environ.get("CHUANG_REAL_ACTUATOR_ENABLE") == "1"
+
+
+def run_xdotool(args):
+    result = subprocess.run(
+        ["xdotool", *args],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=8,
+    )
+    if result.returncode != 0:
+        stderr = sanitize_text(result.stderr)
+        raise SystemExit(
+            f"xdotool failed: command={' '.join(args)} status={result.returncode} stderr={stderr}"
+        )
 
 
 if __name__ == "__main__":

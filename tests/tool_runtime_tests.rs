@@ -152,6 +152,26 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
 }
 
 #[test]
+fn mouse_and_keyboard_are_governed_as_local_desktop_interactions() {
+    let workspace = temp_workspace("desktop-governance-kind");
+
+    for call in [
+        ToolCall::Mouse { x: 10, y: 20 },
+        ToolCall::Keyboard {
+            text: "hello".to_string(),
+            secret: false,
+        },
+    ] {
+        let action = proposed_action_for_tool_call(&workspace, &call);
+        assert_eq!(
+            action.kind,
+            chuang_agent::governance::ActionKind::LocalDesktopInteraction
+        );
+        assert!(action.target.starts_with("actuator::"));
+    }
+}
+
+#[test]
 fn parse_structured_action_accepts_interface_only_desktop_tools() {
     assert!(matches!(
         parse_tool_model_output(

@@ -42,7 +42,9 @@ impl Governance for StaticRuleGovernance {
             ActionKind::Observe | ActionKind::Draft => RiskDecision::Allowed {
                 reason: "read-only or draft action".to_string(),
             },
-            ActionKind::LocalFileWrite | ActionKind::ShellCommand => RiskDecision::Allowed {
+            ActionKind::LocalDesktopInteraction
+            | ActionKind::LocalFileWrite
+            | ActionKind::ShellCommand => RiskDecision::Allowed {
                 reason: "local action allowed by static policy".to_string(),
             },
             ActionKind::ExternalSend | ActionKind::PublicPost => RiskDecision::NeedsApproval {

@@ -1481,7 +1481,7 @@ transport = "stub"
     assert!(parsed["runtime_capability_primer"]
         .as_str()
         .expect("runtime capability primer should be text")
-        .contains("普通对话默认注入同一份能力 primer"));
+        .contains("普通对话默认注入能力 primer"));
     assert!(parsed["runtime_capability_primer"]
         .as_str()
         .expect("runtime capability primer should be text")
@@ -1489,7 +1489,7 @@ transport = "stub"
     assert!(parsed["runtime_capability_primer"]
         .as_str()
         .expect("runtime capability primer should be text")
-        .contains("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
+        .contains("subagent=dispatch/list/run-once/run-loop/report/collect"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(
         parsed["atomic_tools"]["governed_executable_atomic_tool_names"],

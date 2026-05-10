@@ -2423,9 +2423,7 @@ mod tests {
             .contains("locate/screenshot=只读观察"));
         let captured = captured.lock().expect("capture lock should succeed");
         assert!(captured[0].prompt.contains("locate/screenshot=只读观察"));
-        assert!(captured[0]
-            .prompt
-            .contains("桌面/浏览器真实动作仍需治理/live gate/allowlist/receipt"));
+        assert!(captured[0].prompt.contains("mouse/keyboard=GA 桌面交互"));
     }
 
     #[test]

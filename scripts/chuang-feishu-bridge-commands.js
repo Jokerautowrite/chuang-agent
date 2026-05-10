@@ -279,7 +279,7 @@ function loadCapabilityPrimerText() {
     return fs.readFileSync(CAPABILITY_PRIMER_PATH, "utf8").trim();
   } catch (_error) {
     return [
-      "普通对话默认注入同一份能力 primer，不需要先发 /tools 也要按这份边界回答。",
+      "普通对话默认注入能力 primer，不需要先发 /tools 也要按这份边界回答。",
       "",
       "可用能力：file_read/file_write/code_execute/list_dir；memory/session；goal/subagent。",
       "只读观察：locate/screenshot。",

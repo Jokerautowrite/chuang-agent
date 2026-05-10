@@ -53,6 +53,24 @@ fn static_governance_requires_approval_for_external_or_destructive_actions() {
 }
 
 #[test]
+fn static_governance_treats_local_desktop_interaction_as_local_action() {
+    let governance = StaticRuleGovernance::new();
+
+    let decision = governance
+        .classify(&action(
+            ActionKind::LocalDesktopInteraction,
+            "actuator::mouse x=10 y=20",
+        ))
+        .expect("governance should classify");
+
+    assert!(matches!(
+        decision,
+        RiskDecision::Allowed { ref reason }
+            if reason.contains("local action allowed by static policy")
+    ));
+}
+
+#[test]
 fn static_governance_blocks_empty_targets() {
     let governance = StaticRuleGovernance::new();
 

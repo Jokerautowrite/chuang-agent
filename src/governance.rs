@@ -10,6 +10,7 @@ pub use static_rule::StaticRuleGovernance;
 pub enum ActionKind {
     Observe,
     Draft,
+    LocalDesktopInteraction,
     LocalFileWrite,
     ShellCommand,
     ExternalSend,

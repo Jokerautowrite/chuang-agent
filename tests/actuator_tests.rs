@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -16,6 +17,15 @@ fn temp_script_path(name: &str) -> PathBuf {
         .expect("clock should be valid")
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-agent-actuator-{name}-{nanos}.sh"))
+}
+
+fn prepend_path_env(dir: &std::path::Path) -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if current.is_empty() {
+        dir.display().to_string()
+    } else {
+        format!("{}:{current}", dir.display())
+    }
 }
 
 #[test]
@@ -459,4 +469,156 @@ fn real_actuator_adapter_screenshot_is_readonly_and_returns_evidence_boundary() 
             || evidence_uri == "chuang-actuator://screenshot/unavailable",
         "unexpected evidence uri: {evidence_uri}"
     );
+}
+
+#[test]
+fn checked_in_real_actuator_allowlist_enables_ga_interaction_atoms() {
+    let allowlist_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("config")
+        .join("actuator-allowlist.example.json");
+    let allowlist: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(allowlist_path).expect("allowlist should read"))
+            .expect("allowlist should parse");
+
+    assert_eq!(allowlist["click_allowed"], true);
+    assert_eq!(allowlist["input_allowed"], true);
+    assert_eq!(allowlist["screenshot_allowed"], true);
+}
+
+#[test]
+fn real_actuator_adapter_click_and_input_are_dry_run_without_live_gate() {
+    let allowlist = temp_script_path("real-actuator-ga-dry-run").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [],
+  "input_allowed": true,
+  "click_allowed": true,
+  "screenshot_allowed": true
+}"#,
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+
+    for (request, expected_action) in [
+        (
+            br#"{"action":"click","observe_target":null,"open_app":null,"focus_target":null,"click_target":{"Coordinates":{"x":10,"y":20}},"input_target":null,"text":null,"screenshot_target":null}"#.as_slice(),
+            "click",
+        ),
+        (
+            br#"{"action":"input_text","observe_target":null,"open_app":null,"focus_target":null,"click_target":null,"input_target":"Focused","text":{"Plain":"hello"},"screenshot_target":null}"#.as_slice(),
+            "input_text",
+        ),
+    ] {
+        let mut child = Command::new(&adapter_path)
+            .args(["--json", "--allowlist"])
+            .arg(&allowlist)
+            .env_remove("CHUANG_REAL_ACTUATOR_ENABLE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("adapter should spawn");
+        std::io::Write::write_all(
+            child.stdin.as_mut().expect("stdin should be available"),
+            request,
+        )
+        .expect("request should write");
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().expect("adapter should finish");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("response should be json");
+        let message = response["message"].as_str().expect("message should exist");
+        assert!(message.contains("dry_run=true"));
+        assert!(message.contains("real_execution=false"));
+        assert!(message.contains(&format!("action={expected_action}")));
+    }
+}
+
+#[test]
+fn real_actuator_adapter_live_click_and_input_call_xdotool() {
+    let allowlist = temp_script_path("real-actuator-ga-live").with_extension("json");
+    fs::write(
+        &allowlist,
+        r#"{
+  "apps": [],
+  "input_allowed": true,
+  "click_allowed": true,
+  "screenshot_allowed": true
+}"#,
+    )
+    .expect("allowlist should write");
+    let bin_dir = std::env::temp_dir().join(format!(
+        "chuang-actuator-xdotool-bin-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should move forward")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&bin_dir).expect("bin dir should write");
+    let log_path = bin_dir.join("xdotool.log");
+    let xdotool_path = bin_dir.join("xdotool");
+    fs::write(
+        &xdotool_path,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\n",
+            shell_single_quote(&log_path.display().to_string())
+        ),
+    )
+    .expect("xdotool stub should write");
+    fs::set_permissions(&xdotool_path, fs::Permissions::from_mode(0o755))
+        .expect("xdotool stub should be executable");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+
+    for request in [
+        br#"{"action":"click","observe_target":null,"open_app":null,"focus_target":null,"click_target":{"Coordinates":{"x":10,"y":20}},"input_target":null,"text":null,"screenshot_target":null}"#.as_slice(),
+        br#"{"action":"input_text","observe_target":null,"open_app":null,"focus_target":null,"click_target":null,"input_target":"Focused","text":{"Plain":"hello"},"screenshot_target":null}"#.as_slice(),
+    ] {
+        let mut child = Command::new(&adapter_path)
+            .args(["--json", "--allowlist"])
+            .arg(&allowlist)
+            .env("CHUANG_REAL_ACTUATOR_ENABLE", "1")
+            .env("PATH", prepend_path_env(&bin_dir))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("adapter should spawn");
+        std::io::Write::write_all(
+            child.stdin.as_mut().expect("stdin should be available"),
+            request,
+        )
+        .expect("request should write");
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().expect("adapter should finish");
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("response should be json");
+        let message = response["message"].as_str().expect("message should exist");
+        assert!(message.contains("dry_run=false"));
+        assert!(message.contains("real_execution=true"));
+        assert!(message.contains("live_gate_required=true"));
+    }
+
+    let log = fs::read_to_string(log_path).expect("xdotool log should exist");
+    assert!(log.contains("mousemove 10 20"));
+    assert!(log.contains("click 1"));
+    assert!(log.contains("type --clearmodifiers --delay 0 hello"));
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }

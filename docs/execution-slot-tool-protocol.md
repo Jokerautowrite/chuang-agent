@@ -58,7 +58,7 @@ human_suspend -> tool_runtime.human_suspend
 - `mapped_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `file_read`, `file_write`, `code_execute`, `wait`, `human_suspend`
 - `interface_only_atomic_tool_names`: empty in the current local runtime contract
 
-这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：映射不等于真实桌面控制已放行，真实 click/type/screenshot/locate 仍由 actuator adapter、live gate、allowlist 和审计回执决定。
+这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：默认配置会把 GA 原子工具接到 command actuator；`locate` / `screenshot` 可直接做只读取证，`mouse` / `keyboard` 在 allowlist 中默认可用，但只有 `CHUANG_REAL_ACTUATOR_ENABLE=1` 打开时才会真实点击或输入，否则返回 dry-run 审计回执。
 
 ## 模型调用协议
 
@@ -121,7 +121,7 @@ write_file
 shell_exec
 ```
 
-`mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用，但只有在本轮 runtime 注入 actuator adapter 后才会执行；未配置 adapter 时返回结构化 `actuator_unconfigured`。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
+`mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用；默认项目配置已注入 command actuator。未配置 adapter 时返回结构化 `actuator_unconfigured`；adapter 已配置但 live gate 未打开时，`mouse` / `keyboard` 返回 dry-run 审计回执，不执行真实点击或输入。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
 
 格式错误的 `ACTION` / `TOOL_CALL` 不会被当作最终回复；主进程会把 `protocol_error` 回灌给模型，要求它修正为正式 `ACTION` JSON 或输出 `FINAL:`。
 首轮普通文本仍可作为直接答复；一旦进入工具往返，后续普通文本会被视为 `plain_text_response` 协议错误，继续回灌给模型。

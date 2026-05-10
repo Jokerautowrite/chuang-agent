@@ -17,7 +17,7 @@
       }
     }
   ],
-  "input_allowed": false,
-  "click_allowed": false,
+  "input_allowed": true,
+  "click_allowed": true,
   "screenshot_allowed": true
 }

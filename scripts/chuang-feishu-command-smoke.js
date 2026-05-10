@@ -99,7 +99,7 @@ assert(tools.replyText.includes("file_write"));
 assert(tools.replyText.includes("code_execute"));
 assert(tools.replyText.includes("list_dir"));
 assert(tools.replyText.includes("locate/screenshot=只读观察"));
-assert(tools.replyText.includes("subagent 只 dispatch/list/run-once/run-loop/report/collect"));
+assert(tools.replyText.includes("subagent=dispatch/list/run-once/run-loop/report/collect"));
 assert(tools.replyText.includes("会话记忆召回"));
 assert(tools.replyText.includes("provider/runtime"));
 assert(tools.replyText.includes("goal/subagent 派活入口"));

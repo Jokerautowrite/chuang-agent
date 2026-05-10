@@ -1527,9 +1527,8 @@ fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> Actio
         ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } | ToolCall::MemoryRecall { .. } => {
             ActionKind::Observe
         }
-        ToolCall::Mouse { .. }
-        | ToolCall::Keyboard { .. }
-        | ToolCall::Screenshot { .. }
+        ToolCall::Mouse { .. } | ToolCall::Keyboard { .. } => ActionKind::LocalDesktopInteraction,
+        ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
         | ToolCall::Wait { .. }
         | ToolCall::HumanSuspend { .. } => ActionKind::Observe,
