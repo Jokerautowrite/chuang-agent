@@ -23,6 +23,27 @@ bash scripts/chuang-live-runner-rehearsal-smoke.sh
 printf '%s\n' "[candidate-verify] live gaps check"
 bash scripts/chuang-live-gaps-check.sh
 
+printf '%s\n' "[candidate-verify] live runner readiness view"
+runner_view_json="$(bash scripts/chuang-live-runner-readiness-view.sh --json)"
+printf '%s' "$runner_view_json" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+rehearsal = data["live_runner_rehearsal"]
+assert data["readonly"] is True
+assert data["connects_real_provider"] is False
+assert data["connects_real_feishu"] is False
+assert rehearsal["ready_for_live"] is False
+assert rehearsal["starts_external_worker"] is False
+assert rehearsal["capability_mismatch_blocks_live"] is True
+assert rehearsal["blocked_reason"]
+assert rehearsal["next_action"]
+print("candidate_live_runner_readiness_view_state=" + str(rehearsal["state"]))
+print("candidate_live_runner_readiness_view_ready_for_live=" + str(rehearsal["ready_for_live"]).lower())
+print("candidate_live_runner_readiness_view_blocked_reason=" + str(rehearsal["blocked_reason"]))
+'
+
 printf '%s\n' "[candidate-verify] live operator checklist readonly summary"
 operator_status=0
 operator_json="$(bash scripts/chuang-live-operator-checklist.sh --json)" || operator_status=$?

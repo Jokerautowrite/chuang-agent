@@ -227,6 +227,9 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     let live_gaps_check = wrapper
         .find("bash scripts/chuang-live-gaps-check.sh")
         .expect("candidate verify should run live gaps check");
+    let live_runner_readiness_view = wrapper
+        .find("[candidate-verify] live runner readiness view")
+        .expect("candidate verify should run live runner readiness view");
     let operator_checklist = wrapper
         .find("[candidate-verify] live operator checklist readonly summary")
         .expect("candidate verify should run live operator checklist readonly summary");
@@ -242,11 +245,14 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
 
     assert!(complete_local_smoke < live_runner_rehearsal);
     assert!(live_runner_rehearsal < live_gaps_check);
-    assert!(live_gaps_check < operator_checklist);
+    assert!(live_gaps_check < live_runner_readiness_view);
+    assert!(live_runner_readiness_view < operator_checklist);
     assert!(operator_checklist < goal_run_status);
     assert!(goal_run_status < provider_readiness);
     assert!(provider_readiness < marker);
     assert!(wrapper.contains("[candidate-verify] live gaps check"));
+    assert!(wrapper.contains("[candidate-verify] live runner readiness view"));
+    assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
     assert!(wrapper.contains("scripts/chuang-live-operator-checklist.sh --json"));
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
     assert!(wrapper.contains("cannot_mark_complete_from_readonly_checklist"));
@@ -369,6 +375,9 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     let live_gaps_check = wrapper
         .find("bash scripts/chuang-live-gaps-check.sh --json")
         .expect("third test smoke should run live gaps matrix");
+    let live_runner_readiness_view = wrapper
+        .find("[third-test] live runner readiness view")
+        .expect("third test smoke should run live runner readiness view");
     let operator_checklist = wrapper
         .find("bash scripts/chuang-live-operator-checklist.sh --json")
         .expect("third test smoke should run live operator checklist readonly summary");
@@ -382,7 +391,8 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(clean_tree_check < final_verify);
     assert!(final_verify < live_preflight);
     assert!(live_preflight < live_gaps_check);
-    assert!(live_gaps_check < operator_checklist);
+    assert!(live_gaps_check < live_runner_readiness_view);
+    assert!(live_runner_readiness_view < operator_checklist);
     assert!(operator_checklist < goal_status);
     assert!(goal_status < marker);
     assert!(wrapper.contains("working tree must be clean before third test smoke"));
@@ -391,6 +401,8 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("live_gaps_summary="));
     assert!(wrapper.contains("live_gaps_gap_count="));
     assert!(wrapper.contains("live_gaps_marker="));
+    assert!(wrapper.contains("[third-test] live runner readiness view"));
+    assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
     assert!(wrapper.contains("data[\"check_name\"] == \"live-gaps\""));
     assert!(wrapper.contains(
         "data[\"summary\"] == \"local_contract=ready preflight=ready_but_no_start real_live=pending\""
