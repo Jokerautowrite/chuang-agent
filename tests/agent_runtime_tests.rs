@@ -202,7 +202,7 @@ fn agent_runtime_surfaces_readonly_desktop_browser_and_knowledge_guidance_in_pro
     assert!(result.prompt.contains("[chuang-agent-runtime]"));
     assert!(result.prompt.contains("[packed-context]"));
     assert!(result.prompt.contains("system-capabilities"));
-    assert!(result.prompt.contains("普通对话默认注入能力 primer"));
+    assert!(result.prompt.contains("默认注入能力 primer"));
     assert!(result
         .prompt
         .contains("file_read/file_write/code_execute/list_dir=治理内读写/执行"));
@@ -211,7 +211,7 @@ fn agent_runtime_surfaces_readonly_desktop_browser_and_knowledge_guidance_in_pro
         .prompt
         .contains("subagent=dispatch/list/run-once/run-loop/report/collect"));
     assert!(result.prompt.contains("locate/screenshot=只读观察"));
-    assert!(result.prompt.contains("mouse/keyboard=GA 桌面交互"));
+    assert!(result.prompt.contains("open_app/mouse/keyboard=桌面交互"));
     assert!(result.prompt.contains("memory/session=回溯"));
     assert!(result
         .packed_context_preview

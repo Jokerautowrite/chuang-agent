@@ -438,6 +438,7 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
                 "text",
                 "secret",
                 "target",
+                "app_name",
                 "millis",
                 "reason",
                 "prompt",

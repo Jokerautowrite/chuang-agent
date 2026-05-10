@@ -1481,7 +1481,7 @@ transport = "stub"
     assert!(parsed["runtime_capability_primer"]
         .as_str()
         .expect("runtime capability primer should be text")
-        .contains("普通对话默认注入能力 primer"));
+        .contains("默认注入能力 primer"));
     assert!(parsed["runtime_capability_primer"]
         .as_str()
         .expect("runtime capability primer should be text")

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::actuator::{
     Actuator, ClickTarget, CommandActuator, FakeActuator, InputTarget, ObserveTarget,
-    ScreenshotTarget, SecretOrPlainText,
+    OpenAppRequest, ScreenshotTarget, SecretOrPlainText,
 };
 use crate::atomic_tool::AtomicToolRegistry;
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
@@ -50,6 +50,9 @@ pub enum ToolCall {
     Locate {
         #[serde(default)]
         target: Option<String>,
+    },
+    OpenApp {
+        app_name: String,
     },
     Wait {
         millis: u64,
@@ -237,6 +240,7 @@ pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
     "text",
     "secret",
     "target",
+    "app_name",
     "millis",
     "reason",
     "prompt",
@@ -483,6 +487,7 @@ impl ToolSurfaceStatus {
             .collect::<Vec<_>>();
         let mut callable_tools = mapped_atomic_tools.clone();
         callable_tools.push("list_dir".to_string());
+        callable_tools.push("open_app".to_string());
         callable_tools.push("apply_patch".to_string());
         callable_tools.push("memory_recall".to_string());
 
@@ -685,6 +690,9 @@ fn execute_tool_call_with_registry_and_config(
         }
         ToolCall::Locate { target } => {
             execute_locate(registry, call, config.actuator.as_ref(), target)
+        }
+        ToolCall::OpenApp { app_name } => {
+            execute_open_app(registry, call, config.actuator.as_ref(), app_name)
         }
         ToolCall::Wait { millis } => {
             execute_wait(registry, call, config.actuator.as_ref(), *millis)
@@ -944,6 +952,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Keyboard { .. } => "keyboard",
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
+        ToolCall::OpenApp { .. } => "open_app",
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
@@ -1527,7 +1536,9 @@ fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> Actio
         ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } | ToolCall::MemoryRecall { .. } => {
             ActionKind::Observe
         }
-        ToolCall::Mouse { .. } | ToolCall::Keyboard { .. } => ActionKind::LocalDesktopInteraction,
+        ToolCall::Mouse { .. } | ToolCall::Keyboard { .. } | ToolCall::OpenApp { .. } => {
+            ActionKind::LocalDesktopInteraction
+        }
         ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
         | ToolCall::Wait { .. }
@@ -1592,6 +1603,7 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
             "actuator::locate target={}",
             target.as_deref().unwrap_or("screen")
         ),
+        ToolCall::OpenApp { app_name } => format!("actuator::open_app app={}", app_name.trim()),
         ToolCall::Wait { millis } => format!("actuator::wait millis={}", millis),
         ToolCall::HumanSuspend { reason, .. } => {
             format!("human::suspend reason={}", reason.trim())
@@ -1634,6 +1646,7 @@ fn tool_summary(call: &ToolCall) -> String {
         ToolCall::Locate { target } => {
             format!("locate target={}", target.as_deref().unwrap_or("screen"))
         }
+        ToolCall::OpenApp { app_name } => format!("open_app app={}", app_name.trim()),
         ToolCall::Wait { millis } => format!("wait millis={}", millis),
         ToolCall::HumanSuspend { reason, prompt } => format!(
             "human_suspend reason={} prompt={}",
@@ -1667,6 +1680,7 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         | ToolCall::Keyboard { .. }
         | ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
+        | ToolCall::OpenApp { .. }
         | ToolCall::Wait { .. }
         | ToolCall::HumanSuspend { .. }
         | ToolCall::ApplyPatch { .. }
@@ -1753,6 +1767,44 @@ fn execute_keyboard(
         record.ok = false;
         record.failure_class = Some("actuator_failed".to_string());
         record.summary = format!("actuator_input_failed: {}", error.message);
+    }
+    record
+}
+
+fn execute_open_app(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    actuator: Option<&ActuatorConfig>,
+    app_name: &str,
+) -> ToolExecutionRecord {
+    let mut record = success_record(
+        registry,
+        call,
+        format!("open_app app={}", app_name.trim()),
+        None,
+        false,
+    );
+    let Some(mut actuator) = build_actuator(actuator) else {
+        record.ok = false;
+        record.failure_class = Some("actuator_unconfigured".to_string());
+        return record;
+    };
+    match actuator.open_app(OpenAppRequest {
+        app_name: app_name.trim().to_string(),
+    }) {
+        Ok(handle) => {
+            record.output = Some(format!(
+                "app_name={} handle_id={}",
+                handle.app_name, handle.handle_id
+            ));
+            record.output_bytes = record.output.as_ref().map(|value| value.len());
+            record.output_lines = record.output.as_ref().map(|value| count_lines(value));
+        }
+        Err(error) => {
+            record.ok = false;
+            record.failure_class = Some("actuator_failed".to_string());
+            record.summary = format!("actuator_open_app_failed: {}", error.message);
+        }
     }
     record
 }

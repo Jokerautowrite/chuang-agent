@@ -483,6 +483,12 @@ fn checked_in_real_actuator_allowlist_enables_ga_interaction_atoms() {
     assert_eq!(allowlist["click_allowed"], true);
     assert_eq!(allowlist["input_allowed"], true);
     assert_eq!(allowlist["screenshot_allowed"], true);
+    assert!(allowlist["apps"]
+        .as_array()
+        .expect("apps should be an array")
+        .iter()
+        .any(|app| app["app_name"] == "Chrome"
+            && app["open_command"] == serde_json::json!(["google-chrome-stable"])));
 }
 
 #[test]

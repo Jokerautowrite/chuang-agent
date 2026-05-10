@@ -1461,6 +1461,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Keyboard { .. } => "keyboard",
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
+        ToolCall::OpenApp { .. } => "open_app",
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
@@ -2423,7 +2424,9 @@ mod tests {
             .contains("locate/screenshot=只读观察"));
         let captured = captured.lock().expect("capture lock should succeed");
         assert!(captured[0].prompt.contains("locate/screenshot=只读观察"));
-        assert!(captured[0].prompt.contains("mouse/keyboard=GA 桌面交互"));
+        assert!(captured[0]
+            .prompt
+            .contains("open_app/mouse/keyboard=桌面交互"));
     }
 
     #[test]

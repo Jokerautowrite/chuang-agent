@@ -115,6 +115,12 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
     ));
     assert!(matches!(
         parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"open_app","app_name":"Chrome"}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::OpenApp { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
             r#"ACTION: {"type":"tool_call","call":{"tool":"mouse","x":1,"y":2}}"#
         ),
         ToolModelOutput::ToolCall(ToolCall::Mouse { .. })
@@ -214,15 +220,17 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     let instructions = chuang_agent::tool_runtime::tool_instruction_block(&root);
 
     assert!(instructions.contains("file_read, file_write, code_execute"));
-    assert!(instructions.contains("辅助工具：list_dir"));
+    assert!(instructions.contains("辅助工具：list_dir, open_app"));
     assert!(instructions.contains("apply_patch"));
     assert!(instructions.contains("memory_recall"));
+    assert!(instructions.contains(r#""tool":"open_app""#));
+    assert!(instructions.contains(r#""app_name":"Chrome""#));
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
-    assert!(instructions.contains("mouse/keyboard/screenshot/locate"));
+    assert!(instructions.contains("open_app/mouse/keyboard/screenshot/locate"));
     assert!(instructions.contains("当前屏幕、窗口标题、页面内容"));
     assert!(instructions.contains("桌面/浏览器只读观察工具"));
-    assert!(instructions.contains("只用于取证，不执行点击或输入"));
+    assert!(instructions.contains("open_app / mouse / keyboard 是交互工具"));
     assert!(instructions.contains("桌面/浏览器只读观察：screenshot, locate"));
     assert!(instructions.contains("进入工具往返"));
 }
@@ -314,6 +322,7 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"patch"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"command"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"cwd"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"app_name"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"query"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"session_id"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"limit"));
@@ -667,6 +676,22 @@ fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
         &config,
     );
     assert!(keyboard.ok, "keyboard should succeed: {}", keyboard.summary);
+
+    let open_app = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::OpenApp {
+            app_name: "Chrome".to_string(),
+        },
+        &config,
+    );
+    assert!(open_app.ok, "open_app should succeed: {}", open_app.summary);
+    assert_eq!(open_app.atomic_tool_name, None);
+    assert_eq!(open_app.tool_name, "open_app");
+    assert!(open_app
+        .output
+        .as_deref()
+        .expect("open_app output should include handle")
+        .contains("app_name=Chrome"));
 
     let screenshot = chuang_agent::tool_runtime::execute_tool_call_with_config(
         &root,

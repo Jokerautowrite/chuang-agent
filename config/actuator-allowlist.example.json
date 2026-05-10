@@ -15,6 +15,14 @@
         "owner": "chuang",
         "risk": "browser"
       }
+    },
+    {
+      "app_name": "Chrome",
+      "open_command": ["google-chrome-stable"],
+      "metadata": {
+        "owner": "chuang",
+        "risk": "browser"
+      }
     }
   ],
   "input_allowed": true,

@@ -58,7 +58,7 @@ human_suspend -> tool_runtime.human_suspend
 - `mapped_atomic_tool_names`: `mouse`, `keyboard`, `screenshot`, `locate`, `file_read`, `file_write`, `code_execute`, `wait`, `human_suspend`
 - `interface_only_atomic_tool_names`: empty in the current local runtime contract
 
-这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：默认配置会把 GA 原子工具接到 command actuator；`locate` / `screenshot` 可直接做只读取证，`mouse` / `keyboard` 在 allowlist 中默认可用，但只有 `CHUANG_REAL_ACTUATOR_ENABLE=1` 打开时才会真实点击或输入，否则返回 dry-run 审计回执。
+这样可以直接区分“已映射到 runtime/actuator port”与“真实 live 外部动作是否启用”：默认配置会把 GA 原子工具和 `open_app` 接到 command actuator；`locate` / `screenshot` 可直接做只读取证，`open_app` / `mouse` / `keyboard` 在 allowlist 中默认可用，但只有 `CHUANG_REAL_ACTUATOR_ENABLE=1` 打开时才会真实打开、点击或输入，否则返回 dry-run 审计回执。
 
 ## 模型调用协议
 
@@ -71,6 +71,7 @@ ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","co
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"list_dir","path":"."}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"apply_patch","patch":"*** Begin Patch\n*** Update File: notes/out.txt\n@@\n-old\n+new\n*** End Patch"}}
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"memory_recall","query":"会话关键词","limit":3}}
+ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"open_app","app_name":"Chrome"}}
 ACTION: {"schema_version":1,"type":"final","answer":"最终答复"}
 ```
 
@@ -100,6 +101,7 @@ ToolActionEnvelope::call_schema_fields()
   text
   secret
   target
+  app_name
   millis
   reason
   prompt
@@ -121,7 +123,7 @@ write_file
 shell_exec
 ```
 
-`mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用；默认项目配置已注入 command actuator。未配置 adapter 时返回结构化 `actuator_unconfigured`；adapter 已配置但 live gate 未打开时，`mouse` / `keyboard` 返回 dry-run 审计回执，不执行真实点击或输入。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
+`open_app` / `mouse` / `keyboard` / `screenshot` / `locate` 可作为 `ACTION` 调用；默认项目配置已注入 command actuator。未配置 adapter 时返回结构化 `actuator_unconfigured`；adapter 已配置但 live gate 未打开时，`open_app` / `mouse` / `keyboard` 返回 dry-run 审计回执，不执行真实打开、点击或输入。`human_suspend` 可作为 `ACTION` 调用，用于返回 `human_input_required` 并停止自动推进。
 
 格式错误的 `ACTION` / `TOOL_CALL` 不会被当作最终回复；主进程会把 `protocol_error` 回灌给模型，要求它修正为正式 `ACTION` JSON 或输出 `FINAL:`。
 首轮普通文本仍可作为直接答复；一旦进入工具往返，后续普通文本会被视为 `plain_text_response` 协议错误，继续回灌给模型。

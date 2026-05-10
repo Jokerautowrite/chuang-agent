@@ -91,6 +91,7 @@ pub enum ToolCallAtomicKind {
     AuxiliaryListDir,
     AuxiliaryApplyPatch,
     AuxiliaryMemoryRecall,
+    AuxiliaryOpenApp,
 }
 
 pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
@@ -219,6 +220,13 @@ impl AtomicToolRegistry {
                 audit_operation: "tool.memory_recall",
                 callable_now: true,
             },
+            ToolCallAtomicKind::AuxiliaryOpenApp => AtomicToolCallMapping {
+                protocol_tool_name: "open_app",
+                kind: ToolCallAtomicKind::AuxiliaryOpenApp,
+                atomic_tool_name: None,
+                audit_operation: "tool.open_app",
+                callable_now: true,
+            },
         }
     }
 
@@ -256,8 +264,8 @@ impl AtomicToolRegistry {
         format!(
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
-辅助工具：list_dir, apply_patch, memory_recall。兼容旧名：read_file, write_file, shell_exec。\n\
-桌面原子工具 mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面/浏览器只读观察工具，只用于取证，不执行点击或输入；mouse / keyboard 是交互工具。真实桌面/浏览器动作仍要求配置过的 adapter、治理和审计。\n\
+辅助工具：list_dir, open_app, apply_patch, memory_recall。兼容旧名：read_file, write_file, shell_exec。\n\
+桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面/浏览器只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面/浏览器动作按 adapter、gate、allowlist、治理和审计执行。\n\
 当用户要求查看当前屏幕、窗口标题、页面内容或界面状态时，优先调用 locate 或 screenshot 先取证，不要直接回复“无法读取”。\n\
 桌面/浏览器只读观察：screenshot, locate。locate / screenshot 是只读观察工具。交互操作：mouse, keyboard。\n\
 受治理只读记忆工具 memory_recall 可查当前会话记忆；wiki/GBrain live 未接通时，说明本地 knowledge preview/source-contract 边界，不要泛称没有任何工具。\n\
@@ -278,6 +286,7 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"file
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"apply_patch\",\"patch\":\"*** Begin Patch\\n*** End Patch\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"code_execute\",\"command\":\"cargo test --quiet\",\"cwd\":\".\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memory_recall\",\"query\":\"live 缺口\",\"limit\":3}}}}\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"open_app\",\"app_name\":\"Chrome\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"locate\",\"target\":\"screen\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"screenshot\",\"target\":\"screen\"}}}}",
             workspace_root.display()
@@ -321,6 +330,7 @@ pub fn tool_call_atomic_kind(call: &ToolCall) -> ToolCallAtomicKind {
         ToolCall::Keyboard { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Keyboard),
         ToolCall::Screenshot { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Screenshot),
         ToolCall::Locate { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Locate),
+        ToolCall::OpenApp { .. } => ToolCallAtomicKind::AuxiliaryOpenApp,
         ToolCall::Wait { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::Wait),
         ToolCall::HumanSuspend { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::HumanSuspend),
         ToolCall::ReadFile { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::FileRead),
@@ -339,6 +349,7 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::Keyboard { .. } => "keyboard",
         ToolCall::Screenshot { .. } => "screenshot",
         ToolCall::Locate { .. } => "locate",
+        ToolCall::OpenApp { .. } => "open_app",
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
