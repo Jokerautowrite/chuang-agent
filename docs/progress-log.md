@@ -1,5 +1,9 @@
 # 协作进度日志
 
+## 2026-05-10 live runner readiness view 收口
+- 新增 `scripts/chuang-live-runner-readiness-view.sh`，把 `subagent live-preflight`、`status --json`、`doctor --json` 和 `app-server health --diagnostic --json` 聚合成一份本地只读视图，输出 `ready_for_live`、`starts_external_worker`、`capability_mismatch_blocks_live`、`blocked_reason`、`next_action` 和 source evidence refs；它只做聚合，不启动 worker，不接真实外部服务，也不把 blocked 证据改写成 ready。
+- 新增 `tests/live_runner_readiness_view_tests.rs`，锁定新视图的 CLI、JSON 键、read-only 边界和聚合字段；`docs/multi-worker-orchestration.md` 和 `docs/acceptance-next-matrix.md` 也同步收入口径。
+
 ## 2026-05-10 live receipt / acceptance matrix / runbook 文档同步
 - collector 口径已收成 standalone overlay/merge layer：`docs/live-receipt-collection.md` 现在明确它位于 readiness / preflight 之后、最终 live receipt 之前，脚本以 base template 为底接收 partial receipt overlay，再深度合并成 canonical live receipt；同时把 `subagent_live_rehearsal` 的输入输出关系写清楚，`real_live_acceptance` 明确单 worker rehearsal 不是 runner pool ready。
 - 这轮只做文档口径同步，不改脚本逻辑、不碰真实服务：`docs/live-operator-test-runbook.md`、`docs/acceptance-next-matrix.md`、`docs/third-test-candidate.md` 统一了最新 live receipt 结构说明，把 `service_evidence` / `service_receipts` / `real_live_acceptance.services` 明确成 7 项 1:1 对齐（Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain）。

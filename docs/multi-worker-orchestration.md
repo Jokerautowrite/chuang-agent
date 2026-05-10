@@ -37,6 +37,7 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 - `goal step` 不做 cleanup/delete/purge/reset/release-claim，不删除 dispatch、claim、release 或 report 文件。
 - `goal step` 不连接 Feishu，不复用 Codex/Hermes bridge，不控制 Hermes 服务或记忆。
 - `goal collect` 只读聚合 manifest 里的 queued reports；只有当 report 齐全、身份匹配且执行成功时，才会返回可用于 `goal checkpoint --from-collect` 的 suggestion。
+- `live-runner-readiness-view` 只做只读视图，汇总 `status` / `doctor` / `console snapshot` / `app-server health` 里的 runner gate、allowlist、capability route 和 admission 状态；它不启动 worker，不替代 `subagent live-preflight`，也不等于 live runner ready。
 - scope 必须先定义，不能互相重叠。
 - worker 之间只通过计划和报告协作，不共享临时状态。
 - command runner 仍必须显式传 `--approve-exec`。
@@ -46,6 +47,8 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 ## Live Worker 当前缺口
 
 当前 multi-worker 能证明的是本地队列、bounded `goal step`、`goal collect` 和 live-preflight-only 证据链，不是 live worker 池已经可用。真实 live subagent worker 还缺三层接入件：audited adapter 负责把外部 runner 纳入可审计边界，config 负责固定 runner command、scope、capability 和 stop/timeout，gate 负责默认关闭并要求显式审批。
+
+`live-runner-readiness-view` 和 `subagent live-preflight` 的分工要分开看：前者只把 runner gate、allowlist、capability route 和 admission 状态做成 operator 只读视图，后者才是命令级 preflight 证据；两者都不启动真实 worker，也都不能被解释成 live runner ready。
 
 在这三层完成前，`live_runner_rehearsal_smoke_ok` 只能解释为 route/admission/governance 字段可见。它不能解释为真实 worker 已启动、真实桌面/browser 已执行、provider 已 live 调用，或 wiki/GBrain 已接通。
 
@@ -74,6 +77,8 @@ live_runner_rehearsal_smoke_ok
 ```
 
 第一条覆盖 `goal dispatch -> goal step -> goal collect` 的本地闭环，并继续证明 checkpoint 只能来自 `--from-collect`。第二条覆盖 live-preflight-only 边界：`starts_external_worker=false`、live gate disabled、runner allowlist/capability route 可见、`ReportAdmission=Accepted/report_validated` 可见、治理审批字段可见。
+
+如果今晚先想看 runner readiness 视图，再决定要不要跑 preflight 或 smoke，先看 `live-runner-readiness-view`；它只读汇总 runner gate、allowlist、capability route 和 admission 状态，不启动 worker。`subagent live-preflight` 则继续负责命令级预检，验证 gate、allowlist、capability routing、ReportAdmission 和 `starts_external_worker=false`。
 
 如果今晚只想看派活到收集，不写 checkpoint，使用临时目录手工跑到 collect 即停：
 
@@ -132,6 +137,14 @@ cargo run --quiet -- subagent live-preflight \
 ```
 
 预期边界是 `ready_for_live=false` 且 `starts_external_worker=false`。这表示 preflight 证据可见，不表示真实 runner 已经启动或允许启动。
+
+如果要把 status / doctor / app-server health / live-preflight 合成一份只读视图，可以再跑：
+
+```bash
+sh scripts/chuang-live-runner-readiness-view.sh --json
+```
+
+这个视图只做本地聚合，不会启动 worker、不会接真实外部服务，也不会把 blocked 证据改写成 ready。
 
 ## 下一步
 

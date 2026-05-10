@@ -1,0 +1,428 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
+
+fn manifest_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn cargo_command() -> Command {
+    let mut command = Command::new("cargo");
+    command.env("CODEX_PPTOKEN_API_KEY", "test-key");
+    command
+}
+
+fn temp_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-{name}-{nanos}"))
+}
+
+fn write_fake_status_config(root: &Path) -> PathBuf {
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nidentity_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
+            root.join("memory.db").display(),
+            root.join("identity").display(),
+            root.join("identity-bootstrap").display()
+        ),
+    )
+    .expect("config should be written");
+    config_path
+}
+
+#[test]
+fn live_runner_readiness_view_rejects_missing_allow_runner_command() {
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "subagent live-preflight requires --allow-runner-command"
+    );
+}
+
+#[test]
+fn live_runner_readiness_view_outputs_readonly_preflight_json_without_secrets() {
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "live-preflight",
+            "--runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--allow-runner-command",
+            "scripts/chuang-codex-runner.py",
+            "--requires-capability",
+            "rehearsal",
+            "--capability",
+            "rehearsal",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("test-key"));
+
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout json");
+    let rehearsal = &parsed["rehearsal"];
+
+    let mut rehearsal_keys = rehearsal
+        .as_object()
+        .expect("rehearsal should be an object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    rehearsal_keys.sort();
+    let mut expected_rehearsal_keys = vec![
+        "adapter_entrypoint".to_string(),
+        "approval_audit_prerequisites".to_string(),
+        "approval_audit_prerequisites_ok".to_string(),
+        "capability_routing".to_string(),
+        "capability_routing_ok".to_string(),
+        "forbidden_capabilities".to_string(),
+        "forbidden_capabilities_ok".to_string(),
+        "gate".to_string(),
+        "gate_enabled".to_string(),
+        "live_worker_available".to_string(),
+        "next_action".to_string(),
+        "ok".to_string(),
+        "readonly".to_string(),
+        "ready_for_live".to_string(),
+        "report_admission".to_string(),
+        "report_admission_ok".to_string(),
+        "runner_allowlist".to_string(),
+        "runner_allowlist_ok".to_string(),
+        "starts_external_worker".to_string(),
+        "worker_runtime_reason".to_string(),
+        "worker_runtime_state".to_string(),
+    ];
+    expected_rehearsal_keys.sort();
+    assert_eq!(rehearsal_keys, expected_rehearsal_keys);
+    assert_eq!(rehearsal["ok"], true);
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["readonly"], true);
+    assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["live_worker_available"], false);
+    assert_eq!(
+        rehearsal["worker_runtime_state"],
+        "configured_but_gate_disabled"
+    );
+    assert_eq!(
+        rehearsal["worker_runtime_reason"],
+        "runner command and capability route are configured, but CHUANG_CODEX_RUNNER_ENABLE is not enabled; live_worker_available remains false"
+    );
+    assert_eq!(rehearsal["gate_enabled"], false);
+    assert_eq!(rehearsal["runner_allowlist_ok"], true);
+    assert_eq!(rehearsal["capability_routing_ok"], true);
+    assert_eq!(rehearsal["report_admission_ok"], true);
+    assert_eq!(rehearsal["forbidden_capabilities_ok"], true);
+    assert_eq!(rehearsal["approval_audit_prerequisites_ok"], true);
+    assert_eq!(rehearsal["next_action"], "keep rehearsal read-only; set CHUANG_CODEX_RUNNER_ENABLE=1 only after operator approval of exact runner command, capabilities, and report admission evidence");
+    assert_eq!(rehearsal["gate"]["enabled"], false);
+    assert_eq!(
+        rehearsal["gate"]["required_env"],
+        "CHUANG_CODEX_RUNNER_ENABLE"
+    );
+    assert_eq!(rehearsal["gate"]["audit_label"], "subagent.runner.live");
+    assert_eq!(rehearsal["runner_allowlist"]["ok"], true);
+    assert_eq!(
+        rehearsal["runner_allowlist"]["matched_runner_command"],
+        "scripts/chuang-codex-runner.py"
+    );
+    assert_eq!(rehearsal["runner_allowlist"]["exact_match_required"], true);
+    assert_eq!(rehearsal["capability_routing"]["ok"], true);
+    assert_eq!(
+        rehearsal["capability_routing"]["matched_capabilities"],
+        serde_json::json!(["rehearsal"])
+    );
+    assert_eq!(rehearsal["report_admission"]["ok"], true);
+    assert_eq!(
+        rehearsal["report_admission"]["covered_commands"],
+        serde_json::json!(["run-once", "run-loop", "report", "collect"])
+    );
+    assert_eq!(rehearsal["forbidden_capabilities"]["ok"], true);
+    assert_eq!(rehearsal["approval_audit_prerequisites"]["ok"], true);
+    assert_eq!(
+        rehearsal["approval_audit_prerequisites"]["audit_label"],
+        "subagent.runner.live"
+    );
+}
+
+#[test]
+fn live_runner_readiness_view_status_json_exposes_blocked_reason_and_next_action() {
+    let root = temp_root("live-runner-readiness-view");
+    let config_path = write_fake_status_config(&root);
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("test-key"));
+
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout json");
+    let subagent = &parsed["subagent_readiness"];
+    let mut subagent_keys = subagent
+        .as_object()
+        .expect("subagent_readiness should be an object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    subagent_keys.sort();
+    let mut expected_subagent_keys = vec![
+        "blocked_count".to_string(),
+        "capability_mismatch_blocks_live".to_string(),
+        "capability_mismatch_reason".to_string(),
+        "capability_route_state".to_string(),
+        "deferred_count".to_string(),
+        "layer_count".to_string(),
+        "layers".to_string(),
+        "live_adapter_ready".to_string(),
+        "live_adapter_reason".to_string(),
+        "live_adapter_state".to_string(),
+        "live_worker_available".to_string(),
+        "local_contract_ready".to_string(),
+        "local_contract_reason".to_string(),
+        "local_contract_state".to_string(),
+        "mode".to_string(),
+        "ok".to_string(),
+        "overall_state".to_string(),
+        "partial_count".to_string(),
+        "ready_count".to_string(),
+        "worker_runtime_blocked_reason".to_string(),
+        "worker_runtime_reason".to_string(),
+        "worker_runtime_state".to_string(),
+    ];
+    expected_subagent_keys.sort();
+    assert_eq!(subagent_keys, expected_subagent_keys);
+    assert_eq!(subagent["ok"], true);
+    assert_eq!(subagent["mode"], "fake");
+    assert_eq!(subagent["live_worker_available"], false);
+    assert_eq!(subagent["worker_runtime_state"], "local_contract_only");
+    assert_eq!(
+        subagent["worker_runtime_blocked_reason"],
+        "live_worker_unavailable: subagent slot is fake; local contracts are visible but no live worker can run"
+    );
+    assert_eq!(subagent["capability_mismatch_blocks_live"], true);
+    assert_eq!(
+        subagent["capability_mismatch_reason"],
+        "live subagent preflight must reject missing or mismatched dispatch required_capabilities before any worker starts"
+    );
+
+    let layers = subagent["layers"]
+        .as_array()
+        .expect("subagent layers should be an array");
+    let live_runner = layers
+        .iter()
+        .find(|layer| layer["name"] == "live_runner_rehearsal")
+        .expect("live_runner_rehearsal layer should exist");
+    assert_eq!(live_runner["state"], "ready");
+    assert_eq!(live_runner["live_worker_available"], false);
+    assert_eq!(live_runner["worker_runtime_state"], "local_contract_only");
+    assert_eq!(live_runner["blocked_reason"], "live_runner_rehearsal is read-only; missing or mismatched dispatch required_capabilities keep ready_for_live=false");
+    assert_eq!(
+        live_runner["capability_route_state"],
+        "requires_dispatch_required_capabilities"
+    );
+    assert_eq!(live_runner["capability_mismatch_blocks_live"], true);
+    assert_eq!(
+        live_runner["capability_mismatch_reason"],
+        "capability mismatch or missing dispatch required_capabilities must block live runner readiness"
+    );
+    assert_eq!(live_runner["local_contract_ready"], true);
+    assert_eq!(live_runner["local_contract_state"], "ready");
+    assert_eq!(
+        live_runner["local_contract_reason"],
+        "live_runner_rehearsal local contract is protocol-ready"
+    );
+    assert_eq!(live_runner["live_adapter_ready"], false);
+    assert_eq!(live_runner["live_adapter_state"], "deferred");
+    assert_eq!(
+        live_runner["live_adapter_reason"],
+        "read-only live runner rehearsal is ready; real worker execution remains gated and deferred"
+    );
+    assert_eq!(
+        live_runner["current"],
+        "subagent live-preflight rehearses live runner gate, command allowlist, capability routing, ReportAdmission, forbidden capabilities, and audit prerequisites without starting a worker"
+    );
+    assert_eq!(
+        live_runner["next_action"],
+        "run one approved live runner rehearsal only after operator enables CHUANG_CODEX_RUNNER_ENABLE=1 for an exact allowlisted command"
+    );
+    assert_eq!(live_runner["boundary"], "read_only_preflight");
+}
+
+#[test]
+fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
+    let output = Command::new("bash")
+        .arg("scripts/chuang-live-runner-readiness-view.sh")
+        .arg("--json")
+        .env("CHUANG_AGENT_ROOT", manifest_dir())
+        .current_dir(manifest_dir())
+        .output()
+        .expect("script should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("test-key"));
+
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout json");
+    let mut keys = parsed
+        .as_object()
+        .expect("aggregated view should be an object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            "binary_blocked_reason".to_string(),
+            "binary_path".to_string(),
+            "config_path".to_string(),
+            "connects_hermes".to_string(),
+            "connects_real_feishu".to_string(),
+            "connects_real_provider".to_string(),
+            "deletes_files".to_string(),
+            "live_runner_rehearsal".to_string(),
+            "modifies_repo".to_string(),
+            "prints_secret_values".to_string(),
+            "readonly".to_string(),
+            "reads_secret_values".to_string(),
+            "schema_version".to_string(),
+            "source_evidence_refs".to_string(),
+            "sources".to_string(),
+            "starts_external_worker".to_string(),
+            "starts_worker".to_string(),
+            "workspace_root".to_string(),
+            "writes_core_memory".to_string(),
+        ]
+    );
+    assert_eq!(parsed["schema_version"], 1);
+    assert_eq!(parsed["readonly"], true);
+    assert_eq!(parsed["binary_blocked_reason"], Value::Null);
+    assert!(parsed["binary_path"]
+        .as_str()
+        .expect("binary path")
+        .contains("target/debug/chuang-agent"));
+    assert_eq!(parsed["connects_hermes"], false);
+    assert_eq!(parsed["connects_real_provider"], false);
+    assert_eq!(parsed["connects_real_feishu"], false);
+    assert_eq!(parsed["starts_external_worker"], false);
+    assert_eq!(parsed["starts_worker"], false);
+    assert_eq!(parsed["reads_secret_values"], false);
+    assert_eq!(parsed["prints_secret_values"], false);
+    assert_eq!(parsed["modifies_repo"], false);
+    assert_eq!(parsed["deletes_files"], false);
+    assert_eq!(parsed["writes_core_memory"], false);
+    assert_eq!(
+        parsed["workspace_root"],
+        manifest_dir().display().to_string()
+    );
+    assert_eq!(
+        parsed["config_path"],
+        manifest_dir().join("config.toml").display().to_string()
+    );
+
+    let rehearsal = &parsed["live_runner_rehearsal"];
+    assert_eq!(rehearsal["state"], "ready");
+    assert_eq!(rehearsal["overall_state"], "ready");
+    assert_eq!(rehearsal["ready_for_live"], false);
+    assert_eq!(rehearsal["starts_external_worker"], false);
+    assert_eq!(rehearsal["capability_mismatch_blocks_live"], true);
+    assert!(rehearsal["blocked_reason"]
+        .as_str()
+        .expect("blocked reason")
+        .contains("required_capabilities"));
+    assert!(!rehearsal["next_action"]
+        .as_str()
+        .expect("next action")
+        .is_empty());
+    assert!(rehearsal["source_evidence_refs"]["subagent_live_preflight"]
+        .as_str()
+        .expect("preflight ref")
+        .contains("subagent live-preflight"));
+    assert!(rehearsal["source_evidence_refs"]["status_json"]
+        .as_str()
+        .expect("status ref")
+        .contains("status --config"));
+    assert!(rehearsal["source_evidence_refs"]["doctor_json"]
+        .as_str()
+        .expect("doctor ref")
+        .contains("doctor --config"));
+    assert!(rehearsal["source_evidence_refs"]["app_server_health"]
+        .as_str()
+        .expect("app server ref")
+        .contains("app-server health"));
+    assert_eq!(
+        rehearsal["layers"]["status"]["name"],
+        "live_runner_rehearsal"
+    );
+    assert_eq!(
+        rehearsal["layers"]["doctor"]["name"],
+        "live_runner_rehearsal"
+    );
+    assert_eq!(
+        rehearsal["layers"]["app_server_health"]["name"],
+        "live_runner_rehearsal"
+    );
+    assert_eq!(
+        rehearsal["subagent_readiness"]["status"]["mode"],
+        "queued_external"
+    );
+    assert_eq!(
+        rehearsal["subagent_readiness"]["doctor"]["mode"],
+        "queued_external"
+    );
+    assert_eq!(
+        rehearsal["subagent_readiness"]["app_server_health"]["mode"],
+        "queued_external"
+    );
+}

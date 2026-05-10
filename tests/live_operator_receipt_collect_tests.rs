@@ -58,11 +58,9 @@ fn make_temp_dir(prefix: &str) -> PathBuf {
 #[test]
 fn live_operator_receipt_collect_script_is_readonly_overlay_merge_tool() {
     let script = fs::read_to_string(script_path()).expect("collector script should be readable");
-    assert!(script.contains("Readonly overlay/merge collector for a manual Chuang live receipt."));
-    assert!(script.contains("--base PATH"));
-    assert!(script.contains("--overlay PATH"));
-    assert!(script.contains("overlay_merge"));
-    assert!(script.contains("service_receipts overlay ids must match the canonical 7-slot order"));
+    assert!(script.contains("Readonly local receipt collector for operator live receipts."));
+    assert!(script.contains("--base-file PATH"));
+    assert!(script.contains("--overlay-file PATH"));
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("git reset"));
     assert!(!script.contains("git checkout"));
@@ -109,9 +107,9 @@ fn live_operator_receipt_collect_script_merges_base_and_overlay_receipts() {
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
-        .arg("--base")
+        .arg("--base-file")
         .arg(&base_path)
-        .arg("--overlay")
+        .arg("--overlay-file")
         .arg(&overlay_path)
         .env("CHUANG_AGENT_ROOT", &manifest_dir)
         .current_dir(&manifest_dir)
@@ -128,17 +126,14 @@ fn live_operator_receipt_collect_script_merges_base_and_overlay_receipts() {
     let data: Value = serde_json::from_str(&stdout).expect("collector output should be json");
 
     assert_eq!(data["schema_version"], 1);
-    assert_eq!(data["receipt_kind"], "live_operator_receipt_collected");
     assert!(data["tested_at"].as_str().is_some());
-    assert_eq!(data["readonly"], true);
-    assert_eq!(data["collect_overlay_count"], 1);
-    assert_eq!(data["collect_mode"], "overlay_merge");
-    assert_eq!(
-        data["collect_source"],
-        "scripts/chuang-live-operator-receipt-collect.sh"
-    );
-    assert_eq!(data["collect_can_connect_real_services"], false);
+    assert_eq!(data["acceptance_status"], "not_verified");
+    assert_eq!(data["can_mark_real_live_ready"], false);
+    assert_eq!(data["cannot_mark_complete_without_operator_evidence"], true);
     assert_eq!(data["boundaries"], data["readonly_boundaries"]);
+    assert_eq!(data["boundaries"]["readonly"], true);
+    assert_eq!(data["boundaries"]["connects_real_feishu"], false);
+    assert_eq!(data["boundaries"]["connects_real_provider"], false);
 
     let service_ids = data["service_receipts"]
         .as_array()
@@ -210,12 +205,16 @@ fn live_operator_receipt_collect_script_merges_base_and_overlay_receipts() {
         data["notes"],
         serde_json::json!(["collector merged overlay evidence"])
     );
+    assert_eq!(
+        data["codex_hermes_isolation"],
+        "<keep_codex_and_hermes_separate>"
+    );
     assert!(!stdout.contains("app_secret"));
     assert!(!stdout.contains("token="));
 }
 
 #[test]
-fn live_operator_receipt_collect_script_rejects_service_receipt_order_mismatch() {
+fn live_operator_receipt_collect_script_canonicalizes_service_receipt_order() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let temp_dir = make_temp_dir("chuang-live-operator-receipt-collect-reject");
     let base_output = run_json_script(operator_receipt_script_path().as_path(), &[]);
@@ -236,16 +235,45 @@ fn live_operator_receipt_collect_script_rejects_service_receipt_order_mismatch()
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
-        .arg("--base")
+        .arg("--base-file")
         .arg(&base_path)
-        .arg("--overlay")
+        .arg("--overlay-file")
         .arg(&overlay_path)
         .env("CHUANG_AGENT_ROOT", &manifest_dir)
         .current_dir(&manifest_dir)
         .output()
         .expect("collector should execute");
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("canonical 7-slot order"));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: Value = serde_json::from_str(&stdout).expect("collector output should be json");
+    assert_eq!(
+        data["service_receipts"]
+            .as_array()
+            .expect("service receipts")
+            .iter()
+            .map(|item| item["id"].as_str().expect("id"))
+            .collect::<Vec<_>>(),
+        vec![
+            "feishu",
+            "provider",
+            "subagent_live_rehearsal",
+            "desktop",
+            "browser",
+            "wiki",
+            "gbrain"
+        ]
+    );
+    assert_eq!(
+        data["service_receipts"][0]["status"],
+        "<not_verified|verified|blocked>"
+    );
+    assert_eq!(
+        data["service_receipts"][1]["status"],
+        "<not_verified|verified|blocked>"
+    );
 }

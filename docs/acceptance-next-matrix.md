@@ -26,6 +26,8 @@ final verify 本地闭环通过
 
 当前 acceptance 口径必须区分“已 mapped/已 preflight”和“已 live”。GA 9 tools 已 mapped 只代表工具槽位、命令面和能力边界可见；真实 desktop/browser live 仍缺证据。live subagent worker 仍需要 audited adapter、config 和 gate 三件套后才能启用；三大 live gates 默认关闭，分别覆盖 provider live、subagent live runner、desktop/browser actuator live action。Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 都需要各自的真实 live receipt，不能由本地 readiness 或 `<set>` 状态代替。
 
+`live-runner-readiness-view` 只读汇总 runner gate、allowlist、capability route 和 admission 状态；它帮助 operator 看见当前 runner readiness，但不启动 worker，不替代 `subagent live-preflight`，也不等于 live runner ready。
+
 状态面单一入口：`status --json` 的 `live_readiness` 固定复述这些词，验收矩阵只引用同一组词。`ready` / `local-ready` 只表示本地合同、smoke、诊断面或只读预检已通过，不表示真实 live receipt 已完成。
 
 固定状态词：
@@ -35,6 +37,7 @@ final verify 本地闭环通过
 | `ga_local_mapped_only` | true | GA 9 tools 已完成本地 slot、route、命令面和诊断面映射 | 真实 desktop/browser live 已验收 |
 | `desktop_browser_live_gated` | true | 真实桌面/浏览器动作仍在 live gate、allowlist、治理和 receipt 之后 | actuator live action ready |
 | `browser_worker_frozen` | true | 旧 BrowserWorker 线冻结且不在主执行路径 | browser automation ready 或已恢复 |
+| `live_runner_readiness_view` | read-only-view | 只读视图只汇总 runner gate、allowlist、capability route 和 admission 状态 | live runner ready |
 | `live_worker_available` | false | 当前 subagent preflight/rehearsal 不启动、不附着真实 worker | runner 池可用或 live worker 已上线 |
 | `provider_live_request_verified_by_status` | false | `status --json` 只报告 provider 配置/readiness，不发真实 provider 请求 | provider live 已验收 |
 | `real_external_acceptance_pending` | true | Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 真实外部验收仍需人工 receipt | 第三测试 100% 完成 |
@@ -45,11 +48,13 @@ final verify 本地闭环通过
 | 项目 | 判定 | 验收方式 | 100% 前是否必须人工验证 | 边界 |
 | --- | --- | --- | --- | --- |
 | live/readiness 状态面 | `local_ready_live_pending` | `cargo run --quiet -- status --json` -> `live_readiness.overall_state=local_ready_live_pending`，并固定 `mapped_does_not_mean_live=true / gated_does_not_mean_ready=true / frozen_does_not_mean_ready=true / ready_does_not_mean_live=true` | 否，自动复验即可 | 状态面只收口术语；不连接真实服务、不启动 worker、不把 local-ready 当 live-ready |
+| live-runner-readiness-view | `read-only-view` | `status --json` / `doctor` / `console snapshot` / `app-server health` 的 live runner readiness 只读视图 | 否，自动复验即可 | 只读视图只汇总 runner gate、allowlist、capability route 和 admission 状态；不启动 worker，不替代 `subagent live-preflight`，不等于 live runner ready |
 | third-test candidate wrapper | ready | `sh scripts/chuang-third-test-smoke.sh` -> `third_test_candidate_smoke_ok` | 否，自动复验即可 | 只串本地门禁和只读摘要；operator env blocked 可见但不让本地合同失败 |
 | candidate verify wrapper | ready | `sh scripts/chuang-candidate-verify.sh` -> `chuang_candidate_verify_ok`，或明确报告 provider non-live block | 否，自动复验即可 | dirty-tree friendly；覆盖 live-gaps、operator checklist 和 goal run status 只读摘要；不连接真实 provider/Feishu；provider env 缺失只作为候选现场 blocker |
 | live-gaps matrix | ready | `bash scripts/chuang-live-gaps-check.sh` -> `marker=live_gaps_check_ok`；`--json` 输出 `local_contract=ready / preflight=ready_but_no_start / real_live=pending` | 否，自动复验即可 | 只读 `status --json` 和 `subagent live-preflight --json`；不启 live gate、不启动 worker、不连接真实服务，provider 只显示 `<set>/<missing>` |
 | final verify 本地门禁 | ready | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 否，自动复验即可 | 证明本地合同闭环，不证明 live Feishu 或真实 runner |
 | live-readiness 只读预检 | local-preflight-ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | 否，自动复验即可 | 只读预检，不连接真实 Feishu、不读 secret、不控制服务；不等于 live-ready |
+| live runner readiness view | local-readonly-view | `sh scripts/chuang-live-runner-readiness-view.sh --json` -> `live_runner_readiness_view_ok=true`，并输出 `ready_for_live`、`starts_external_worker`、`capability_mismatch_blocks_live`、`blocked_reason`、`next_action` 和 source evidence refs | 否，自动复验即可 | 只读聚合 status / doctor / app-server health / live-preflight；不启动 worker，不接真实外部服务，不把 blocked 证据改写成 ready |
 | Feishu `/tools` 可见能力 | ready | 在 Chuang 专用 Feishu 会话发送 `/tools` 或 `/capabilities`，可见 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界 | 否，已作为 bridge 命令面可复验；live 侧可继续截图/receipt 留证 | 只展示当前能力与边界，不执行本地检查、不修改服务、不打印 secret |
 | operator receipt template | ready | `scripts/chuang-live-operator-receipt.sh --json` 输出 `request_id`、`approval_scope`、`rollback_condition`、`readonly_boundaries`、`service_evidence`、`service_receipts` 和 `real_live_acceptance`；其中 `service_receipts` / `service_evidence` / `real_live_acceptance.services` 逐项对齐 Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 7 项 | 否，自动复验模板结构即可 | 只生成模板，不连接服务；`can_mark_real_live_ready=false`，不能代替人工 evidence |
 | GA 9 tools mapped | `ga_local_mapped_only` | `/tools` / `/capabilities` 和本地诊断面显示 GA 9 工具映射、scope 和边界 | 否，自动和人工查看均可 | 只证明 mapped/routed；真实 desktop/browser live 仍需单独 receipt 和 action allowlist |
