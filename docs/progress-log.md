@@ -1,5 +1,10 @@
 # 协作进度日志
 
+## 2026-05-10 live readiness wrapper coverage checkpoint
+- 已提交 `1b71aef feat: extend live readiness wrapper coverage`，把 `scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 `live runner readiness view` 顺序接入候选链路，并在 `tests/cli_smoke_tests.rs`、`tests/live_operator_scripts_tests.rs` 里补齐同口径断言，保证它稳定位于 `live gaps` 之后、`operator checklist` / `goal run status` 之前。
+- clean-tree 复验继续通过：`sh scripts/chuang-final-verify.sh` 与 `sh scripts/chuang-third-test-smoke.sh` 都回到 `chuang_final_verify_ok` / `third_test_candidate_smoke_ok`，当前工作树已清空。
+- 当前仍然后置的是真实外部验收链路，尤其是 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 的人工 evidence 和最终 `real_live` 验证。
+
 ## 2026-05-10 live runner readiness view 收口
 - 新增 `scripts/chuang-live-runner-readiness-view.sh`，把 `subagent live-preflight`、`status --json`、`doctor --json` 和 `app-server health --diagnostic --json` 聚合成一份本地只读视图，输出 `ready_for_live`、`starts_external_worker`、`capability_mismatch_blocks_live`、`blocked_reason`、`next_action` 和 source evidence refs；它只做聚合，不启动 worker，不接真实外部服务，也不把 blocked 证据改写成 ready。
 - 新增 `tests/live_runner_readiness_view_tests.rs`，锁定新视图的 CLI、JSON 键、read-only 边界和聚合字段；`docs/multi-worker-orchestration.md` 和 `docs/acceptance-next-matrix.md` 也同步收入口径。

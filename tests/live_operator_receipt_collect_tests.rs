@@ -277,3 +277,83 @@ fn live_operator_receipt_collect_script_canonicalizes_service_receipt_order() {
         "<not_verified|verified|blocked>"
     );
 }
+
+#[test]
+fn live_operator_receipt_collect_script_refuses_overlay_live_ready_boundary_escalation() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let temp_dir = make_temp_dir("chuang-live-operator-receipt-collect-boundary");
+    let base_output = run_json_script(operator_receipt_script_path().as_path(), &[]);
+    let base_path = write_temp_json(&temp_dir, "base.json", &base_output);
+
+    let overlay = serde_json::json!({
+        "acceptance_status": "verified",
+        "can_mark_real_live_ready": true,
+        "cannot_mark_complete_without_operator_evidence": false,
+        "readonly_boundaries": {
+            "readonly": false,
+            "starts_workers": true,
+            "dispatches_tasks": true,
+            "connects_real_provider": true,
+            "modifies_repo": true,
+            "prints_secret_values": true
+        },
+        "boundaries": {
+            "readonly": false,
+            "starts_workers": true,
+            "dispatches_tasks": true,
+            "connects_real_provider": true,
+            "modifies_repo": true,
+            "prints_secret_values": true
+        },
+        "real_live_acceptance": {
+            "complete": true,
+            "status": "verified",
+            "gap_count": 0,
+            "cannot_mark_complete_from_template": false,
+            "requires_operator_evidence": false
+        }
+    });
+    let overlay_path = write_temp_json(&temp_dir, "overlay.json", &overlay);
+
+    let output = Command::new("bash")
+        .arg(script_path())
+        .arg("--json")
+        .arg("--base-file")
+        .arg(&base_path)
+        .arg("--overlay-file")
+        .arg(&overlay_path)
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("collector should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let data: Value =
+        serde_json::from_slice(&output.stdout).expect("collector output should be json");
+
+    assert_eq!(data["acceptance_status"], "not_verified");
+    assert_eq!(data["can_mark_real_live_ready"], false);
+    assert_eq!(data["cannot_mark_complete_without_operator_evidence"], true);
+    assert_eq!(data["boundaries"], data["readonly_boundaries"]);
+    assert_eq!(data["boundaries"]["readonly"], true);
+    assert_eq!(data["boundaries"]["starts_workers"], false);
+    assert_eq!(data["boundaries"]["dispatches_tasks"], false);
+    assert_eq!(data["boundaries"]["connects_real_provider"], false);
+    assert_eq!(data["boundaries"]["modifies_repo"], false);
+    assert_eq!(data["boundaries"]["prints_secret_values"], false);
+    assert_eq!(data["real_live_acceptance"]["complete"], false);
+    assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 7);
+    assert_eq!(
+        data["real_live_acceptance"]["cannot_mark_complete_from_template"],
+        true
+    );
+    assert_eq!(
+        data["real_live_acceptance"]["requires_operator_evidence"],
+        true
+    );
+}

@@ -8,7 +8,7 @@
 
 第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、single worker rehearsal 证据，然后再回到本地 `final verify` 绿。
 
-2026-05-09 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。`/tools` / `/capabilities` 已能展示当前可见命令能力与边界。下一步不再卡“桥是否挂上”，而是收集 live 侧可审计 receipt、provider `<set>` 状态和单 worker rehearsal 证据。
+2026-05-10 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。第三测试候选的本地 gates 已收口到 `final verify`、live-readonly preflight、live-gaps、candidate verify、operator checklist/receipt 模板结构和 provider readiness 只读检查。下一步不再卡“桥是否挂上”或“本地门禁是否可跑”，而是收集 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。
 
 当前固定状态词：
 
@@ -32,13 +32,15 @@
 
 这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。
 
+本地 gate completion 的含义到这里为止：脚本、模板、诊断面和只读证据链可复验。它不能替代 `service_evidence` / `service_receipts` / `real_live_acceptance.services` 七项真实 evidence，也不能把 `can_mark_real_live_ready=false` 的模板默认值改写成 acceptance 结论。
+
 ### 必须人工 live check
 
 - Chuang 专用 Feishu live 通道真实收发一次，并拿到可审计 receipt。
 - 在 Chuang 专用 Feishu 会话发 `/tools`，确认可见能力包含 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界。
-- Chuang provider env 对齐，输出只允许 `变量名=<set>`；`scripts/chuang-live-operator-checklist.sh` 会优先吸收默认 `~/.config/chuang-agent/provider.env`，默认文件存在时不需要手工 export。
+- Chuang provider env/readiness 对齐，输出只允许 `变量名=<set>`；真实 provider acceptance 还需要单独 live request receipt 或 runtime report id，不能由 `<set>` 代替。
 - desktop/browser 的只读观察回执单独跑一轮，确认 `observe` / `screenshot` 回执里有 `read_only=true` 和 `live_gate_required=false`，但不把它写成 click/input live ready。
-- 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要。
+- 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要；`service_evidence` / `service_receipts` / `real_live_acceptance.services` 必须按 Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 七项 1:1 对齐。
 - 单个 worker live rehearsal 通过 gate + allowlist + capability routing + report admission。
 - live rehearsal 之后再次跑 `sh scripts/chuang-final-verify.sh`，确认本地合同没坏。
 
@@ -47,8 +49,8 @@
 唯一硬门槛不是“再多跑几个 smoke”，而是把上面的人工 live 链闭环做实：
 
 1. Chuang 专用 Feishu live 通道拿到真实 receipt。
-2. provider/env 对齐完成，secret 只显示为 `<set>`。
-3. operator receipt 完整。
+2. provider/env readiness 对齐完成，secret 只显示为 `<set>`，并拿到 provider live request receipt 或 runtime report id。
+3. operator receipt 完整，七项 service evidence / receipt / acceptance services 同序同名且都有现场结论。
 4. 单个 worker live rehearsal 完整。
 5. rehearsal 后 `final verify` 仍然通过。
 

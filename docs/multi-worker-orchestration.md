@@ -37,7 +37,8 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 - `goal step` 不做 cleanup/delete/purge/reset/release-claim，不删除 dispatch、claim、release 或 report 文件。
 - `goal step` 不连接 Feishu，不复用 Codex/Hermes bridge，不控制 Hermes 服务或记忆。
 - `goal collect` 只读聚合 manifest 里的 queued reports；只有当 report 齐全、身份匹配且执行成功时，才会返回可用于 `goal checkpoint --from-collect` 的 suggestion。
-- `live-runner-readiness-view` 只做只读视图，汇总 `status` / `doctor` / `console snapshot` / `app-server health` 里的 runner gate、allowlist、capability route 和 admission 状态；它不启动 worker，不替代 `subagent live-preflight`，也不等于 live runner ready。
+- `live-runner-readiness-view` 只做只读状态视图，汇总 `status` / `doctor` / `console snapshot` / `app-server health` 里的 runner gate、blocked reason、capability mismatch 和 next action；它不运行 `subagent live-preflight`，不启动 worker，不产生命令级 preflight 证据，也不等于 live runner ready。
+- `live-operator-receipt-collect` 只做本地只读回执模板/收集器，记录脱敏占位字段和 evidence refs；它不连接 Feishu/provider/runner，不替代 operator-approved real live evidence。
 - scope 必须先定义，不能互相重叠。
 - worker 之间只通过计划和报告协作，不共享临时状态。
 - command runner 仍必须显式传 `--approve-exec`。
@@ -48,7 +49,9 @@ cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 
 当前 multi-worker 能证明的是本地队列、bounded `goal step`、`goal collect` 和 live-preflight-only 证据链，不是 live worker 池已经可用。真实 live subagent worker 还缺三层接入件：audited adapter 负责把外部 runner 纳入可审计边界，config 负责固定 runner command、scope、capability 和 stop/timeout，gate 负责默认关闭并要求显式审批。
 
-`live-runner-readiness-view` 和 `subagent live-preflight` 的分工要分开看：前者只把 runner gate、allowlist、capability route 和 admission 状态做成 operator 只读视图，后者才是命令级 preflight 证据；两者都不启动真实 worker，也都不能被解释成 live runner ready。
+`live-runner-readiness-view`、`subagent live-preflight` 和真实 live evidence path 的分工要分开看：readiness view 只汇总本地状态面；`subagent live-preflight` 才是命令级 preflight 证据；真实 live evidence 只能来自 operator-approved live run 之后的外部证据 ref、runtime report id 或 live request receipt。前两者都不启动真实 worker，也都不能被解释成 live runner ready。
+
+`live-operator-receipt-collect` 只收口 Feishu/provider/subagent/desktop/browser/wiki/GBrain 七项 receipt 模板字段，保持 `can_mark_real_live_ready=false` 和 `real_live_acceptance.status=not_verified`。它可以指向真实证据 ref，但模板本身不是证据产生动作。
 
 在这三层完成前，`live_runner_rehearsal_smoke_ok` 只能解释为 route/admission/governance 字段可见。它不能解释为真实 worker 已启动、真实桌面/browser 已执行、provider 已 live 调用，或 wiki/GBrain 已接通。
 
@@ -78,7 +81,7 @@ live_runner_rehearsal_smoke_ok
 
 第一条覆盖 `goal dispatch -> goal step -> goal collect` 的本地闭环，并继续证明 checkpoint 只能来自 `--from-collect`。第二条覆盖 live-preflight-only 边界：`starts_external_worker=false`、live gate disabled、runner allowlist/capability route 可见、`ReportAdmission=Accepted/report_validated` 可见、治理审批字段可见。
 
-如果今晚先想看 runner readiness 视图，再决定要不要跑 preflight 或 smoke，先看 `live-runner-readiness-view`；它只读汇总 runner gate、allowlist、capability route 和 admission 状态，不启动 worker。`subagent live-preflight` 则继续负责命令级预检，验证 gate、allowlist、capability routing、ReportAdmission 和 `starts_external_worker=false`。
+如果今晚先想看 runner readiness 视图，再决定要不要跑 preflight 或 smoke，先看 `live-runner-readiness-view`；它只读汇总 runner gate、blocked reason、capability mismatch 和 next action，不启动 worker，也不替你跑 `subagent live-preflight`。`subagent live-preflight` 则继续负责命令级预检，验证 gate、allowlist、capability routing、ReportAdmission 和 `starts_external_worker=false`。
 
 如果今晚只想看派活到收集，不写 checkpoint，使用临时目录手工跑到 collect 即停：
 
@@ -138,13 +141,15 @@ cargo run --quiet -- subagent live-preflight \
 
 预期边界是 `ready_for_live=false` 且 `starts_external_worker=false`。这表示 preflight 证据可见，不表示真实 runner 已经启动或允许启动。
 
-如果要把 status / doctor / app-server health / live-preflight 合成一份只读视图，可以再跑：
+如果要看 status / doctor / console / app-server health 对 live runner 的只读状态面，应把它作为 `live-runner-readiness-view` 使用；它只读展示 blocked/next-action，不把状态面提升成 preflight 或 real live evidence。
+
+如果要收集 operator receipt 模板，可以单独跑：
 
 ```bash
-sh scripts/chuang-live-runner-readiness-view.sh --json
+sh scripts/chuang-live-operator-receipt.sh --json
 ```
 
-这个视图只做本地聚合，不会启动 worker、不会接真实外部服务，也不会把 blocked 证据改写成 ready。
+这个 collector 只输出脱敏模板和七项 evidence ref 槽位，不会启动 worker、不会接真实外部服务，也不会把 blocked/not_verified 证据改写成 ready。
 
 ## 下一步
 
@@ -262,7 +267,7 @@ Blocked evidence 的读取顺序：
 
 ### Live Runner Preflight 派活 Runbook
 
-这一节是下一阶段统一复制给 worker 的 runbook。它只覆盖真实 runner 启用前的只读 preflight、capability mismatch 和 blocked evidence 验收；默认不启动真实 live runner，不连接外部平台，不接 Feishu/Hermes，不读取或输出 secret，不做删除、清理、reset 或卸载。
+这一节是下一阶段统一复制给 worker 的 runbook。它只覆盖真实 runner 启用前的只读 readiness view、命令级 preflight、capability mismatch 和 blocked evidence 验收；默认不启动真实 live runner，不连接外部平台，不接 Feishu/Hermes，不读取或输出 secret，不做删除、清理、reset 或卸载。
 
 适用目标：
 
@@ -277,7 +282,7 @@ Disallowed mode: real live runner start
 
 ```text
 Worker ID: live-preflight-status
-Objective: make status/doctor/console/app-server health show the same live gate, readiness reason, and next action.
+Objective: make status/doctor/console/app-server health show the same live gate, readiness reason, blocked reason, capability mismatch, and next action without running preflight.
 Required capability: live_runner_readiness_view
 Expected negative case: live gate closed or capability route missing still shows ready_for_live=false.
 
@@ -330,6 +335,7 @@ Final report must include: changed files, evidence fields, tests run, negative c
 字段验收口径：
 
 - `Required capability`、`Expected dispatch required_capabilities` 和 `Expected worker capabilities` 必须能一一对上；capability mismatch 是本阶段必须覆盖的负例，不是可选测试。
+- `Expected readiness view fields` 至少覆盖 `live_runner_rehearsal` 的 `ready_for_live=false` 口径、`starts_external_worker=false` 口径、`capability_mismatch_blocks_live=true`、`blocked_reason` 和 `next_action`，但不得把它写成 preflight 已执行。
 - `Expected live preflight fields` 至少覆盖 `ready_for_live=false`、`starts_external_worker=false`、`missing_capabilities`、runner allowlist 状态、live gate 状态、forbidden capability rejection 和 next action。
 - `Expected ReportAdmission state` 至少覆盖一条 accepted 路径和一条 rejected 路径；rejected 路径必须能看到 `reason_code`，有上游协议原因时还要保留 `upstream_reason_code`。
 - `Expected governance receipt fields` 至少覆盖 action id、decision、reason/source、approval boundary，并明确主控允许启动 runner 不等于 worker 内部动作自动获批。
@@ -376,7 +382,7 @@ ready_to_checkpoint=false: goal checkpoint --from-collect must fail and that fai
 
 ```text
 Worker ID: live-runner-readiness-view
-Objective: 对齐 status/doctor/console/app-server health 的 live runner gate 文本和 JSON 字段。
+Objective: 对齐 status/doctor/console/app-server health 的 live runner gate、blocked reason、capability mismatch 和 next action 文本/JSON 字段；不运行 preflight、不产生真实 live evidence。
 Allowed files: src/kernel_status.rs, src/cli_output.rs, src/cli_status.rs, src/cli_doctor.rs, src/cli_console.rs, src/app_server.rs, tests/*status*/*doctor*/*console*/*app_server* 相关文件
 Forbidden files/services: 不碰 Hermes/Feishu，不改 runner 执行逻辑，不启动真实 worker，不写 data/skills，不删除/清理任何文件。
 Required capability: live_runner_readiness_view
