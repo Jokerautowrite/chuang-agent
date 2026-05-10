@@ -294,6 +294,7 @@ provider_readiness_evidence = {
     "connects_real_provider": False,
     "prints_secret_values": False,
     "expected_fields": [
+        "source_status_surface",
         "provider_kind",
         "transport",
         "request_timeout_ms",
@@ -367,13 +368,23 @@ external_live_acceptance_matrix = [
         "completion_state": "not_verified",
         "must_not_count_as_complete": True,
         "readonly_probe": "bash scripts/chuang-live-runner-rehearsal-smoke.sh",
-        "local_evidence": ["subagent_live_preflight", "report_admission_contract"],
+        "local_evidence": [
+            "subagent_live_preflight",
+            "gate_allowlist_capability_routing_report_admission_contract",
+        ],
         "manual_live_required": True,
+        "evidence_refs": {
+            "gate": "<fill_after_test>",
+            "allowlist": "<fill_after_test>",
+            "capability_routing": "<fill_after_test>",
+            "report_admission": "<fill_after_test>",
+        },
         "required_evidence": [
             "single worker only",
-            "live gate and runner allowlist receipt",
-            "capability routing result",
-            "ReportAdmission accepted or blocked with structured reason",
+            "gate receipt is explicit",
+            "allowlist receipt is explicit",
+            "capability routing receipt is explicit",
+            "report admission receipt or blocked reason is explicit",
         ],
         "connects_real_service_in_checklist": False,
         "starts_worker_in_checklist": False,
@@ -527,8 +538,8 @@ else:
     print("mounted_feishu_capabilities=/health,/tools,/capabilities,/new,/session")
     print(
         "provider_readiness_evidence="
-        "script=scripts/chuang-provider-readiness-check.sh source=status --json "
-        "fields=provider_kind,transport,request_timeout_ms,api_key_state,current,next_action "
+        "script=scripts/chuang-provider-readiness-check.sh source_status_surface=status --json "
+        "fields=source_status_surface,provider_kind,transport,request_timeout_ms,api_key_state,current,next_action "
         "connects_real_provider=false prints_secret_values=false"
     )
     print(

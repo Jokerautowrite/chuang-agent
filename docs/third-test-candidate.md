@@ -6,7 +6,7 @@
 
 ## 一句话结论
 
-第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，然后再回到本地 `final verify` 绿。
+第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、single worker rehearsal 证据，然后再回到本地 `final verify` 绿。
 
 2026-05-09 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。`/tools` / `/capabilities` 已能展示当前可见命令能力与边界。下一步不再卡“桥是否挂上”，而是收集 live 侧可审计 receipt、provider `<set>` 状态和单 worker rehearsal 证据。
 
@@ -16,7 +16,7 @@
 - `desktop_browser_live_gated`：真实桌面和浏览器动作仍需要 live gate、allowlist、治理和 operator receipt；当前不能写成 desktop/browser live ready。
 - `desktop_browser_read_only_observation_ready`：`observe` / `screenshot` 已可作为只读证据回执使用，回执会标明 `read_only=true` 和 `live_gate_required=false`；这不代表 click/input 已经 live ready。
 - `live_worker_available=false`：当前 subagent preflight/rehearsal 不启动、不附着真实 worker。
-- `real_external_acceptance_pending`：Feishu/provider/single subagent rehearsal/desktop/browser/wiki/GBrain 的真实外部验收仍 pending，不能由本地 smoke、`<set>` 或 `/tools` 代替。
+- `real_external_acceptance_pending`：Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 的真实外部验收仍 pending，不能由本地 smoke、`<set>` 或 `/tools` 代替。
 
 ## 现在的分层
 
@@ -39,7 +39,7 @@
 - Chuang provider env 对齐，输出只允许 `变量名=<set>`；`scripts/chuang-live-operator-checklist.sh` 会优先吸收默认 `~/.config/chuang-agent/provider.env`，默认文件存在时不需要手工 export。
 - desktop/browser 的只读观察回执单独跑一轮，确认 `observe` / `screenshot` 回执里有 `read_only=true` 和 `live_gate_required=false`，但不把它写成 click/input live ready。
 - 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要。
-- 单个子代理 live rehearsal 通过 gate + allowlist + capability routing + report admission。
+- 单个 worker live rehearsal 通过 gate + allowlist + capability routing + report admission。
 - live rehearsal 之后再次跑 `sh scripts/chuang-final-verify.sh`，确认本地合同没坏。
 
 ## 100% 前唯一硬门槛
@@ -49,7 +49,7 @@
 1. Chuang 专用 Feishu live 通道拿到真实 receipt。
 2. provider/env 对齐完成，secret 只显示为 `<set>`。
 3. operator receipt 完整。
-4. 单个子代理 live rehearsal 完整。
+4. 单个 worker live rehearsal 完整。
 5. rehearsal 后 `final verify` 仍然通过。
 
 这条链没有闭环前，不算 100%。
@@ -85,7 +85,7 @@ scripts/chuang-live-operator-receipt.sh --json
 
 已联系上的 Feishu 会话优先用 `/tools`、`/health` 和 `/session` 留证据；需要新上下文时再发 `/new`，避免把“能联系上”误判成还缺本地绑定。
 
-4. 只允许单个子代理 live rehearsal，不扩成 runner 池。
+4. 只允许单个 worker live rehearsal，不扩成 runner 池。
 5. rehearsal 后再跑一次 `sh scripts/chuang-final-verify.sh`。
 6. 最后做 `git diff --check -- docs/third-test-candidate.md docs/acceptance-next-matrix.md docs/live-operator-test-runbook.md`。
 

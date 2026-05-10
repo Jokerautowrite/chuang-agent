@@ -113,7 +113,7 @@ elif placeholder_warning_count > 0:
 result = {
     "schema_version": 1,
     "readonly": True,
-    "source_command": "cargo run --quiet -- status --json",
+    "source_status_surface": "cargo run --quiet -- status --json",
     "connects_real_provider": False,
     "prints_secret_values": False,
     "ok": not blocked,
@@ -132,6 +132,7 @@ if FORMAT == "json":
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
 else:
     print(f"provider_readiness_check: ok={str(result['ok']).lower()} state={overall_state}")
+    print(f"source_status_surface: {result['source_status_surface']}")
     print(f"provider_kind: {provider_kind}")
     print(f"transport: {transport}")
     print(f"request_timeout_ms: {timeout_label(request_timeout_ms)}")

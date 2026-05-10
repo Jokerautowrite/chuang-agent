@@ -138,6 +138,15 @@ fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission()
     assert!(script.contains("assert data[\"starts_external_worker\"] is False"));
     assert!(script.contains("assert data[\"readonly\"] is True"));
     assert!(script.contains("assert data[\"ready_for_live\"] is False"));
+    assert!(script.contains("assert data[\"gate\"][\"enabled\"] is False"));
+    assert!(script
+        .contains("assert data[\"gate\"][\"required_env\"] == \"CHUANG_CODEX_RUNNER_ENABLE\""));
+    assert!(script.contains("assert data[\"gate\"][\"audit_label\"] == \"subagent.runner.live\""));
+    assert!(script.contains("assert data[\"runner_allowlist\"][\"exact_match_required\"] is True"));
+    assert!(script.contains("assert data[\"report_admission\"][\"required\"] is True"));
+    assert!(script.contains(
+        "assert data[\"report_admission\"][\"evidence\"].startswith(\"run-once, run-loop, report, and collect\")"
+    ));
     assert!(script.contains("assert not queue_root.exists()"));
     assert!(script.contains("subagent dispatch"));
     assert!(script.contains("--subagent-queue-root \"$queue_root\""));
@@ -257,6 +266,19 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("continuing candidate-only gate"));
     assert!(wrapper.contains("provider readiness remains covered by complete-local"));
     assert!(wrapper.contains("no real provider call is attempted"));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"gate_receipt_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"allowlist_receipt_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"capability_routing_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"report_admission_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains("assert real_live[\"services\"][2][\"required\"] == ["));
     assert!(wrapper.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
     assert!(wrapper.contains("unset CHUANG_REAL_CONTROL_ENABLE"));
     assert!(wrapper.contains("unset CHUANG_REAL_ACTUATOR_ENABLE"));
@@ -398,6 +420,23 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("real_live[\"complete\"] is False"));
     assert!(wrapper.contains("real_live[\"status\"] == \"not_verified\""));
     assert!(wrapper.contains("real_live[\"gap_count\"] == 7"));
+    assert!(wrapper.contains(
+        "assert data[\"service_receipts\"][2][\"evidence\"][\"capability_routing_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"gate_receipt_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"allowlist_receipt_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"capability_routing_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper.contains(
+        "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"report_admission_ref\"] == \"<fill_after_test>\""
+    ));
+    assert!(wrapper
+        .contains("assert data[\"real_live_acceptance\"][\"services\"][2][\"required\"] == ["));
     assert!(wrapper.contains(
         "[\"feishu\", \"provider\", \"subagent_live_rehearsal\", \"desktop\", \"browser\", \"wiki\", \"gbrain\"]"
     ));
@@ -820,6 +859,9 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     let readiness_fields = data["provider_readiness_evidence"]["expected_fields"]
         .as_array()
         .expect("provider readiness expected fields should be array");
+    assert!(readiness_fields
+        .iter()
+        .any(|field| field == "source_status_surface"));
     assert!(readiness_fields
         .iter()
         .any(|field| field == "provider_kind"));

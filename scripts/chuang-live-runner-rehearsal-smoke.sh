@@ -56,6 +56,13 @@ assert data["readonly"] is True
 assert data["starts_external_worker"] is False
 assert data["gate_enabled"] is False
 assert data["runner_allowlist_ok"] is True
+assert data["gate"]["enabled"] is False
+assert data["gate"]["required_env"] == "CHUANG_CODEX_RUNNER_ENABLE"
+assert data["gate"]["audit_label"] == "subagent.runner.live"
+assert any(
+    "runner command allowlist" in check for check in data["gate"]["preflight_checks"]
+)
+assert data["runner_allowlist"]["exact_match_required"] is True
 assert data["runner_allowlist"]["runner"] == "command"
 assert data["runner_allowlist"]["runner_command"] == "scripts/chuang-codex-runner.py"
 assert data["runner_allowlist"]["matched_runner_command"] == "scripts/chuang-codex-runner.py"
@@ -65,10 +72,12 @@ assert data["capability_routing"]["worker_capabilities"] == ["rehearsal"]
 assert data["capability_routing"]["matched_capabilities"] == ["rehearsal"]
 assert data["capability_routing"]["missing_capabilities"] == []
 assert data["report_admission_ok"] is True
+assert data["report_admission"]["required"] is True
 assert "run-once" in data["report_admission"]["covered_commands"]
 assert "report" in data["report_admission"]["covered_commands"]
 assert "collect" in data["report_admission"]["covered_commands"]
 assert "report_validated" in data["report_admission"]["stable_reason_codes"]
+assert data["report_admission"]["evidence"].startswith("run-once, run-loop, report, and collect")
 assert data["approval_audit_prerequisites"]["explicit_operator_approval_required"] is True
 assert data["approval_audit_prerequisites"]["governance_approval_required"] is True
 assert not queue_root.exists()

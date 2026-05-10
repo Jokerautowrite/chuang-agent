@@ -61,6 +61,8 @@ fn live_operator_receipt_script_is_readonly_and_template_only() {
     assert!(script.contains("\"modifies_repo\": False"));
     assert!(script.contains("\"deletes_files\": False"));
     assert!(script.contains("\"reuses_codex_or_hermes_credentials\": False"));
+    assert!(script.contains("\"provider_live_request_receipt_ref\""));
+    assert!(script.contains("\"capability_routing_ref\""));
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("rm "));
     assert!(!script.contains("git reset"));
@@ -190,7 +192,39 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
         "<set|missing>"
     );
     assert_eq!(
+        data["service_evidence"]["provider"]["provider_live_request_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
         data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_receipts"][2]["evidence"]["gate_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_receipts"][2]["evidence"]["allowlist_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_receipts"][2]["evidence"]["capability_routing_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_receipts"][2]["evidence"]["report_admission_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["subagent_live_rehearsal"]["gate_receipt_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["subagent_live_rehearsal"]["capability_routing_ref"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["subagent_live_rehearsal"]["report_admission_ref"],
         "<fill_after_test>"
     );
     assert_eq!(
@@ -219,6 +253,8 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
 fn provider_readiness_check_reports_local_only_block_without_secret_values() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-provider-readiness-check.sh");
+    let script = fs::read_to_string(&script_path).expect("provider readiness script should read");
+    assert!(script.contains("source_status_surface"));
     let (_root, config_path) = write_live_readiness_config(&manifest_dir);
 
     let output = Command::new("bash")
@@ -252,7 +288,10 @@ fn provider_readiness_check_reports_local_only_block_without_secret_values() {
 
     assert_eq!(data["schema_version"], 1);
     assert_eq!(data["readonly"], true);
-    assert_eq!(data["source_command"], "cargo run --quiet -- status --json");
+    assert_eq!(
+        data["source_status_surface"],
+        "cargo run --quiet -- status --json"
+    );
     assert_eq!(data["connects_real_provider"], false);
     assert_eq!(data["prints_secret_values"], false);
     assert_eq!(data["ok"], false);
@@ -537,6 +576,34 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
         data["real_live_acceptance"]["cannot_mark_complete_from_readonly_checklist"],
         true
     );
+    assert_eq!(
+        matrix
+            .iter()
+            .find(|item| item["id"] == "subagent_live_rehearsal")
+            .expect("subagent rehearsal entry")["evidence_refs"]["gate"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        matrix
+            .iter()
+            .find(|item| item["id"] == "subagent_live_rehearsal")
+            .expect("subagent rehearsal entry")["evidence_refs"]["allowlist"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        matrix
+            .iter()
+            .find(|item| item["id"] == "subagent_live_rehearsal")
+            .expect("subagent rehearsal entry")["evidence_refs"]["capability_routing"],
+        "<fill_after_test>"
+    );
+    assert_eq!(
+        matrix
+            .iter()
+            .find(|item| item["id"] == "subagent_live_rehearsal")
+            .expect("subagent rehearsal entry")["evidence_refs"]["report_admission"],
+        "<fill_after_test>"
+    );
     for item in matrix {
         assert_eq!(item["manual_live_required"], true);
         assert_eq!(item["connects_real_service_in_checklist"], false);
@@ -544,13 +611,26 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
         assert_eq!(item["must_not_count_as_complete"], true);
         assert_eq!(item["prints_secret_values"], false);
         assert!(!item["readonly_probe"].as_str().unwrap_or("").is_empty());
-        assert!(
-            item["required_evidence"]
-                .as_array()
-                .expect("required evidence should be listed")
-                .len()
-                >= 2
-        );
+        if item["id"] == "subagent_live_rehearsal" {
+            assert_eq!(
+                item["required_evidence"],
+                serde_json::json!([
+                    "single worker only",
+                    "gate receipt is explicit",
+                    "allowlist receipt is explicit",
+                    "capability routing receipt is explicit",
+                    "report admission receipt or blocked reason is explicit",
+                ])
+            );
+        } else {
+            assert!(
+                item["required_evidence"]
+                    .as_array()
+                    .expect("required evidence should be listed")
+                    .len()
+                    >= 2
+            );
+        }
     }
     assert!(!stdout.contains("app-secret-value"));
     assert!(!stdout.contains("feishu-secret-value"));

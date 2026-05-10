@@ -126,12 +126,23 @@ for key in [
 service_ids = [item["id"] for item in data["service_receipts"]]
 assert service_ids == ["feishu", "provider", "subagent_live_rehearsal", "desktop", "browser", "wiki", "gbrain"]
 assert sorted(data["service_evidence"].keys()) == sorted(service_ids)
+assert data["service_evidence"]["subagent_live_rehearsal"]["gate_receipt_ref"] == "<fill_after_test>"
+assert data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"] == "<fill_after_test>"
+assert data["service_evidence"]["subagent_live_rehearsal"]["capability_routing_ref"] == "<fill_after_test>"
+assert data["service_evidence"]["subagent_live_rehearsal"]["report_admission_ref"] == "<fill_after_test>"
 real_live = data["real_live_acceptance"]
 assert real_live["complete"] is False
 assert real_live["status"] == "not_verified"
 assert real_live["gap_count"] == 7
 assert real_live["cannot_mark_complete_from_template"] is True
 assert real_live["requires_operator_evidence"] is True
+assert real_live["services"][2]["required"] == [
+    "single worker only",
+    "gate receipt is explicit",
+    "allowlist receipt is explicit",
+    "capability routing receipt is explicit",
+    "report admission receipt or blocked reason is explicit",
+]
 print("candidate_live_operator_receipt_status=" + str(data["acceptance_status"]))
 print("candidate_live_operator_receipt_services=" + str(len(service_ids)))
 '
