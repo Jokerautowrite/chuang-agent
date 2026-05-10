@@ -188,3 +188,169 @@ fn jsonl_runtime_event_ledger_reports_bad_line_with_path_and_line_number() {
         other => panic!("expected deserialize error, got {other:?}"),
     }
 }
+
+#[test]
+fn runtime_event_ledger_query_by_turn_and_call_preserves_append_order() {
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let e1 = RuntimeEvent::at(
+        RuntimeEventKind::TurnStarted,
+        "thread-q",
+        "2026-05-11T00:00:00Z",
+    )
+    .with_turn_id("turn-q")
+    .with_call_id("call-a");
+    let e2 = RuntimeEvent::at(
+        RuntimeEventKind::ToolStarted,
+        "thread-q",
+        "2026-05-11T00:00:01Z",
+    )
+    .with_turn_id("turn-q")
+    .with_call_id("call-a");
+    let e3 = RuntimeEvent::at(
+        RuntimeEventKind::TurnCompleted,
+        "thread-q",
+        "2026-05-11T00:00:02Z",
+    )
+    .with_turn_id("turn-q");
+    let other_turn = RuntimeEvent::at(
+        RuntimeEventKind::TurnStarted,
+        "thread-q",
+        "2026-05-11T00:00:03Z",
+    )
+    .with_turn_id("turn-other")
+    .with_call_id("call-b");
+
+    ledger.append(e1.clone()).expect("append 1 should succeed");
+    ledger.append(e2.clone()).expect("append 2 should succeed");
+    ledger.append(e3.clone()).expect("append 3 should succeed");
+    ledger
+        .append(other_turn)
+        .expect("append other turn should succeed");
+
+    let by_turn = ledger
+        .query_by_turn("thread-q", "turn-q")
+        .expect("query_by_turn should succeed");
+    assert_eq!(by_turn, vec![e1.clone(), e2.clone(), e3.clone()]);
+
+    let by_call = ledger
+        .query_by_call("call-a")
+        .expect("query_by_call should succeed");
+    assert_eq!(by_call, vec![e1, e2]);
+}
+
+#[test]
+fn runtime_event_ledger_query_methods_are_read_only() {
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let e1 = RuntimeEvent::at(
+        RuntimeEventKind::TurnStarted,
+        "thread-r",
+        "2026-05-11T00:00:00Z",
+    )
+    .with_turn_id("turn-r");
+    let e2 = RuntimeEvent::at(
+        RuntimeEventKind::TurnCompleted,
+        "thread-r",
+        "2026-05-11T00:00:01Z",
+    )
+    .with_turn_id("turn-r");
+    ledger.append(e1.clone()).expect("append 1 should succeed");
+    ledger.append(e2.clone()).expect("append 2 should succeed");
+
+    let before = ledger.list().expect("list before should succeed");
+    let _ = ledger
+        .query_by_turn("thread-r", "turn-r")
+        .expect("query_by_turn should succeed");
+    let _ = ledger
+        .query_by_call("not-found")
+        .expect("query_by_call should succeed");
+    let _ = ledger
+        .summarize_turn("thread-r", "turn-r")
+        .expect("summarize_turn should succeed");
+    let after = ledger.list().expect("list after should succeed");
+
+    assert_eq!(before, after);
+}
+
+#[test]
+fn runtime_event_ledger_summarize_turn_avoids_secret_like_previews() {
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let started = RuntimeEvent::at(
+        RuntimeEventKind::ApprovalRequested,
+        "thread-summary",
+        "2026-05-11T00:00:00Z",
+    )
+    .with_turn_id("turn-summary")
+    .with_call_id("call-secret-value")
+    .with_risk_decision(RuntimeRiskDecision::new("prompt", "external send"))
+    .with_evidence_ref("token://secret-preview-value");
+    let resolved = RuntimeEvent::at(
+        RuntimeEventKind::ApprovalResolved,
+        "thread-summary",
+        "2026-05-11T00:00:01Z",
+    )
+    .with_turn_id("turn-summary");
+
+    ledger
+        .append(started)
+        .expect("append started should succeed");
+    ledger
+        .append(resolved)
+        .expect("append resolved should succeed");
+
+    let summary = ledger
+        .summarize_turn("thread-summary", "turn-summary")
+        .expect("summary should succeed");
+    assert_eq!(summary.thread_id, "thread-summary");
+    assert_eq!(summary.turn_id, "turn-summary");
+    assert_eq!(summary.event_count, 2);
+    assert_eq!(summary.risk_decision_count, 1);
+    assert_eq!(summary.evidence_ref_count, 1);
+    assert_eq!(summary.call_count, 1);
+    assert_eq!(
+        summary.first_created_at.as_deref(),
+        Some("2026-05-11T00:00:00Z")
+    );
+    assert_eq!(
+        summary.last_created_at.as_deref(),
+        Some("2026-05-11T00:00:01Z")
+    );
+    assert_eq!(
+        summary.event_types,
+        vec![
+            RuntimeEventKind::ApprovalRequested,
+            RuntimeEventKind::ApprovalResolved
+        ]
+    );
+
+    let value = serde_json::to_string(&summary).expect("summary should serialize");
+    assert!(!value.contains("call-secret-value"));
+    assert!(!value.contains("token://secret-preview-value"));
+}
+
+#[test]
+fn runtime_event_ledger_query_propagates_structured_deserialize_errors() {
+    let path = temp_path("bad-query");
+    let valid = serde_json::to_string(&RuntimeEvent::at(
+        RuntimeEventKind::TurnStarted,
+        "thread-bad-query",
+        fixed_at(),
+    ))
+    .expect("valid event should serialize");
+    fs::write(&path, format!("{valid}\n{{\"bad\":\n")).expect("bad jsonl fixture should write");
+    let ledger = JsonlRuntimeEventLedger::new(&path);
+
+    let error = ledger
+        .query_by_turn("thread-bad-query", "turn-x")
+        .expect_err("query_by_turn should surface deserialize error");
+    match error {
+        RuntimeEventLedgerError::DeserializeEvent {
+            path: error_path,
+            line,
+            ..
+        } => {
+            assert_eq!(error_path, path);
+            assert_eq!(line, 2);
+        }
+        other => panic!("expected deserialize error, got {other:?}"),
+    }
+}

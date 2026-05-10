@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::permission_profile_slot::ToolDescriptorRisk;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -294,7 +295,7 @@ pub fn mcp_tool_risk_view(spec: &McpToolSpec) -> McpToolRiskView {
     let read_only = spec.read_only.unwrap_or(false);
     let destructive = spec.destructive.unwrap_or(!read_only);
     let open_world = spec.open_world.unwrap_or(!read_only);
-    let external_commit = spec.external_commit.unwrap_or(false);
+    let external_commit = spec.external_commit.unwrap_or(!read_only);
     let requires_approval =
         destructive || open_world || external_commit || has_high_risk_tag(&spec.risk_tags);
 
@@ -306,6 +307,29 @@ pub fn mcp_tool_risk_view(spec: &McpToolSpec) -> McpToolRiskView {
         external_commit,
         requires_approval,
         risk_tags: spec.risk_tags.clone(),
+    }
+}
+
+pub fn mcp_tool_descriptor_risk<'a>(
+    spec: &'a McpToolSpec,
+    risk_tags_storage: &'a mut Vec<&'a str>,
+) -> ToolDescriptorRisk<'a> {
+    let risk = mcp_tool_risk_view(spec);
+    risk_tags_storage.clear();
+    risk_tags_storage.extend(spec.risk_tags.iter().map(String::as_str));
+
+    if risk.open_world && !risk_tags_storage.contains(&"open_world") {
+        risk_tags_storage.push("open_world");
+    }
+
+    ToolDescriptorRisk {
+        name: &spec.name,
+        risk_tags: risk_tags_storage.as_slice(),
+        read_only: risk.read_only,
+        mutating: !risk.read_only,
+        destructive: risk.destructive,
+        external_commit: risk.external_commit,
+        requires_approval: risk.requires_approval,
     }
 }
 

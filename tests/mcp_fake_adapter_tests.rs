@@ -1,5 +1,6 @@
 use chuang_agent::mcp_fake_adapter::{
-    mcp_tool_risk_view, McpAdapterError, McpFakeServer, McpToolCall, McpToolSpec,
+    mcp_tool_descriptor_risk, mcp_tool_risk_view, McpAdapterError, McpFakeServer, McpToolCall,
+    McpToolSpec,
 };
 use serde_json::{json, Value};
 
@@ -236,6 +237,49 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
     assert!(external.open_world);
     assert!(external.external_commit);
     assert!(external.requires_approval);
+
+    let omitted_external_commit =
+        McpToolSpec::new("local.unknown_commit", "Risk omitted", schema())
+            .read_only(false)
+            .destructive(false)
+            .open_world(false)
+            .risk_view();
+    assert!(omitted_external_commit.external_commit);
+    assert!(omitted_external_commit.requires_approval);
+}
+
+#[test]
+fn mcp_descriptor_converts_into_tool_descriptor_risk_view_without_runtime_side_effects() {
+    let spec = McpToolSpec::new("local.write_note", "Write local note", schema())
+        .read_only(false)
+        .destructive(false)
+        .open_world(false)
+        .external_commit(false)
+        .risk_tags(["file_write"]);
+    let mut tags = Vec::new();
+    let risk = mcp_tool_descriptor_risk(&spec, &mut tags);
+
+    assert_eq!(risk.name, "local.write_note");
+    assert!(!risk.read_only);
+    assert!(risk.mutating);
+    assert!(!risk.destructive);
+    assert!(!risk.external_commit);
+    assert!(!risk.requires_approval);
+    assert_eq!(risk.risk_tags, ["file_write"]);
+}
+
+#[test]
+fn mcp_descriptor_conversion_marks_open_world_as_approval_required_even_without_explicit_tag() {
+    let spec = McpToolSpec::new("net.search", "Open-world search", schema())
+        .read_only(false)
+        .destructive(false)
+        .open_world(true)
+        .external_commit(false);
+    let mut tags = Vec::new();
+    let risk = mcp_tool_descriptor_risk(&spec, &mut tags);
+
+    assert!(risk.requires_approval);
+    assert!(risk.risk_tags.contains(&"open_world"));
 }
 
 #[test]

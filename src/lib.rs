@@ -55,5 +55,6 @@ pub mod subagent_tree_ledger;
 pub mod tool_loop_meta;
 pub mod tool_registry_slot;
 pub mod tool_runtime;
+pub mod turn_context;
 pub mod unified_execution_slot;
 pub mod workspace_file_adapter;

@@ -107,6 +107,83 @@ fn current_timestamp() -> String {
 pub trait RuntimeEventLedger {
     fn append(&mut self, event: RuntimeEvent) -> Result<(), RuntimeEventLedgerError>;
     fn list(&self) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError>;
+
+    fn query_by_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError> {
+        let events = self.list()?;
+        Ok(events
+            .into_iter()
+            .filter(|event| {
+                event.thread_id == thread_id && event.turn_id.as_deref() == Some(turn_id)
+            })
+            .collect())
+    }
+
+    fn query_by_call(&self, call_id: &str) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError> {
+        let events = self.list()?;
+        Ok(events
+            .into_iter()
+            .filter(|event| event.call_id.as_deref() == Some(call_id))
+            .collect())
+    }
+
+    fn summarize_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<RuntimeTurnSummary, RuntimeEventLedgerError> {
+        let events = self.query_by_turn(thread_id, turn_id)?;
+        Ok(RuntimeTurnSummary::from_events(thread_id, turn_id, &events))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeTurnSummary {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub event_count: usize,
+    pub risk_decision_count: usize,
+    pub evidence_ref_count: usize,
+    pub call_count: usize,
+    pub first_created_at: Option<String>,
+    pub last_created_at: Option<String>,
+    pub event_types: Vec<RuntimeEventKind>,
+}
+
+impl RuntimeTurnSummary {
+    pub fn from_events(thread_id: &str, turn_id: &str, events: &[RuntimeEvent]) -> Self {
+        let mut event_types = Vec::new();
+        let mut risk_decision_count = 0usize;
+        let mut evidence_ref_count = 0usize;
+        let mut call_count = 0usize;
+        for event in events {
+            event_types.push(event.event_type.clone());
+            if event.risk_decision.is_some() {
+                risk_decision_count += 1;
+            }
+            if event.evidence_ref.is_some() {
+                evidence_ref_count += 1;
+            }
+            if event.call_id.is_some() {
+                call_count += 1;
+            }
+        }
+
+        Self {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            event_count: events.len(),
+            risk_decision_count,
+            evidence_ref_count,
+            call_count,
+            first_created_at: events.first().map(|event| event.created_at.clone()),
+            last_created_at: events.last().map(|event| event.created_at.clone()),
+            event_types,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
