@@ -545,13 +545,42 @@ pub fn parse_tool_action_envelope_result(
             trimmed,
         ));
     };
-    serde_json::from_str(json_text).map_err(|error| {
-        protocol_error(
+    parse_action_json_prefix(json_text, trimmed)
+}
+
+fn parse_action_json_prefix(
+    json_text: &str,
+    raw: &str,
+) -> Result<ToolActionEnvelope, ToolProtocolError> {
+    let mut stream =
+        serde_json::Deserializer::from_str(json_text).into_iter::<ToolActionEnvelope>();
+    let envelope = stream
+        .next()
+        .transpose()
+        .map_err(|error| {
+            protocol_error(
+                "invalid_action_json",
+                &format!("ACTION payload is invalid or unsupported: {error}"),
+                raw,
+            )
+        })?
+        .ok_or_else(|| protocol_error("invalid_action_json", "ACTION payload is empty", raw))?;
+    let trailing = json_text[stream.byte_offset()..].trim();
+    if trailing.is_empty() || is_recoverable_concatenated_tool_output(trailing) {
+        Ok(envelope)
+    } else {
+        Err(protocol_error(
             "invalid_action_json",
-            &format!("ACTION payload is invalid or unsupported: {error}"),
-            trimmed,
-        )
-    })
+            "ACTION payload has trailing text; output only one ACTION or FINAL per response",
+            raw,
+        ))
+    }
+}
+
+fn is_recoverable_concatenated_tool_output(trailing: &str) -> bool {
+    trailing.starts_with("FINAL:")
+        || trailing.starts_with("ACTION:")
+        || trailing.starts_with("TOOL_CALL:")
 }
 
 pub fn parse_tool_call(body: &str) -> Option<ToolCall> {

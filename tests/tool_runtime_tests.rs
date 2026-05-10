@@ -76,6 +76,26 @@ fn parse_structured_action_protocol_roundtrip() {
 }
 
 #[test]
+fn parse_structured_action_recovers_from_concatenated_final() {
+    assert!(matches!(
+        parse_tool_model_output(
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"locate","target":"screen"}}FINAL: 已观察"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::Locate { .. })
+    ));
+
+    assert!(matches!(
+        parse_tool_action_envelope_result(
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"open_app","app_name":"Chrome"}}FINAL: Chrome 已打开"#
+        ),
+        Ok(ToolActionEnvelope::ToolCall {
+            call: ToolCall::OpenApp { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
 fn parse_structured_action_result_reports_errors() {
     let missing_prefix = parse_tool_action_envelope_result(r#"{"type":"final","answer":"完成"}"#)
         .expect_err("missing ACTION prefix should be structured error");
@@ -85,6 +105,12 @@ fn parse_structured_action_result_reports_errors() {
         .expect_err("bad ACTION json should be structured error");
     assert_eq!(invalid_json.code, "invalid_action_json");
     assert!(invalid_json.message.contains("ACTION payload is invalid"));
+
+    let trailing_text =
+        parse_tool_action_envelope_result(r#"ACTION: {"type":"final","answer":"完成"} extra"#)
+            .expect_err("arbitrary trailing text should stay invalid");
+    assert_eq!(trailing_text.code, "invalid_action_json");
+    assert!(trailing_text.message.contains("trailing text"));
 }
 
 #[test]

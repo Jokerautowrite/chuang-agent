@@ -11,6 +11,7 @@
 - 按“GA 原子工具默认开启”方向推进：`config/actuator-allowlist.example.json` 现在默认允许 `click` / `input_text` / `screenshot`；`scripts/chuang-real-actuator-adapter.py` 在 `CHUANG_REAL_ACTUATOR_ENABLE=1` 时用 `xdotool` 执行坐标点击和非 secret 文本输入，gate 未开时仍返回 dry-run 审计回执；`scripts/chuang-feishu-bridge.sh` 启动 Chuang Feishu 通道时默认给本进程设置 `CHUANG_REAL_ACTUATOR_ENABLE=1`，同时保留现有桌面 env 自动探测。治理分类也把 `mouse` / `keyboard` 从只读观察改成 `LocalDesktopInteraction`，避免真实交互在审计里伪装成 observe。
 - 补齐 `open_app` 受治理桌面工具：主链工具协议、atomic tool 映射、doctor schema、CLI runtime 和能力 primer 现在都显式暴露 `open_app`；它作为辅助桌面工具接入 actuator，不是任意启动器，真实打开仍走 adapter、allowlist、live gate、治理和审计。示例 allowlist 已加入 `Chrome -> google-chrome-stable`，Feishu 侧可直接要求 Chuang `open_app Chrome`，再用 `locate` 观察当前窗口确认。
 - 执行模式口径已按老爸要求调整：普通本地能力默认直接执行，不再因为常规打开应用、点击或输入要求人工审批；`open_app` / `mouse` / `keyboard` 仍走 actuator gate、allowlist、治理和审计。删除、清理、重置、卸载、支付、验证码、服务或网络变更、密钥访问等高危操作才询问或拒绝。后续开源时再把“审批模式/非审批模式”作为可配置策略暴露。
+- 工具协议容错补强：如果模型把 `ACTION: {...}` 和后续 `FINAL:` / 下一条 `ACTION:` 粘在同一次输出里，runtime 现在会先解析并执行第一段合法 JSON，避免 Chrome 已打开但后续 `locate` 因 `trailing characters` 中断；任意普通尾随文本仍保留为协议错误。回归覆盖 `ACTION locate + FINAL` 粘连、任意 trailing text 拒绝和既有 tool loop protocol error 反馈。
 - 当前结论：Feishu health/session/tools 现场证据已拿到，provider 配置 ready 且 Feishu 普通文本 live request 已有 `report-turn-1`；desktop 只读 observe/screenshot evidence 已拿到，但 browser DOM/URL/title live adapter 和 wiki/GBrain live adapter 仍缺，因此 real live 仍未 100% 完成。
 
 ## 2026-05-10 live readiness wrapper coverage checkpoint
