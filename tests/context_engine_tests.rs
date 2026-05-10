@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use chuang_agent::context_engine::{
-    ContextBudget, ContextEngine, ContextPackError, ContextPacker, ContextSegment,
-    DeterministicContextEngine, SegmentSource, SummaryCompressionContextEngine,
+    ContextBudget, ContextCompactionEventKind, ContextEngine, ContextPackError, ContextPacker,
+    ContextSegment, DeterministicContextEngine, SegmentSource, SummaryCompressionContextEngine,
     WorkingReservationReason,
 };
 
@@ -716,5 +716,103 @@ fn pack_records_first_version_pipeline_trace_and_rendered_prompt() {
     let rendered = packed.render_prompt();
     assert!(rendered.contains("pack_trace=normalize_tokens:6->6(-0),dedupe:6->6(-0),trim:6->4(-2)"));
     assert!(rendered.contains("drop_reasons=tool-old:tool_result_trim,memory-old:memory_trim"));
+    assert!(rendered.contains("context_compaction_started"));
+    assert!(rendered.contains("context_segment_dropped:tool-old:tool_result_trim:@trim"));
+    assert!(rendered.contains("context_compaction_completed:packed:@merge_under_budget"));
     assert!(rendered.contains("- Working/p220 [working-1] work"));
+}
+
+#[test]
+fn pack_records_structured_compaction_events_without_segment_content() {
+    let packer = ContextPacker::new(ContextBudget {
+        max_tokens: 22,
+        reserve_system_tokens: 10,
+        min_working_tokens: 5,
+        max_tool_results: 1,
+        max_memory_segments: 1,
+    });
+
+    let packed = packer
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system instruction",
+                Some(10),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-secret-old",
+                SegmentSource::Memory,
+                "Authorization: Bearer should-not-appear",
+                Some(3),
+                100,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "memory-new",
+                SegmentSource::Memory,
+                "new memory",
+                Some(3),
+                100,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "tool-old",
+                SegmentSource::ToolResult,
+                "tool secret=should-not-appear",
+                Some(3),
+                90,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "tool-new",
+                SegmentSource::ToolResult,
+                "new tool",
+                Some(3),
+                90,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "working-1",
+                SegmentSource::Working,
+                "working segment",
+                Some(5),
+                220,
+                "2026-04-30T18:00:03Z",
+                "2026-04-30T18:00:03Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let event_kinds: Vec<&'static str> = packed
+        .compaction_events
+        .iter()
+        .map(|event| event.kind.as_str())
+        .collect();
+    assert_eq!(event_kinds.first(), Some(&"context_compaction_started"));
+    assert_eq!(event_kinds.last(), Some(&"context_compaction_completed"));
+    assert!(packed.compaction_events.iter().any(|event| {
+        event.kind == ContextCompactionEventKind::SegmentDropped
+            && event.segment_id.as_deref() == Some("memory-secret-old")
+            && event.reason.as_deref() == Some("memory_trim")
+            && event.trace_step == Some("trim")
+    }));
+    assert!(packed.compaction_events.iter().any(|event| {
+        event.kind == ContextCompactionEventKind::SegmentDropped
+            && event.segment_id.as_deref() == Some("tool-old")
+            && event.reason.as_deref() == Some("tool_result_trim")
+            && event.trace_step == Some("trim")
+    }));
+
+    let rendered = packed.render_prompt();
+    assert!(rendered.contains("compaction_events="));
+    assert!(rendered.contains("context_segment_dropped:memory-secret-old:memory_trim:@trim"));
+    assert!(!rendered.contains("should-not-appear"));
 }

@@ -50,6 +50,7 @@ pub struct PackedContext {
     pub budget_exceeded_reasons: Vec<BudgetExceededReason>,
     pub working_reservation: Option<WorkingReservation>,
     pub trace: Vec<ContextPackTraceStep>,
+    pub compaction_events: Vec<ContextCompactionEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,31 @@ pub struct ContextPackTraceStep {
     pub input_count: usize,
     pub output_count: usize,
     pub dropped_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompactionEvent {
+    pub kind: ContextCompactionEventKind,
+    pub segment_id: Option<String>,
+    pub reason: Option<String>,
+    pub trace_step: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextCompactionEventKind {
+    Started,
+    SegmentDropped,
+    Completed,
+}
+
+impl ContextCompactionEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Started => "context_compaction_started",
+            Self::SegmentDropped => "context_segment_dropped",
+            Self::Completed => "context_compaction_completed",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +196,13 @@ impl ContextPacker {
         let mut trace = Vec::new();
         let mut dropped_ids = Vec::new();
         let mut drop_reasons = Vec::new();
+        let mut compaction_events = Vec::new();
+        compaction_events.push(ContextCompactionEvent {
+            kind: ContextCompactionEventKind::Started,
+            segment_id: None,
+            reason: None,
+            trace_step: None,
+        });
         let normalized = self.normalize_segments(segments);
         trace.push(ContextPackTraceStep {
             name: "normalize_tokens",
@@ -179,6 +212,12 @@ impl ContextPacker {
         });
         let before_dedupe_dropped = dropped_ids.len();
         let deduped = self.deduplicate_segments(normalized, &mut dropped_ids, &mut drop_reasons);
+        record_compaction_events(
+            &mut compaction_events,
+            &drop_reasons,
+            before_dedupe_dropped,
+            "dedupe",
+        );
         trace.push(ContextPackTraceStep {
             name: "dedupe",
             input_count: original_count,
@@ -187,6 +226,12 @@ impl ContextPacker {
         });
         let before_trim_dropped = dropped_ids.len();
         let trimmed = self.trim_segments(deduped, &mut dropped_ids, &mut drop_reasons);
+        record_compaction_events(
+            &mut compaction_events,
+            &drop_reasons,
+            before_trim_dropped,
+            "trim",
+        );
         trace.push(ContextPackTraceStep {
             name: "trim",
             input_count: original_count,
@@ -267,6 +312,12 @@ impl ContextPacker {
             &mut drop_reasons,
             &mut budget_exceeded_reasons,
         );
+        record_compaction_events(
+            &mut compaction_events,
+            &drop_reasons,
+            before_reservation_dropped,
+            "reserve_working",
+        );
         trace.push(ContextPackTraceStep {
             name: "reserve_working",
             input_count: regular.len(),
@@ -333,6 +384,25 @@ impl ContextPacker {
             output_count: packed.len(),
             dropped_count: dropped_ids.len().saturating_sub(before_merge_dropped),
         });
+        record_compaction_events(
+            &mut compaction_events,
+            &drop_reasons,
+            before_merge_dropped,
+            "merge_under_budget",
+        );
+        compaction_events.push(ContextCompactionEvent {
+            kind: ContextCompactionEventKind::Completed,
+            segment_id: None,
+            reason: Some(
+                if budget_exceeded {
+                    "budget_exceeded"
+                } else {
+                    "packed"
+                }
+                .to_string(),
+            ),
+            trace_step: Some("merge_under_budget"),
+        });
 
         Ok(PackedContext {
             segments: packed,
@@ -343,6 +413,7 @@ impl ContextPacker {
             budget_exceeded_reasons,
             working_reservation,
             trace,
+            compaction_events,
         })
     }
 
@@ -570,6 +641,10 @@ impl PackedContext {
                 render_budget_exceeded_reasons(&self.budget_exceeded_reasons)
             ),
             format!("pack_trace={}", render_pack_trace(&self.trace)),
+            format!(
+                "compaction_events={}",
+                render_compaction_events(&self.compaction_events)
+            ),
         ];
 
         for segment in &self.segments {
@@ -621,6 +696,46 @@ fn render_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
         .map(BudgetExceededReason::as_str)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn render_compaction_events(events: &[ContextCompactionEvent]) -> String {
+    if events.is_empty() {
+        return "none".to_string();
+    }
+
+    events
+        .iter()
+        .map(|event| {
+            let mut parts = vec![event.kind.as_str().to_string()];
+            if let Some(segment_id) = &event.segment_id {
+                parts.push(segment_id.clone());
+            }
+            if let Some(reason) = &event.reason {
+                parts.push(reason.clone());
+            }
+            if let Some(trace_step) = event.trace_step {
+                parts.push(format!("@{trace_step}"));
+            }
+            parts.join(":")
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn record_compaction_events(
+    events: &mut Vec<ContextCompactionEvent>,
+    reasons: &[DropReason],
+    start_index: usize,
+    trace_step: &'static str,
+) {
+    for reason in reasons.iter().skip(start_index) {
+        events.push(ContextCompactionEvent {
+            kind: ContextCompactionEventKind::SegmentDropped,
+            segment_id: Some(reason.segment_id.clone()),
+            reason: Some(reason.reason.as_str().to_string()),
+            trace_step: Some(trace_step),
+        });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
