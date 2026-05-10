@@ -17,6 +17,7 @@ STATUS_FILE="${STATUS_FILE:-$LOG_DIR/status.json}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-30}"
 CHUANG_OVERNIGHT_DRY_RUN="${CHUANG_OVERNIGHT_DRY_RUN:-0}"
 CHUANG_OVERNIGHT_MAX_ITERATIONS="${CHUANG_OVERNIGHT_MAX_ITERATIONS:-}"
+CHUANG_OVERNIGHT_EXTRA_FOCUS="${CHUANG_OVERNIGHT_EXTRA_FOCUS:-}"
 DEADLINE=$(( $(date +%s) + DURATION_SECONDS ))
 ITERATION=0
 LAST_ITERATION_EXIT_STATUS=""
@@ -121,6 +122,9 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
 3. 每轮都必须先读当前状态，再做小而实的实现/测试/文档同步。
 4. 每轮结束前必须更新 docs/handoff-current.md 或 docs/progress-log.md 中至少一个，用于下一轮续接。
 5. 尽量运行验证命令，优先 cargo test -q 和 sh scripts/chuang-mvp-smoke.sh；如果太慢或失败，记录原因和下一步。
+
+本次额外焦点：
+${CHUANG_OVERNIGHT_EXTRA_FOCUS:-未指定；按主目标推进。}
 
 边界：
 - 不要删除文件，不要 rm，不要 cleanup，不要 reset，不要 purge。

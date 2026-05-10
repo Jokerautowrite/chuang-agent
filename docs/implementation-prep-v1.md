@@ -6,6 +6,10 @@
 2. struct / enum 文件切分建议
 3. 状态机与准入策略测试清单
 
+## Codex + Claude Update
+
+Codex + Claude 双参考后的拆分工单见 `docs/codex-claude-implementation-slices-v1.md`。后续 M1-M7 的写入范围、测试命令和风险边界以该文档为准。
+
 ---
 
 # 1. Rust trait 草案

@@ -4,6 +4,7 @@
 - 已补官方 Codex 代码级架构审计：本地审计源为 `/tmp/openai-codex-audit`，commit `76845d7`，新增 `docs/codex-architecture-audit-v1.md`。结论是 Chuang 最初 Slot/trait/event/governance/memory-body 方向成立，但当前落地要吸收 Codex 的 SQ/EQ protocol、`Session`/`TurnContext`、`ToolRegistry` dispatch、`UnifiedExec`、`exec_policy`/sandbox/guardian、SQLite state 与 rollout trace。
 - 新增 `docs/codex-claude-optimization-plan-v1.md`，把 Codex 与 `claude-rust` 分工合并：Codex 主导运行骨架、治理执行、安全沙箱、state/trace、多代理 agent tree；Claude 主导工具 descriptor/MCP 易迁移实现、`QueryEngine` 工具回灌/retry/compaction 细节和 allow/deny pattern UX。
 - 优先级已从“直接补更多工具”调整为 M1-M3：先做 `RuntimeEventLedger`、`ToolRegistrySlot`、`PermissionProfileSlot`，把“普通本地完整能力默认执行，高危才询问/拒绝”落成 policy 和 contract，而不是只靠 prompt；随后再做 unified exec/actuator orchestrator、MCP fake adapter、SubagentTreeLedger。
+- 并行第一批实现已落最小合同：新增 `runtime_event_ledger`、`tool_registry_slot`、`permission_profile_slot`、`subagent_tree_ledger` 四个独立模块及定向测试，并新增 `docs/codex-claude-implementation-slices-v1.md` 拆解 M1-M7 工单、写入范围、验收命令和风险边界。当前仍是 fake/纯结构层，尚未接入真实 runtime/tool dispatch/governance 主链。
 
 ## 2026-05-11 claude-rust Slot 审计
 - 已对 `/home/user/projects/claude-rust` 做代码级 Slot 审计，并新增 `docs/claude-rust-slot-audit-v1.md` 与 `docs/claude-rust-integration-plan-v1.md`：结论是 `claude-rust` 值得吸收，但不能整体替换 Chuang 主链；优先吸收 `Tool` trait / `ToolRegistry` / MCP fake adapter、`QueryEngine` 的流式 tool-use loop 与 overload retry、`permission` 的模式和 allow/deny pattern。

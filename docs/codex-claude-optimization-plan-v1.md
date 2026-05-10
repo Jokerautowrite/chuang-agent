@@ -5,6 +5,7 @@
 - `docs/codex-architecture-audit-v1.md`
 - `docs/claude-rust-slot-audit-v1.md`
 - `docs/claude-rust-integration-plan-v1.md`
+- `docs/codex-claude-implementation-slices-v1.md`
 
 ## 目标
 
@@ -218,5 +219,5 @@ Codex 提供 turn context 事实源，Claude 提供 compaction trigger 思路，
 
 - `docs/claude-rust-slot-audit-v1.md` 仍保留，作为 Claude 单源审计。
 - `docs/claude-rust-integration-plan-v1.md` 的 M1/M2 仍有效，但现在纳入本计划：ToolRegistrySlot 必须同时吸收 Codex dispatch/trace 与 Claude descriptor/MCP。
+- `docs/codex-claude-implementation-slices-v1.md` 是本计划的工单拆分和验收矩阵。
 - 本文档是新的执行优先级来源。
-

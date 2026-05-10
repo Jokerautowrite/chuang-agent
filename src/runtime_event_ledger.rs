@@ -1,0 +1,256 @@
+use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+
+use chrono::{SecondsFormat, Utc};
+use serde::{Deserialize, Serialize};
+
+pub const RUNTIME_EVENT_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeEventKind {
+    ThreadStarted,
+    TurnStarted,
+    ToolStarted,
+    ToolFinished,
+    ApprovalRequested,
+    ApprovalResolved,
+    SubagentSpawned,
+    SubagentReported,
+    TurnCompleted,
+    TurnFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeRiskDecision {
+    pub decision: String,
+    pub reason: String,
+    pub policy_ref: Option<String>,
+}
+
+impl RuntimeRiskDecision {
+    pub fn new(decision: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            decision: decision.into(),
+            reason: reason.into(),
+            policy_ref: None,
+        }
+    }
+
+    pub fn with_policy_ref(mut self, policy_ref: impl Into<String>) -> Self {
+        self.policy_ref = Some(policy_ref.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeEvent {
+    pub schema_version: u16,
+    pub event_type: RuntimeEventKind,
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub call_id: Option<String>,
+    pub created_at: String,
+    pub risk_decision: Option<RuntimeRiskDecision>,
+    pub evidence_ref: Option<String>,
+}
+
+impl RuntimeEvent {
+    pub fn new(event_type: RuntimeEventKind, thread_id: impl Into<String>) -> Self {
+        Self::at(event_type, thread_id, current_timestamp())
+    }
+
+    pub fn at(
+        event_type: RuntimeEventKind,
+        thread_id: impl Into<String>,
+        created_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: RUNTIME_EVENT_SCHEMA_VERSION,
+            event_type,
+            thread_id: thread_id.into(),
+            turn_id: None,
+            call_id: None,
+            created_at: created_at.into(),
+            risk_decision: None,
+            evidence_ref: None,
+        }
+    }
+
+    pub fn with_turn_id(mut self, turn_id: impl Into<String>) -> Self {
+        self.turn_id = Some(turn_id.into());
+        self
+    }
+
+    pub fn with_call_id(mut self, call_id: impl Into<String>) -> Self {
+        self.call_id = Some(call_id.into());
+        self
+    }
+
+    pub fn with_risk_decision(mut self, risk_decision: RuntimeRiskDecision) -> Self {
+        self.risk_decision = Some(risk_decision);
+        self
+    }
+
+    pub fn with_evidence_ref(mut self, evidence_ref: impl Into<String>) -> Self {
+        self.evidence_ref = Some(evidence_ref.into());
+        self
+    }
+}
+
+fn current_timestamp() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+pub trait RuntimeEventLedger {
+    fn append(&mut self, event: RuntimeEvent) -> Result<(), RuntimeEventLedgerError>;
+    fn list(&self) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryRuntimeEventLedger {
+    events: Vec<RuntimeEvent>,
+}
+
+impl InMemoryRuntimeEventLedger {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn into_events(self) -> Vec<RuntimeEvent> {
+        self.events
+    }
+}
+
+impl RuntimeEventLedger for InMemoryRuntimeEventLedger {
+    fn append(&mut self, event: RuntimeEvent) -> Result<(), RuntimeEventLedgerError> {
+        self.events.push(event);
+        Ok(())
+    }
+
+    fn list(&self) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError> {
+        Ok(self.events.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonlRuntimeEventLedger {
+    path: PathBuf,
+}
+
+impl JsonlRuntimeEventLedger {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl RuntimeEventLedger for JsonlRuntimeEventLedger {
+    fn append(&mut self, event: RuntimeEvent) -> Result<(), RuntimeEventLedgerError> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|source| RuntimeEventLedgerError::Io {
+                action: "open_append",
+                path: self.path.clone(),
+                source,
+            })?;
+        let line =
+            serde_json::to_string(&event).map_err(RuntimeEventLedgerError::SerializeEvent)?;
+        file.write_all(line.as_bytes())
+            .and_then(|_| file.write_all(b"\n"))
+            .map_err(|source| RuntimeEventLedgerError::Io {
+                action: "write_event",
+                path: self.path.clone(),
+                source,
+            })
+    }
+
+    fn list(&self) -> Result<Vec<RuntimeEvent>, RuntimeEventLedgerError> {
+        if !self.path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let file = File::open(&self.path).map_err(|source| RuntimeEventLedgerError::Io {
+            action: "open_read",
+            path: self.path.clone(),
+            source,
+        })?;
+        let reader = BufReader::new(file);
+        let mut events = Vec::new();
+        for (index, line) in reader.lines().enumerate() {
+            let line = line.map_err(|source| RuntimeEventLedgerError::Io {
+                action: "read_line",
+                path: self.path.clone(),
+                source,
+            })?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event = serde_json::from_str::<RuntimeEvent>(&line).map_err(|source| {
+                RuntimeEventLedgerError::DeserializeEvent {
+                    path: self.path.clone(),
+                    line: index + 1,
+                    source,
+                }
+            })?;
+            events.push(event);
+        }
+        Ok(events)
+    }
+}
+
+#[derive(Debug)]
+pub enum RuntimeEventLedgerError {
+    Io {
+        action: &'static str,
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    SerializeEvent(serde_json::Error),
+    DeserializeEvent {
+        path: PathBuf,
+        line: usize,
+        source: serde_json::Error,
+    },
+}
+
+impl fmt::Display for RuntimeEventLedgerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RuntimeEventLedgerError::Io {
+                action,
+                path,
+                source,
+            } => write!(
+                f,
+                "runtime_event_ledger_io_failed action={action} path={} error={source}",
+                path.display()
+            ),
+            RuntimeEventLedgerError::SerializeEvent(source) => {
+                write!(f, "runtime_event_serialize_failed error={source}")
+            }
+            RuntimeEventLedgerError::DeserializeEvent { path, line, source } => write!(
+                f,
+                "runtime_event_deserialize_failed path={} line={line} error={source}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeEventLedgerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RuntimeEventLedgerError::Io { source, .. } => Some(source),
+            RuntimeEventLedgerError::SerializeEvent(source) => Some(source),
+            RuntimeEventLedgerError::DeserializeEvent { source, .. } => Some(source),
+        }
+    }
+}
