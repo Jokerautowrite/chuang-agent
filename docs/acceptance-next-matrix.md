@@ -24,7 +24,7 @@ final verify 本地闭环通过
 
 第三测试版候选不是“所有 live adapter 全开”，而是 100% 前最后一跳：用最小真实链路证明老爸可以通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单个子代理 live rehearsal 证据，并最终回到本地 verify 绿。真实 runner 池、桌面 mutation、服务控制、wiki/GBrain live 仍后置，不纳入第三测试版必须项。
 
-当前 acceptance 口径必须区分“已 mapped/已 preflight”和“已 live”。GA 9 tools 已 mapped 只代表工具槽位、命令面和能力边界可见；真实 desktop/browser live 仍缺证据。live subagent worker 仍需要 audited adapter、config 和 gate 三件套后才能启用；三大 live gates 默认关闭，分别覆盖 provider live、subagent live runner、desktop/browser actuator live action。Feishu、provider、desktop、browser、wiki、GBrain 都需要各自的真实 live receipt，不能由本地 readiness 或 `<set>` 状态代替。
+当前 acceptance 口径必须区分“已 mapped/已 preflight”和“已 live”。GA 9 tools 已 mapped 只代表工具槽位、命令面和能力边界可见；真实 desktop/browser live 仍缺证据。live subagent worker 仍需要 audited adapter、config 和 gate 三件套后才能启用；三大 live gates 默认关闭，分别覆盖 provider live、subagent live runner、desktop/browser actuator live action。Feishu、provider、single subagent rehearsal、desktop、browser、wiki、GBrain 都需要各自的真实 live receipt，不能由本地 readiness 或 `<set>` 状态代替。
 
 状态面单一入口：`status --json` 的 `live_readiness` 固定复述这些词，验收矩阵只引用同一组词。`ready` / `local-ready` 只表示本地合同、smoke、诊断面或只读预检已通过，不表示真实 live receipt 已完成。
 
@@ -37,7 +37,7 @@ final verify 本地闭环通过
 | `browser_worker_frozen` | true | 旧 BrowserWorker 线冻结且不在主执行路径 | browser automation ready 或已恢复 |
 | `live_worker_available` | false | 当前 subagent preflight/rehearsal 不启动、不附着真实 worker | runner 池可用或 live worker 已上线 |
 | `provider_live_request_verified_by_status` | false | `status --json` 只报告 provider 配置/readiness，不发真实 provider 请求 | provider live 已验收 |
-| `real_external_acceptance_pending` | true | Feishu/provider/desktop/browser/wiki/GBrain 真实外部验收仍需人工 receipt | 第三测试 100% 完成 |
+| `real_external_acceptance_pending` | true | Feishu/provider/single subagent rehearsal/desktop/browser/wiki/GBrain 真实外部验收仍需人工 receipt | 第三测试 100% 完成 |
 | `ready/local-ready` | local only | 本地合同、smoke、诊断面或只读 preflight 通过 | live-ready、external acceptance 完成 |
 
 ## 第三测试版候选 Acceptance

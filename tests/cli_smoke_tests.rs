@@ -397,9 +397,10 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("boundaries[\"connects_real_gbrain\"] is False"));
     assert!(wrapper.contains("real_live[\"complete\"] is False"));
     assert!(wrapper.contains("real_live[\"status\"] == \"not_verified\""));
-    assert!(wrapper.contains("real_live[\"gap_count\"] == 6"));
-    assert!(wrapper
-        .contains("[\"feishu\", \"provider\", \"desktop\", \"browser\", \"wiki\", \"gbrain\"]"));
+    assert!(wrapper.contains("real_live[\"gap_count\"] == 7"));
+    assert!(wrapper.contains(
+        "[\"feishu\", \"provider\", \"subagent_live_rehearsal\", \"desktop\", \"browser\", \"wiki\", \"gbrain\"]"
+    ));
     assert!(wrapper.contains("boundaries[\"starts_services\"] is False"));
     assert!(wrapper.contains("boundaries[\"touches_services\"] is False"));
     assert!(!wrapper.contains("systemctl"));
@@ -847,7 +848,7 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
         .any(|step| step == "complete local smoke"));
     assert_eq!(data["real_live_acceptance"]["complete"], false);
     assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
-    assert_eq!(data["real_live_acceptance"]["gap_count"], 6);
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 7);
     assert_eq!(
         data["real_live_acceptance"]["cannot_mark_complete_from_readonly_checklist"],
         true
@@ -855,8 +856,16 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
     let live_gaps = data["real_live_acceptance"]["services"]
         .as_array()
         .expect("real live acceptance services should be array");
-    assert_eq!(live_gaps.len(), 6);
-    for id in ["feishu", "provider", "desktop", "browser", "wiki", "gbrain"] {
+    assert_eq!(live_gaps.len(), 7);
+    for id in [
+        "feishu",
+        "provider",
+        "subagent_live_rehearsal",
+        "desktop",
+        "browser",
+        "wiki",
+        "gbrain",
+    ] {
         let gap = live_gaps
             .iter()
             .find(|item| item["id"] == id)

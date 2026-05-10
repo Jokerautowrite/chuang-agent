@@ -53,6 +53,7 @@ assert real_live["status"] == "not_verified"
 assert real_live["cannot_mark_complete_from_readonly_checklist"] is True
 assert real_live["operator_receipt_template"] == "scripts/chuang-live-operator-receipt.sh --json"
 assert real_live["operator_receipt_template_can_mark_complete"] is False
+assert real_live["gap_count"] == 7
 print("candidate_live_operator_checklist_status=" + str(data["status"]))
 print("candidate_live_operator_real_live_acceptance=" + str(real_live["status"]))
 '

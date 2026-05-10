@@ -362,6 +362,24 @@ external_live_acceptance_matrix = [
         "prints_secret_values": False,
     },
     {
+        "id": "subagent_live_rehearsal",
+        "service": "single subagent live rehearsal",
+        "completion_state": "not_verified",
+        "must_not_count_as_complete": True,
+        "readonly_probe": "bash scripts/chuang-live-runner-rehearsal-smoke.sh",
+        "local_evidence": ["subagent_live_preflight", "report_admission_contract"],
+        "manual_live_required": True,
+        "required_evidence": [
+            "single worker only",
+            "live gate and runner allowlist receipt",
+            "capability routing result",
+            "ReportAdmission accepted or blocked with structured reason",
+        ],
+        "connects_real_service_in_checklist": False,
+        "starts_worker_in_checklist": False,
+        "prints_secret_values": False,
+    },
+    {
         "id": "desktop",
         "service": "desktop actuator",
         "completion_state": "not_verified",
@@ -520,7 +538,7 @@ else:
     )
     print(
         "external_live_acceptance_matrix="
-        "feishu,provider,desktop,browser,wiki,gbrain completion_state=not_verified "
+        "feishu,provider,subagent_live_rehearsal,desktop,browser,wiki,gbrain completion_state=not_verified "
         "connects_real_service_in_checklist=false"
     )
     print(

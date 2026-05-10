@@ -1,6 +1,6 @@
 # Third Test Candidate Quick Entry
 
-更新时间：2026-05-09
+更新时间：2026-05-10
 
 这一页只回答四件事：现在哪些已经是 `local-ready`，哪些必须人工 live check，怎么跑第三测试版候选，和 100% 前最后的硬门槛是什么。
 
@@ -16,7 +16,7 @@
 - `desktop_browser_live_gated`：真实桌面和浏览器动作仍需要 live gate、allowlist、治理和 operator receipt；当前不能写成 desktop/browser live ready。
 - `desktop_browser_read_only_observation_ready`：`observe` / `screenshot` 已可作为只读证据回执使用，回执会标明 `read_only=true` 和 `live_gate_required=false`；这不代表 click/input 已经 live ready。
 - `live_worker_available=false`：当前 subagent preflight/rehearsal 不启动、不附着真实 worker。
-- `real_external_acceptance_pending`：Feishu/provider/desktop/browser/wiki/GBrain 的真实外部验收仍 pending，不能由本地 smoke、`<set>` 或 `/tools` 代替。
+- `real_external_acceptance_pending`：Feishu/provider/single subagent rehearsal/desktop/browser/wiki/GBrain 的真实外部验收仍 pending，不能由本地 smoke、`<set>` 或 `/tools` 代替。
 
 ## 现在的分层
 
@@ -30,7 +30,7 @@
 - `cargo run --quiet -- channel feishu-check --env-file /home/user/.codex-im/chuang-feishu-bridge.env --json`
 - `node scripts/chuang-feishu-command-smoke.js`
 
-这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。
+这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。
 
 ### 必须人工 live check
 
@@ -38,7 +38,7 @@
 - 在 Chuang 专用 Feishu 会话发 `/tools`，确认可见能力包含 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界。
 - Chuang provider env 对齐，输出只允许 `变量名=<set>`；`scripts/chuang-live-operator-checklist.sh` 会优先吸收默认 `~/.config/chuang-agent/provider.env`，默认文件存在时不需要手工 export。
 - desktop/browser 的只读观察回执单独跑一轮，确认 `observe` / `screenshot` 回执里有 `read_only=true` 和 `live_gate_required=false`，但不把它写成 click/input live ready。
-- 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件和结果摘要。
+- 生成 live operator receipt，保留 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要。
 - 单个子代理 live rehearsal 通过 gate + allowlist + capability routing + report admission。
 - live rehearsal 之后再次跑 `sh scripts/chuang-final-verify.sh`，确认本地合同没坏。
 

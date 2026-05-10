@@ -83,7 +83,7 @@ assert boundaries["prints_secret_values"] is False
 real_live = data["real_live_acceptance"]
 assert real_live["complete"] is False
 assert real_live["status"] == "not_verified"
-assert real_live["gap_count"] == 6
+assert real_live["gap_count"] == 7
 assert real_live["cannot_mark_complete_from_readonly_checklist"] is True
 assert real_live["operator_receipt_template"] == "scripts/chuang-live-operator-receipt.sh --json"
 assert real_live["operator_receipt_template_can_mark_complete"] is False
@@ -97,7 +97,7 @@ assert real_live["required_receipt_service_ids"] == [
     "gbrain",
 ]
 service_ids = [item["id"] for item in real_live["services"]]
-assert service_ids == ["feishu", "provider", "desktop", "browser", "wiki", "gbrain"]
+assert service_ids == ["feishu", "provider", "subagent_live_rehearsal", "desktop", "browser", "wiki", "gbrain"]
 print("live_operator_checklist_status=" + str(data["status"]))
 print("live_operator_checklist_ok=" + str(data["ok"]).lower())
 print("live_operator_checklist_blockers=" + str(len(data.get("blockers", []))))

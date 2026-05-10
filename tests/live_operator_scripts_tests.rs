@@ -519,11 +519,19 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
         .collect::<Vec<_>>();
     assert_eq!(
         surfaces,
-        vec!["feishu", "provider", "desktop", "browser", "wiki", "gbrain"]
+        vec![
+            "feishu",
+            "provider",
+            "subagent_live_rehearsal",
+            "desktop",
+            "browser",
+            "wiki",
+            "gbrain"
+        ]
     );
     assert_eq!(data["real_live_acceptance"]["complete"], false);
     assert_eq!(data["real_live_acceptance"]["status"], "not_verified");
-    assert_eq!(data["real_live_acceptance"]["gap_count"], 6);
+    assert_eq!(data["real_live_acceptance"]["gap_count"], 7);
     assert_eq!(data["real_live_acceptance"]["checklist_is_readonly"], true);
     assert_eq!(
         data["real_live_acceptance"]["cannot_mark_complete_from_readonly_checklist"],
