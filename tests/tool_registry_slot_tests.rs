@@ -1,9 +1,6 @@
 use std::collections::BTreeSet;
 
-#[path = "../src/tool_registry_slot.rs"]
-mod tool_registry_slot;
-
-use tool_registry_slot::{
+use chuang_agent::tool_registry_slot::{
     builtin_tool_descriptors, default_tool_registry_slot, descriptor_for_tool, ToolDescriptor,
     ToolRegistrySlot,
 };

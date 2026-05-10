@@ -2,10 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[path = "../src/runtime_event_ledger.rs"]
-mod runtime_event_ledger;
-
-use runtime_event_ledger::{
+use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, JsonlRuntimeEventLedger, RuntimeEvent, RuntimeEventKind,
     RuntimeEventLedger, RuntimeEventLedgerError, RuntimeRiskDecision,
 };

@@ -1,7 +1,4 @@
-#[path = "../src/subagent_tree_ledger.rs"]
-mod subagent_tree_ledger;
-
-use subagent_tree_ledger::{
+use chuang_agent::subagent_tree_ledger::{
     AgentRole, InMemorySubagentTreeLedger, ReportAdmissionRef, SpawnRequest, SubagentTreeLedger,
     SubagentTreeLedgerError, SubagentTreePolicy, SubagentTreeStatus,
 };

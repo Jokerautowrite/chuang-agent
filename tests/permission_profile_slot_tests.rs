@@ -1,7 +1,4 @@
-#[path = "../src/permission_profile_slot.rs"]
-mod permission_profile_slot;
-
-use permission_profile_slot::{
+use chuang_agent::permission_profile_slot::{
     classify_tag, decide_descriptor_risk, decide_tag, local_ga_profile, safe_default_profile,
     PermissionDecision, PermissionProfileId, PermissionTag, ToolDescriptorRisk,
 };
