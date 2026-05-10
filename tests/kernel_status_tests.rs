@@ -268,6 +268,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.provider_readiness.transport, "fake");
     assert!(!status.provider_readiness.fallback_configured);
     assert_eq!(status.provider_readiness.request_timeout_ms, None);
+    assert!(!status.provider_readiness.provider_env_file_state.is_empty());
     assert!(status.local_contract_readiness.ok);
     assert_eq!(status.local_contract_readiness.overall_state, "ready");
     assert_eq!(status.local_contract_readiness.contract_count, 6);

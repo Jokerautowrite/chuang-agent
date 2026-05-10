@@ -20,7 +20,8 @@ use crate::runtime_config::{ConfigError, ConfigSummary, ProviderConfig, RuntimeC
 use crate::slot_registry::{summarize_runtime_slots, RuntimeSlotsSummary};
 use crate::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use serde::Serialize;
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChuangMvpStatus {
@@ -446,6 +447,8 @@ pub struct ProviderReadinessStatus {
     pub request_timeout_ms: Option<u64>,
     pub tls_ca_cert_path: Option<String>,
     pub api_key_state: Option<String>,
+    pub provider_env_file: Option<String>,
+    pub provider_env_file_state: String,
     pub placeholder_warning_count: usize,
     pub current: String,
     pub next_action: String,
@@ -993,6 +996,7 @@ fn build_provider_readiness(
     let request_timeout_ms = summary.provider_request_timeout_ms;
     let tls_ca_cert_path = summary.provider_tls_ca_cert_path.clone();
     let api_key_state = summary.api_key_state.clone();
+    let provider_env_hint = provider_env_file_hint();
     let placeholder_warning_count = summary
         .placeholder_warnings
         .iter()
@@ -1026,6 +1030,8 @@ fn build_provider_readiness(
         request_timeout_ms,
         tls_ca_cert_path,
         api_key_state,
+        provider_env_file: provider_env_hint.path.clone(),
+        provider_env_file_state: provider_env_hint.state.clone(),
         placeholder_warning_count,
         current: if fallback_configured {
             "provider fallback is configured; live provider and fallback metadata remain locally observable".to_string()
@@ -1034,7 +1040,10 @@ fn build_provider_readiness(
         } else if uses_stub {
             "provider transport=stub is local-only and ready for smoke coverage".to_string()
         } else if missing_env {
-            "provider api_key_env is missing; live provider readiness remains partial".to_string()
+            format!(
+                "provider api_key_env is missing in the current process; provider env file hint is {}",
+                provider_env_hint.state
+            )
         } else {
             "provider configuration is ready for a live-request attempt; readiness sends no live provider call and verifies no live response".to_string()
         },
@@ -1043,11 +1052,63 @@ fn build_provider_readiness(
         } else if provider_kind_is_fake || uses_stub {
             "switch to a real provider transport only after live secrets and transport diagnostics are confirmed".to_string()
         } else if missing_env {
-            "set the provider api_key_env before claiming live provider readiness".to_string()
+            if provider_env_hint.exists {
+                "run through scripts/chuang-provider-readiness-check.sh or source the provider env file before claiming live provider readiness".to_string()
+            } else {
+                "set CHUANG_PROVIDER_ENV_FILE or the provider api_key_env before claiming live provider readiness".to_string()
+            }
         } else {
             "keep timeout, TLS, and fallback policy aligned with the selected provider transport"
                 .to_string()
         },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderEnvFileHint {
+    path: Option<String>,
+    state: String,
+    exists: bool,
+}
+
+fn provider_env_file_hint() -> ProviderEnvFileHint {
+    if let Ok(path) = env::var("CHUANG_PROVIDER_ENV_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            let exists = Path::new(trimmed).is_file();
+            return ProviderEnvFileHint {
+                path: Some(trimmed.to_string()),
+                state: if exists {
+                    "explicit_file_exists".to_string()
+                } else {
+                    "explicit_file_missing".to_string()
+                },
+                exists,
+            };
+        }
+    }
+
+    let default_path = env::var("HOME")
+        .ok()
+        .filter(|home| !home.trim().is_empty())
+        .map(|home| PathBuf::from(home).join(".config/chuang-agent/provider.env"));
+    if let Some(path) = default_path {
+        let exists = path.is_file();
+        return ProviderEnvFileHint {
+            path: Some(path.display().to_string()),
+            state: if exists {
+                "default_file_exists".to_string()
+            } else {
+                "default_file_missing".to_string()
+            },
+            exists,
+        };
+    }
+
+    ProviderEnvFileHint {
+        path: None,
+        state: "home_unavailable".to_string(),
+        exists: false,
     }
 }
 

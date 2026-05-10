@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-10 knowledge/browser/actuator/app-server 收口
+- provider readiness 诊断再补一层：`status --json` 现在在不读取 secret、不 source env 文件的前提下，暴露 `provider_env_file` / `provider_env_file_state`，用于解释“当前进程 api key missing，但默认 `~/.config/chuang-agent/provider.env` 存在，可通过 `scripts/chuang-provider-readiness-check.sh` 吸收”的状态差异；这仍不代表发起真实 provider 请求。
 - `knowledge_read` 已从旧的 `external_knowledge` 预览概念里拆出真实 wiki/GBrain live-read 合同：`src/knowledge_read.rs` 提供 fake/unavailable adapter、结构化 `knowledge_read_unavailable`、wiki/gbrain 双源 preflight，`RuntimeConfig.external_knowledge` 和配置文件解析已统一到 `KnowledgeReadConfig`，`status --json` 通过 `knowledge_readiness` 明确展示“本地 preview 可用，但真实 wiki/GBrain adapter 未配置”。当前仍不声明已连接真实 wiki/GBrain。
 - `knowledge_read` 的 preflight 语义继续收紧：即使 endpoint、token env 和 token 状态都齐全，在真实 adapter 未接线前也只返回 `preflight_ready_adapter_missing` / `available=false`，避免把“配置已齐”误报为“live 查询可用”。
 - `browser_read` 继续保持独立合同边界：`desktop_read` 只代表 `locate/screenshot` 只读屏幕证据，`browser_read` 才代表 URL/title/DOM live read；当前状态固定为 `desktop_read_ready_browser_read_unavailable`，避免把窗口标题或截图证据冒充成浏览器 DOM/URL/title。

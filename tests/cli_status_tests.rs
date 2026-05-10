@@ -1225,6 +1225,10 @@ fn cli_status_exposes_provider_request_timeout_from_cli_override() {
     assert_eq!(parsed["provider_readiness"]["request_timeout_ms"], 12_345);
     assert_eq!(parsed["provider_readiness"]["fallback_configured"], false);
     assert_eq!(parsed["provider_readiness"]["api_key_state"], "<set>");
+    assert!(!parsed["provider_readiness"]["provider_env_file_state"]
+        .as_str()
+        .expect("provider env file state should be a string")
+        .is_empty());
     assert!(!stdout.contains("test-secret-key"));
 }
 

@@ -70,7 +70,7 @@ pub fn print_status(status: &ChuangMvpStatus) {
         println!("provider_fallback_policy: {policy}");
     }
     println!(
-        "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
+        "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={} provider_env_file_state={}",
         status.provider_readiness.ok,
         status.provider_readiness.overall_state,
         status.provider_readiness.provider_kind,
@@ -86,7 +86,8 @@ pub fn print_status(status: &ChuangMvpStatus) {
             .api_key_state
             .as_deref()
             .unwrap_or("none"),
-        status.provider_readiness.placeholder_warning_count
+        status.provider_readiness.placeholder_warning_count,
+        status.provider_readiness.provider_env_file_state
     );
     println!(
         "provider_readiness_current: {}",
