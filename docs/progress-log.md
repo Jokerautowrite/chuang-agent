@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-10 live receipt / acceptance matrix / runbook 文档同步
+- collector 口径已收成 standalone overlay/merge layer：`docs/live-receipt-collection.md` 现在明确它位于 readiness / preflight 之后、最终 live receipt 之前，脚本以 base template 为底接收 partial receipt overlay，再深度合并成 canonical live receipt；同时把 `subagent_live_rehearsal` 的输入输出关系写清楚，`real_live_acceptance` 明确单 worker rehearsal 不是 runner pool ready。
 - 这轮只做文档口径同步，不改脚本逻辑、不碰真实服务：`docs/live-operator-test-runbook.md`、`docs/acceptance-next-matrix.md`、`docs/third-test-candidate.md` 统一了最新 live receipt 结构说明，把 `service_evidence` / `service_receipts` / `real_live_acceptance.services` 明确成 7 项 1:1 对齐（Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain）。
 - 三份文档把对外叙述收成同一组词：Feishu 只算 bridge/contact 证据；provider readiness 只算 `<set>/<missing>` 和 live readiness 证据，provider live receipt 仍要单独留痕；single worker rehearsal 作为 live gate + allowlist + report admission 的单项证据，脚本内 `subagent_live_rehearsal` 只作为 receipt id 锚点保留。
 - `docs/acceptance-next-matrix.md` 的 7 项 acceptance matrix 也同步到同一口径，`real_external_acceptance_pending`、operator receipt template 和 manual live check 现在都明确区分 readiness、receipt 和真实 live。
