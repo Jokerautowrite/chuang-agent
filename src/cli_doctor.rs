@@ -698,6 +698,18 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.governance.secret_shell_decision
     );
     println!(
+        "policy_tool_status: active_profile={} normal_local_action_default={} high_risk_boundary={} ga_tool_descriptors={}/{} missing={}",
+        doctor.status.policy_tool_status.active_permission_profile,
+        doctor.status.policy_tool_status.local_ga_normal_local_action_default,
+        doctor
+            .status
+            .policy_tool_status
+            .local_ga_high_risk_boundary_summary,
+        doctor.status.policy_tool_status.ga_tool_descriptor_mapped_count,
+        doctor.status.policy_tool_status.tool_descriptor_count,
+        doctor.status.policy_tool_status.ga_tool_descriptor_missing.len()
+    );
+    println!(
         "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
         doctor.status.provider_readiness.ok,
         doctor.status.provider_readiness.overall_state,

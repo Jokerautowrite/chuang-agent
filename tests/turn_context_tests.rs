@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use chuang_agent::permission_profile_slot::PermissionProfileId;
+use chuang_agent::runtime_config::{ProviderConfig, RuntimeConfig};
 use chuang_agent::tool_registry_slot::{builtin_tool_descriptors, descriptor_for_tool};
 use chuang_agent::turn_context::{
-    TurnContextSnapshot, TurnContextSnapshotError, TurnContextSnapshotInput,
+    RuntimeTurnContextInput, TurnContextSnapshot, TurnContextSnapshotError,
+    TurnContextSnapshotInput,
 };
 
 #[test]
@@ -120,6 +122,63 @@ fn turn_context_snapshot_rejects_missing_provider_or_model_identity() {
         workspace_root: PathBuf::from("/workspace/chuang"),
         provider_id: "fake".to_string(),
         model_name: "".to_string(),
+        permission_profile_id: PermissionProfileId::SafeDefault,
+        tools: vec![],
+        memory_segment_ids: vec![],
+        recent_history_segment_ids: vec![],
+        env_pairs: vec![],
+    })
+    .expect_err("missing model_name should fail");
+    assert_eq!(
+        err,
+        TurnContextSnapshotError::MissingRequiredField {
+            field: "model_name"
+        }
+    );
+}
+
+#[test]
+fn turn_context_snapshot_supports_runtime_config_summary_helper() {
+    let mut runtime = RuntimeConfig::new(PathBuf::from("/tmp/chuang.db"));
+    runtime.provider = ProviderConfig::Fake {
+        provider_id: "openai-compatible".to_string(),
+        model_name: "gpt-5.3-codex".to_string(),
+    };
+
+    let snapshot = TurnContextSnapshot::from_runtime_config_summary(RuntimeTurnContextInput {
+        thread_id: "thread-rt-1".to_string(),
+        turn_id: "turn-rt-1".to_string(),
+        workspace_root: PathBuf::from("/workspace/chuang"),
+        config_summary: runtime.summary(),
+        permission_profile_id: PermissionProfileId::LocalGa,
+        tools: builtin_tool_descriptors().to_vec(),
+        memory_segment_ids: vec!["mem-1".to_string()],
+        recent_history_segment_ids: vec!["hist-1".to_string()],
+        env_pairs: vec![("OPENAI_API_KEY".to_string(), Some("sk-live".to_string()))],
+    })
+    .expect("build runtime summary snapshot");
+
+    assert_eq!(snapshot.provider.provider_id, "openai-compatible");
+    assert_eq!(snapshot.provider.model_name, "gpt-5.3-codex");
+    assert_eq!(snapshot.thread_id, "thread-rt-1");
+    assert_eq!(snapshot.turn_id, "turn-rt-1");
+    assert_eq!(snapshot.workspace_root, "/workspace/chuang");
+    assert_eq!(snapshot.env_vars[0].value_state, "<redacted>");
+}
+
+#[test]
+fn turn_context_snapshot_runtime_helper_rejects_missing_model_name() {
+    let mut runtime = RuntimeConfig::new(PathBuf::from("/tmp/chuang.db"));
+    runtime.provider = ProviderConfig::Fake {
+        provider_id: "fake-runtime".to_string(),
+        model_name: "".to_string(),
+    };
+
+    let err = TurnContextSnapshot::from_runtime_config_summary(RuntimeTurnContextInput {
+        thread_id: "thread-rt-1".to_string(),
+        turn_id: "turn-rt-1".to_string(),
+        workspace_root: PathBuf::from("/workspace/chuang"),
+        config_summary: runtime.summary(),
         permission_profile_id: PermissionProfileId::SafeDefault,
         tools: vec![],
         memory_segment_ids: vec![],

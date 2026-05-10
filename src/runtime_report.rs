@@ -305,6 +305,11 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
 
 fn collect_typed_failures(extra: &BTreeMap<String, String>) -> BTreeSet<String> {
     let mut classes = BTreeSet::new();
+    if let Some(class) = extra.get("tool_protocol_typed_failure_code") {
+        if is_typed_failure_class(class) {
+            classes.insert(class.clone());
+        }
+    }
     if let Ok(Some(report)) = crate::tool_loop_meta::parse_json_value(extra, "tool_report_json") {
         append_typed_failures_from_report(&mut classes, &report);
     }

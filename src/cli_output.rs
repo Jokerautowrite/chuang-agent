@@ -339,6 +339,15 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.governance.dangerous_shell_decision,
         status.governance.secret_shell_decision
     );
+    println!(
+        "policy_tool_status: active_profile={} normal_local_action_default={} high_risk_boundary={} ga_tool_descriptors={}/{} missing={}",
+        status.policy_tool_status.active_permission_profile,
+        status.policy_tool_status.local_ga_normal_local_action_default,
+        status.policy_tool_status.local_ga_high_risk_boundary_summary,
+        status.policy_tool_status.ga_tool_descriptor_mapped_count,
+        status.policy_tool_status.tool_descriptor_count,
+        status.policy_tool_status.ga_tool_descriptor_missing.len()
+    );
     println!("execution: {}", status.slots.execution);
     println!("actuator: {}", status.slots.actuator);
     if let Some(timeout_ms) = status.config.actuator_command_timeout_ms {

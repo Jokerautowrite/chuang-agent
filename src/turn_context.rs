@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::permission_profile_slot::PermissionProfileId;
+use crate::runtime_config::ConfigSummary;
 use crate::tool_registry_slot::ToolDescriptor;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +49,19 @@ pub struct TurnContextSnapshotInput {
     pub workspace_root: PathBuf,
     pub provider_id: String,
     pub model_name: String,
+    pub permission_profile_id: PermissionProfileId,
+    pub tools: Vec<ToolDescriptor>,
+    pub memory_segment_ids: Vec<String>,
+    pub recent_history_segment_ids: Vec<String>,
+    pub env_pairs: Vec<(String, Option<String>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeTurnContextInput {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub workspace_root: PathBuf,
+    pub config_summary: ConfigSummary,
     pub permission_profile_id: PermissionProfileId,
     pub tools: Vec<ToolDescriptor>,
     pub memory_segment_ids: Vec<String>,
@@ -115,6 +129,38 @@ impl TurnContextSnapshot {
             memory_segment_ids: input.memory_segment_ids,
             recent_history_segment_ids: input.recent_history_segment_ids,
             env_vars,
+        })
+    }
+
+    pub fn from_runtime_config_summary(
+        input: RuntimeTurnContextInput,
+    ) -> Result<Self, TurnContextSnapshotError> {
+        let snapshot_input = TurnContextSnapshotInput::from_runtime_config_summary(input)?;
+        Self::from_fake_input(snapshot_input)
+    }
+}
+
+impl TurnContextSnapshotInput {
+    pub fn from_runtime_config_summary(
+        input: RuntimeTurnContextInput,
+    ) -> Result<Self, TurnContextSnapshotError> {
+        require_non_empty("thread_id", &input.thread_id)?;
+        require_non_empty("turn_id", &input.turn_id)?;
+        require_non_empty_path("workspace_root", &input.workspace_root)?;
+        require_non_empty("provider_id", &input.config_summary.provider_id)?;
+        require_non_empty("model_name", &input.config_summary.model_name)?;
+
+        Ok(Self {
+            thread_id: input.thread_id,
+            turn_id: input.turn_id,
+            workspace_root: input.workspace_root,
+            provider_id: input.config_summary.provider_id,
+            model_name: input.config_summary.model_name,
+            permission_profile_id: input.permission_profile_id,
+            tools: input.tools,
+            memory_segment_ids: input.memory_segment_ids,
+            recent_history_segment_ids: input.recent_history_segment_ids,
+            env_pairs: input.env_pairs,
         })
     }
 }

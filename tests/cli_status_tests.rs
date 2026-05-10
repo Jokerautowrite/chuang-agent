@@ -116,6 +116,11 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=draft_only"
     ));
+    assert!(stdout.contains(
+        "policy_tool_status: active_profile=local_ga normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
+    ));
+    assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
+    assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));

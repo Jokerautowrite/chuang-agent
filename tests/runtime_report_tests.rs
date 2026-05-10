@@ -526,6 +526,75 @@ fn runtime_report_observability_meta_includes_typed_execution_failures() {
 }
 
 #[test]
+fn runtime_report_observability_meta_includes_tool_protocol_typed_failure_code() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "tool_protocol_typed_failure_code".to_string(),
+        "protocol_error".to_string(),
+    );
+    extra.insert(
+        "tool_protocol_typed_failure_message".to_string(),
+        "sensitive details should not appear".to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "gpt-observable".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: Some("local-openai-compatible".to_string()),
+                recall_hit_count: Some(0),
+                finish_reason: Some("stop".to_string()),
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 20,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("tool_typed_failure_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_typed_failure_classes"),
+        Some(&"protocol_error".to_string())
+    );
+
+    let report = build_runtime_report(
+        &result,
+        "report-typed-failure-code",
+        "task-typed-failure-code",
+        "agent-typed-failure-code",
+        None,
+    );
+    let observability_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.observability")
+        .expect("observability artifact should exist");
+    let description = observability_artifact
+        .description
+        .as_deref()
+        .expect("description");
+    assert!(description.contains("tool_typed_failures=1"));
+    assert!(!description.contains("sensitive details should not appear"));
+}
+
+#[test]
 fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
     let mut extra = BTreeMap::new();
     extra.insert("transport".to_string(), "openai-compatible".to_string());

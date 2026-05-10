@@ -81,6 +81,11 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=draft_only"
     ));
     assert!(stdout.contains(
+        "policy_tool_status: active_profile=local_ga normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
+    ));
+    assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
+    assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
+    assert!(stdout.contains(
         "atomic_tools_ok: true manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
     assert!(stdout.contains("atomic_tools_mapped: mouse,keyboard,screenshot,locate,file_read,file_write,code_execute,wait,human_suspend"));
