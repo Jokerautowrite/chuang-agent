@@ -40,7 +40,7 @@ def handle_request(allowlist: dict, request: dict) -> dict:
         if app is None:
             raise SystemExit(f"app not allowlisted: {app_name}")
         if live_enabled():
-            subprocess.Popen(app["open_command"])
+            launch_open_command(app["open_command"])
             message = boundary_message("open_app", real_execution=True)
         else:
             message = boundary_message("open_app")
@@ -236,6 +236,17 @@ def find_app(allowlist: dict, app_name: str):
                 raise SystemExit(f"app missing open_command: {app_name}")
             return app
     return None
+
+
+def launch_open_command(command: list) -> None:
+    subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+    )
 
 
 def response(observation=None, app_handle=None, evidence_ref=None, message="ok") -> dict:

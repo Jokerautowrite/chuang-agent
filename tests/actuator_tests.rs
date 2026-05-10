@@ -367,6 +367,67 @@ fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
 }
 
 #[test]
+fn real_actuator_adapter_live_open_app_detaches_child_output() {
+    let noisy_app = temp_script_path("noisy-open-app");
+    fs::write(
+        &noisy_app,
+        "#!/bin/sh\nsleep 0.05\nprintf 'child stdout noise\\n'\nprintf 'child stderr noise\\n' >&2\n",
+    )
+    .expect("noisy app script should write");
+    fs::set_permissions(&noisy_app, fs::Permissions::from_mode(0o755))
+        .expect("noisy app script should be executable");
+    let allowlist = temp_script_path("real-actuator-noisy-open-app").with_extension("json");
+    fs::write(
+        &allowlist,
+        serde_json::json!({
+            "apps": [{
+                "app_name": "NoisyApp",
+                "open_command": [noisy_app.display().to_string()]
+            }],
+            "input_allowed": false,
+            "click_allowed": false,
+            "screenshot_allowed": false
+        })
+        .to_string(),
+    )
+    .expect("allowlist should write");
+    let adapter_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("chuang-real-actuator-adapter.py");
+    let mut child = Command::new(adapter_path)
+        .args(["--json", "--allowlist"])
+        .arg(&allowlist)
+        .env("CHUANG_REAL_ACTUATOR_ENABLE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("adapter should spawn");
+    let request = br#"{"action":"open_app","open_app":{"app_name":"NoisyApp"}}"#;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("stdin should be available"),
+        request,
+    )
+    .expect("request should write");
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("adapter should finish");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("response should be clean json");
+    assert_eq!(response["app_handle"]["app_name"], "NoisyApp");
+    let message = response["message"].as_str().expect("message should exist");
+    assert!(message.contains("dry_run=false"));
+    assert!(message.contains("real_execution=true"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("child stdout noise"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("child stderr noise"));
+}
+
+#[test]
 fn real_actuator_adapter_observe_is_readonly_and_structured() {
     let allowlist = temp_script_path("real-actuator-observe").with_extension("json");
     fs::write(
