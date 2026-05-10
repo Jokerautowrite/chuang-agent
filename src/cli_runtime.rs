@@ -496,24 +496,74 @@ where
         }
     }
 
-    if let (Some(mut turn), Some(answer)) = (last_turn, last_plain_text_answer) {
-        turn.result.response.body = answer;
-        turn.user_input = original_input;
-        insert_tool_surface_metadata(&mut turn, workspace_root)?;
-        insert_tool_metadata_with_status(
-            &mut turn,
-            workspace_root,
-            max_tool_rounds,
-            &tool_calls,
-            &protocol_errors,
-            &tool_events,
-            &transcript,
-            "implicit_final_plain_text",
-        )?;
-        return Ok(turn);
+    if let Some(answer) = last_plain_text_answer {
+        if let Some(mut turn) = last_turn.take() {
+            turn.result.response.body = answer;
+            turn.user_input = original_input;
+            insert_tool_surface_metadata(&mut turn, workspace_root)?;
+            insert_tool_metadata_with_status(
+                &mut turn,
+                workspace_root,
+                max_tool_rounds,
+                &tool_calls,
+                &protocol_errors,
+                &tool_events,
+                &transcript,
+                "implicit_final_plain_text",
+            )?;
+            return Ok(turn);
+        }
+    }
+
+    if let Some(mut turn) = last_turn {
+        if let Some(record) = tool_calls
+            .last()
+            .filter(|record| terminal_tool_failure(record))
+        {
+            turn.result.response.body = terminal_tool_failure_answer(record);
+            turn.user_input = original_input;
+            insert_tool_surface_metadata(&mut turn, workspace_root)?;
+            insert_tool_metadata_with_status(
+                &mut turn,
+                workspace_root,
+                max_tool_rounds,
+                &tool_calls,
+                &protocol_errors,
+                &tool_events,
+                &transcript,
+                "terminal_tool_failure",
+            )?;
+            return Ok(turn);
+        }
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+fn terminal_tool_failure(record: &ToolExecutionRecord) -> bool {
+    !record.ok
+        && record
+            .failure_class
+            .as_deref()
+            .is_some_and(|failure_class| {
+                matches!(
+                    failure_class,
+                    "actuator_failed"
+                        | "actuator_unconfigured"
+                        | "governance_rejected"
+                        | "tool_failed"
+                )
+            })
+}
+
+fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
+    let tool_name = tool_call_name(&record.call);
+    let decision = record.decision.as_deref().unwrap_or("unknown");
+    let failure_class = record.failure_class.as_deref().unwrap_or("tool_failed");
+    format!(
+        "本轮没有完成真实动作。\n动作：{tool_name}\n结果：未执行点击、输入或修改。\n拦截原因：{failure_class}; {summary}\n治理决策：{decision}\n下一步：如果确实要执行真实桌面动作，需要先补 action allowlist、治理审批和 operator receipt；否则只能继续做只读 observe/screenshot 取证。",
+        summary = record.summary
+    )
 }
 
 fn should_auto_observe_desktop(user_input: &str) -> bool {
@@ -3128,6 +3178,73 @@ mod tests {
             .get("tool_protocol_errors_json")
             .expect("tool protocol errors json should exist")
             .contains("plain_text_response"));
+    }
+
+    #[test]
+    fn run_with_options_returns_terminal_tool_failure_for_unapproved_desktop_action() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-terminal-tool-failure-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"mouse","x":1910,"y":10}}"#,
+                r#"ACTION: {"type":"tool_call","call":{"tool":"mouse","x":1910,"y":10}}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "试试点一下飞书右上角的关闭".to_string(),
+            Vec::new(),
+        )
+        .expect("terminal tool failure should return a user-facing response");
+
+        assert!(turn.result.response.body.contains("本轮没有完成真实动作"));
+        assert!(turn.result.response.body.contains("未执行点击、输入或修改"));
+        assert!(turn.result.response.body.contains("actuator_unconfigured"));
+        assert!(turn
+            .result
+            .response
+            .body
+            .contains("action allowlist、治理审批和 operator receipt"));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("terminal_tool_failure")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("2")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_report_json")
+            .expect("tool report json should exist")
+            .contains("\"status\":\"terminal_tool_failure\""));
     }
 
     fn test_runtime(db_path: PathBuf, identity_root: PathBuf) -> RuntimeConfig {
