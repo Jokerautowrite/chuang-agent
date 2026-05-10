@@ -3,6 +3,8 @@
 日期：2026-05-11
 依据：`docs/claude-rust-slot-audit-v1.md`
 
+补充：本文的 M1/M2 仍有效，但已被 `docs/codex-claude-optimization-plan-v1.md` 扩展为 Codex + Claude 双参考路线；后续执行优先级以双参考计划为准。
+
 ## 目标
 
 把 `claude-rust` 的成熟模块吸收到 Chuang Slot 体系中，但保持 Chuang 的核心边界：

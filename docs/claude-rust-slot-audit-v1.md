@@ -4,6 +4,8 @@
 对象：`/home/user/projects/claude-rust`
 定位：评估 `claude-rust` 对 Chuang 九大 Slot 的可移植价值。
 
+补充：本文是 Claude 单源审计；Codex 代码级审计与双参考后的执行优先级见 `docs/codex-architecture-audit-v1.md` 和 `docs/codex-claude-optimization-plan-v1.md`。
+
 ## 结论
 
 `claude-rust` 是 Chuang 当前最值得吸收的 Rust 参考实现之一，但不应整体替换 Chuang runtime。正确路径是按 Slot 做 adapter / contract test / fake-first 接入。
