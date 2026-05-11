@@ -353,6 +353,18 @@ transport = "stub"
             ["tool_unified_execution_failure_count"],
         "0"
     );
+    assert!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["context_pack_trace"]
+            .as_str()
+            .expect("completed context pack trace should be a string")
+            .contains("normalize_tokens:")
+    );
+    assert!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["context_compaction_events"]
+            .as_str()
+            .expect("completed context compaction events should be a string")
+            .contains("context_compaction_started")
+    );
     assert_eq!(
         turn_completed["params"]["turn"]["toolProtocolErrorCount"],
         0
