@@ -196,6 +196,8 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
     assert!(!read_only.open_world);
     assert!(!read_only.external_commit);
     assert!(!read_only.requires_approval);
+    assert!(!read_only.omitted_risk_defaults_tightened);
+    assert_eq!(read_only.permission_decision_hint, "allow");
 
     let local_mutation = McpToolSpec::new("local.write_note", "Write local note", schema())
         .read_only(false)
@@ -209,6 +211,8 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
     assert!(!local_mutation.open_world);
     assert!(!local_mutation.external_commit);
     assert!(!local_mutation.requires_approval);
+    assert!(!local_mutation.omitted_risk_defaults_tightened);
+    assert_eq!(local_mutation.permission_decision_hint, "allow_with_audit");
 
     let destructive = McpToolSpec::new("local.delete_note", "Delete local note", schema())
         .read_only(false)
@@ -219,6 +223,8 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
         .risk_view();
     assert!(destructive.destructive);
     assert!(destructive.requires_approval);
+    assert!(!destructive.omitted_risk_defaults_tightened);
+    assert_eq!(destructive.permission_decision_hint, "require_approval");
 
     let omitted_risk = McpToolSpec::new("unknown.mutator", "Risk omitted", schema())
         .read_only(false)
@@ -226,6 +232,8 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
     assert!(omitted_risk.destructive);
     assert!(omitted_risk.open_world);
     assert!(omitted_risk.requires_approval);
+    assert!(omitted_risk.omitted_risk_defaults_tightened);
+    assert_eq!(omitted_risk.permission_decision_hint, "require_approval");
 
     let external = McpToolSpec::new("external.send", "Send message", schema())
         .read_only(false)
@@ -237,6 +245,8 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
     assert!(external.open_world);
     assert!(external.external_commit);
     assert!(external.requires_approval);
+    assert!(!external.omitted_risk_defaults_tightened);
+    assert_eq!(external.permission_decision_hint, "require_approval");
 
     let omitted_external_commit =
         McpToolSpec::new("local.unknown_commit", "Risk omitted", schema())
@@ -246,6 +256,11 @@ fn mcp_tool_specs_convert_to_descriptor_like_risk_flags() {
             .risk_view();
     assert!(omitted_external_commit.external_commit);
     assert!(omitted_external_commit.requires_approval);
+    assert!(omitted_external_commit.omitted_risk_defaults_tightened);
+    assert_eq!(
+        omitted_external_commit.permission_decision_hint,
+        "require_approval"
+    );
 }
 
 #[test]
@@ -336,4 +351,12 @@ fn tools_list_includes_structured_descriptors_for_audit() {
     assert_eq!(descriptors.len(), 1);
     assert_eq!(descriptors[0]["spec"]["name"], "external.send");
     assert_eq!(descriptors[0]["risk"]["requires_approval"], true);
+    assert_eq!(
+        descriptors[0]["risk"]["omitted_risk_defaults_tightened"],
+        false
+    );
+    assert_eq!(
+        descriptors[0]["risk"]["permission_decision_hint"],
+        "require_approval"
+    );
 }

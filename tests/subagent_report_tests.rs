@@ -1,8 +1,8 @@
 use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
 use chuang_agent::subagent_report::{
-    ArtifactKind, ArtifactRef, ExecutionStatus, ReportAdmissionStatus, ReportBuilder,
-    ReportRejectReason, ReportValidator, ResourceUsage, SubagentReport, SubagentReportBuilder,
-    SubagentReportValidator,
+    ArtifactKind, ArtifactRef, ExecutionStatus, ReportAdmission, ReportAdmissionStatus,
+    ReportBuilder, ReportRejectReason, ReportValidator, ResourceUsage, SubagentReport,
+    SubagentReportBuilder, SubagentReportValidator,
 };
 
 fn sample_report() -> SubagentReport {
@@ -593,4 +593,65 @@ fn builder_can_build_report_from_runtime_input() {
         .expect("working reservation should exist");
     assert_eq!(reservation.reserved_segment_id, "working-user-input");
     assert_eq!(reservation.reason, "minimum_working_tokens");
+}
+
+#[test]
+fn accepted_admission_builds_parent_context_handoff_with_provenance() {
+    let report = sample_report();
+    let admission = ReportAdmission {
+        schema_version: "1.0.0".to_string(),
+        report_id: Some(report.report_id.clone()),
+        task_id: Some(report.task_id.clone()),
+        agent_id: Some(report.agent_id.clone()),
+        controller_agent_id: AgentId("controller-1".to_string()),
+        status: ReportAdmissionStatus::Accepted,
+        reason_code: "report_validated".to_string(),
+        upstream_reason_code: None,
+        reason: "report_validated".to_string(),
+        decided_at: Timestamp("2026-04-30T10:32:00Z".to_string()),
+    };
+
+    let handoff = chuang_agent::subagent_report::build_parent_context_handoff(&report, &admission);
+
+    assert!(handoff.accepted);
+    assert_eq!(handoff.report_id, Some(report.report_id.clone()));
+    assert_eq!(handoff.task_id, Some(report.task_id.clone()));
+    assert_eq!(handoff.agent_id, Some(report.agent_id.clone()));
+    assert_eq!(handoff.admission_reason_code, "report_validated");
+    assert_eq!(
+        handoff.provenance_ref.as_deref(),
+        Some("report://agent-1/report-1")
+    );
+    assert_eq!(handoff.summary.as_deref(), Some("ok"));
+    assert!(!handoff.memory_proposal_only);
+    assert_eq!(handoff.context_debug, report.context_debug);
+}
+
+#[test]
+fn rejected_admission_builds_memory_proposal_only_handoff_without_report_payload() {
+    let report = sample_report();
+    let admission = ReportAdmission {
+        schema_version: "1.0.0".to_string(),
+        report_id: Some(report.report_id.clone()),
+        task_id: Some(report.task_id.clone()),
+        agent_id: Some(report.agent_id.clone()),
+        controller_agent_id: AgentId("controller-1".to_string()),
+        status: ReportAdmissionStatus::Rejected,
+        reason_code: "missing_required_field".to_string(),
+        upstream_reason_code: None,
+        reason: "MissingRequiredField { field: \"summary\" }".to_string(),
+        decided_at: Timestamp("2026-04-30T10:32:00Z".to_string()),
+    };
+
+    let handoff = chuang_agent::subagent_report::build_parent_context_handoff(&report, &admission);
+
+    assert!(!handoff.accepted);
+    assert!(handoff.report_id.is_none());
+    assert!(handoff.task_id.is_none());
+    assert!(handoff.agent_id.is_none());
+    assert_eq!(handoff.admission_reason_code, "missing_required_field");
+    assert!(handoff.provenance_ref.is_none());
+    assert!(handoff.summary.is_none());
+    assert!(handoff.context_debug.is_none());
+    assert!(handoff.memory_proposal_only);
 }

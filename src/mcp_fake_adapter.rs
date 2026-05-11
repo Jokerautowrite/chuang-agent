@@ -54,6 +54,8 @@ pub struct McpToolRiskView {
     pub open_world: bool,
     pub external_commit: bool,
     pub requires_approval: bool,
+    pub omitted_risk_defaults_tightened: bool,
+    pub permission_decision_hint: String,
     pub risk_tags: Vec<String>,
 }
 
@@ -296,8 +298,19 @@ pub fn mcp_tool_risk_view(spec: &McpToolSpec) -> McpToolRiskView {
     let destructive = spec.destructive.unwrap_or(!read_only);
     let open_world = spec.open_world.unwrap_or(!read_only);
     let external_commit = spec.external_commit.unwrap_or(!read_only);
+    let omitted_risk_defaults_tightened = !read_only
+        && (spec.destructive.is_none()
+            || spec.open_world.is_none()
+            || spec.external_commit.is_none());
     let requires_approval =
         destructive || open_world || external_commit || has_high_risk_tag(&spec.risk_tags);
+    let permission_decision_hint = if requires_approval {
+        "require_approval"
+    } else if read_only {
+        "allow"
+    } else {
+        "allow_with_audit"
+    };
 
     McpToolRiskView {
         name: spec.name.clone(),
@@ -306,6 +319,8 @@ pub fn mcp_tool_risk_view(spec: &McpToolSpec) -> McpToolRiskView {
         open_world,
         external_commit,
         requires_approval,
+        omitted_risk_defaults_tightened,
+        permission_decision_hint: permission_decision_hint.to_string(),
         risk_tags: spec.risk_tags.clone(),
     }
 }
@@ -320,6 +335,14 @@ pub fn mcp_tool_descriptor_risk<'a>(
 
     if risk.open_world && !risk_tags_storage.contains(&"open_world") {
         risk_tags_storage.push("open_world");
+    }
+    if risk.external_commit && !risk_tags_storage.contains(&"external_commit") {
+        risk_tags_storage.push("external_commit");
+    }
+    if risk.omitted_risk_defaults_tightened
+        && !risk_tags_storage.contains(&"omitted_risk_tightened")
+    {
+        risk_tags_storage.push("omitted_risk_tightened");
     }
 
     ToolDescriptorRisk {

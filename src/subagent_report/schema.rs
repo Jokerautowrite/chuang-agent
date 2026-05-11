@@ -118,3 +118,17 @@ pub struct ReportAdmission {
     pub reason: String,
     pub decided_at: Timestamp,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParentContextHandoff {
+    pub schema_version: String,
+    pub accepted: bool,
+    pub report_id: Option<ReportId>,
+    pub task_id: Option<TaskId>,
+    pub agent_id: Option<AgentId>,
+    pub admission_reason_code: String,
+    pub provenance_ref: Option<String>,
+    pub summary: Option<String>,
+    pub context_debug: Option<ContextDebugSummary>,
+    pub memory_proposal_only: bool,
+}
