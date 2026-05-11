@@ -1,6 +1,9 @@
 use chuang_agent::mcp_fake_adapter::{
-    mcp_tool_descriptor_risk, mcp_tool_risk_view, McpAdapterError, McpFakeServer, McpToolCall,
-    McpToolSpec,
+    mcp_call_runtime_events, mcp_tool_descriptor_risk, mcp_tool_risk_view, McpAdapterError,
+    McpFakeServer, McpRuntimeEventInput, McpToolCall, McpToolSpec,
+};
+use chuang_agent::runtime_event_ledger::{
+    InMemoryRuntimeEventLedger, RuntimeEventKind, RuntimeEventLedger,
 };
 use serde_json::{json, Value};
 
@@ -359,4 +362,84 @@ fn tools_list_includes_structured_descriptors_for_audit() {
         descriptors[0]["risk"]["permission_decision_hint"],
         "require_approval"
     );
+}
+
+#[test]
+fn mcp_call_runtime_events_record_result_error_and_approval_without_payload_leakage() {
+    let risk = McpToolSpec::new("external.send", "Send", schema())
+        .read_only(false)
+        .destructive(false)
+        .open_world(true)
+        .external_commit(true)
+        .risk_tags(["external_send"])
+        .risk_view();
+    let input = McpRuntimeEventInput {
+        thread_id: "thread-mcp".to_string(),
+        turn_id: Some("turn-mcp".to_string()),
+        call_id: "call-mcp-secret-value".to_string(),
+        tool_name: "external.send".to_string(),
+        risk,
+    };
+
+    let events = mcp_call_runtime_events(input, false);
+    let approval = events
+        .approval_required
+        .clone()
+        .expect("external MCP tool should request approval");
+    assert_eq!(approval.event_type, RuntimeEventKind::ApprovalRequested);
+    assert_eq!(approval.thread_id, "thread-mcp");
+    assert_eq!(approval.turn_id.as_deref(), Some("turn-mcp"));
+    assert_eq!(approval.call_id.as_deref(), Some("call-mcp-secret-value"));
+    assert_eq!(
+        approval
+            .risk_decision
+            .as_ref()
+            .map(|risk| risk.decision.as_str()),
+        Some("require_approval")
+    );
+    assert_eq!(
+        events.tool_started.event_type,
+        RuntimeEventKind::ToolStarted
+    );
+    assert_eq!(
+        events.tool_finished.event_type,
+        RuntimeEventKind::ToolFinished
+    );
+    assert_eq!(
+        events
+            .tool_finished
+            .risk_decision
+            .as_ref()
+            .map(|risk| risk.decision.as_str()),
+        Some("tool_error")
+    );
+    assert_eq!(
+        events.tool_finished.evidence_ref.as_deref(),
+        Some("mcp://tool/external.send/call-mcp-secret-value/error")
+    );
+
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    ledger
+        .append(approval)
+        .expect("approval event should append");
+    ledger
+        .append(events.tool_started)
+        .expect("started event should append");
+    ledger
+        .append(events.tool_finished)
+        .expect("finished event should append");
+    let turn_events = ledger
+        .query_by_turn("thread-mcp", "turn-mcp")
+        .expect("turn query should work");
+    assert_eq!(turn_events.len(), 3);
+    let call_events = ledger
+        .query_by_call("call-mcp-secret-value")
+        .expect("call query should work");
+    assert_eq!(call_events.len(), 3);
+
+    let rendered = serde_json::to_string(&call_events).expect("events should serialize");
+    assert!(rendered.contains("approval_required"));
+    assert!(rendered.contains("tool_error"));
+    assert!(!rendered.contains("api_key"));
+    assert!(!rendered.contains("payload-secret-value"));
 }

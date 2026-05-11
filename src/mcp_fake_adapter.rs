@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::permission_profile_slot::ToolDescriptorRisk;
+use crate::runtime_event_ledger::{RuntimeEvent, RuntimeEventKind, RuntimeRiskDecision};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -44,6 +45,22 @@ pub struct McpToolResult {
 pub struct McpToolDescriptor {
     pub spec: McpToolSpec,
     pub risk: McpToolRiskView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpRuntimeEventInput {
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub call_id: String,
+    pub tool_name: String,
+    pub risk: McpToolRiskView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpRuntimeEvents {
+    pub approval_required: Option<RuntimeEvent>,
+    pub tool_started: RuntimeEvent,
+    pub tool_finished: RuntimeEvent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -353,6 +370,69 @@ pub fn mcp_tool_descriptor_risk<'a>(
         destructive: risk.destructive,
         external_commit: risk.external_commit,
         requires_approval: risk.requires_approval,
+    }
+}
+
+pub fn mcp_call_runtime_events(input: McpRuntimeEventInput, ok: bool) -> McpRuntimeEvents {
+    let decision = if input.risk.requires_approval {
+        RuntimeRiskDecision::new(
+            "require_approval",
+            format!("mcp tool {} requires approval", input.tool_name),
+        )
+        .with_policy_ref("policy://mcp-fake-adapter/risk-view")
+    } else if input.risk.read_only {
+        RuntimeRiskDecision::new(
+            "allow",
+            format!("mcp tool {} is read-only", input.tool_name),
+        )
+        .with_policy_ref("policy://mcp-fake-adapter/read-only")
+    } else {
+        RuntimeRiskDecision::new(
+            "allow_with_audit",
+            format!("mcp tool {} is local mutating", input.tool_name),
+        )
+        .with_policy_ref("policy://mcp-fake-adapter/local-mutating")
+    };
+    let base_evidence = format!("mcp://tool/{}/{}", input.tool_name, input.call_id);
+
+    let mut tool_started =
+        RuntimeEvent::new(RuntimeEventKind::ToolStarted, input.thread_id.clone())
+            .with_call_id(input.call_id.clone())
+            .with_risk_decision(decision.clone())
+            .with_evidence_ref(format!("{base_evidence}/started"));
+    let mut tool_finished =
+        RuntimeEvent::new(RuntimeEventKind::ToolFinished, input.thread_id.clone())
+            .with_call_id(input.call_id.clone())
+            .with_risk_decision(RuntimeRiskDecision::new(
+                if ok { "tool_result" } else { "tool_error" },
+                format!("mcp tool {} finished ok={ok}", input.tool_name),
+            ))
+            .with_evidence_ref(format!(
+                "{base_evidence}/{}",
+                if ok { "result" } else { "error" }
+            ));
+    if let Some(turn_id) = &input.turn_id {
+        tool_started = tool_started.with_turn_id(turn_id.clone());
+        tool_finished = tool_finished.with_turn_id(turn_id.clone());
+    }
+
+    let approval_required = if input.risk.requires_approval {
+        let mut event = RuntimeEvent::new(RuntimeEventKind::ApprovalRequested, input.thread_id)
+            .with_call_id(input.call_id)
+            .with_risk_decision(decision)
+            .with_evidence_ref(format!("{base_evidence}/approval_required"));
+        if let Some(turn_id) = input.turn_id {
+            event = event.with_turn_id(turn_id);
+        }
+        Some(event)
+    } else {
+        None
+    };
+
+    McpRuntimeEvents {
+        approval_required,
+        tool_started,
+        tool_finished,
     }
 }
 

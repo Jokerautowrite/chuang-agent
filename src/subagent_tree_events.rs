@@ -96,6 +96,56 @@ impl SubagentTreeEventBuilder {
         )
     }
 
+    pub fn message_sent_event(
+        &self,
+        record: &SubagentThreadRecord,
+        message_id: impl Into<String>,
+    ) -> SubagentTreeRuntimeEvent {
+        let message_id = sanitize_event_segment(&message_id.into());
+        let evidence_ref = record_evidence_ref(record, &format!("message/{message_id}"));
+        let runtime_event = self
+            .base_event(
+                RuntimeEventKind::ToolStarted,
+                record.relation.thread_id.clone(),
+                evidence_ref.clone(),
+            )
+            .with_call_id(format!(
+                "subagent-message:{}:{message_id}",
+                record.relation.thread_id
+            ));
+        self.event_from_record(
+            SubagentTreeBridgeEventKind::SubagentMessageSent,
+            runtime_event,
+            record,
+            evidence_ref,
+        )
+    }
+
+    pub fn wait_started_event(
+        &self,
+        record: &SubagentThreadRecord,
+        wait_id: impl Into<String>,
+    ) -> SubagentTreeRuntimeEvent {
+        let wait_id = sanitize_event_segment(&wait_id.into());
+        let evidence_ref = record_evidence_ref(record, &format!("wait/{wait_id}"));
+        let runtime_event = self
+            .base_event(
+                RuntimeEventKind::ToolStarted,
+                record.relation.thread_id.clone(),
+                evidence_ref.clone(),
+            )
+            .with_call_id(format!(
+                "subagent-wait:{}:{wait_id}",
+                record.relation.thread_id
+            ));
+        self.event_from_record(
+            SubagentTreeBridgeEventKind::SubagentWaitStarted,
+            runtime_event,
+            record,
+            evidence_ref,
+        )
+    }
+
     pub fn list_event(
         &self,
         root_thread_id: impl Into<String>,
@@ -181,6 +231,8 @@ impl SubagentTreeEventBuilder {
 #[serde(rename_all = "snake_case")]
 pub enum SubagentTreeBridgeEventKind {
     SubagentSpawned,
+    SubagentMessageSent,
+    SubagentWaitStarted,
     SubagentReported,
     SubagentClosed,
     SubagentChildrenListed,
@@ -273,6 +325,22 @@ pub fn subagent_closed_event(
     SubagentTreeEventBuilder::new(created_at).close_event(record)
 }
 
+pub fn subagent_message_sent_event(
+    created_at: impl Into<String>,
+    record: &SubagentThreadRecord,
+    message_id: impl Into<String>,
+) -> SubagentTreeRuntimeEvent {
+    SubagentTreeEventBuilder::new(created_at).message_sent_event(record, message_id)
+}
+
+pub fn subagent_wait_started_event(
+    created_at: impl Into<String>,
+    record: &SubagentThreadRecord,
+    wait_id: impl Into<String>,
+) -> SubagentTreeRuntimeEvent {
+    SubagentTreeEventBuilder::new(created_at).wait_started_event(record, wait_id)
+}
+
 fn spawn_evidence_ref(
     root_thread_id: &str,
     parent_thread_id: &str,
@@ -286,6 +354,25 @@ fn record_evidence_ref(record: &SubagentThreadRecord, action: &str) -> String {
         "subagent-tree://{}/record/{}/{}",
         record.relation.root_thread_id, action, record.relation.thread_id
     )
+}
+
+fn sanitize_event_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .take(96)
+        .collect();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn admission_evidence_ref(admission: Option<&ReportAdmissionRef>) -> Option<String> {

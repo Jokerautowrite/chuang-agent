@@ -1,7 +1,8 @@
 use chuang_agent::runtime_event_ledger::RuntimeEventKind;
 use chuang_agent::subagent_tree_events::{
-    subagent_closed_event, subagent_reported_event, subagent_spawned_event,
-    SubagentTreeBridgeEventKind, SubagentTreeEventBuilder,
+    subagent_closed_event, subagent_message_sent_event, subagent_reported_event,
+    subagent_spawned_event, subagent_wait_started_event, SubagentTreeBridgeEventKind,
+    SubagentTreeEventBuilder,
 };
 use chuang_agent::subagent_tree_ledger::{
     AgentRole, InMemorySubagentTreeLedger, ReportAdmissionRef, SpawnRequest, SubagentTreeLedger,
@@ -223,6 +224,57 @@ fn close_event_serializes_as_bridge_event_without_new_runtime_event_kind() {
     assert!(encoded.contains("\"bridge_event_kind\":\"subagent_closed\""));
     assert!(encoded.contains("\"event_type\":\"tool_finished\""));
     assert!(encoded.contains("\"status\":\"Closed\""));
+}
+
+#[test]
+fn message_and_wait_events_record_audited_subagent_activity_without_secret_values() {
+    let mut ledger = ledger();
+    ledger
+        .spawn(spawn_request("child-thread-1", "reader"))
+        .expect("spawn should succeed");
+    let record = ledger
+        .register_report(
+            "child-thread-1",
+            admission("Accepted", "report_validated", "queue://reports/report-1"),
+        )
+        .expect("report should register");
+
+    let message_event = subagent_message_sent_event(CREATED_AT, &record, "msg-1");
+    let wait_event = subagent_wait_started_event(CREATED_AT, &record, "wait-1");
+
+    assert_eq!(
+        message_event.bridge_event_kind,
+        SubagentTreeBridgeEventKind::SubagentMessageSent
+    );
+    assert_eq!(
+        message_event.runtime_event.event_type,
+        RuntimeEventKind::ToolStarted
+    );
+    assert_eq!(
+        message_event.runtime_event.call_id.as_deref(),
+        Some("subagent-message:child-thread-1:msg-1")
+    );
+    assert!(message_event.evidence_ref.contains("message/msg-1"));
+    assert_eq!(
+        wait_event.bridge_event_kind,
+        SubagentTreeBridgeEventKind::SubagentWaitStarted
+    );
+    assert_eq!(
+        wait_event.runtime_event.event_type,
+        RuntimeEventKind::ToolStarted
+    );
+    assert_eq!(
+        wait_event.runtime_event.call_id.as_deref(),
+        Some("subagent-wait:child-thread-1:wait-1")
+    );
+    assert!(wait_event.evidence_ref.contains("wait/wait-1"));
+
+    let encoded =
+        serde_json::to_string(&[message_event, wait_event]).expect("events should serialize");
+    assert!(encoded.contains("subagent_message_sent"));
+    assert!(encoded.contains("subagent_wait_started"));
+    assert!(!encoded.contains("message-body-secret-value"));
+    assert!(!encoded.contains("wait-result-secret-value"));
 }
 
 #[test]

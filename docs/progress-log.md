@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-11 Codex + Claude 双参考架构补全
+- M5/M6/M7 继续小步推进：`src/mcp_fake_adapter.rs` 新增 `mcp_call_runtime_events()`，把 fake MCP approval/started/finished 结果转成 runtime ledger 事件，供 `RuntimeEventLedger` 查询，不接真实 MCP/network、不打印 secret；`src/subagent_tree_events.rs` 新增 subagent message/wait 桥接事件，继续用审计事件表达子代理活动而不改真实队列执行；`src/context_engine.rs` 新增 `PackedContext::compaction_summary()`，给 compaction runtime trace 提供可查询摘要，不再要求上层解析 prompt 字符串。
 - app-server health 与 status/doctor 继续对齐：`src/app_server.rs` 现在把 `runtime_report_surface` 作为结构化 JSON 字段直接带进 health 输出，文本面也同步打印 `runtime_report_surface: ok=true artifacts=6 observability_fields=6`，避免健康面比状态面少一块 runtime/report 可查询合同。
 - app-server runtimeObservability 事件面继续补回归：`tests/app_server_tests.rs` 现在同时锁定 `turn/completed` 事件里的 `context_pack_trace` 和 `context_compaction_events`，避免只在 `turn/start` 响应或 channel simulate 输出面可见、事件订阅面丢失 compaction/runtime trace。
 - Feishu 独立通道这轮再补一条 direct-startup 回归：`tests/cli_smoke_tests.rs` 新增 `feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup`，用只读 provider env 触发 `scripts/chuang-feishu-bridge.js` 顶层 `loadProviderEnvReadonly()`，确认它在真正进入 bridge 主循环前就拒绝 `CHUANG_FEISHU_*` / `HERMES_FEISHU_*` 变体，且错误输出仍只暴露变量名不暴露 secret 值。

@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
 
@@ -69,6 +69,17 @@ pub struct ContextCompactionEvent {
     pub trace_step: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompactionSummary {
+    pub event_count: usize,
+    pub started_count: usize,
+    pub completed_count: usize,
+    pub dropped_count: usize,
+    pub dropped_segment_ids: Vec<String>,
+    pub drop_reason_counts: BTreeMap<String, usize>,
+    pub trace_steps: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextCompactionEventKind {
     Started,
@@ -82,6 +93,47 @@ impl ContextCompactionEventKind {
             Self::Started => "context_compaction_started",
             Self::SegmentDropped => "context_segment_dropped",
             Self::Completed => "context_compaction_completed",
+        }
+    }
+}
+
+impl PackedContext {
+    pub fn compaction_summary(&self) -> ContextCompactionSummary {
+        let mut started_count = 0usize;
+        let mut completed_count = 0usize;
+        let mut dropped_segment_ids = Vec::new();
+        let mut drop_reason_counts = BTreeMap::new();
+        let mut trace_steps = Vec::new();
+
+        for event in &self.compaction_events {
+            match event.kind {
+                ContextCompactionEventKind::Started => started_count += 1,
+                ContextCompactionEventKind::Completed => completed_count += 1,
+                ContextCompactionEventKind::SegmentDropped => {
+                    if let Some(segment_id) = &event.segment_id {
+                        dropped_segment_ids.push(segment_id.clone());
+                    }
+                    if let Some(reason) = &event.reason {
+                        *drop_reason_counts.entry(reason.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+            if let Some(trace_step) = event.trace_step {
+                let step = trace_step.to_string();
+                if !trace_steps.iter().any(|existing| existing == &step) {
+                    trace_steps.push(step);
+                }
+            }
+        }
+
+        ContextCompactionSummary {
+            event_count: self.compaction_events.len(),
+            started_count,
+            completed_count,
+            dropped_count: dropped_segment_ids.len(),
+            dropped_segment_ids,
+            drop_reason_counts,
+            trace_steps,
         }
     }
 }

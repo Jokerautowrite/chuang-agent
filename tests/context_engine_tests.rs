@@ -816,3 +816,97 @@ fn pack_records_structured_compaction_events_without_segment_content() {
     assert!(rendered.contains("context_segment_dropped:memory-secret-old:memory_trim:@trim"));
     assert!(!rendered.contains("should-not-appear"));
 }
+
+#[test]
+fn compaction_summary_is_queryable_without_segment_content() {
+    let packer = ContextPacker::new(ContextBudget {
+        max_tokens: 22,
+        reserve_system_tokens: 10,
+        min_working_tokens: 5,
+        max_tool_results: 1,
+        max_memory_segments: 1,
+    });
+
+    let packed = packer
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system instruction",
+                Some(10),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-secret-old",
+                SegmentSource::Memory,
+                "Authorization: Bearer should-not-appear",
+                Some(3),
+                100,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "memory-new",
+                SegmentSource::Memory,
+                "new memory",
+                Some(3),
+                100,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "tool-old",
+                SegmentSource::ToolResult,
+                "tool secret=should-not-appear",
+                Some(3),
+                90,
+                "2026-04-30T18:00:01Z",
+                "2026-04-30T18:00:01Z",
+            ),
+            segment(
+                "tool-new",
+                SegmentSource::ToolResult,
+                "new tool",
+                Some(3),
+                90,
+                "2026-04-30T18:00:02Z",
+                "2026-04-30T18:00:02Z",
+            ),
+            segment(
+                "working-1",
+                SegmentSource::Working,
+                "working segment",
+                Some(5),
+                220,
+                "2026-04-30T18:00:03Z",
+                "2026-04-30T18:00:03Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let summary = packed.compaction_summary();
+    assert_eq!(summary.started_count, 1);
+    assert_eq!(summary.completed_count, 1);
+    assert!(summary.dropped_count >= 2);
+    assert!(summary
+        .dropped_segment_ids
+        .iter()
+        .any(|segment_id| segment_id == "memory-secret-old"));
+    assert!(summary
+        .dropped_segment_ids
+        .iter()
+        .any(|segment_id| segment_id == "tool-old"));
+    assert_eq!(summary.drop_reason_counts.get("memory_trim"), Some(&1));
+    assert_eq!(summary.drop_reason_counts.get("tool_result_trim"), Some(&1));
+    assert!(summary.trace_steps.contains(&"trim".to_string()));
+    assert!(summary
+        .trace_steps
+        .contains(&"merge_under_budget".to_string()));
+
+    let rendered = format!("{summary:?}");
+    assert!(!rendered.contains("should-not-appear"));
+    assert!(!rendered.contains("Authorization"));
+    assert!(!rendered.contains("secret="));
+}
