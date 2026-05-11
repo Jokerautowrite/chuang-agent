@@ -103,6 +103,14 @@ assert.strictEqual(checks.env_source_isolation.status, "pass");
 assert.strictEqual(checks.env_source_isolation.inherited_forbidden_credentials_used, false);
 assert.strictEqual(checks.env_source_isolation.codex_feishu_bridge_env_used, false);
 assert.strictEqual(checks.env_source_isolation.hermes_feishu_env_used, false);
+assert.strictEqual(
+  checks.env_source_isolation.inherited_forbidden_credential_env_states.HERMES_FEISHU_ENCRYPT_KEY,
+  "<unset>"
+);
+assert.strictEqual(
+  checks.env_source_isolation.inherited_forbidden_credential_env_states.CODEX_FEISHU_BOT_ID,
+  "<unset>"
+);
 assert.deepStrictEqual(checks.env_source_isolation.forbidden_credential_env_names_in_file, []);
 assert.strictEqual(checks.channel_feishu_check.status, "pass");
 assert.strictEqual(checks.channel_feishu_check.live_feishu_call_made, false);
@@ -120,5 +128,52 @@ assert.strictEqual(checks.provider_env_file.status, "pass");
 assert.strictEqual(checks.provider_env_file.provider_env_parse_status, "ok");
 assert.strictEqual(checks.provider_env_file.provider_secret_var_states.CODEX_PPTOKEN_API_KEY, "<set>");
 assert.deepStrictEqual(checks.provider_env_file.forbidden_feishu_credential_names_in_provider_env, []);
+
+const legacyEnvFile = path.join(workDir, "chuang-feishu-bridge-legacy.env");
+fs.writeFileSync(
+  legacyEnvFile,
+  [
+    `CHUANG_AGENT_ROOT=${root}`,
+    `CHUANG_AGENT_WORKSPACE_ROOT=${workspace}`,
+    `CHUANG_PROVIDER_ENV_FILE=${providerEnvFile}`,
+    "CHUANG_FEISHU_APP_ID=cli_a_chuang_preflight_smoke",
+    "CHUANG_FEISHU_APP_SECRET=smoke-secret-value",
+    "HERMES_FEISHU_ENCRYPT_KEY=legacy-hermes-encrypt",
+    "CODEX_FEISHU_BOT_ID=legacy-codex-bot",
+    "",
+  ].join("\n"),
+  "utf8"
+);
+const legacyResult = spawnSync(
+  "node",
+  [
+    path.join(root, "scripts", "chuang-feishu-live-preflight.js"),
+    "--env-file",
+    legacyEnvFile,
+    "--workspace-root",
+    workspace,
+    "--state-file",
+    path.join(workspace, "context", "feishu-session-state.json"),
+    "--json",
+  ],
+  {
+    cwd: root,
+    env: {
+      ...process.env,
+      CHUANG_FEISHU_PREFLIGHT_SMOKE_API_KEY: "test-key",
+    },
+    encoding: "utf8",
+  }
+);
+assert.notStrictEqual(legacyResult.status, 0, "legacy Feishu env names should block preflight");
+assert(!legacyResult.stdout.includes("legacy-hermes-encrypt"), "preflight output must not leak legacy secret");
+const legacyParsed = JSON.parse(legacyResult.stdout);
+const legacyChecks = Object.fromEntries(legacyParsed.checks.map((check) => [check.name, check]));
+assert.strictEqual(legacyParsed.ok, false);
+assert.strictEqual(legacyChecks.env_source_isolation.status, "fail");
+assert.deepStrictEqual(legacyChecks.env_source_isolation.forbidden_credential_env_names_in_file, [
+  "HERMES_FEISHU_ENCRYPT_KEY",
+  "CODEX_FEISHU_BOT_ID",
+]);
 
 console.log(`chuang_feishu_live_preflight_smoke_ok work_dir=${workDir}`);

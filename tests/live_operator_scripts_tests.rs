@@ -629,6 +629,16 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
     let stdout = String::from_utf8_lossy(&output.stdout);
     let data: serde_json::Value =
         serde_json::from_str(&stdout).expect("checklist output should be json");
+    assert_eq!(
+        data["checks"]["feishu_env_file"]["inherited_forbidden_credential_env_states"]
+            ["HERMES_FEISHU_ENCRYPT_KEY"],
+        "<unset>"
+    );
+    assert_eq!(
+        data["checks"]["feishu_env_file"]["inherited_forbidden_credential_env_states"]
+            ["CODEX_FEISHU_BOT_ID"],
+        "<unset>"
+    );
     let matrix = data["external_live_acceptance_matrix"]
         .as_array()
         .expect("matrix should be an array");
@@ -713,6 +723,70 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
         }
     }
     assert!(!stdout.contains("app-secret-value"));
+    assert!(!stdout.contains("feishu-secret-value"));
+    assert!(!stdout.contains("provider-secret-value"));
+}
+
+#[test]
+fn live_operator_checklist_blocks_codex_and_hermes_feishu_secret_names() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-live-operator-checklist-forbidden-{}-{nanos}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let provider_env = temp_dir.join("provider.env");
+    fs::write(
+        &provider_env,
+        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
+    )
+    .expect("provider env should write");
+    let env_file = temp_dir.join("chuang-feishu.env");
+    fs::write(
+        &env_file,
+        format!(
+            "CHUANG_FEISHU_APP_ID=app-secret-value\nCHUANG_FEISHU_APP_SECRET=feishu-secret-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_PROVIDER_ENV_FILE={}\nHERMES_FEISHU_ENCRYPT_KEY=legacy-hermes-secret\nCODEX_FEISHU_BOT_ID=legacy-codex-bot\n",
+            manifest_dir.display(),
+            provider_env.display()
+        ),
+    )
+    .expect("operator env should write");
+
+    let output = Command::new("bash")
+        .arg(&script_path)
+        .arg("--json")
+        .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &env_file)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("checklist should execute");
+    assert!(
+        !output.status.success(),
+        "forbidden Feishu credential names should block checklist"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value =
+        serde_json::from_str(&stdout).expect("checklist output should be json");
+    assert_eq!(data["ok"], false);
+    assert_eq!(data["status"], "blocked");
+    assert_eq!(
+        data["checks"]["feishu_env_file"]["forbidden_credential_env_names_in_file"],
+        serde_json::json!(["HERMES_FEISHU_ENCRYPT_KEY", "CODEX_FEISHU_BOT_ID"])
+    );
+    assert!(data["blockers"]
+        .as_array()
+        .expect("blockers should be array")
+        .iter()
+        .any(|blocker| blocker == "forbidden_codex_or_hermes_feishu_names_in_env_file"));
+    assert!(!stdout.contains("legacy-hermes-secret"));
+    assert!(!stdout.contains("legacy-codex-bot"));
     assert!(!stdout.contains("feishu-secret-value"));
     assert!(!stdout.contains("provider-secret-value"));
 }
