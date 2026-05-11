@@ -161,6 +161,72 @@ fn feishu_bridge_script_discovers_desktop_env_without_host_specific_display() {
 }
 
 #[test]
+fn feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "chuang-feishu-bridge-direct-startup-{}-{nanos}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("direct startup test root should be created");
+
+    let bridge_env = root.join("chuang-feishu-bridge.env");
+    let provider_env = root.join("provider.env");
+    fs::write(
+        &bridge_env,
+        format!(
+            "CHUANG_FEISHU_APP_ID=cli_a_chuang_startup\nCHUANG_FEISHU_APP_SECRET=bridge-secret-value\nCHUANG_AGENT_WORKSPACE_ROOT={}\nCHUANG_PROVIDER_ENV_FILE={}\n",
+            manifest_dir.display(),
+            provider_env.display()
+        ),
+    )
+    .expect("bridge env should write");
+    fs::write(
+        &provider_env,
+        "OPENAI_API_KEY=provider-secret-value\nCHUANG_FEISHU_APP_ID=forbidden-feishu-app\nHERMES_FEISHU_BOT_ID=legacy-hermes-bot\n",
+    )
+    .expect("provider env should write");
+
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(
+            "try { require('./scripts/chuang-feishu-bridge.js'); console.log('unexpected_bridge_startup_success'); } catch (error) { console.error(error.message); process.exit(1); }",
+        )
+        .env(
+            "NODE_PATH",
+            "/home/user/.codex/codex-feishu-bridge/node_modules",
+        )
+        .env("CHUANG_FEISHU_ENV_FILE", &bridge_env)
+        .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("direct bridge startup should execute");
+
+    assert!(
+        !output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stdout.contains("provider-secret-value"));
+    assert!(!stderr.contains("provider-secret-value"));
+    assert!(!stdout.contains("bridge-secret-value"));
+    assert!(!stderr.contains("bridge-secret-value"));
+    assert!(!stdout.contains("forbidden-feishu-app"));
+    assert!(!stderr.contains("forbidden-feishu-app"));
+    assert!(!stdout.contains("legacy-hermes-bot"));
+    assert!(!stderr.contains("legacy-hermes-bot"));
+    assert!(stderr.contains("Provider env file contains forbidden Feishu config names"));
+    assert!(stderr.contains("CHUANG_FEISHU_APP_ID"));
+    assert!(stderr.contains("HERMES_FEISHU_BOT_ID"));
+}
+
+#[test]
 fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-smoke.sh");
