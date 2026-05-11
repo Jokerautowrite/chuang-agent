@@ -40,6 +40,7 @@ assert(help.replyText.includes("/receipt"));
 assert(help.replyText.includes("/live-check"));
 assert(help.replyText.includes("/tools"));
 assert(help.replyText.includes("开新窗口/新上下文入口"));
+assert(help.replyText.includes("不复用 Hermes/Codex bridge、凭据、会话或队列"));
 assert(help.replyText.includes("普通文本会转发到 Chuang app-server"));
 assert.strictEqual(buildHelpCommandReply().commandName, "help");
 

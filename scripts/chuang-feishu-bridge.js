@@ -39,21 +39,17 @@ const {
   buildProcessSection,
   buildStatusFooter,
 } = require("./chuang-feishu-turn-summary");
+const { listForbiddenCredentialEnvNames } = require("./chuang-feishu-bridge-config");
 
-const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
-const ENV_FILE =
+const DEFAULT_ROOT = path.resolve(__dirname, "..");
+let ROOT = process.env.CHUANG_AGENT_ROOT || DEFAULT_ROOT;
+let ENV_FILE =
   process.env.CHUANG_FEISHU_ENV_FILE || path.join(ROOT, "ops/systemd/chuang-feishu-bridge.env");
-const WORKSPACE_ROOT =
-  normalizeWorkspaceRoot(process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT);
-const PROVIDER_ENV_FILE =
-  process.env.CHUANG_PROVIDER_ENV_FILE || path.join(os.homedir(), ".config/chuang-agent/provider.env");
-const SESSION_STATE_FILE =
-  process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
-const FEISHU_SDK_MODULES =
-  process.env.CHUANG_FEISHU_SDK_NODE_MODULES ||
-  "/home/user/.codex/codex-feishu-bridge/node_modules";
-const EVENT_LOG_FILE =
-  process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
+let WORKSPACE_ROOT = "";
+let PROVIDER_ENV_FILE = "";
+let SESSION_STATE_FILE = "";
+let FEISHU_SDK_MODULES = "";
+let EVENT_LOG_FILE = "";
 let cachedTesseractLanguages = null;
 
 loadEnv();
@@ -73,6 +69,20 @@ function loadEnv() {
       dotenv.config({ path: envPath });
     }
   }
+  ROOT = process.env.CHUANG_AGENT_ROOT || ROOT;
+  ENV_FILE = process.env.CHUANG_FEISHU_ENV_FILE || ENV_FILE;
+  WORKSPACE_ROOT = normalizeWorkspaceRoot(
+    process.env.CHUANG_AGENT_WORKSPACE_ROOT || process.env.CHUANG_FEISHU_WORKSPACE_ROOT || ROOT
+  );
+  PROVIDER_ENV_FILE =
+    process.env.CHUANG_PROVIDER_ENV_FILE || path.join(os.homedir(), ".config/chuang-agent/provider.env");
+  SESSION_STATE_FILE =
+    process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
+  FEISHU_SDK_MODULES =
+    process.env.CHUANG_FEISHU_SDK_NODE_MODULES ||
+    "/home/user/.codex/codex-feishu-bridge/node_modules";
+  EVENT_LOG_FILE =
+    process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
   process.env.NODE_PATH = `${FEISHU_SDK_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;
   require("module").Module._initPaths();
 }
@@ -264,6 +274,12 @@ class ChuangFeishuBridge {
     const missing = required.filter((name) => !String(process.env[name] || "").trim());
     if (missing.length) {
       throw new Error(`Missing required env: ${missing.join(",")}`);
+    }
+    const forbidden = listForbiddenCredentialEnvNames(process.env);
+    if (forbidden.length) {
+      throw new Error(
+        `Forbidden credential env names detected for Chuang Feishu bridge: ${forbidden.join(",")}`
+      );
     }
   }
 
@@ -768,5 +784,6 @@ if (require.main === module) {
 module.exports = {
   buildProcessSection,
   buildStatusFooter,
+  listForbiddenCredentialEnvNames,
   parseBridgeCommand,
 };

@@ -13,6 +13,7 @@ This checklist is for the future Chuang Feishu bot. It must stay separate from C
 - Bind the channel to `/home/user/projects/chuang-agent` explicitly.
 - For the current long-connection adapter, only `CHUANG_FEISHU_APP_ID` and `CHUANG_FEISHU_APP_SECRET` are mandatory; `CHUANG_FEISHU_BOT_ID` and `CHUANG_FEISHU_VERIFICATION_TOKEN` stay optional unless you later switch to a webhook-style adapter.
 - The Chuang bot env file must use Chuang-scoped Feishu names only: `CHUANG_FEISHU_*` plus `CHUANG_AGENT_WORKSPACE_ROOT` and provider-env pointers. Do not put generic `FEISHU_*`, `HERMES_FEISHU_*`, or `CODEX_FEISHU_*` credential names in this file; `channel feishu-check` treats app id, app secret, bot id, verification token, and encrypt key variants from those namespaces as isolation blockers.
+- `CHUANG_FEISHU_SDK_NODE_MODULES` may point to a shared local SDK installation path for dependency loading only; this does not mean credential/session/channel reuse. Runtime credentials, session state, and bridge service ownership must still stay Chuang-dedicated.
 
 ## Minimal Adapter Shape
 

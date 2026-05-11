@@ -305,6 +305,7 @@ function buildHelpCommandReply() {
       "- `/live-check`：显示人工 live 检查步骤；不会进入 Agent 主链。",
       "- `/tools` / `/capabilities`：显示当前本地能力与边界。",
       "- `/help`：显示这条帮助；不会进入 Agent 主链。",
+      "- 隔离边界：不复用 Hermes/Codex bridge、凭据、会话或队列。",
       "",
       "普通文本会转发到 Chuang app-server，由 Agent runtime 处理。",
     ].join("\n"),

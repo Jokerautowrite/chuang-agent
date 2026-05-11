@@ -654,7 +654,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     .expect("summary should write");
     fs::write(
         latest_run.join("status.json"),
-        r#"{"status":"running","iteration":3}"#,
+        r#"{"status":"running","iteration":3,"updated_at":"2026-01-01T00:00:00Z"}"#,
     )
     .expect("overnight status should write");
     fs::write(latest_run.join("run.log"), "iteration 3 still running\n")
@@ -690,6 +690,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(data["readonly_boundaries"]["touches_services"], false);
     assert_eq!(data["watchdog"]["available"], true);
     assert_eq!(data["watchdog"]["readonly"], true);
+    assert_eq!(data["watchdog"]["freshness"]["available"], true);
     assert_eq!(data["watchdog"]["session"], "chuang-goal");
     assert_eq!(data["watchdog"]["tmux_session_present"], true);
     assert_eq!(data["watchdog"]["codex_process_count"], 1);
@@ -697,6 +698,11 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(
         data["watchdog"]["next_action"],
         "monitor_or_attach_if_human_review_needed"
+    );
+    assert!(data["tmux_observation"]["session"].is_string());
+    assert!(
+        data["tmux_observation"]["session_present"].is_boolean()
+            || data["tmux_observation"]["session_present"].is_null()
     );
     assert_eq!(
         data["overnight"]["latest_run_dir"],
@@ -707,9 +713,12 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         data["overnight"]["status_json"]["data"]["status"],
         "running"
     );
+    assert_eq!(data["overnight"]["freshness"]["available"], true);
+    assert_eq!(data["overnight"]["freshness"]["stale"], true);
     assert_eq!(data["overnight"]["summary"]["fields"]["status"], "running");
     assert_eq!(data["overnight"]["summary"]["fields"]["iterations"], "3");
-    assert_eq!(data["overall_status"], "terminal_worker_observed");
+    assert_eq!(data["freshness"]["overnight"]["stale"], true);
+    assert_eq!(data["overall_status"], "interactive_active_overnight_stale");
 }
 
 #[test]
