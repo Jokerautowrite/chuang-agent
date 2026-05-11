@@ -317,6 +317,11 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     );
     extra.insert("tool_call_count".to_string(), "1".to_string());
     extra.insert("tool_protocol_error_count".to_string(), "0".to_string());
+    extra.insert("runtime_event_count".to_string(), "2".to_string());
+    extra.insert(
+        "runtime_event_ledger_json".to_string(),
+        r#"[{"event_type":"tool_started"},{"event_type":"tool_finished"}]"#.to_string(),
+    );
 
     let result = chuang_agent::agent_runtime::RuntimeResult {
         prompt: "prompt".to_string(),
@@ -424,7 +429,19 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
         Some(&"0".to_string())
     );
     assert_eq!(
+        observability.get("runtime_event_count"),
+        Some(&"2".to_string())
+    );
+    assert_eq!(
         observability.get("tool_typed_failure_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_unified_execution_status"),
+        Some(&"ok".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_unified_execution_failure_count"),
         Some(&"0".to_string())
     );
 
@@ -439,6 +456,19 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert!(description.contains("goal=mainline-mvp"));
     assert!(description.contains("session=thread-a"));
     assert!(description.contains("tool_typed_failures=0"));
+    assert!(description.contains("tool_unified_execution_status=ok"));
+    assert!(description.contains("tool_unified_execution_failures=0"));
+    assert!(description.contains("runtime_events=2"));
+    let runtime_event_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.runtime_event_ledger_json")
+        .expect("runtime event ledger artifact should exist");
+    assert!(runtime_event_artifact
+        .description
+        .as_deref()
+        .expect("description")
+        .contains("tool_started=1"));
 }
 
 #[test]
@@ -494,6 +524,18 @@ fn runtime_report_observability_meta_includes_typed_execution_failures() {
         observability.get("tool_typed_failure_classes"),
         Some(&"adapter_unavailable,invalid_output,protocol_error,timeout".to_string())
     );
+    assert_eq!(
+        observability.get("tool_unified_execution_status"),
+        Some(&"failed".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_unified_execution_failure_count"),
+        Some(&"3".to_string())
+    );
+    assert_eq!(
+        observability.get("tool_unified_execution_failure_classes"),
+        Some(&"adapter_unavailable,invalid_output,timeout".to_string())
+    );
 
     let report = build_runtime_report(
         &result,
@@ -512,6 +554,8 @@ fn runtime_report_observability_meta_includes_typed_execution_failures() {
         .as_deref()
         .expect("description");
     assert!(description.contains("tool_typed_failures=4"));
+    assert!(description.contains("tool_unified_execution_status=failed"));
+    assert!(description.contains("tool_unified_execution_failures=3"));
 
     let tool_events_artifact = report
         .artifacts
@@ -1003,4 +1047,119 @@ fn runtime_report_promotes_tool_events_metadata_to_artifact() {
         .artifacts
         .iter()
         .any(|artifact| artifact.locator == "runtime_meta.observability"));
+}
+
+#[test]
+fn runtime_report_promotes_runtime_event_ledger_metadata_to_artifact() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "runtime_event_ledger_json".to_string(),
+        r#"[{"event_type":"tool_started"},{"event_type":"tool_finished"},{"event_type":"tool_finished"}]"#
+            .to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let report = build_runtime_report(
+        &result,
+        "report-runtime-events",
+        "task-runtime-events",
+        "agent-runtime-events",
+        None,
+    );
+
+    let runtime_events_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.runtime_event_ledger_json")
+        .expect("runtime event ledger artifact should exist");
+    assert_eq!(runtime_events_artifact.kind, ArtifactKind::Log);
+    let description = runtime_events_artifact
+        .description
+        .as_deref()
+        .expect("description");
+    assert!(description.contains("count=3"));
+    assert!(description.contains("tool_started=1"));
+    assert!(description.contains("tool_finished=2"));
+}
+
+#[test]
+fn runtime_report_promotes_context_pack_trace_and_compaction_events() {
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra: BTreeMap::new(),
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "[packed-context]\npack_trace=normalize_tokens:5->5(-0),dedupe:5->4(-1)\ncompaction_events=context_compaction_started,context_segment_dropped:mem-1:duplicate_content:@dedupe,context_compaction_completed:packed:@merge_under_budget".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("context_pack_trace"),
+        Some(&"normalize_tokens:5->5(-0),dedupe:5->4(-1)".to_string())
+    );
+    assert_eq!(
+        observability.get("context_compaction_events"),
+        Some(&"context_compaction_started,context_segment_dropped:mem-1:duplicate_content:@dedupe,context_compaction_completed:packed:@merge_under_budget".to_string())
+    );
+
+    let report = build_runtime_report(
+        &result,
+        "report-context-compaction",
+        "task-context-compaction",
+        "agent-context-compaction",
+        None,
+    );
+    assert!(report
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.locator == "runtime_meta.context_pack_trace"));
+    assert!(report
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.locator == "runtime_meta.context_compaction_events"));
 }

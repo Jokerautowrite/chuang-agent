@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -128,9 +128,51 @@ pub fn derive_tool_protocol_typed_failure(
     }
 }
 
+pub fn collect_unified_execution_failure_classes(
+    extra: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    let mut classes = BTreeSet::new();
+    if let Ok(Some(report)) = parse_json_value(extra, "tool_report_json") {
+        append_unified_failure_classes_from_calls(
+            &mut classes,
+            report
+                .get("calls")
+                .and_then(|value| value.as_array())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        );
+    }
+    if let Ok(calls) = parse_json_vec_value(extra, "tool_calls_json") {
+        append_unified_failure_classes_from_calls(&mut classes, &calls);
+    }
+    if let Ok(events) = parse_json_vec_value(extra, "tool_events_json") {
+        append_unified_failure_classes_from_calls(&mut classes, &events);
+    }
+    classes
+}
+
+fn append_unified_failure_classes_from_calls(classes: &mut BTreeSet<String>, calls: &[Value]) {
+    for call in calls {
+        if call.get("ok").and_then(|value| value.as_bool()) == Some(false) {
+            if let Some(class) = call.get("failure_class").and_then(|value| value.as_str()) {
+                if is_unified_execution_failure_class(class) {
+                    classes.insert(class.to_string());
+                }
+            }
+        }
+    }
+}
+
+fn is_unified_execution_failure_class(class: &str) -> bool {
+    matches!(
+        class,
+        "adapter_unavailable" | "permission_denied" | "timeout" | "invalid_output"
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ToolLoopMeta;
+    use super::{collect_unified_execution_failure_classes, ToolLoopMeta};
     use std::collections::BTreeMap;
 
     #[test]
@@ -165,5 +207,32 @@ mod tests {
         assert_eq!(meta.tool_calls.len(), 1);
         assert_eq!(meta.tool_protocol_errors.len(), 1);
         assert_eq!(meta.tool_events.len(), 2);
+    }
+
+    #[test]
+    fn collects_unified_execution_failures_from_runtime_extra() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[
+                {"ok":false,"failure_class":"timeout"},
+                {"ok":false,"failure_class":"nonzero_exit"}
+            ]"#
+            .to_string(),
+        );
+        extra.insert(
+            "tool_events_json".to_string(),
+            r#"[
+                {"kind":"tool_call","ok":false,"failure_class":"permission_denied"},
+                {"kind":"tool_call","ok":true,"failure_class":null}
+            ]"#
+            .to_string(),
+        );
+
+        let classes = collect_unified_execution_failure_classes(&extra);
+        assert_eq!(
+            classes.into_iter().collect::<Vec<_>>(),
+            vec!["permission_denied".to_string(), "timeout".to_string()]
+        );
     }
 }

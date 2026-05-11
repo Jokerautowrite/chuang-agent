@@ -35,6 +35,12 @@ pub fn build_runtime_report(
     report.artifacts.extend(tool_events_artifacts(result));
     report
         .artifacts
+        .extend(runtime_event_ledger_artifacts(result));
+    report
+        .artifacts
+        .extend(context_compaction_artifacts(result));
+    report
+        .artifacts
         .extend(runtime_observability_artifacts(result));
     report
 }
@@ -122,10 +128,47 @@ fn tool_events_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     }]
 }
 
+fn runtime_event_ledger_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let Some(raw_ledger) = result.response.meta.extra.get("runtime_event_ledger_json") else {
+        return Vec::new();
+    };
+
+    let description = serde_json::from_str::<Vec<serde_json::Value>>(raw_ledger)
+        .map(|events| {
+            let started_count = events
+                .iter()
+                .filter(|event| {
+                    event.get("event_type").and_then(|value| value.as_str()) == Some("tool_started")
+                })
+                .count();
+            let finished_count = events
+                .iter()
+                .filter(|event| {
+                    event.get("event_type").and_then(|value| value.as_str())
+                        == Some("tool_finished")
+                })
+                .count();
+            format!(
+                "runtime_event_ledger count={} tool_started={} tool_finished={}",
+                events.len(),
+                started_count,
+                finished_count
+            )
+        })
+        .unwrap_or_else(|_| "runtime_event_ledger present but could not be parsed".to_string());
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_meta.runtime_event_ledger_json".to_string(),
+        description: Some(description),
+    }]
+}
+
 pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, String> {
     let extra = &result.response.meta.extra;
     let mut metadata = BTreeMap::new();
     let typed_failures = collect_typed_failures(extra);
+    let unified_failures = crate::tool_loop_meta::collect_unified_execution_failure_classes(extra);
     metadata.insert("model_name".to_string(), result.response.model_name.clone());
     metadata.insert(
         "recall_hit_count".to_string(),
@@ -144,6 +187,14 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
     }
     if let Some(finish_reason) = &result.response.meta.finish_reason {
         metadata.insert("finish_reason".to_string(), finish_reason.clone());
+    }
+    if let Some(pack_trace) = packed_context_field(&result.packed_context_preview, "pack_trace") {
+        metadata.insert("context_pack_trace".to_string(), pack_trace);
+    }
+    if let Some(compaction_events) =
+        packed_context_field(&result.packed_context_preview, "compaction_events")
+    {
+        metadata.insert("context_compaction_events".to_string(), compaction_events);
     }
 
     for key in [
@@ -232,6 +283,9 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "tool_action_schema_version",
         "tool_report_schema_version",
         "tool_instruction_context_injected",
+        "runtime_event_count",
+        "context_pack_trace",
+        "context_compaction_events",
     ] {
         if let Some(value) = extra.get(key) {
             metadata.insert(key.to_string(), value.clone());
@@ -253,8 +307,54 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
             typed_failures.into_iter().collect::<Vec<_>>().join(","),
         );
     }
+    metadata.insert(
+        "tool_unified_execution_failure_count".to_string(),
+        unified_failures.len().to_string(),
+    );
+    metadata.insert(
+        "tool_unified_execution_status".to_string(),
+        if unified_failures.is_empty() {
+            "ok".to_string()
+        } else {
+            "failed".to_string()
+        },
+    );
+    if !unified_failures.is_empty() {
+        metadata.insert(
+            "tool_unified_execution_failure_classes".to_string(),
+            unified_failures.into_iter().collect::<Vec<_>>().join(","),
+        );
+    }
 
     metadata
+}
+
+fn context_compaction_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let mut artifacts = Vec::new();
+    if let Some(pack_trace) = packed_context_field(&result.packed_context_preview, "pack_trace") {
+        artifacts.push(ArtifactRef {
+            kind: ArtifactKind::Log,
+            locator: "runtime_meta.context_pack_trace".to_string(),
+            description: Some(format!("pack_trace {pack_trace}")),
+        });
+    }
+    if let Some(compaction_events) =
+        packed_context_field(&result.packed_context_preview, "compaction_events")
+    {
+        artifacts.push(ArtifactRef {
+            kind: ArtifactKind::Log,
+            locator: "runtime_meta.context_compaction_events".to_string(),
+            description: Some(format!("compaction_events {compaction_events}")),
+        });
+    }
+    artifacts
+}
+
+fn packed_context_field(preview: &str, key: &str) -> Option<String> {
+    preview
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")))
+        .map(str::to_string)
 }
 
 fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
@@ -264,7 +364,7 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     }
 
     let description = format!(
-        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={} tool_typed_failures={}",
+        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={} tool_typed_failures={} tool_unified_execution_status={} tool_unified_execution_failures={} runtime_events={}",
         observability
             .get("model_name")
             .map(String::as_str)
@@ -292,6 +392,18 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
             .unwrap_or("0"),
         observability
             .get("tool_typed_failure_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("tool_unified_execution_status")
+            .map(String::as_str)
+            .unwrap_or("ok"),
+        observability
+            .get("tool_unified_execution_failure_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("runtime_event_count")
             .map(String::as_str)
             .unwrap_or("0")
     );
