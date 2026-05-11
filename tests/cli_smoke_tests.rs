@@ -143,6 +143,12 @@ fn feishu_bridge_script_discovers_desktop_env_without_host_specific_display() {
     assert!(script.contains("export DISPLAY=\":${socket##*/X}\""));
     assert!(script.contains("export XAUTHORITY=\"$candidate\""));
     assert!(script.contains("export XDG_RUNTIME_DIR=\"$runtime_dir\""));
+    assert!(script.contains("ROOT=\"${CHUANG_AGENT_ROOT:-$ROOT}\""));
+    assert!(
+        script.contains("PROVIDER_ENV_FILE=\"${CHUANG_PROVIDER_ENV_FILE:-$PROVIDER_ENV_FILE}\"")
+    );
+    assert!(script
+        .contains("FEISHU_SDK_MODULES=\"${CHUANG_FEISHU_SDK_NODE_MODULES:-$FEISHU_SDK_MODULES}\""));
     assert!(script.contains("CHUANG_REAL_ACTUATOR_ENABLE=\"${CHUANG_REAL_ACTUATOR_ENABLE:-1}\""));
     assert!(!script.contains("DISPLAY=:0"));
     assert!(!script.contains("/run/user/1000"));
