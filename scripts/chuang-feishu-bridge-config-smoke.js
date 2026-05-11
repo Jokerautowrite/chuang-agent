@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
-const { listForbiddenCredentialEnvNames } = require("./chuang-feishu-bridge-config");
+const {
+  listDisallowedProviderEnvNames,
+  listForbiddenCredentialEnvNames,
+} = require("./chuang-feishu-bridge-config");
 
 const forbidden = listForbiddenCredentialEnvNames({
   FEISHU_APP_ID: "legacy-feishu-app",
@@ -23,5 +26,21 @@ const forbiddenError = new Error(
 assert(!forbiddenError.message.includes("legacy-feishu-app"));
 assert(!forbiddenError.message.includes("legacy-hermes-secret"));
 assert(!forbiddenError.message.includes("chuang-secret"));
+
+const disallowedInProvider = listDisallowedProviderEnvNames({
+  OPENAI_API_KEY: "provider-key",
+  CHUANG_FEISHU_APP_ID: "bad-feishu-app",
+  FEISHU_ENCRYPT_KEY: "legacy-encrypt",
+});
+assert.deepStrictEqual(disallowedInProvider, [
+  "CHUANG_FEISHU_APP_ID",
+  "FEISHU_ENCRYPT_KEY",
+]);
+const providerError = new Error(
+  `Provider env file contains forbidden Feishu config names: ${disallowedInProvider.join(",")}`
+);
+assert(!providerError.message.includes("provider-key"));
+assert(!providerError.message.includes("bad-feishu-app"));
+assert(!providerError.message.includes("legacy-encrypt"));
 
 console.log("chuang_feishu_bridge_config_smoke_ok");

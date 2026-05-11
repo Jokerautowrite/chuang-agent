@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { FORBIDDEN_CREDENTIAL_ENV_NAMES } = require("./chuang-feishu-bridge-config");
 
 const ROOT = process.env.CHUANG_AGENT_ROOT || path.resolve(__dirname, "..");
 const DEFAULT_ENV_FILE =
@@ -136,7 +137,7 @@ function checkEnvFile(envFile, envValues) {
     nextActions.push(`set_missing_chuang_env_vars:${missing.join(",")}`);
   }
   const legacy = Object.keys(envValues.values).filter((name) =>
-    forbiddenCredentialEnvNames().includes(name)
+    FORBIDDEN_CREDENTIAL_ENV_NAMES.includes(name)
   );
   if (legacy.length) {
     nextActions.push("remove_legacy_feishu_env_names");
@@ -160,9 +161,14 @@ function checkEnvFile(envFile, envValues) {
 }
 
 function checkEnvIsolation(envFile, values) {
-  const forbiddenInFile = Object.keys(values).filter((name) => forbiddenCredentialEnvNames().includes(name));
+  const forbiddenInFile = Object.keys(values).filter((name) =>
+    FORBIDDEN_CREDENTIAL_ENV_NAMES.includes(name)
+  );
   const inheritedForbiddenStates = Object.fromEntries(
-    forbiddenCredentialEnvNames().map((name) => [name, process.env[name] ? "<set_ignored>" : "<unset>"])
+    FORBIDDEN_CREDENTIAL_ENV_NAMES.map((name) => [
+      name,
+      Object.prototype.hasOwnProperty.call(process.env, name) ? "<set_ignored>" : "<unset>",
+    ])
   );
   const pathWarnings = envFileScopeWarnings(envFile);
   const nextActions = [];
@@ -506,26 +512,6 @@ function safeRealpath(target) {
   } catch {
     return "";
   }
-}
-
-function forbiddenCredentialEnvNames() {
-  return [
-    "FEISHU_APP_ID",
-    "FEISHU_APP_SECRET",
-    "FEISHU_BOT_ID",
-    "FEISHU_VERIFICATION_TOKEN",
-    "FEISHU_ENCRYPT_KEY",
-    "HERMES_FEISHU_APP_ID",
-    "HERMES_FEISHU_APP_SECRET",
-    "HERMES_FEISHU_BOT_ID",
-    "HERMES_FEISHU_VERIFICATION_TOKEN",
-    "HERMES_FEISHU_ENCRYPT_KEY",
-    "CODEX_FEISHU_APP_ID",
-    "CODEX_FEISHU_APP_SECRET",
-    "CODEX_FEISHU_BOT_ID",
-    "CODEX_FEISHU_VERIFICATION_TOKEN",
-    "CODEX_FEISHU_ENCRYPT_KEY",
-  ];
 }
 
 function envFileScopeWarnings(envFile) {

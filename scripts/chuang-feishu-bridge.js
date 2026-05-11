@@ -39,7 +39,10 @@ const {
   buildProcessSection,
   buildStatusFooter,
 } = require("./chuang-feishu-turn-summary");
-const { listForbiddenCredentialEnvNames } = require("./chuang-feishu-bridge-config");
+const {
+  listDisallowedProviderEnvNames,
+  listForbiddenCredentialEnvNames,
+} = require("./chuang-feishu-bridge-config");
 
 const DEFAULT_ROOT = path.resolve(__dirname, "..");
 let ROOT = process.env.CHUANG_AGENT_ROOT || DEFAULT_ROOT;
@@ -76,6 +79,7 @@ function loadEnv() {
   );
   PROVIDER_ENV_FILE =
     process.env.CHUANG_PROVIDER_ENV_FILE || path.join(os.homedir(), ".config/chuang-agent/provider.env");
+  loadProviderEnvReadonly(PROVIDER_ENV_FILE);
   SESSION_STATE_FILE =
     process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
   FEISHU_SDK_MODULES =
@@ -85,6 +89,24 @@ function loadEnv() {
     process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
   process.env.NODE_PATH = `${FEISHU_SDK_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;
   require("module").Module._initPaths();
+}
+
+function loadProviderEnvReadonly(providerEnvPath) {
+  if (!normalizeText(providerEnvPath) || !fs.existsSync(providerEnvPath)) {
+    return;
+  }
+  const parsed = dotenv.parse(fs.readFileSync(providerEnvPath, "utf8"));
+  const disallowed = listDisallowedProviderEnvNames(parsed);
+  if (disallowed.length) {
+    throw new Error(
+      `Provider env file contains forbidden Feishu config names: ${disallowed.join(",")}`
+    );
+  }
+  for (const [name, value] of Object.entries(parsed)) {
+    if (!Object.prototype.hasOwnProperty.call(process.env, name)) {
+      process.env[name] = value;
+    }
+  }
 }
 
 class AppServerClient {

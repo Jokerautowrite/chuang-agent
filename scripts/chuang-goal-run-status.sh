@@ -263,6 +263,12 @@ def summarize_watchdog():
     git = data.get("git") if isinstance(data.get("git"), dict) else {}
     takeover = data.get("takeover") if isinstance(data.get("takeover"), dict) else {}
     pane = data.get("pane") if isinstance(data.get("pane"), dict) else {}
+    pane_tail = []
+    raw_pane_tail = data.get("pane_tail")
+    if isinstance(raw_pane_tail, list):
+        pane_tail = [str(line) for line in raw_pane_tail][-10:]
+    elif isinstance(pane.get("tail"), list):
+        pane_tail = [str(line) for line in pane.get("tail", [])][-10:]
     generated_at = data.get("generated_at")
     return {
         "available": True,
@@ -276,6 +282,7 @@ def summarize_watchdog():
         "session": data.get("session"),
         "tmux_session_present": data.get("tmux_session_present"),
         "pane_bytes": pane.get("bytes"),
+        "pane_tail": pane_tail,
         "codex_process_count": codex_processes.get("count"),
         "git_dirty": git.get("dirty"),
         "git_status_count": len(git.get("status_short", [])) if isinstance(git.get("status_short"), list) else None,
@@ -370,6 +377,56 @@ def summarize_overnight():
     return result
 
 
+def infer_interactive_state(tmux_observation, watchdog):
+    tail_tmux = tmux_observation.get("pane_tail")
+    if not isinstance(tail_tmux, list):
+        tail_tmux = []
+    tail_watchdog = watchdog.get("pane_tail")
+    if not isinstance(tail_watchdog, list):
+        tail_watchdog = []
+    merged_tail = [*tail_tmux, *tail_watchdog]
+    corpus = "\n".join(str(line).strip() for line in merged_tail if str(line).strip()).lower()
+    if not corpus:
+        if tmux_observation.get("session_present") is False:
+            return {
+                "interactive_state": "session_missing",
+                "activity_hint": "tmux session missing; interactive goal worker not observed",
+            }
+        return {
+            "interactive_state": "unknown",
+            "activity_hint": "no pane tail captured; inspect tmux pane for current state",
+        }
+    if "compacted" in corpus or "context compact" in corpus:
+        return {
+            "interactive_state": "compacting_context",
+            "activity_hint": "context compaction detected; still processing",
+        }
+    if "working" in corpus:
+        return {
+            "interactive_state": "working",
+            "activity_hint": "agent is working through current task steps",
+        }
+    if any(marker in corpus for marker in ("planning", "examining", "investigating", "exploring", "running")):
+        return {
+            "interactive_state": "working",
+            "activity_hint": "agent is actively inspecting or executing task steps",
+        }
+    if "thinking" in corpus:
+        return {
+            "interactive_state": "thinking",
+            "activity_hint": "agent is thinking; no immediate intervention needed",
+        }
+    if "press enter" in corpus or "waiting for input" in corpus:
+        return {
+            "interactive_state": "idle_waiting_input",
+            "activity_hint": "prompt appears idle or waiting for input",
+        }
+    return {
+        "interactive_state": "active_unclassified",
+        "activity_hint": "interactive pane updated but state is not classified",
+    }
+
+
 def infer_overall(watchdog, overnight, tmux_observation):
     watchdog_fresh = (watchdog.get("freshness") or {}).get("stale") is False
     watchdog_worker_active = (
@@ -413,6 +470,7 @@ def infer_overall(watchdog, overnight, tmux_observation):
 watchdog = summarize_watchdog()
 overnight = summarize_overnight()
 tmux_observation = observe_tmux(TMUX_SESSION)
+interactive = infer_interactive_state(tmux_observation, watchdog)
 payload = {
     "ok": True,
     "schema_version": 1,
@@ -420,6 +478,8 @@ payload = {
     "watchdog": watchdog,
     "overnight": overnight,
     "tmux_observation": tmux_observation,
+    "interactive_state": interactive["interactive_state"],
+    "activity_hint": interactive["activity_hint"],
     "freshness": {
         "watchdog": watchdog.get("freshness"),
         "overnight": overnight.get("freshness"),
@@ -462,4 +522,6 @@ else:
     print("tmux_observation_session_present: " + str(tmux.get("session_present", "unknown")).lower())
     print("tmux_observation_window_count: " + str(tmux.get("window_count", "unknown")))
     print("tmux_observation_pane_count: " + str(tmux.get("pane_count", "unknown")))
+    print("interactive_state: " + str(payload.get("interactive_state") or "unknown"))
+    print("activity_hint: " + str(payload.get("activity_hint") or "unknown"))
 PY

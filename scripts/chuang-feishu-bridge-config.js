@@ -22,7 +22,16 @@ function listForbiddenCredentialEnvNames(env = process.env) {
   );
 }
 
+function listDisallowedProviderEnvNames(values = {}) {
+  const names = Object.keys(values || {});
+  return names.filter(
+    (name) =>
+      name.startsWith("CHUANG_FEISHU_") || FORBIDDEN_CREDENTIAL_ENV_NAMES.includes(name)
+  );
+}
+
 module.exports = {
   FORBIDDEN_CREDENTIAL_ENV_NAMES,
+  listDisallowedProviderEnvNames,
   listForbiddenCredentialEnvNames,
 };

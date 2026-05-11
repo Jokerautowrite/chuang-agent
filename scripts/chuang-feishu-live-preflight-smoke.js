@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { FORBIDDEN_CREDENTIAL_ENV_NAMES } = require("./chuang-feishu-bridge-config");
 
 const root = path.resolve(__dirname, "..");
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "chuang-feishu-live-preflight-"));
@@ -103,6 +104,15 @@ assert.strictEqual(checks.env_source_isolation.status, "pass");
 assert.strictEqual(checks.env_source_isolation.inherited_forbidden_credentials_used, false);
 assert.strictEqual(checks.env_source_isolation.codex_feishu_bridge_env_used, false);
 assert.strictEqual(checks.env_source_isolation.hermes_feishu_env_used, false);
+for (const name of FORBIDDEN_CREDENTIAL_ENV_NAMES) {
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(
+      checks.env_source_isolation.inherited_forbidden_credential_env_states,
+      name
+    ),
+    `missing inherited forbidden env state for ${name}`
+  );
+}
 assert.strictEqual(
   checks.env_source_isolation.inherited_forbidden_credential_env_states.HERMES_FEISHU_ENCRYPT_KEY,
   "<unset>"

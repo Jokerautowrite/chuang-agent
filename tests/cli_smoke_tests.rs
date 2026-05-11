@@ -633,7 +633,11 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
             "project_root": manifest_dir.display().to_string(),
             "session": "chuang-goal",
             "tmux_session_present": true,
-            "pane": {"bytes": 128, "panes": ["pane=%1 active=1 pid=123 current_command=codex"]},
+            "pane": {
+                "bytes": 128,
+                "panes": ["pane=%1 active=1 pid=123 current_command=codex"],
+                "tail": ["Planning script inspection and testing", "Thinking about next patch"]
+            },
             "codex_processes": {"count": 1, "processes": ["123 1 00:01 codex --no-alt-screen"]},
             "git": {"dirty": false, "status_short": []},
             "takeover": {"next_action": "monitor_or_attach_if_human_review_needed"},
@@ -692,6 +696,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(data["watchdog"]["readonly"], true);
     assert_eq!(data["watchdog"]["freshness"]["available"], true);
     assert_eq!(data["watchdog"]["session"], "chuang-goal");
+    assert!(data["watchdog"]["pane_tail"].is_array());
     assert_eq!(data["watchdog"]["tmux_session_present"], true);
     assert_eq!(data["watchdog"]["codex_process_count"], 1);
     assert_eq!(data["watchdog"]["git_dirty"], false);
@@ -718,6 +723,11 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(data["overnight"]["summary"]["fields"]["status"], "running");
     assert_eq!(data["overnight"]["summary"]["fields"]["iterations"], "3");
     assert_eq!(data["freshness"]["overnight"]["stale"], true);
+    assert_eq!(data["interactive_state"], "working");
+    assert!(data["activity_hint"]
+        .as_str()
+        .unwrap_or("")
+        .contains("actively"));
     assert_eq!(data["overall_status"], "interactive_active_overnight_stale");
 }
 
