@@ -336,6 +336,27 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && !tool.read_only
             && tool.mutating
             && tool.local_ga_decision == "allow_with_audit"));
+    assert!(status.runtime_report_surface.ok);
+    assert!(status
+        .runtime_report_surface
+        .artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.runtime_event_ledger_json"));
+    assert!(status
+        .runtime_report_surface
+        .artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.context_compaction_events"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "tool_unified_execution_status"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "context_pack_trace"));
     assert!(status.plugin_registry.available);
     assert!(status.plugin_registry.ok);
     assert_eq!(status.plugin_registry.plugin_count, 5);

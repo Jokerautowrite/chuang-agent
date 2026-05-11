@@ -710,6 +710,14 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.policy_tool_status.ga_tool_descriptor_missing.len()
     );
     println!(
+        "runtime_report_surface: ok={} artifacts={} observability_fields={} artifact_locators={} observability={}",
+        doctor.status.runtime_report_surface.ok,
+        doctor.status.runtime_report_surface.artifact_count,
+        doctor.status.runtime_report_surface.observability_field_count,
+        format_name_list(&doctor.status.runtime_report_surface.artifact_locators),
+        format_name_list(&doctor.status.runtime_report_surface.observability_fields)
+    );
+    println!(
         "provider_readiness: ok={} state={} kind={} transport={} fallback_configured={} timeout_ms={} api_key_state={} placeholder_warnings={}",
         doctor.status.provider_readiness.ok,
         doctor.status.provider_readiness.overall_state,

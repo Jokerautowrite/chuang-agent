@@ -348,6 +348,14 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.policy_tool_status.tool_descriptor_count,
         status.policy_tool_status.ga_tool_descriptor_missing.len()
     );
+    println!(
+        "runtime_report_surface: ok={} artifacts={} observability_fields={} artifact_locators={} observability={}",
+        status.runtime_report_surface.ok,
+        status.runtime_report_surface.artifact_count,
+        status.runtime_report_surface.observability_field_count,
+        format_name_list(&status.runtime_report_surface.artifact_locators),
+        format_name_list(&status.runtime_report_surface.observability_fields)
+    );
     println!("execution: {}", status.slots.execution);
     println!("actuator: {}", status.slots.actuator);
     if let Some(timeout_ms) = status.config.actuator_command_timeout_ms {

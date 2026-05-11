@@ -48,6 +48,7 @@ pub struct ChuangMvpStatus {
     pub live_adapter_gates: LiveAdapterGateStatus,
     pub atomic_tools: AtomicToolSurfaceStatus,
     pub policy_tool_status: PolicyToolStatusSurface,
+    pub runtime_report_surface: RuntimeReportSurfaceStatus,
     pub governance: GovernanceReadinessStatus,
     pub release_readiness: ReleaseReadinessStatus,
     pub third_test_candidate: ThirdTestCandidateReadinessStatus,
@@ -75,6 +76,17 @@ pub struct GaToolDescriptorStatus {
     pub mutating: bool,
     pub destructive: bool,
     pub local_ga_decision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RuntimeReportSurfaceStatus {
+    pub ok: bool,
+    pub artifact_count: usize,
+    pub observability_field_count: usize,
+    pub artifact_locators: Vec<String>,
+    pub observability_fields: Vec<String>,
+    pub current: String,
+    pub next_action: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -594,6 +606,7 @@ pub fn build_chuang_mvp_status(
         manifests: atomic_manifests,
     };
     let policy_tool_status = build_policy_tool_status_surface(&atomic_tools.manifests);
+    let runtime_report_surface = build_runtime_report_surface_status();
     let project_readiness = build_project_readiness(
         &config_summary,
         &slots,
@@ -703,6 +716,7 @@ pub fn build_chuang_mvp_status(
         live_adapter_gates,
         atomic_tools,
         policy_tool_status,
+        runtime_report_surface,
         governance,
         release_readiness,
         third_test_candidate,
@@ -814,6 +828,35 @@ fn build_policy_tool_status_surface(
         ga_tool_descriptor_mapped_count: ga_tool_descriptors.len(),
         ga_tool_descriptor_missing,
         ga_tool_descriptors,
+    }
+}
+
+fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
+    let artifact_locators = vec![
+        "runtime_meta.tool_report_json".to_string(),
+        "runtime_meta.tool_events_json".to_string(),
+        "runtime_meta.runtime_event_ledger_json".to_string(),
+        "runtime_meta.context_pack_trace".to_string(),
+        "runtime_meta.context_compaction_events".to_string(),
+        "runtime_meta.observability".to_string(),
+    ];
+    let observability_fields = vec![
+        "runtime_event_count".to_string(),
+        "tool_unified_execution_status".to_string(),
+        "tool_unified_execution_failure_count".to_string(),
+        "tool_unified_execution_failure_classes".to_string(),
+        "context_pack_trace".to_string(),
+        "context_compaction_events".to_string(),
+    ];
+
+    RuntimeReportSurfaceStatus {
+        ok: true,
+        artifact_count: artifact_locators.len(),
+        observability_field_count: observability_fields.len(),
+        artifact_locators,
+        observability_fields,
+        current: "runtime report promotes tool reports, tool events, runtime event ledger, unified execution failure summary, and context compaction trace surfaces".to_string(),
+        next_action: "keep app-server and channel outputs consuming runtime_observability_meta; add new fields here before relying on them in operators".to_string(),
     }
 }
 

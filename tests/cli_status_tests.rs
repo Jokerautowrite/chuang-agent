@@ -121,6 +121,11 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
     assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
+    assert!(stdout.contains("runtime_report_surface: ok=true artifacts=6 observability_fields=6"));
+    assert!(stdout.contains("runtime_meta.runtime_event_ledger_json"));
+    assert!(stdout.contains("runtime_meta.context_compaction_events"));
+    assert!(stdout.contains("tool_unified_execution_status"));
+    assert!(stdout.contains("context_pack_trace"));
     assert!(stdout.contains("execution: generic_agent_mvp"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
