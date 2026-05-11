@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-11 Codex + Claude 双参考架构补全
+- app-server health 与 status/doctor 继续对齐：`src/app_server.rs` 现在把 `runtime_report_surface` 作为结构化 JSON 字段直接带进 health 输出，文本面也同步打印 `runtime_report_surface: ok=true artifacts=6 observability_fields=6`，避免健康面比状态面少一块 runtime/report 可查询合同。
 - app-server runtimeObservability 事件面继续补回归：`tests/app_server_tests.rs` 现在同时锁定 `turn/completed` 事件里的 `context_pack_trace` 和 `context_compaction_events`，避免只在 `turn/start` 响应或 channel simulate 输出面可见、事件订阅面丢失 compaction/runtime trace。
 - Feishu 独立通道这轮再补一条 direct-startup 回归：`tests/cli_smoke_tests.rs` 新增 `feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup`，用只读 provider env 触发 `scripts/chuang-feishu-bridge.js` 顶层 `loadProviderEnvReadonly()`，确认它在真正进入 bridge 主循环前就拒绝 `CHUANG_FEISHU_*` / `HERMES_FEISHU_*` 变体，且错误输出仍只暴露变量名不暴露 secret 值。
 - 第二批并行 goal worker 已继续收口：Node live preflight 复用 `scripts/chuang-feishu-bridge-config.js` 的 forbidden credential 名单，减少 JS 侧漂移；JS bridge 直启会只读加载 `CHUANG_PROVIDER_ENV_FILE` 并拒绝 provider env 中出现 `CHUANG_FEISHU_*` 或 legacy Feishu credential 名称，仍只报变量名不泄漏值；`chuang-goal-run-status.sh` 新增 `interactive_state` / `activity_hint`，从 tmux pane tail/watchdog tail 判断 working、thinking、idle_waiting_input、compacting_context、active_unclassified、session_missing、unknown，便于区分“还在跑”与“等输入/缺 session”。

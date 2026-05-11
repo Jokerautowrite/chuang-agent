@@ -200,6 +200,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "runtime_capability_primer": status.runtime_capability_primer.clone(),
         "goal_mode": status.goal_mode,
         "goal_run": status.goal_run,
+        "runtime_report_surface": status.runtime_report_surface,
         "provider_readiness": status.provider_readiness,
         "atomic_tools": status.atomic_tools.clone(),
         "project_readiness": status.project_readiness,
@@ -371,6 +372,14 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.goal_run.worker_count,
             status.goal_run.validation_command_count,
             status.goal_run.path
+        );
+        println!(
+            "runtime_report_surface: ok={} artifacts={} observability_fields={} artifact_locators={} observability={}",
+            status.runtime_report_surface.ok,
+            status.runtime_report_surface.artifact_count,
+            status.runtime_report_surface.observability_field_count,
+            format_text_list(&status.runtime_report_surface.artifact_locators),
+            format_text_list(&status.runtime_report_surface.observability_fields)
         );
         println!(
             "goal_run_readiness: ok={} plan_exists={} goal_id={} checkpoints={} workers={} validation_commands={} checkpoint_log_complete={} last_checkpoint={} last_summary={} last_created_at={} last_completed_worker_ids={} last_validation_notes={} incomplete_reasons={}",
