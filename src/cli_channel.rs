@@ -64,12 +64,7 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
         .collect::<Vec<_>>();
     let legacy_var_names = values
         .keys()
-        .filter(|key| {
-            matches!(
-                key.as_str(),
-                "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_BOT_ID" | "HERMES_FEISHU_APP_ID"
-            )
-        })
+        .filter(|key| forbidden_feishu_credential_env_names().contains(&key.as_str()))
         .cloned()
         .collect::<Vec<_>>();
     let has_legacy_names = !legacy_var_names.is_empty();
@@ -210,6 +205,26 @@ fn channel_feishu_check_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn forbidden_feishu_credential_env_names() -> &'static [&'static str] {
+    &[
+        "FEISHU_APP_ID",
+        "FEISHU_APP_SECRET",
+        "FEISHU_BOT_ID",
+        "FEISHU_VERIFICATION_TOKEN",
+        "FEISHU_ENCRYPT_KEY",
+        "HERMES_FEISHU_APP_ID",
+        "HERMES_FEISHU_APP_SECRET",
+        "HERMES_FEISHU_BOT_ID",
+        "HERMES_FEISHU_VERIFICATION_TOKEN",
+        "HERMES_FEISHU_ENCRYPT_KEY",
+        "CODEX_FEISHU_APP_ID",
+        "CODEX_FEISHU_APP_SECRET",
+        "CODEX_FEISHU_BOT_ID",
+        "CODEX_FEISHU_VERIFICATION_TOKEN",
+        "CODEX_FEISHU_ENCRYPT_KEY",
+    ]
 }
 
 fn channel_simulate_command(args: &[String]) -> Result<(), String> {

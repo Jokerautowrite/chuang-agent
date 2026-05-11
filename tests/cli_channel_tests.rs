@@ -511,6 +511,11 @@ CHUANG_AGENT_WORKSPACE_ROOT={}
 CHUANG_FEISHU_APP_ID=cli_a_test
 CHUANG_FEISHU_APP_SECRET=secret-value
 FEISHU_APP_ID=legacy-codex
+FEISHU_ENCRYPT_KEY=legacy-encrypt
+HERMES_FEISHU_APP_SECRET=legacy-hermes-secret
+HERMES_FEISHU_VERIFICATION_TOKEN=legacy-hermes-token
+CODEX_FEISHU_BOT_ID=legacy-codex-bot
+CODEX_FEISHU_APP_SECRET=legacy-codex-secret
 "#,
             workspace.display()
         ),
@@ -535,10 +540,30 @@ FEISHU_APP_ID=legacy-codex
 
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["has_legacy_names"], true);
-    assert_eq!(
-        parsed["legacy_var_names"],
-        serde_json::json!(["FEISHU_APP_ID"])
-    );
+    let legacy_var_names = parsed["legacy_var_names"]
+        .as_array()
+        .expect("legacy vars should be array")
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .expect("legacy var should be string")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    for expected in [
+        "FEISHU_APP_ID",
+        "FEISHU_ENCRYPT_KEY",
+        "HERMES_FEISHU_APP_SECRET",
+        "HERMES_FEISHU_VERIFICATION_TOKEN",
+        "CODEX_FEISHU_BOT_ID",
+        "CODEX_FEISHU_APP_SECRET",
+    ] {
+        assert!(
+            legacy_var_names.iter().any(|name| name == expected),
+            "expected legacy var {expected} in {legacy_var_names:?}"
+        );
+    }
     assert!(parsed["next_actions"]
         .as_array()
         .expect("next actions should be array")

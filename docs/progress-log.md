@@ -1,6 +1,7 @@
 # 协作进度日志
 
 ## 2026-05-11 Codex + Claude 双参考架构补全
+- Feishu 独立通道隔离继续加固：`channel feishu-check` 的 legacy env 检测从少量硬编码扩展为明确的 forbidden credential namespace helper，覆盖 generic `FEISHU_*`、`HERMES_FEISHU_*`、`CODEX_FEISHU_*` 下的 app id、app secret、bot id、verification token、encrypt key，避免 Chuang bot env 文件混入 Hermes/Codex/旧桥密钥名后仍被误判为 ready。同步补 `cli_channel_tests` 回归和 `docs/feishu-dedicated-channel-checklist.md` 开源配置边界说明。
 - 已补官方 Codex 代码级架构审计：本地审计源为 `/tmp/openai-codex-audit`，commit `76845d7`，新增 `docs/codex-architecture-audit-v1.md`。结论是 Chuang 最初 Slot/trait/event/governance/memory-body 方向成立，但当前落地要吸收 Codex 的 SQ/EQ protocol、`Session`/`TurnContext`、`ToolRegistry` dispatch、`UnifiedExec`、`exec_policy`/sandbox/guardian、SQLite state 与 rollout trace。
 - 新增 `docs/codex-claude-optimization-plan-v1.md`，把 Codex 与 `claude-rust` 分工合并：Codex 主导运行骨架、治理执行、安全沙箱、state/trace、多代理 agent tree；Claude 主导工具 descriptor/MCP 易迁移实现、`QueryEngine` 工具回灌/retry/compaction 细节和 allow/deny pattern UX。
 - 优先级已从“直接补更多工具”调整为 M1-M3：先做 `RuntimeEventLedger`、`ToolRegistrySlot`、`PermissionProfileSlot`，把“普通本地完整能力默认执行，高危才询问/拒绝”落成 policy 和 contract，而不是只靠 prompt；随后再做 unified exec/actuator orchestrator、MCP fake adapter、SubagentTreeLedger。
