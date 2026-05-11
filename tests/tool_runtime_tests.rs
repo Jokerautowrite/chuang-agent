@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::governance::{RiskDecision, StaticRuleGovernance};
+use chuang_agent::runtime_event_ledger::{
+    InMemoryRuntimeEventLedger, RuntimeEventKind, RuntimeEventLedger,
+};
 use chuang_agent::tool_runtime::{
     execute_tool_call, execute_tool_call_with_governance, parse_final_answer,
     parse_tool_action_envelope, parse_tool_action_envelope_result, parse_tool_call,
@@ -1165,6 +1168,106 @@ fn execution_slot_wraps_registry_config_and_governed_execution() {
         Some("file_read")
     );
     assert_eq!(governance.audit_records()[0].operation, "tool.file_read");
+}
+
+#[test]
+fn execution_slot_records_runtime_ledger_events_for_tool_calls() {
+    let root = temp_workspace("execution-slot-ledger");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+
+    let outcome = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-1",
+            "turn-1",
+            &root,
+            &mut governance,
+            &ToolCall::WriteFile {
+                path: "notes/out.txt".to_string(),
+                content: "ledger".to_string(),
+            },
+            "cli",
+            "turn-1:tool-1",
+        )
+        .expect("governed execution should succeed");
+
+    assert!(outcome.record.ok);
+    let events = ledger
+        .query_by_turn("thread-1", "turn-1")
+        .expect("ledger should list turn events");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].event_type, RuntimeEventKind::ToolStarted);
+    assert_eq!(events[1].event_type, RuntimeEventKind::ToolFinished);
+    assert!(events[1]
+        .risk_decision
+        .as_ref()
+        .is_some_and(|decision| decision.decision.starts_with("allowed")));
+    assert!(events.iter().all(|event| event
+        .evidence_ref
+        .as_deref()
+        .is_some_and(|value| value.starts_with("tool://"))));
+
+    let call_id = "tool:write_file:cli:turn-1:tool-1";
+    let by_call = ledger
+        .query_by_call(call_id)
+        .expect("ledger should query by call id");
+    assert_eq!(by_call, events);
+}
+
+#[test]
+fn execution_slot_records_runtime_ledger_events_for_rejected_tool_calls() {
+    let root = temp_workspace("execution-slot-ledger-rejected");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+
+    let outcome = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-2",
+            "turn-2",
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-2:tool-1",
+        )
+        .expect("governance rejection should be captured as a tool record");
+
+    assert!(!outcome.record.ok);
+    assert_eq!(
+        outcome.record.failure_class.as_deref(),
+        Some("governance_rejected")
+    );
+    let events = ledger
+        .query_by_turn("thread-2", "turn-2")
+        .expect("ledger should list rejected turn events");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].event_type, RuntimeEventKind::ToolStarted);
+    assert_eq!(events[1].event_type, RuntimeEventKind::ToolFinished);
+    assert!(events[1]
+        .risk_decision
+        .as_ref()
+        .is_some_and(|decision| decision.decision.starts_with("needs_approval")));
+    assert!(events.iter().all(|event| event
+        .evidence_ref
+        .as_deref()
+        .is_some_and(|value| value.starts_with("tool://"))));
+    assert_eq!(
+        events[0].call_id.as_deref(),
+        Some("tool:shell_exec:cli:turn-2:tool-1")
+    );
+    assert_eq!(
+        events[1].call_id.as_deref(),
+        Some("tool:shell_exec:cli:turn-2:tool-1")
+    );
 }
 
 #[test]

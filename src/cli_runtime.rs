@@ -15,6 +15,7 @@ use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, 
 use chuang_agent::memory_store::MemoryStore;
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
+use chuang_agent::runtime_event_ledger::{InMemoryRuntimeEventLedger, RuntimeEventLedger};
 use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
@@ -278,6 +279,7 @@ where
     let mut tool_calls: Vec<ToolExecutionRecord> = Vec::new();
     let mut protocol_errors: Vec<ToolProtocolError> = Vec::new();
     let mut tool_events: Vec<ToolLoopEvent> = Vec::new();
+    let mut runtime_event_ledger = InMemoryRuntimeEventLedger::new();
     let mut transcript: Vec<String> = Vec::new();
     let mut turn_context = extra_context_segments;
     turn_context.push(tool_instruction_segment(workspace_root));
@@ -289,7 +291,10 @@ where
         let call = ToolCall::Locate {
             target: Some("screen".to_string()),
         };
-        let outcome = execution_slot.execute_or_reject_with_governance(
+        let outcome = execution_slot.execute_or_reject_with_governance_and_ledger(
+            &mut runtime_event_ledger,
+            "cli",
+            "pre-model",
             workspace_root,
             governance,
             &call,
@@ -350,12 +355,16 @@ where
                         &tool_events,
                         &transcript,
                     )?;
+                    insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
                 }
                 return Ok(turn);
             }
             ToolModelOutput::ToolCall(call) => {
                 let task_id = format!("{}:tool:{}", turn.turn_id, tool_calls.len() + 1);
-                let outcome = execution_slot.execute_or_reject_with_governance(
+                let outcome = execution_slot.execute_or_reject_with_governance_and_ledger(
+                    &mut runtime_event_ledger,
+                    "cli",
+                    turn.turn_id.clone(),
                     workspace_root,
                     governance,
                     &call,
@@ -406,6 +415,7 @@ where
                         &transcript,
                         "human_input_required",
                     )?;
+                    insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
                     turn.result.response.meta.extra.insert(
                         "tool_loop_status".to_string(),
                         "human_input_required".to_string(),
@@ -511,6 +521,7 @@ where
                 &transcript,
                 "implicit_final_plain_text",
             )?;
+            insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
             return Ok(turn);
         }
     }
@@ -533,6 +544,7 @@ where
                 &transcript,
                 "terminal_tool_failure",
             )?;
+            insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
             return Ok(turn);
         }
     }
@@ -936,6 +948,27 @@ fn insert_tool_metadata_with_status(
         .meta
         .extra
         .insert("tool_loop_status".to_string(), status.to_string());
+    Ok(())
+}
+
+fn insert_runtime_event_ledger_metadata(
+    turn: &mut ChuangKernelTurn,
+    ledger: &InMemoryRuntimeEventLedger,
+) -> Result<(), String> {
+    let events = ledger
+        .list()
+        .map_err(|e| format!("runtime_event_ledger_read_failed: {e}"))?;
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert(
+        "runtime_event_ledger_available".to_string(),
+        "true".to_string(),
+    );
+    extra.insert("runtime_event_count".to_string(), events.len().to_string());
+    extra.insert(
+        "runtime_event_ledger_json".to_string(),
+        serde_json::to_string(&events)
+            .map_err(|e| format!("runtime_event_ledger_json_failed: {e}"))?,
+    );
     Ok(())
 }
 
@@ -2300,6 +2333,25 @@ mod tests {
         assert!(tool_events_json.contains("\"atomic_tool_name\":\"file_write\""));
         assert!(tool_events_json.contains("\"duration_ms\":"));
         assert!(tool_events_json.contains("\"retryable\":false"));
+        let runtime_events_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("runtime_event_ledger_json")
+            .expect("runtime event ledger json should exist");
+        assert!(runtime_events_json.contains("\"event_type\":\"tool_started\""));
+        assert!(runtime_events_json.contains("\"event_type\":\"tool_finished\""));
+        assert!(runtime_events_json.contains("\"risk_decision\""));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("runtime_event_count")
+                .map(String::as_str),
+            Some("2")
+        );
         let tool_report_json = turn
             .result
             .response
@@ -2966,6 +3018,16 @@ mod tests {
             .expect("tool events json should exist");
         assert!(tool_events_json.contains("\"failure_class\":\"governance_rejected\""));
         assert!(tool_events_json.contains("\"atomic_tool_name\":\"code_execute\""));
+        let runtime_events_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("runtime_event_ledger_json")
+            .expect("runtime event ledger json should exist");
+        assert!(runtime_events_json.contains("\"event_type\":\"tool_started\""));
+        assert!(runtime_events_json.contains("\"event_type\":\"tool_finished\""));
+        assert!(runtime_events_json.contains("\"decision\":\"draft_only:"));
         assert!(governance
             .audit_records()
             .iter()

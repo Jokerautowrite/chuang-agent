@@ -16,6 +16,9 @@ use crate::memory_recall::{MemoryRecallPipeline, RecallRequest};
 use crate::memory_store_sqlite::SqliteMemoryStore;
 use crate::path_utils::resolve_candidate_preserving_existing_symlinks;
 use crate::runtime_config::ActuatorConfig;
+use crate::runtime_event_ledger::{
+    RuntimeEvent, RuntimeEventKind, RuntimeEventLedger, RuntimeRiskDecision,
+};
 use crate::workspace_file_adapter::WorkspaceFileAdapter;
 use serde::{Deserialize, Serialize};
 
@@ -432,6 +435,35 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memo
             &self.config,
         )
     }
+
+    pub fn execute_or_reject_with_governance_and_ledger<L, G>(
+        &self,
+        ledger: &mut L,
+        thread_id: impl Into<String>,
+        turn_id: impl Into<String>,
+        workspace_root: &Path,
+        governance: &mut G,
+        call: &ToolCall,
+        agent_id: impl Into<String>,
+        task_id: impl Into<String>,
+    ) -> Result<GovernedToolExecutionRecord, String>
+    where
+        L: RuntimeEventLedger,
+        G: Governance,
+    {
+        execute_tool_call_or_reject_with_registry_governance_and_ledger(
+            ledger,
+            thread_id,
+            turn_id,
+            workspace_root,
+            governance,
+            &self.registry,
+            call,
+            agent_id,
+            task_id,
+            &self.config,
+        )
+    }
 }
 
 impl ToolLoopReport {
@@ -791,6 +823,146 @@ pub fn execute_tool_call_with_governance_and_config<G: Governance>(
     )
 }
 
+pub fn execute_tool_call_with_governance_and_ledger<L, G>(
+    ledger: &mut L,
+    thread_id: impl Into<String>,
+    turn_id: impl Into<String>,
+    workspace_root: &Path,
+    governance: &mut G,
+    call: &ToolCall,
+    agent_id: impl Into<String>,
+    task_id: impl Into<String>,
+    config: &ToolExecutionConfig,
+) -> Result<GovernedToolExecutionRecord, String>
+where
+    L: RuntimeEventLedger,
+    G: Governance,
+{
+    let thread_id = thread_id.into();
+    let turn_id = turn_id.into();
+    let agent_id = agent_id.into();
+    let task_id = task_id.into();
+    let call_id = tool_call_event_id(call, &agent_id, &task_id);
+
+    ledger
+        .append(
+            RuntimeEvent::at(
+                RuntimeEventKind::ToolStarted,
+                thread_id.clone(),
+                now_timestamp(),
+            )
+            .with_turn_id(turn_id.clone())
+            .with_call_id(call_id.clone())
+            .with_evidence_ref(format!("tool://{call_id}/started")),
+        )
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+
+    let outcome = execute_tool_call_with_governance_and_config(
+        workspace_root,
+        governance,
+        call,
+        agent_id,
+        task_id,
+        config,
+    );
+
+    let finished_event = match &outcome {
+        Ok(outcome) => RuntimeEvent::at(
+            RuntimeEventKind::ToolFinished,
+            thread_id.clone(),
+            now_timestamp(),
+        )
+        .with_turn_id(turn_id.clone())
+        .with_call_id(call_id.clone())
+        .with_risk_decision(RuntimeRiskDecision::new(
+            risk_decision_label(&outcome.decision),
+            risk_decision_reason(&outcome.decision),
+        ))
+        .with_evidence_ref(format!("tool://{call_id}/finished")),
+        Err(_) => RuntimeEvent::at(RuntimeEventKind::ToolFinished, thread_id, now_timestamp())
+            .with_turn_id(turn_id)
+            .with_call_id(call_id.clone())
+            .with_evidence_ref(format!("tool://{call_id}/finished")),
+    };
+
+    ledger
+        .append(finished_event)
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+
+    outcome
+}
+
+fn execute_tool_call_or_reject_with_registry_governance_and_ledger<L, G>(
+    ledger: &mut L,
+    thread_id: impl Into<String>,
+    turn_id: impl Into<String>,
+    workspace_root: &Path,
+    governance: &mut G,
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    agent_id: impl Into<String>,
+    task_id: impl Into<String>,
+    config: &ToolExecutionConfig,
+) -> Result<GovernedToolExecutionRecord, String>
+where
+    L: RuntimeEventLedger,
+    G: Governance,
+{
+    let thread_id = thread_id.into();
+    let turn_id = turn_id.into();
+    let agent_id = agent_id.into();
+    let task_id = task_id.into();
+    let call_id = tool_call_event_id(call, &agent_id, &task_id);
+
+    ledger
+        .append(
+            RuntimeEvent::at(
+                RuntimeEventKind::ToolStarted,
+                thread_id.clone(),
+                now_timestamp(),
+            )
+            .with_turn_id(turn_id.clone())
+            .with_call_id(call_id.clone())
+            .with_evidence_ref(format!("tool://{call_id}/started")),
+        )
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+
+    let outcome = execute_tool_call_or_reject_with_registry_and_governance(
+        workspace_root,
+        governance,
+        registry,
+        call,
+        agent_id,
+        task_id,
+        config,
+    );
+
+    let finished_event = match &outcome {
+        Ok(outcome) => RuntimeEvent::at(
+            RuntimeEventKind::ToolFinished,
+            thread_id.clone(),
+            now_timestamp(),
+        )
+        .with_turn_id(turn_id.clone())
+        .with_call_id(call_id.clone())
+        .with_risk_decision(RuntimeRiskDecision::new(
+            risk_decision_label(&outcome.decision),
+            risk_decision_reason(&outcome.decision),
+        ))
+        .with_evidence_ref(format!("tool://{call_id}/finished")),
+        Err(_) => RuntimeEvent::at(RuntimeEventKind::ToolFinished, thread_id, now_timestamp())
+            .with_turn_id(turn_id)
+            .with_call_id(call_id.clone())
+            .with_evidence_ref(format!("tool://{call_id}/finished")),
+    };
+
+    ledger
+        .append(finished_event)
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+
+    outcome
+}
+
 fn execute_tool_call_with_registry_and_governance<G: Governance>(
     workspace_root: &Path,
     governance: &mut G,
@@ -988,6 +1160,10 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ShellExec { .. } => "shell_exec",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }
+}
+
+fn tool_call_event_id(call: &ToolCall, agent_id: &str, task_id: &str) -> String {
+    format!("tool:{}:{}:{}", tool_call_name(call), agent_id, task_id)
 }
 
 fn execute_list_dir(
