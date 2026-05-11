@@ -103,6 +103,22 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     );
     assert_eq!(parsed["runtime_observability"]["tool_call_count"], "0");
     assert_eq!(
+        parsed["runtime_observability"]["tool_unified_execution_status"],
+        "ok"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["tool_unified_execution_failure_count"],
+        "0"
+    );
+    assert!(parsed["runtime_observability"]["context_pack_trace"]
+        .as_str()
+        .expect("context pack trace should be a string")
+        .contains("normalize_tokens:"));
+    assert!(parsed["runtime_observability"]["context_compaction_events"]
+        .as_str()
+        .expect("context compaction events should be a string")
+        .contains("context_compaction_started"));
+    assert_eq!(
         parsed["runtime_observability"]["knowledge_context_preview_enabled"],
         "false"
     );

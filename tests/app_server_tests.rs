@@ -197,6 +197,27 @@ transport = "stub"
         "report-turn-1"
     );
     assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_unified_execution_status"],
+        "ok"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["tool_unified_execution_failure_count"],
+        "0"
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["context_pack_trace"]
+            .as_str()
+            .expect("context pack trace should be a string")
+            .contains("normalize_tokens:")
+    );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["context_compaction_events"]
+            .as_str()
+            .expect("context compaction events should be a string")
+            .contains("context_compaction_started")
+    );
+    assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
             ["knowledge_context_preview_enabled"],
         "false"
@@ -322,6 +343,15 @@ transport = "stub"
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]["runtime_report_id"],
         "report-turn-1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["tool_unified_execution_status"],
+        "ok"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["tool_unified_execution_failure_count"],
+        "0"
     );
     assert_eq!(
         turn_completed["params"]["turn"]["toolProtocolErrorCount"],
