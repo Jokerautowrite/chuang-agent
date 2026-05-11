@@ -83,6 +83,22 @@ pub struct SubagentThreadRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentChildrenSummary {
+    pub parent_thread_id: String,
+    pub child_count: usize,
+    pub open_child_count: usize,
+    pub reported_child_count: usize,
+    pub closed_child_count: usize,
+    pub accepted_report_count: usize,
+    pub rejected_report_count: usize,
+    pub missing_report_count: usize,
+    pub child_thread_ids: Vec<String>,
+    #[serde(default)]
+    pub report_admission_refs: Vec<ReportAdmissionRef>,
+    pub report_reason_codes: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnRequest {
     pub parent_thread_id: String,
     pub child_thread_id: String,
@@ -195,6 +211,11 @@ impl InMemorySubagentTreeLedger {
         self.records.values().cloned().collect()
     }
 
+    pub fn summarize_children(&self, parent_thread_id: &str) -> SubagentChildrenSummary {
+        let children = self.list_children(parent_thread_id);
+        SubagentChildrenSummary::from_children(parent_thread_id, &children)
+    }
+
     pub fn validate_spawn(
         &self,
         request: &SpawnRequest,
@@ -252,6 +273,60 @@ impl InMemorySubagentTreeLedger {
             })
             .count()
             .min(usize::from(u16::MAX)) as u16
+    }
+}
+
+impl SubagentChildrenSummary {
+    pub fn from_children(parent_thread_id: &str, children: &[SubagentThreadRecord]) -> Self {
+        let mut open_child_count = 0usize;
+        let mut reported_child_count = 0usize;
+        let mut closed_child_count = 0usize;
+        let mut accepted_report_count = 0usize;
+        let mut rejected_report_count = 0usize;
+        let mut missing_report_count = 0usize;
+        let mut child_thread_ids = Vec::new();
+        let mut report_admission_refs = Vec::new();
+        let mut report_reason_codes = BTreeMap::new();
+
+        for child in children {
+            child_thread_ids.push(child.relation.thread_id.clone());
+            if child.status.is_open() {
+                open_child_count += 1;
+            }
+            if child.status == SubagentTreeStatus::Reported {
+                reported_child_count += 1;
+            }
+            if child.status == SubagentTreeStatus::Closed {
+                closed_child_count += 1;
+            }
+            if let Some(admission) = &child.report_admission_ref {
+                match admission.status.as_str() {
+                    "Accepted" => accepted_report_count += 1,
+                    "Rejected" => rejected_report_count += 1,
+                    _ => {}
+                }
+                *report_reason_codes
+                    .entry(admission.reason_code.clone())
+                    .or_insert(0) += 1;
+                report_admission_refs.push(admission.clone());
+            } else {
+                missing_report_count += 1;
+            }
+        }
+
+        Self {
+            parent_thread_id: parent_thread_id.to_string(),
+            child_count: children.len(),
+            open_child_count,
+            reported_child_count,
+            closed_child_count,
+            accepted_report_count,
+            rejected_report_count,
+            missing_report_count,
+            child_thread_ids,
+            report_admission_refs,
+            report_reason_codes,
+        }
     }
 }
 

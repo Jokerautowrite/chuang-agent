@@ -31,6 +31,73 @@ fn admission_ref(id: &str) -> ReportAdmissionRef {
 }
 
 #[test]
+fn summarize_children_counts_statuses_and_report_reasons_without_payload_leakage() {
+    let mut ledger = ledger(3, 4);
+    ledger
+        .spawn(spawn_request(
+            "root-thread",
+            "child-thread-1",
+            AgentRole::Analyze,
+            "reader",
+        ))
+        .expect("first spawn should succeed");
+    ledger
+        .register_report("child-thread-1", admission_ref("admission-1"))
+        .expect("report should register");
+    ledger
+        .spawn(spawn_request(
+            "root-thread",
+            "child-thread-2",
+            AgentRole::Execute,
+            "builder",
+        ))
+        .expect("second spawn should succeed");
+    ledger
+        .close("child-thread-2")
+        .expect("close should succeed");
+    let summary = ledger.summarize_children("root-thread");
+
+    assert_eq!(summary.parent_thread_id, "root-thread");
+    assert_eq!(summary.child_count, 2);
+    assert_eq!(summary.open_child_count, 1);
+    assert_eq!(summary.reported_child_count, 1);
+    assert_eq!(summary.closed_child_count, 1);
+    assert_eq!(summary.accepted_report_count, 1);
+    assert_eq!(summary.rejected_report_count, 0);
+    assert_eq!(summary.missing_report_count, 1);
+    assert_eq!(
+        summary.child_thread_ids,
+        vec!["child-thread-1", "child-thread-2"]
+    );
+    assert_eq!(
+        summary.report_reason_codes.get("report_validated"),
+        Some(&1)
+    );
+    assert_eq!(summary.report_admission_refs.len(), 1);
+    assert_eq!(summary.report_admission_refs[0].admission_id, "admission-1");
+    assert_eq!(
+        summary.report_admission_refs[0].report_id.as_deref(),
+        Some("report-admission-1")
+    );
+    assert_eq!(summary.report_admission_refs[0].status, "Accepted");
+    assert_eq!(
+        summary.report_admission_refs[0].reason_code,
+        "report_validated"
+    );
+    assert_eq!(
+        summary.report_admission_refs[0].evidence_ref.as_deref(),
+        Some("queue://reports/admission-1")
+    );
+
+    let encoded = serde_json::to_string(&summary).expect("summary should serialize");
+    assert!(encoded.contains("child-thread-1"));
+    assert!(encoded.contains("\"report_admission_refs\""));
+    assert!(encoded.contains("\"admission_id\":\"admission-1\""));
+    assert!(encoded.contains("queue://reports/admission-1"));
+    assert!(!encoded.contains("report-admission-secret-value"));
+}
+
+#[test]
 fn ledger_records_root_child_relation_spawn_edge_and_report_ref() {
     let mut ledger = ledger(3, 4);
 
@@ -255,6 +322,30 @@ fn ledger_contract_structs_roundtrip_as_json() {
     assert!(encoded.contains("\"nickname\":\"wiki-reader\""));
     assert!(encoded.contains("\"status\":\"Reported\""));
     assert!(encoded.contains("\"report_admission_ref\""));
+}
+
+#[test]
+fn children_summary_deserializes_legacy_json_without_report_admission_refs() {
+    let summary: chuang_agent::subagent_tree_ledger::SubagentChildrenSummary =
+        serde_json::from_str(
+            r#"{
+                "parent_thread_id":"root-thread",
+                "child_count":1,
+                "open_child_count":1,
+                "reported_child_count":0,
+                "closed_child_count":0,
+                "accepted_report_count":0,
+                "rejected_report_count":0,
+                "missing_report_count":1,
+                "child_thread_ids":["child-thread-1"],
+                "report_reason_codes":{}
+            }"#,
+        )
+        .expect("legacy summary should deserialize");
+
+    assert_eq!(summary.parent_thread_id, "root-thread");
+    assert_eq!(summary.child_count, 1);
+    assert!(summary.report_admission_refs.is_empty());
 }
 
 #[test]

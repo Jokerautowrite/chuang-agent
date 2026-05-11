@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::agent_runtime::{ContextDebugInfo, RuntimeResult};
+use crate::context_engine::ContextCompactionSummary;
 use crate::subagent_report::{
     governance_metadata, ArtifactKind, ArtifactRef, ExecutionStatus, ReportBuilder,
     RuntimeReportInput, SubagentReport, SubagentReportBuilder,
@@ -135,24 +136,29 @@ fn runtime_event_ledger_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
 
     let description = serde_json::from_str::<Vec<serde_json::Value>>(raw_ledger)
         .map(|events| {
-            let started_count = events
-                .iter()
-                .filter(|event| {
-                    event.get("event_type").and_then(|value| value.as_str()) == Some("tool_started")
-                })
-                .count();
-            let finished_count = events
-                .iter()
-                .filter(|event| {
-                    event.get("event_type").and_then(|value| value.as_str())
-                        == Some("tool_finished")
-                })
-                .count();
+            let mut tool_started_count = 0usize;
+            let mut tool_finished_count = 0usize;
+            let mut approval_requested_count = 0usize;
+            let mut approval_resolved_count = 0usize;
+            let mut elicitation_requested_count = 0usize;
+            for event in &events {
+                match event.get("event_type").and_then(|value| value.as_str()) {
+                    Some("tool_started") => tool_started_count += 1,
+                    Some("tool_finished") => tool_finished_count += 1,
+                    Some("approval_requested") => approval_requested_count += 1,
+                    Some("approval_resolved") => approval_resolved_count += 1,
+                    Some("elicitation_requested") => elicitation_requested_count += 1,
+                    _ => {}
+                }
+            }
             format!(
-                "runtime_event_ledger count={} tool_started={} tool_finished={}",
+                "runtime_event_ledger count={} tool_started={} tool_finished={} approval_requested={} approval_resolved={} elicitation_requested={}",
                 events.len(),
-                started_count,
-                finished_count
+                tool_started_count,
+                tool_finished_count,
+                approval_requested_count,
+                approval_resolved_count,
+                elicitation_requested_count
             )
         })
         .unwrap_or_else(|_| "runtime_event_ledger present but could not be parsed".to_string());
@@ -160,6 +166,38 @@ fn runtime_event_ledger_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     vec![ArtifactRef {
         kind: ArtifactKind::Log,
         locator: "runtime_meta.runtime_event_ledger_json".to_string(),
+        description: Some(description),
+    }]
+}
+
+fn context_compaction_summary_artifact(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let Some(raw_summary) = result
+        .response
+        .meta
+        .extra
+        .get("context_compaction_summary_json")
+    else {
+        return Vec::new();
+    };
+
+    let description = serde_json::from_str::<ContextCompactionSummary>(raw_summary)
+        .map(|summary| {
+            format!(
+                "context_compaction_summary events={} started={} completed={} dropped={} trace_steps={}",
+                summary.event_count,
+                summary.started_count,
+                summary.completed_count,
+                summary.dropped_count,
+                summary.trace_steps.join(",")
+            )
+        })
+        .unwrap_or_else(|_| {
+            "context_compaction_summary present but could not be parsed".to_string()
+        });
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_meta.context_compaction_summary_json".to_string(),
         description: Some(description),
     }]
 }
@@ -195,6 +233,12 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         packed_context_field(&result.packed_context_preview, "compaction_events")
     {
         metadata.insert("context_compaction_events".to_string(), compaction_events);
+    }
+    if let Some(summary) = extra.get("context_compaction_summary_json") {
+        metadata.insert(
+            "context_compaction_summary_json".to_string(),
+            summary.clone(),
+        );
     }
 
     for key in [
@@ -286,6 +330,7 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "runtime_event_count",
         "context_pack_trace",
         "context_compaction_events",
+        "context_compaction_summary_json",
     ] {
         if let Some(value) = extra.get(key) {
             metadata.insert(key.to_string(), value.clone());
@@ -347,6 +392,7 @@ fn context_compaction_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
             description: Some(format!("compaction_events {compaction_events}")),
         });
     }
+    artifacts.extend(context_compaction_summary_artifact(result));
     artifacts
 }
 

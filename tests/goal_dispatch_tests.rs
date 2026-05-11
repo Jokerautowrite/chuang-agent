@@ -212,6 +212,15 @@ fn goal_collect_exposes_checkpoint_handoff_when_all_reports_exist() {
         collection.completed_worker_ids,
         vec!["worker-1".to_string(), "worker-2".to_string()]
     );
+    assert_eq!(collection.parent_context_handoffs.len(), 2);
+    assert!(collection.parent_context_handoffs[0].accepted);
+    assert_eq!(
+        collection.parent_context_handoffs[0].provenance_ref,
+        Some(format!(
+            "report://{}/report-{}",
+            receipt.dispatches[0].agent_id, receipt.dispatches[0].run_id
+        ))
+    );
     assert!(collection.ready_to_checkpoint);
     let suggestion = checkpoint_suggestion_from_collection(&collection)
         .expect("collection should expose checkpoint handoff");
@@ -281,6 +290,7 @@ fn goal_collect_blocks_failed_worker_reports_from_checkpoint_handoff() {
     assert_eq!(collection.available_report_count, 2);
     assert!(collection.missing_run_ids.is_empty());
     assert_eq!(collection.completed_worker_ids, vec!["worker-1"]);
+    assert_eq!(collection.parent_context_handoffs.len(), 1);
     assert_eq!(
         collection.blocked_report_run_ids,
         vec![receipt.dispatches[1].run_id.clone()]
@@ -320,6 +330,7 @@ fn goal_collect_blocks_identity_mismatch_reports_from_checkpoint_handoff() {
         .expect("collection should succeed");
     assert_eq!(collection.available_report_count, 2);
     assert_eq!(collection.completed_worker_ids, vec!["worker-1"]);
+    assert_eq!(collection.parent_context_handoffs.len(), 1);
     assert_eq!(
         collection.blocked_report_run_ids,
         vec![receipt.dispatches[1].run_id.clone()]
@@ -349,6 +360,7 @@ fn goal_collect_read_only_reports_missing_state_without_touching_queue_dirs() {
     assert!(!readonly_queue_root.exists());
     assert_eq!(collection.available_report_count, 0);
     assert_eq!(collection.missing_run_ids.len(), receipt.dispatches.len());
+    assert!(collection.parent_context_handoffs.is_empty());
     assert!(!collection.ready_to_checkpoint);
     assert!(collection.checkpoint_suggestion.is_none());
     assert!(collection

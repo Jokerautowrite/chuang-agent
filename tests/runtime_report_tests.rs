@@ -10,6 +10,7 @@ use chuang_agent::runtime_report::{
     build_runtime_report, report_metadata, runtime_observability_meta,
 };
 use chuang_agent::subagent_report::{ArtifactKind, ExecutionStatus};
+use serde_json::json;
 
 fn temp_db_path(name: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
@@ -139,7 +140,23 @@ fn runtime_report_builder_carries_working_reservation_debug() {
                 provider: None,
                 recall_hit_count: None,
                 finish_reason: None,
-                extra: BTreeMap::new(),
+                extra: {
+                    let mut extra = BTreeMap::new();
+                    extra.insert(
+                        "context_compaction_summary_json".to_string(),
+                        serde_json::json!({
+                            "event_count": 3,
+                            "started_count": 1,
+                            "completed_count": 1,
+                            "dropped_count": 1,
+                            "dropped_segment_ids": ["mem-1"],
+                            "drop_reason_counts": {"duplicate_content": 1},
+                            "trace_steps": ["normalize_tokens", "dedupe"]
+                        })
+                        .to_string(),
+                    );
+                    extra
+                },
             },
         },
         recall_summary: "summary".to_string(),
@@ -1054,7 +1071,12 @@ fn runtime_report_promotes_runtime_event_ledger_metadata_to_artifact() {
     let mut extra = BTreeMap::new();
     extra.insert(
         "runtime_event_ledger_json".to_string(),
-        r#"[{"event_type":"tool_started"},{"event_type":"tool_finished"},{"event_type":"tool_finished"}]"#
+        r#"[
+            {"schema_version":1,"event_type":"approval_requested","thread_id":"thread-report","turn_id":"turn-report","call_id":"call-approval-secret-value","created_at":"2026-05-12T00:00:00Z","risk_decision":{"decision":"prompt","reason":"external send requires approval","policy_ref":"policy://local/high-risk"},"evidence_ref":"approval://secret-preview-value"},
+            {"schema_version":1,"event_type":"elicitation_requested","thread_id":"thread-report","turn_id":"turn-report","call_id":"call-elicit-secret-value","created_at":"2026-05-12T00:00:01Z","risk_decision":{"decision":"deny_secret_elicitation","reason":"operator input requested","policy_ref":"policy://local/secret-denied"},"evidence_ref":"elicitation://secret-preview-value"},
+            {"schema_version":1,"event_type":"tool_started","thread_id":"thread-report","turn_id":"turn-report","call_id":"call-tool","created_at":"2026-05-12T00:00:02Z","risk_decision":null,"evidence_ref":null},
+            {"schema_version":1,"event_type":"tool_finished","thread_id":"thread-report","turn_id":"turn-report","call_id":"call-tool","created_at":"2026-05-12T00:00:03Z","risk_decision":null,"evidence_ref":null}
+        ]"#
             .to_string(),
     );
 
@@ -1103,9 +1125,13 @@ fn runtime_report_promotes_runtime_event_ledger_metadata_to_artifact() {
         .description
         .as_deref()
         .expect("description");
-    assert!(description.contains("count=3"));
+    assert!(description.contains("count=4"));
     assert!(description.contains("tool_started=1"));
-    assert!(description.contains("tool_finished=2"));
+    assert!(description.contains("tool_finished=1"));
+    assert!(description.contains("approval_requested=1"));
+    assert!(description.contains("elicitation_requested=1"));
+    assert!(!description.contains("secret-preview-value"));
+    assert!(!description.contains("call-approval-secret-value"));
 }
 
 #[test]
@@ -1120,7 +1146,23 @@ fn runtime_report_promotes_context_pack_trace_and_compaction_events() {
                 provider: None,
                 recall_hit_count: None,
                 finish_reason: None,
-                extra: BTreeMap::new(),
+                extra: {
+                    let mut extra = BTreeMap::new();
+                    extra.insert(
+                        "context_compaction_summary_json".to_string(),
+                        serde_json::json!({
+                            "event_count": 3,
+                            "started_count": 1,
+                            "completed_count": 1,
+                            "dropped_count": 1,
+                            "dropped_segment_ids": ["mem-1"],
+                            "drop_reason_counts": {"duplicate_content": 1},
+                            "trace_steps": ["normalize_tokens", "dedupe"]
+                        })
+                        .to_string(),
+                    );
+                    extra
+                },
             },
         },
         recall_summary: "summary".to_string(),
@@ -1162,4 +1204,85 @@ fn runtime_report_promotes_context_pack_trace_and_compaction_events() {
         .artifacts
         .iter()
         .any(|artifact| artifact.locator == "runtime_meta.context_compaction_events"));
+    assert!(report
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.locator == "runtime_meta.context_compaction_summary_json"));
+}
+
+#[test]
+fn runtime_report_promotes_context_compaction_summary_without_segment_payloads() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "context_compaction_summary_json".to_string(),
+        json!({
+            "event_count": 3,
+            "started_count": 1,
+            "completed_count": 1,
+            "dropped_count": 1,
+            "dropped_segment_ids": ["mem-1"],
+            "drop_reason_counts": {"duplicate_content": 1},
+            "trace_steps": ["normalize_tokens", "dedupe"]
+        })
+        .to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability
+            .get("context_compaction_summary_json")
+            .is_some(),
+        true
+    );
+
+    let report = build_runtime_report(
+        &result,
+        "report-context-compaction-summary",
+        "task-context-compaction-summary",
+        "agent-context-compaction-summary",
+        None,
+    );
+    let artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.context_compaction_summary_json")
+        .expect("context compaction summary artifact should exist");
+    assert_eq!(artifact.kind, ArtifactKind::Log);
+    assert!(artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("events=3"));
+    assert!(artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("trace_steps=normalize_tokens,dedupe"));
 }

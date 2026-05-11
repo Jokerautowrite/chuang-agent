@@ -2,6 +2,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 mod deterministic;
 mod summary_compression;
@@ -69,7 +70,7 @@ pub struct ContextCompactionEvent {
     pub trace_step: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextCompactionSummary {
     pub event_count: usize,
     pub started_count: usize,

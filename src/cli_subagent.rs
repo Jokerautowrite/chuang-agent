@@ -12,8 +12,8 @@ use chuang_agent::live_subagent_rehearsal::{
 };
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{
-    ExecutionStatus, GovernanceDecisionSummary, ReportAdmissionStatus, ResourceUsage,
-    SubagentReport, SubagentReportValidator,
+    build_parent_context_handoff, ExecutionStatus, GovernanceDecisionSummary,
+    ReportAdmissionStatus, ResourceUsage, SubagentReport, SubagentReportValidator,
 };
 use chuang_agent::subagent_spawner::{QueuedSubagentSpawner, RunId};
 
@@ -668,18 +668,29 @@ fn subagent_report_command(args: &[String]) -> Result<(), String> {
             report_admission = Some(admission);
         }
     }
+    let parent_context_handoff = report.as_ref().and_then(|report| {
+        report_admission
+            .as_ref()
+            .map(|admission| build_parent_context_handoff(report, admission))
+    });
     let output = SubagentReportCliOutput {
         run_id: request.run_id.0.clone(),
         available: report_raw.is_some(),
         report,
         report_admission,
+        parent_context_handoff,
     };
 
     match request.output {
         ControlOutputFormat::Text => {
             if let Some(report) = &output.report {
+                let handoff = output
+                    .parent_context_handoff
+                    .as_ref()
+                    .map(parent_context_handoff_state)
+                    .unwrap_or_else(|| "none".to_string());
                 println!(
-                    "subagent_report_available run_id={} status={:?} summary={} admission={}",
+                    "subagent_report_available run_id={} status={:?} summary={} admission={} handoff={}",
                     output.run_id,
                     report.status,
                     report.summary,
@@ -687,7 +698,8 @@ fn subagent_report_command(args: &[String]) -> Result<(), String> {
                         .report_admission
                         .as_ref()
                         .map(|admission| format!("{:?}", admission.status))
-                        .unwrap_or_else(|| "none".to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    handoff
                 );
             } else {
                 println!(
@@ -732,6 +744,7 @@ fn subagent_collect_command(args: &[String]) -> Result<(), String> {
             report_available: false,
             report: None,
             report_admission: None,
+            parent_context_handoff: None,
         };
         return match request.output {
             ControlOutputFormat::Text => {
@@ -766,19 +779,30 @@ fn subagent_collect_command(args: &[String]) -> Result<(), String> {
             );
         }
     }
+    let parent_context_handoff = report.as_ref().and_then(|report| {
+        report_admission
+            .as_ref()
+            .map(|admission| build_parent_context_handoff(report, admission))
+    });
     let output = SubagentCollectCliOutput {
         run_id: request.run_id.0.clone(),
         dispatch_available: true,
         report_available: report_raw.is_some(),
         report,
         report_admission,
+        parent_context_handoff,
     };
 
     match request.output {
         ControlOutputFormat::Text => {
             if let Some(report) = &output.report {
+                let handoff = output
+                    .parent_context_handoff
+                    .as_ref()
+                    .map(parent_context_handoff_state)
+                    .unwrap_or_else(|| "none".to_string());
                 println!(
-                    "subagent_collect_available run_id={} status={:?} summary={} admission={}",
+                    "subagent_collect_available run_id={} status={:?} summary={} admission={} handoff={}",
                     output.run_id,
                     report.status,
                     report.summary,
@@ -786,7 +810,8 @@ fn subagent_collect_command(args: &[String]) -> Result<(), String> {
                         .report_admission
                         .as_ref()
                         .map(|admission| format!("{:?}", admission.status))
-                        .unwrap_or_else(|| "none".to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    handoff
                 );
             } else {
                 println!("subagent_collect_pending run_id={}", output.run_id);
@@ -852,6 +877,33 @@ fn unique_cli_subagent_ids(agent_name: &str) -> Result<CliSubagentIds, String> {
         run_id: RunId(format!("queued-cli-{pid}-{nanos}")),
         agent_id: AgentId(format!("{safe_agent_name}-{pid}-{nanos}")),
     })
+}
+
+fn parent_context_handoff_state(
+    handoff: &chuang_agent::subagent_report::ParentContextHandoff,
+) -> String {
+    if handoff.memory_proposal_only {
+        format!("proposal_only reason={}", handoff.admission_reason_code)
+    } else {
+        format!(
+            "accepted report_id={} task_id={} agent_id={}",
+            handoff
+                .report_id
+                .as_ref()
+                .map(|id| id.0.as_str())
+                .unwrap_or("none"),
+            handoff
+                .task_id
+                .as_ref()
+                .map(|id| id.0.as_str())
+                .unwrap_or("none"),
+            handoff
+                .agent_id
+                .as_ref()
+                .map(|id| id.0.as_str())
+                .unwrap_or("none")
+        )
+    }
 }
 
 fn build_fake_runner_report(

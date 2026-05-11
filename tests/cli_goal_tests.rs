@@ -1315,6 +1315,8 @@ fn cli_goal_collect_can_seed_checkpoint_from_ready_reports() {
     );
     let stdout = String::from_utf8_lossy(&text_collect.stdout);
     assert!(stdout.contains("goal_collect_ready_to_checkpoint: true"));
+    assert!(stdout.contains("goal_collect_parent_context_handoff_count: 2"));
+    assert!(stdout.contains("goal_collect_parent_context_handoff_refs:"));
     assert!(stdout.contains(
         "goal_collect_checkpoint_summary: checkpoint ready for goal_id=collect-goal workers=goal-worker-1 | goal-worker-2"
     ));
@@ -1620,6 +1622,8 @@ fn cli_goal_collect_surfaces_blocked_report_reasons_for_failed_and_mismatched_re
         "goal_operability_next_command_reason: dispatch manifest is present but reports are not yet ready to checkpoint"
     ));
     assert!(stdout.contains("goal_operability_checkpoint_ready: false"));
+    assert!(stdout.contains("goal_operability_parent_context_handoff_count: 0"));
+    assert!(stdout.contains("goal_operability_parent_context_handoff_refs:"));
     assert!(stdout.contains("goal_operability_collect_blocked_report_run_ids:"));
     assert!(stdout.contains("goal_operability_collect_blocked_report_reasons:"));
     assert!(stdout.contains("report status is not success"));
@@ -1726,6 +1730,8 @@ fn cli_goal_collect_blocks_malformed_report_from_checkpoint_material() {
     );
     let stdout = String::from_utf8_lossy(&text_collect.stdout);
     assert!(stdout.contains("goal_collect_ready_to_checkpoint: false"));
+    assert!(stdout.contains("goal_collect_parent_context_handoff_count: 1"));
+    assert!(stdout.contains("goal_collect_parent_context_handoff_refs:"));
     assert!(stdout.contains("goal_collect_blocked_report_run_ids:"));
     assert!(stdout.contains("goal_collect_blocked_report_reasons:"));
     assert!(stdout.contains("report parse failed"));

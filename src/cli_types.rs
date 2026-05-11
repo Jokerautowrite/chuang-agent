@@ -112,6 +112,7 @@ pub(crate) struct SubagentReportCliOutput {
     pub(crate) available: bool,
     pub(crate) report: Option<SubagentReport>,
     pub(crate) report_admission: Option<ReportAdmission>,
+    pub(crate) parent_context_handoff: Option<chuang_agent::subagent_report::ParentContextHandoff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -128,6 +129,7 @@ pub(crate) struct SubagentCollectCliOutput {
     pub(crate) report_available: bool,
     pub(crate) report: Option<SubagentReport>,
     pub(crate) report_admission: Option<ReportAdmission>,
+    pub(crate) parent_context_handoff: Option<chuang_agent::subagent_report::ParentContextHandoff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

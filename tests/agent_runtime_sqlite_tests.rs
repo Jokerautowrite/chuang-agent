@@ -129,8 +129,8 @@ fn agent_runtime_exposes_structured_context_debug_fields() {
             recall_limit: 1,
             metadata: BTreeMap::new(),
             context_budget: Some(chuang_agent::context_engine::ContextBudget {
-                max_tokens: 280,
-                reserve_system_tokens: 240,
+                max_tokens: 344,
+                reserve_system_tokens: 344,
                 min_working_tokens: 5,
                 max_tool_results: 5,
                 max_memory_segments: 20,

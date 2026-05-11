@@ -17,6 +17,7 @@ pub enum RuntimeEventKind {
     ToolFinished,
     ApprovalRequested,
     ApprovalResolved,
+    ElicitationRequested,
     SubagentSpawned,
     SubagentReported,
     TurnCompleted,
@@ -145,6 +146,11 @@ pub struct RuntimeTurnSummary {
     pub thread_id: String,
     pub turn_id: String,
     pub event_count: usize,
+    pub tool_started_count: usize,
+    pub tool_finished_count: usize,
+    pub approval_requested_count: usize,
+    pub approval_resolved_count: usize,
+    pub elicitation_requested_count: usize,
     pub risk_decision_count: usize,
     pub evidence_ref_count: usize,
     pub call_count: usize,
@@ -156,11 +162,24 @@ pub struct RuntimeTurnSummary {
 impl RuntimeTurnSummary {
     pub fn from_events(thread_id: &str, turn_id: &str, events: &[RuntimeEvent]) -> Self {
         let mut event_types = Vec::new();
+        let mut tool_started_count = 0usize;
+        let mut tool_finished_count = 0usize;
+        let mut approval_requested_count = 0usize;
+        let mut approval_resolved_count = 0usize;
+        let mut elicitation_requested_count = 0usize;
         let mut risk_decision_count = 0usize;
         let mut evidence_ref_count = 0usize;
         let mut call_count = 0usize;
         for event in events {
             event_types.push(event.event_type.clone());
+            match event.event_type {
+                RuntimeEventKind::ToolStarted => tool_started_count += 1,
+                RuntimeEventKind::ToolFinished => tool_finished_count += 1,
+                RuntimeEventKind::ApprovalRequested => approval_requested_count += 1,
+                RuntimeEventKind::ApprovalResolved => approval_resolved_count += 1,
+                RuntimeEventKind::ElicitationRequested => elicitation_requested_count += 1,
+                _ => {}
+            }
             if event.risk_decision.is_some() {
                 risk_decision_count += 1;
             }
@@ -176,6 +195,11 @@ impl RuntimeTurnSummary {
             thread_id: thread_id.to_string(),
             turn_id: turn_id.to_string(),
             event_count: events.len(),
+            tool_started_count,
+            tool_finished_count,
+            approval_requested_count,
+            approval_resolved_count,
+            elicitation_requested_count,
             risk_decision_count,
             evidence_ref_count,
             call_count,

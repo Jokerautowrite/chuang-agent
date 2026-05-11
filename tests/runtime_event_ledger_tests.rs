@@ -35,6 +35,10 @@ fn runtime_event_serializes_supported_m1_event_types() {
         (RuntimeEventKind::ToolFinished, "tool_finished"),
         (RuntimeEventKind::ApprovalRequested, "approval_requested"),
         (RuntimeEventKind::ApprovalResolved, "approval_resolved"),
+        (
+            RuntimeEventKind::ElicitationRequested,
+            "elicitation_requested",
+        ),
         (RuntimeEventKind::SubagentSpawned, "subagent_spawned"),
         (RuntimeEventKind::SubagentReported, "subagent_reported"),
         (RuntimeEventKind::TurnCompleted, "turn_completed"),
@@ -274,25 +278,60 @@ fn runtime_event_ledger_query_methods_are_read_only() {
 #[test]
 fn runtime_event_ledger_summarize_turn_avoids_secret_like_previews() {
     let mut ledger = InMemoryRuntimeEventLedger::new();
-    let started = RuntimeEvent::at(
-        RuntimeEventKind::ApprovalRequested,
+    let tool_started = RuntimeEvent::at(
+        RuntimeEventKind::ToolStarted,
         "thread-summary",
         "2026-05-11T00:00:00Z",
+    )
+    .with_turn_id("turn-summary")
+    .with_call_id("call-tool-secret-value");
+    let approval_requested = RuntimeEvent::at(
+        RuntimeEventKind::ApprovalRequested,
+        "thread-summary",
+        "2026-05-11T00:00:01Z",
     )
     .with_turn_id("turn-summary")
     .with_call_id("call-secret-value")
     .with_risk_decision(RuntimeRiskDecision::new("prompt", "external send"))
     .with_evidence_ref("token://secret-preview-value");
+    let elicitation_requested = RuntimeEvent::at(
+        RuntimeEventKind::ElicitationRequested,
+        "thread-summary",
+        "2026-05-11T00:00:02Z",
+    )
+    .with_turn_id("turn-summary")
+    .with_call_id("call-elicit-secret-value")
+    .with_risk_decision(RuntimeRiskDecision::new(
+        "deny_secret_elicitation",
+        "operator input requested",
+    ))
+    .with_evidence_ref("elicitation://secret-preview-value");
+    let tool_finished = RuntimeEvent::at(
+        RuntimeEventKind::ToolFinished,
+        "thread-summary",
+        "2026-05-11T00:00:03Z",
+    )
+    .with_turn_id("turn-summary")
+    .with_call_id("call-tool-secret-value");
     let resolved = RuntimeEvent::at(
         RuntimeEventKind::ApprovalResolved,
         "thread-summary",
-        "2026-05-11T00:00:01Z",
+        "2026-05-11T00:00:04Z",
     )
     .with_turn_id("turn-summary");
 
     ledger
-        .append(started)
+        .append(tool_started)
         .expect("append started should succeed");
+    ledger
+        .append(approval_requested)
+        .expect("append approval should succeed");
+    ledger
+        .append(elicitation_requested)
+        .expect("append elicitation should succeed");
+    ledger
+        .append(tool_finished)
+        .expect("append finished should succeed");
     ledger
         .append(resolved)
         .expect("append resolved should succeed");
@@ -302,22 +341,30 @@ fn runtime_event_ledger_summarize_turn_avoids_secret_like_previews() {
         .expect("summary should succeed");
     assert_eq!(summary.thread_id, "thread-summary");
     assert_eq!(summary.turn_id, "turn-summary");
-    assert_eq!(summary.event_count, 2);
-    assert_eq!(summary.risk_decision_count, 1);
-    assert_eq!(summary.evidence_ref_count, 1);
-    assert_eq!(summary.call_count, 1);
+    assert_eq!(summary.event_count, 5);
+    assert_eq!(summary.tool_started_count, 1);
+    assert_eq!(summary.tool_finished_count, 1);
+    assert_eq!(summary.approval_requested_count, 1);
+    assert_eq!(summary.approval_resolved_count, 1);
+    assert_eq!(summary.elicitation_requested_count, 1);
+    assert_eq!(summary.risk_decision_count, 2);
+    assert_eq!(summary.evidence_ref_count, 2);
+    assert_eq!(summary.call_count, 4);
     assert_eq!(
         summary.first_created_at.as_deref(),
         Some("2026-05-11T00:00:00Z")
     );
     assert_eq!(
         summary.last_created_at.as_deref(),
-        Some("2026-05-11T00:00:01Z")
+        Some("2026-05-11T00:00:04Z")
     );
     assert_eq!(
         summary.event_types,
         vec![
+            RuntimeEventKind::ToolStarted,
             RuntimeEventKind::ApprovalRequested,
+            RuntimeEventKind::ElicitationRequested,
+            RuntimeEventKind::ToolFinished,
             RuntimeEventKind::ApprovalResolved
         ]
     );
@@ -325,6 +372,8 @@ fn runtime_event_ledger_summarize_turn_avoids_secret_like_previews() {
     let value = serde_json::to_string(&summary).expect("summary should serialize");
     assert!(!value.contains("call-secret-value"));
     assert!(!value.contains("token://secret-preview-value"));
+    assert!(!value.contains("call-tool-secret-value"));
+    assert!(!value.contains("call-elicit-secret-value"));
 }
 
 #[test]

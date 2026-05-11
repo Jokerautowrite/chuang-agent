@@ -1648,6 +1648,23 @@ fn cli_subagent_report_reads_available_report_json() {
     assert_eq!(parsed["available"], true);
     assert_eq!(parsed["report"]["summary"], "queued worker completed");
     assert_eq!(parsed["report"]["status"], "Success");
+    assert_eq!(parsed["parent_context_handoff"]["accepted"], true);
+    assert_eq!(
+        parsed["parent_context_handoff"]["admission_reason_code"],
+        "report_validated"
+    );
+    assert_eq!(
+        parsed["parent_context_handoff"]["provenance_ref"],
+        "report://worker-1/report-queued-run-1"
+    );
+    assert_eq!(
+        parsed["parent_context_handoff"]["summary"],
+        "queued worker completed"
+    );
+    assert_eq!(
+        parsed["parent_context_handoff"]["memory_proposal_only"],
+        false
+    );
 }
 
 #[test]
@@ -1718,6 +1735,7 @@ fn cli_subagent_report_returns_rejected_admission_for_malformed_report_file() {
 
     assert_eq!(parsed["available"], true);
     assert_eq!(parsed["report"], Value::Null);
+    assert_eq!(parsed["parent_context_handoff"], Value::Null);
     assert_eq!(
         parsed["report_admission"]["status"],
         Value::String("Rejected".to_string())
@@ -1772,6 +1790,20 @@ fn cli_subagent_collect_uses_dispatch_identity_before_returning_report() {
     assert_eq!(parsed["dispatch_available"], true);
     assert_eq!(parsed["report_available"], true);
     assert_eq!(parsed["report"]["summary"], "identity checked report");
+    assert_eq!(parsed["parent_context_handoff"]["accepted"], true);
+    assert_eq!(
+        parsed["parent_context_handoff"]["report_id"],
+        "report-queued-run-1"
+    );
+    assert_eq!(
+        parsed["parent_context_handoff"]["task_id"],
+        "task-cli-collect"
+    );
+    assert_eq!(parsed["parent_context_handoff"]["agent_id"], agent_id);
+    assert_eq!(
+        parsed["parent_context_handoff"]["memory_proposal_only"],
+        false
+    );
 }
 
 #[test]
@@ -1815,6 +1847,7 @@ fn cli_subagent_collect_returns_rejected_admission_for_partial_report_file() {
     assert_eq!(parsed["dispatch_available"], true);
     assert_eq!(parsed["report_available"], true);
     assert_eq!(parsed["report"], Value::Null);
+    assert_eq!(parsed["parent_context_handoff"], Value::Null);
     assert_eq!(
         parsed["report_admission"]["status"],
         Value::String("Rejected".to_string())

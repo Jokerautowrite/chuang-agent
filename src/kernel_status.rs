@@ -838,6 +838,7 @@ fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
         "runtime_meta.runtime_event_ledger_json".to_string(),
         "runtime_meta.context_pack_trace".to_string(),
         "runtime_meta.context_compaction_events".to_string(),
+        "runtime_meta.context_compaction_summary_json".to_string(),
         "runtime_meta.observability".to_string(),
     ];
     let observability_fields = vec![
@@ -847,6 +848,7 @@ fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
         "tool_unified_execution_failure_classes".to_string(),
         "context_pack_trace".to_string(),
         "context_compaction_events".to_string(),
+        "context_compaction_summary_json".to_string(),
     ];
 
     RuntimeReportSurfaceStatus {

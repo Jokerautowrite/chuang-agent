@@ -303,6 +303,16 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
                 format_text_list(&receipt.report_summaries)
             );
             println!(
+                "goal_collect_parent_context_handoff_count: {}",
+                receipt.parent_context_handoffs.len()
+            );
+            println!(
+                "goal_collect_parent_context_handoff_refs: {}",
+                format_text_list(&parent_context_handoff_refs(
+                    &receipt.parent_context_handoffs
+                ))
+            );
+            println!(
                 "goal_collect_blocked_report_run_ids: {}",
                 format_text_list(&receipt.blocked_report_run_ids)
             );
@@ -710,6 +720,16 @@ fn print_goal_operability_text(status: &GoalOperabilityStatus) {
             format_text_list(&collect.blocked_report_reasons)
         );
         println!(
+            "goal_operability_parent_context_handoff_count: {}",
+            collect.parent_context_handoffs.len()
+        );
+        println!(
+            "goal_operability_parent_context_handoff_refs: {}",
+            format_text_list(&parent_context_handoff_refs(
+                &collect.parent_context_handoffs
+            ))
+        );
+        println!(
             "goal_operability_collect_ready_to_checkpoint: {}",
             collect.ready_to_checkpoint
         );
@@ -734,6 +754,19 @@ fn print_goal_operability_text(status: &GoalOperabilityStatus) {
     if let Some(message) = &status.goal_collect_error_message {
         println!("goal_operability_collect_error_message: {}", message);
     }
+}
+
+fn parent_context_handoff_refs(
+    handoffs: &[chuang_agent::subagent_report::ParentContextHandoff],
+) -> Vec<String> {
+    handoffs
+        .iter()
+        .map(|handoff| {
+            handoff.provenance_ref.clone().unwrap_or_else(|| {
+                format!("proposal_only:{}", handoff.admission_reason_code.as_str())
+            })
+        })
+        .collect()
 }
 
 fn goal_dispatch_command_line(goal_root: &Path, queue_root: &Path, goal_id: &str) -> String {

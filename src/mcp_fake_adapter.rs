@@ -54,13 +54,23 @@ pub struct McpRuntimeEventInput {
     pub call_id: String,
     pub tool_name: String,
     pub risk: McpToolRiskView,
+    pub elicitation_request: Option<McpElicitationRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpRuntimeEvents {
     pub approval_required: Option<RuntimeEvent>,
+    pub elicitation_required: Option<RuntimeEvent>,
     pub tool_started: RuntimeEvent,
     pub tool_finished: RuntimeEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpElicitationRequest {
+    pub request_id: String,
+    pub reason_code: String,
+    pub asks_for_secret: bool,
+    pub secret_access_approved: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -417,22 +427,79 @@ pub fn mcp_call_runtime_events(input: McpRuntimeEventInput, ok: bool) -> McpRunt
     }
 
     let approval_required = if input.risk.requires_approval {
-        let mut event = RuntimeEvent::new(RuntimeEventKind::ApprovalRequested, input.thread_id)
-            .with_call_id(input.call_id)
-            .with_risk_decision(decision)
-            .with_evidence_ref(format!("{base_evidence}/approval_required"));
-        if let Some(turn_id) = input.turn_id {
-            event = event.with_turn_id(turn_id);
+        let mut event =
+            RuntimeEvent::new(RuntimeEventKind::ApprovalRequested, input.thread_id.clone())
+                .with_call_id(input.call_id.clone())
+                .with_risk_decision(decision)
+                .with_evidence_ref(format!("{base_evidence}/approval_required"));
+        if let Some(turn_id) = &input.turn_id {
+            event = event.with_turn_id(turn_id.clone());
         }
         Some(event)
     } else {
         None
     };
 
+    let elicitation_required = input.elicitation_request.map(|request| {
+        let request_id = sanitize_event_segment(&request.request_id);
+        let reason_code = sanitize_event_segment(&request.reason_code);
+        let (decision, policy_ref) = if request.asks_for_secret && !request.secret_access_approved {
+            (
+                "deny_secret_elicitation",
+                "policy://mcp-fake-adapter/secret-elicitation-denied",
+            )
+        } else {
+            (
+                "elicitation_required",
+                "policy://mcp-fake-adapter/operator-input",
+            )
+        };
+        let mut event = RuntimeEvent::new(
+            RuntimeEventKind::ElicitationRequested,
+            input.thread_id.clone(),
+        )
+        .with_call_id(input.call_id.clone())
+        .with_risk_decision(
+            RuntimeRiskDecision::new(
+                decision,
+                format!(
+                    "mcp tool {} requested operator input reason_code={reason_code}",
+                    input.tool_name
+                ),
+            )
+            .with_policy_ref(policy_ref),
+        )
+        .with_evidence_ref(format!("{base_evidence}/elicitation/{request_id}"));
+        if let Some(turn_id) = &input.turn_id {
+            event = event.with_turn_id(turn_id.clone());
+        }
+        event
+    });
+
     McpRuntimeEvents {
         approval_required,
+        elicitation_required,
         tool_started,
         tool_finished,
+    }
+}
+
+fn sanitize_event_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .take(96)
+        .collect();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
     }
 }
 

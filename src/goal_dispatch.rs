@@ -2,10 +2,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::common::{AgentId, TaskId};
+use crate::common::{AgentId, TaskId, Timestamp};
 use crate::goal_run::{GoalRun, GoalRunDiagnostics, GoalRunError, GoalWorkerPlan};
 use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
-use crate::subagent_report::{ExecutionStatus, SubagentReport};
+use crate::subagent_report::{
+    build_parent_context_handoff, ExecutionStatus, ParentContextHandoff, ReportAdmissionStatus,
+    SubagentReport, SubagentReportValidator,
+};
 use crate::subagent_spawner::{
     ContextIsolation, QueuedSubagentSpawner, RunId, SpawnRequest, SubagentToolPolicy,
 };
@@ -50,6 +53,7 @@ pub struct GoalDispatchCollectionReceipt {
     pub blocked_report_reasons: Vec<String>,
     pub completed_worker_ids: Vec<String>,
     pub report_summaries: Vec<String>,
+    pub parent_context_handoffs: Vec<ParentContextHandoff>,
     pub ready_to_checkpoint: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_suggestion: Option<GoalCheckpointSuggestion>,
@@ -243,6 +247,7 @@ where
     let mut blocked_report_reasons = Vec::new();
     let mut completed_worker_ids = Vec::new();
     let mut report_summaries = Vec::new();
+    let mut parent_context_handoffs = Vec::new();
 
     for dispatch in &manifest.dispatches {
         let run_id = RunId(dispatch.run_id.clone());
@@ -273,7 +278,17 @@ where
                     ));
                     continue;
                 }
+                let admission = build_goal_collect_report_admission(&report)?;
+                if admission.status != ReportAdmissionStatus::Accepted {
+                    blocked_report_run_ids.push(dispatch.run_id.clone());
+                    blocked_report_reasons.push(format!(
+                        "report admission rejected for run_id={} reason_code={}",
+                        dispatch.run_id, admission.reason_code
+                    ));
+                    continue;
+                }
                 completed_worker_ids.push(dispatch.worker_id.clone());
+                parent_context_handoffs.push(build_parent_context_handoff(&report, &admission));
                 report_summaries.push(report.summary);
             }
             GoalReportReadOutcome::Blocked(reason) => {
@@ -313,12 +328,27 @@ where
         blocked_report_reasons,
         completed_worker_ids,
         report_summaries,
+        parent_context_handoffs,
         ready_to_checkpoint,
         checkpoint_suggestion,
         manifest_path: goal_dispatch_manifest_path(goal_root, &manifest.goal_id)?
             .display()
             .to_string(),
     })
+}
+
+fn build_goal_collect_report_admission(
+    report: &SubagentReport,
+) -> Result<crate::subagent_report::ReportAdmission, GoalDispatchError> {
+    let raw = serde_json::to_vec(report).map_err(|error| GoalDispatchError {
+        field: "goal_dispatch_report.admission".to_string(),
+        message: format!("goal dispatch report admission encode failed: {error}"),
+    })?;
+    Ok(SubagentReportValidator::default().admit_raw(
+        &raw,
+        AgentId("goal-collect-controller".to_string()),
+        Timestamp(current_rfc3339_timestamp()),
+    ))
 }
 
 fn read_report_for_collect(

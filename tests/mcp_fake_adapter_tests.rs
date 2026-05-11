@@ -1,6 +1,6 @@
 use chuang_agent::mcp_fake_adapter::{
     mcp_call_runtime_events, mcp_tool_descriptor_risk, mcp_tool_risk_view, McpAdapterError,
-    McpFakeServer, McpRuntimeEventInput, McpToolCall, McpToolSpec,
+    McpElicitationRequest, McpFakeServer, McpRuntimeEventInput, McpToolCall, McpToolSpec,
 };
 use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEventKind, RuntimeEventLedger,
@@ -379,6 +379,12 @@ fn mcp_call_runtime_events_record_result_error_and_approval_without_payload_leak
         call_id: "call-mcp-secret-value".to_string(),
         tool_name: "external.send".to_string(),
         risk,
+        elicitation_request: Some(McpElicitationRequest {
+            request_id: "request secret value".to_string(),
+            reason_code: "need-more-context".to_string(),
+            asks_for_secret: true,
+            secret_access_approved: false,
+        }),
     };
 
     let events = mcp_call_runtime_events(input, false);
@@ -387,6 +393,31 @@ fn mcp_call_runtime_events_record_result_error_and_approval_without_payload_leak
         .clone()
         .expect("external MCP tool should request approval");
     assert_eq!(approval.event_type, RuntimeEventKind::ApprovalRequested);
+    let elicitation = events
+        .elicitation_required
+        .clone()
+        .expect("MCP tool should surface elicitation request");
+    assert_eq!(
+        elicitation.event_type,
+        RuntimeEventKind::ElicitationRequested
+    );
+    assert_eq!(elicitation.thread_id, "thread-mcp");
+    assert_eq!(elicitation.turn_id.as_deref(), Some("turn-mcp"));
+    assert_eq!(
+        elicitation.call_id.as_deref(),
+        Some("call-mcp-secret-value")
+    );
+    assert_eq!(
+        elicitation
+            .risk_decision
+            .as_ref()
+            .map(|risk| risk.decision.as_str()),
+        Some("deny_secret_elicitation")
+    );
+    assert_eq!(
+        elicitation.evidence_ref.as_deref(),
+        Some("mcp://tool/external.send/call-mcp-secret-value/elicitation/request_secret_value")
+    );
     assert_eq!(approval.thread_id, "thread-mcp");
     assert_eq!(approval.turn_id.as_deref(), Some("turn-mcp"));
     assert_eq!(approval.call_id.as_deref(), Some("call-mcp-secret-value"));
@@ -423,6 +454,9 @@ fn mcp_call_runtime_events_record_result_error_and_approval_without_payload_leak
         .append(approval)
         .expect("approval event should append");
     ledger
+        .append(elicitation)
+        .expect("elicitation event should append");
+    ledger
         .append(events.tool_started)
         .expect("started event should append");
     ledger
@@ -431,15 +465,18 @@ fn mcp_call_runtime_events_record_result_error_and_approval_without_payload_leak
     let turn_events = ledger
         .query_by_turn("thread-mcp", "turn-mcp")
         .expect("turn query should work");
-    assert_eq!(turn_events.len(), 3);
+    assert_eq!(turn_events.len(), 4);
     let call_events = ledger
         .query_by_call("call-mcp-secret-value")
         .expect("call query should work");
-    assert_eq!(call_events.len(), 3);
+    assert_eq!(call_events.len(), 4);
 
     let rendered = serde_json::to_string(&call_events).expect("events should serialize");
     assert!(rendered.contains("approval_required"));
+    assert!(rendered.contains("elicitation_requested"));
+    assert!(rendered.contains("deny_secret_elicitation"));
     assert!(rendered.contains("tool_error"));
     assert!(!rendered.contains("api_key"));
     assert!(!rendered.contains("payload-secret-value"));
+    assert!(!rendered.contains("request secret value"));
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
-use chuang_agent::responder::{Responder, ResponderMeta, ResponderRequest, ScriptedResponder};
+use chuang_agent::responder::{Responder, ResponderRequest, ScriptedResponder};
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {
     MemoryRecord {
@@ -104,12 +104,23 @@ fn scripted_responder_keeps_runtime_trace_intact() {
         .trace
         .contains("user_input=《创项目先跑通》"));
     assert_eq!(
-        result.response.meta,
-        ResponderMeta {
-            provider: Some("scripted-responder".to_string()),
-            recall_hit_count: Some(1),
-            finish_reason: Some("scripted".to_string()),
-            extra: BTreeMap::new(),
-        }
+        result.response.meta.provider.as_deref(),
+        Some("scripted-responder")
+    );
+    assert_eq!(result.response.meta.recall_hit_count, Some(1));
+    assert_eq!(
+        result.response.meta.finish_reason.as_deref(),
+        Some("scripted")
+    );
+    assert_eq!(
+        result
+            .response
+            .meta
+            .extra
+            .get("context_compaction_summary_json")
+            .map(String::as_str),
+        Some(
+            "{\"event_count\":2,\"started_count\":1,\"completed_count\":1,\"dropped_count\":0,\"dropped_segment_ids\":[],\"drop_reason_counts\":{},\"trace_steps\":[\"merge_under_budget\"]}"
+        )
     );
 }

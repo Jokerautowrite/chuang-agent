@@ -101,20 +101,28 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             .map_err(AgentRuntimeError::ContextPack)?;
 
         let packed_context_preview = packed_context.render_prompt();
+        let context_compaction_summary =
+            serde_json::to_string(&packed_context.compaction_summary())
+                .expect("compaction summary should serialize");
         let prompt = format!(
             "[chuang-agent-runtime]\nuser_input={}\n{}",
             request.user_input, packed_context_preview
         );
 
-        let responder_output = self.responder.generate(&ResponderRequest {
-            prompt: prompt.clone(),
-            user_input: request.user_input.clone(),
-            recall_hit_count: recall_result.hits.len(),
-        });
+        let mut runtime_response =
+            map_runtime_response(self.responder.generate(&ResponderRequest {
+                prompt: prompt.clone(),
+                user_input: request.user_input.clone(),
+                recall_hit_count: recall_result.hits.len(),
+            }));
+        runtime_response.meta.extra.insert(
+            "context_compaction_summary_json".to_string(),
+            context_compaction_summary,
+        );
 
         Ok(RuntimeResult {
             prompt,
-            response: map_runtime_response(responder_output),
+            response: runtime_response,
             recall_summary: recall_result.summary,
             recall_hit_count: recall_result.hits.len(),
             context_engine_kind: self.context_engine_kind.as_str().to_string(),

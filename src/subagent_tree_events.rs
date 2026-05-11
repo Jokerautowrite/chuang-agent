@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::runtime_event_ledger::{RuntimeEvent, RuntimeEventKind};
 use crate::subagent_tree_ledger::{
-    AgentRole, ReportAdmissionRef, SpawnEdge, SubagentThreadRecord, SubagentTreeStatus,
+    AgentRole, ReportAdmissionRef, SpawnEdge, SubagentChildrenSummary, SubagentThreadRecord,
+    SubagentTreeStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +166,7 @@ impl SubagentTreeEventBuilder {
                 evidence_ref.clone(),
             )
             .with_call_id(format!("subagent-list-children:{parent_thread_id}"));
+        let children_summary = SubagentChildrenSummary::from_children(&parent_thread_id, children);
 
         SubagentTreeListRuntimeEvent {
             schema_version: 1,
@@ -177,6 +179,7 @@ impl SubagentTreeEventBuilder {
             ),
             root_thread_id,
             parent_thread_id,
+            children_summary,
             child_count: children.len(),
             children: children
                 .iter()
@@ -264,6 +267,7 @@ pub struct SubagentTreeListRuntimeEvent {
     pub consistency_warnings: Vec<String>,
     pub root_thread_id: String,
     pub parent_thread_id: String,
+    pub children_summary: SubagentChildrenSummary,
     pub child_count: usize,
     pub children: Vec<SubagentTreeChildSnapshot>,
     pub evidence_ref: String,

@@ -1851,8 +1851,8 @@ mod tests {
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            max_tokens: 2700,
-            reserve_system_tokens: 32,
+            max_tokens: 3600,
+            reserve_system_tokens: 3200,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,
