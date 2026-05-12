@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 GoalRun checkpoint 时间摘要
+- 本轮在 `6bb88d7` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认 candidate 与 third-test 都已打印 latest GoalRun checkpoint 时间：`candidate_project_goal_run_last_checkpoint_created_at=...` 与 `project_goal_run_last_checkpoint_created_at=...`，当前 project checkpoint count 为 96，checkpoint log complete 为 true；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 candidate/third-test GoalRun checkpoint 时间摘要
 - 本轮继续把 M6/M7 GoalRun 状态证据往候选门禁抬：`scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 goal run status 摘要现在会打印 latest checkpoint 的 `created_at`，和 checkpoint id、完整性、worker count、validation note count 同屏展示。
 - `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs` 已锁住 candidate/third-test wrapper 保留该字段；candidate 复验已确认实际输出 `candidate_project_goal_run_last_checkpoint_created_at=...`。验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests`、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
