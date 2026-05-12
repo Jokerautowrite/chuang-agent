@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验覆盖 docs sync
+- 本轮在 third-test/runbook/acceptance 文档同步后跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认文档口径更新没有影响 complete-local、goal 正负 smoke、live rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 和 provider readiness 候选链。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_live_readiness_state=local_ready_live_pending`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 138，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778605342819843503`，count 到 139。
+
 # 2026-05-12 docs/status/readiness 轻量矩阵复验
 - 本轮在 third-test/runbook 文档同步后复验文档格式和状态面测试，确认 live 文档三件套 diff clean，CLI status/doctor 与 live runner readiness view 仍能看到最新 runtime surface/readiness 口径。
 - 验证已通过 `git diff --check -- docs/third-test-candidate.md docs/live-operator-test-runbook.md docs/acceptance-next-matrix.md` 和 `cargo test -q --test cli_status_tests --test cli_doctor_tests --test live_runner_readiness_view_tests`；GoalRun checkpoint 写入 `checkpoint-1778605127647195545`，count 到 138。
