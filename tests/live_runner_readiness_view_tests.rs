@@ -419,7 +419,13 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .any(|locator| locator == "runtime_meta.tool_protocol_errors_json"));
     assert!(artifact_locators
         .iter()
+        .any(|locator| locator == "runtime_meta.runtime_event_ledger_json"));
+    assert!(artifact_locators
+        .iter()
         .any(|locator| locator == "runtime_response.trace"));
+    assert!(artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.context_compaction_events"));
     assert!(artifact_locators
         .iter()
         .any(|locator| locator == "runtime_meta.goal_handoff_query_summary_json"));
@@ -433,6 +439,12 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
     let observability_fields = runtime_surface["observability_fields"]
         .as_array()
         .expect("observability fields");
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "runtime_event_count"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "runtime_event_approval_resolved_count"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "tool_protocol_error_count"));
@@ -450,16 +462,34 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .any(|field| field == "tool_unified_execution_failure_classes"));
     assert!(observability_fields
         .iter()
+        .any(|field| field == "goal_handoff_query_summary_json"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_ref_count"));
+    assert!(observability_fields
+        .iter()
         .any(|field| field == "goal_handoff_report_admission_refs"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "goal_handoff_report_admission_reason_codes"));
     assert!(observability_fields
         .iter()
+        .any(|field| field == "subagent_children_summary_json"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_ref_count"));
+    assert!(observability_fields
+        .iter()
         .any(|field| field == "subagent_children_report_admission_refs"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "subagent_children_report_reason_codes"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "context_pack_trace"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "context_compaction_events"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "context_compaction_summary_json"));

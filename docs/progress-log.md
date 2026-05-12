@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 readiness JSON runtime surface 抽样补强
+- 本轮继续补 M5/M6/M7 readiness 聚合面的静态回归：`tests/live_runner_readiness_view_tests.rs` 的 aggregated JSON 用例现在额外锁住 `runtime_meta.runtime_event_ledger_json`、`runtime_meta.context_compaction_events`、`runtime_event_count`、`runtime_event_approval_resolved_count`、goal/subagent summary JSON、admission ref count、`context_pack_trace` 和 `context_compaction_events`。
+- 这让 readiness JSON 抽样更接近 candidate/third-test 脚本门禁，不再只靠 11/26 总数和少量字段。验证已通过 `cargo test -q --test live_runner_readiness_view_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778603497683696073`，count 到 130。
+
 # 2026-05-12 third-test 复验覆盖 goal gates
 - 本轮跑通完整 `sh scripts/chuang-third-test-smoke.sh`，继承 final/candidate、complete-local、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 只读摘要；近期 goal admission refs、negative not-ready show、runtime/status/readiness 和 channel/Feishu observability gate 均进入第三测试链。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 128，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778603225483317893`，count 到 129。
