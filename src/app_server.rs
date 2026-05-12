@@ -201,6 +201,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "goal_mode": status.goal_mode,
         "goal_run": status.goal_run,
         "runtime_report_surface": status.runtime_report_surface,
+        "policy_tool_status": status.policy_tool_status,
         "provider_readiness": status.provider_readiness,
         "atomic_tools": status.atomic_tools.clone(),
         "project_readiness": status.project_readiness,

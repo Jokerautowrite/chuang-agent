@@ -1680,6 +1680,36 @@ transport = "stub"
     );
     assert_eq!(parsed["goal_run"]["ok"], true);
     assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
+    assert_eq!(
+        parsed["policy_tool_status"]["active_permission_profile"],
+        "local_ga"
+    );
+    let health_tool_descriptors = parsed["policy_tool_status"]["ga_tool_descriptors"]
+        .as_array()
+        .expect("app-server health tool descriptors should be array");
+    let file_write_descriptor = health_tool_descriptors
+        .iter()
+        .find(|descriptor| descriptor["name"] == "file_write")
+        .expect("file_write descriptor should be surfaced");
+    assert_eq!(file_write_descriptor["read_only"], false);
+    assert_eq!(file_write_descriptor["mutating"], true);
+    assert_eq!(file_write_descriptor["destructive"], false);
+    assert_eq!(file_write_descriptor["external_commit"], false);
+    assert_eq!(file_write_descriptor["requires_approval"], false);
+    assert_eq!(
+        file_write_descriptor["local_ga_decision"],
+        "allow_with_audit"
+    );
+    assert!(file_write_descriptor["risk_tags"]
+        .as_array()
+        .expect("file_write risk tags should be array")
+        .iter()
+        .any(|tag| tag == "write"));
+    assert!(file_write_descriptor["risk_tags"]
+        .as_array()
+        .expect("file_write risk tags should be array")
+        .iter()
+        .any(|tag| tag == "audit"));
     assert_eq!(parsed["runtime_report_surface"]["ok"], true);
     assert_eq!(parsed["runtime_report_surface"]["artifact_count"], 11);
     assert_eq!(

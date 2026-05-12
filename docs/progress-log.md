@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server health 透出 policy tool status
+- 本轮继续把 M5 governance/tool descriptor 状态面推进到 app-server health：`app-server health --json` 现在随 `runtime_report_surface` 一起返回 `policy_tool_status`，让服务健康面也能查询 GA 工具 descriptor 的 `external_commit`、`requires_approval`、`risk_tags` 和本地治理决策。
+- 新增回归在 `app_server_health_reports_workspace_runtime` 中锁住 `file_write` descriptor 的 non-readonly、mutating、non-destructive、non-external、descriptor-level no approval、`allow_with_audit` 以及 `write/audit` tags。验证已通过 `cargo test -q --test app_server_tests app_server_health_reports_workspace_runtime`、`cargo test -q --test app_server_tests --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests` 和 `cargo fmt --all --check`。
+
 # 2026-05-12 policy tool status 风险字段可观测性补齐
 - 本轮继续沿 M5 governance/tool descriptor 主链补状态面：`policy_tool_status.ga_tool_descriptors` 现在在 JSON 面除 name/read_only/mutating/destructive/local decision 外，也暴露 `external_commit`、`requires_approval` 和 `risk_tags`，让 operator 能直接查询 GA 映射工具的完整 descriptor 风险元数据。
 - `tests/kernel_status_tests.rs` 已锁住 `file_write` 和 `code_execute` 在状态面保留 local mutating、non-destructive、non-external、no descriptor-level approval 以及 `write/audit`、`code_execution/shell` tags。验证已通过 `cargo test -q --test kernel_status_tests`、`cargo test -q --test cli_status_tests --test cli_doctor_tests --test app_server_tests` 和 `cargo fmt --all --check`。
