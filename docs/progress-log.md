@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 readiness view JSON runtime surface 回归加固
+- 本轮把刚才的运行态只读抽查固化到 `tests/live_runner_readiness_view_tests.rs`：`live_runner_readiness_view_script_outputs_aggregated_json_view` 现在直接断言 JSON 顶层 `runtime_report_surface` 为 `artifact_count=10`、`observability_field_count=25`，并且包含 `runtime_meta.context_compaction_summary_json`、`goal_handoff_report_admission_refs`、`subagent_children_report_admission_refs` 和 `context_compaction_summary_json`。这样 candidate/third-test 依赖的 readiness view JSON 不会只保顶层键而漏掉 M6/M7 的关键字段。
+- 验证已通过 `cargo test -q --test live_runner_readiness_view_tests live_runner_readiness_view_status_json_exposes_blocked_reason_and_next_action`。下一轮入口：继续看 candidate/third-test wrapper 是否也需要从静态字段名断言提升到运行态 JSON 抽查。
+
 # 2026-05-12 M7/tool protocol 与 compaction 主链复验
 - 本轮按验收矩阵补跑 M7/tool runtime 相关主链：`cargo test -q --test tool_runtime_tests --test agent_runtime_tests --test context_engine_tests --test app_server_tests` 已通过，覆盖 tool protocol typed failure/correction、context packing/compaction summary、agent runtime extra meta 注入，以及 app-server 的 runtime observability 事件面。
 - 现有 smoke/candidate 已覆盖 `runtime_meta.context_compaction_summary_json`、`context_compaction_summary_json`、`context_pack_trace` 与 `context_compaction_events` 的状态/报告可见性。本轮不新增结构，只记录复验；下一轮入口：继续扫文档/脚本里旧 M7 字段计数或工具协议门禁是否有漂移。

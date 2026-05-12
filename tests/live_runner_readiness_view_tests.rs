@@ -372,6 +372,31 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         manifest_dir().join("config.toml").display().to_string()
     );
 
+    let runtime_surface = &parsed["runtime_report_surface"];
+    assert_eq!(runtime_surface["ok"], true);
+    assert_eq!(runtime_surface["artifact_count"], 10);
+    assert_eq!(runtime_surface["observability_field_count"], 25);
+    assert!(runtime_surface["artifact_locators"]
+        .as_array()
+        .expect("artifact locators")
+        .iter()
+        .any(|locator| locator == "runtime_meta.context_compaction_summary_json"));
+    assert!(runtime_surface["observability_fields"]
+        .as_array()
+        .expect("observability fields")
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_refs"));
+    assert!(runtime_surface["observability_fields"]
+        .as_array()
+        .expect("observability fields")
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_refs"));
+    assert!(runtime_surface["observability_fields"]
+        .as_array()
+        .expect("observability fields")
+        .iter()
+        .any(|field| field == "context_compaction_summary_json"));
+
     let rehearsal = &parsed["live_runner_rehearsal"];
     assert_eq!(rehearsal["state"], "ready");
     assert_eq!(rehearsal["overall_state"], "ready");
