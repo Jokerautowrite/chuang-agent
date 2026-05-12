@@ -376,24 +376,41 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
     assert_eq!(runtime_surface["ok"], true);
     assert_eq!(runtime_surface["artifact_count"], 10);
     assert_eq!(runtime_surface["observability_field_count"], 25);
-    assert!(runtime_surface["artifact_locators"]
+    let artifact_locators = runtime_surface["artifact_locators"]
         .as_array()
-        .expect("artifact locators")
+        .expect("artifact locators");
+    assert!(artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_response.trace"));
+    assert!(artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.goal_handoff_query_summary_json"));
+    assert!(artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.subagent_children_summary_json"));
+    assert!(artifact_locators
         .iter()
         .any(|locator| locator == "runtime_meta.context_compaction_summary_json"));
-    assert!(runtime_surface["observability_fields"]
+
+    let observability_fields = runtime_surface["observability_fields"]
         .as_array()
-        .expect("observability fields")
+        .expect("observability fields");
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "runtime_response_trace_chars"));
+    assert!(observability_fields
         .iter()
         .any(|field| field == "goal_handoff_report_admission_refs"));
-    assert!(runtime_surface["observability_fields"]
-        .as_array()
-        .expect("observability fields")
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_reason_codes"));
+    assert!(observability_fields
         .iter()
         .any(|field| field == "subagent_children_report_admission_refs"));
-    assert!(runtime_surface["observability_fields"]
-        .as_array()
-        .expect("observability fields")
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_report_reason_codes"));
+    assert!(observability_fields
         .iter()
         .any(|field| field == "context_compaction_summary_json"));
 
