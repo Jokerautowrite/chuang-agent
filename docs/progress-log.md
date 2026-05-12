@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test clean-tree 复验通过
+- 本轮在干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、complete-local、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 只读摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 关键状态面继续保持 `live_runner_readiness_view_runtime_report_surface_artifacts=11`、`live_runner_readiness_view_runtime_report_surface_observability_fields=26`，provider readiness 只显示 `api_key_state=<set>` / `connects_real_provider=false`，没有打印 secret。下一轮继续推进剩余 M5/M6/M7 高层查询边角或主链接线代码缺口。
+
 # 2026-05-12 candidate verify 复验通过
 - 本轮在 app-server completed protocol artifact 和 channel 文本 protocol error code 面补齐后，完整跑通 `sh scripts/chuang-candidate-verify.sh`。链路覆盖 complete-local smoke、goal-mode 正/负 smoke、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 和 provider readiness 只读检查。
 - 输出确认 `candidate_runtime_report_surface_artifacts=11`、`candidate_runtime_report_surface_observability_fields=26`、provider readiness `api_key_state=<set>` 且 `connects_real_provider=false`，最终 `chuang_candidate_verify_ok`。下一步在干净工作树继续跑 third-test clean-tree 门禁，或继续补 app-server/channel 高层文本/JSON边角。
