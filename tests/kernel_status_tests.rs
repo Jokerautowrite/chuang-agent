@@ -411,12 +411,47 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .runtime_report_surface
         .observability_fields
         .iter()
+        .any(|field| field == "goal_handoff_parent_context_handoff_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_ref_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_refs"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
         .any(|field| field == "goal_handoff_report_admission_reason_codes"));
     assert!(status
         .runtime_report_surface
         .observability_fields
         .iter()
         .any(|field| field == "subagent_children_report_admission_ref_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_child_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_accepted_report_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_refs"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_missing_report_count"));
     assert!(status
         .runtime_report_surface
         .observability_fields

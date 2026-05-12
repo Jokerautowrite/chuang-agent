@@ -465,6 +465,9 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .any(|field| field == "goal_handoff_query_summary_json"));
     assert!(observability_fields
         .iter()
+        .any(|field| field == "goal_handoff_parent_context_handoff_count"));
+    assert!(observability_fields
+        .iter()
         .any(|field| field == "goal_handoff_report_admission_ref_count"));
     assert!(observability_fields
         .iter()
@@ -477,10 +480,19 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .any(|field| field == "subagent_children_summary_json"));
     assert!(observability_fields
         .iter()
+        .any(|field| field == "subagent_children_child_count"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_accepted_report_count"));
+    assert!(observability_fields
+        .iter()
         .any(|field| field == "subagent_children_report_admission_ref_count"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "subagent_children_report_admission_refs"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_missing_report_count"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "subagent_children_report_reason_codes"));
