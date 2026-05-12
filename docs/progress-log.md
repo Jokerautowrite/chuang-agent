@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server runtime compaction summary 事件面回归
+- 本轮继续沿 M7 主链把 app-server turn 事件面补齐：`tests/app_server_tests.rs` 的 `app_server_turn_uses_workspace_provider_config` 现在在 `turn/start` 响应和 `turn/completed` 事件两处都断言 `runtimeObservability.context_compaction_summary_json` 存在，并包含稳定的 `dropped_count` 字段。这样 app-server 事件订阅面、channel simulate 面、status/doctor/health 面对 compaction summary 的可查询口径保持一致。
+- 验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`。下一轮入口：继续扫 tool protocol correction 是否也需要进入 channel/app-server 高层事件面回归。
+
 # 2026-05-12 channel runtime compaction summary 回归加固
 - 本轮沿 M7 主链把 channel 输出面再锁一层：`tests/cli_channel_tests.rs` 的 `cli_channel_simulate_runs_workspace_config_without_fake_responder` 现在不仅检查 `context_pack_trace` 和 `context_compaction_events`，还断言 `runtime_observability.context_compaction_summary_json` 出现在 `channel simulate --json` 输出里，并包含稳定的 `dropped_count` 字段。这样 Feishu/app-server 通道模拟面也能查询 compaction summary，不只停在 status/doctor/app-server health。
 - 验证已通过 `cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`。下一轮入口：继续看 app-server turn/completed 事件是否也需要把 `context_compaction_summary_json` 作为显式事件面回归。

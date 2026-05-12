@@ -217,6 +217,13 @@ transport = "stub"
             .expect("context compaction events should be a string")
             .contains("context_compaction_started")
     );
+    assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["context_compaction_summary_json"]
+            .as_str()
+            .expect("context compaction summary should be a string")
+            .contains("\"dropped_count\"")
+    );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
             ["knowledge_context_preview_enabled"],
@@ -364,6 +371,13 @@ transport = "stub"
             .as_str()
             .expect("completed context compaction events should be a string")
             .contains("context_compaction_started")
+    );
+    assert!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["context_compaction_summary_json"]
+            .as_str()
+            .expect("completed context compaction summary should be a string")
+            .contains("\"dropped_count\"")
     );
     assert_eq!(
         turn_completed["params"]["turn"]["toolProtocolErrorCount"],
