@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live receipt 文档同步 provider 只读边界
+- 本轮同步 `docs/live-receipt-collection.md` 的 provider evidence 字段表，把 `does_not_call_provider` 与 `does_not_read_provider_readiness` 纳入 provider receipt/operator receipt collector 文档口径，和刚落地的 `chuang-provider-live-receipt.sh`、operator receipt template、collector JSON 输出保持一致。
+- 本轮只改文档，不运行真实 provider、不读取 secret、不触碰 Hermes；用于避免后续人工 overlay 仍只填 provider ref 而漏掉“模板不发请求、不读 readiness”的边界字段。验证已通过文档 diff 审计与 `git diff --check`。
+
 # 2026-05-12 operator receipt provider evidence 同步只读边界
 - 本轮继续沿 M5/M7 live receipt 主链对齐 provider evidence：`scripts/chuang-live-operator-receipt.sh` 与 `scripts/chuang-live-operator-receipt-collect.sh` 的 provider service evidence 现在也带出 `does_not_call_provider=true`、`does_not_read_provider_readiness=true`，和独立 `chuang-provider-live-receipt.sh --json` 同口径。
 - `tests/live_operator_scripts_tests.rs` 与 `tests/live_operator_receipt_collect_tests.rs` 已锁住模板与 collector 合并后保留这两个边界字段；仍然只生成/合并本地 receipt，不连接 provider、不读取 secret。验证已通过 `cargo test -q --test live_operator_scripts_tests --test live_operator_receipt_collect_tests`、`cargo test -q --test provider_live_receipt_tests --test live_operator_receipt_collect_tests --test live_operator_scripts_tests`、`cargo fmt --all --check`、`git diff --check`。
