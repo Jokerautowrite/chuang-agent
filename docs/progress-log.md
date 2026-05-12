@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate/third-test 复验报告 no-tail GoalRun 状态
+- 本轮在 `c457f38` 后继续推进，先复用刚完成的 candidate verify，再跑通完整 `sh scripts/chuang-third-test-smoke.sh`；candidate 与 third-test 都确认 GoalRun status 进入 `interactive_state=session_present_no_tail`，并保留 `activity_hint` 提醒 tmux session/pane 存在但 pane tail 未捕获，不能误判为 worker missing。
+- 复验同时确认 `runtime_report_surface=11/26`、`live_readiness_state=local_ready_live_pending`、`policy_tool_status=9/12`、checkpoint log complete 为 true，provider readiness 只显示 `api_key_state=<set>` 且 `connects_real_provider=false`。本轮 GoalRun checkpoint 写入 `checkpoint-1778601986149763388`，checkpoint count 到 121；未触碰 Hermes、未打印 secret。
+
 # 2026-05-12 GoalRun no-tail guard 宽静态复验
 - 本轮在 `9953792` 后复跑高层静态矩阵，确认 candidate/third-test wrapper 的 GoalRun status 摘要、live operator scripts、no-tail 状态防退化和只读边界同口径；GoalRun status 抽样显示 `interactive_state=session_present_no_tail`、checkpoint count 到 119。
 - 验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests` 和 `bash scripts/chuang-goal-run-status.sh --json`；本轮只读状态查询和本地测试，不派活、不启动 worker、不触碰服务、不触碰 Hermes。
