@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel JSON 锁住 tool surface callable meta
+- 本轮继续沿 M7 channel 输出面补 JSON 回归：`tests/cli_channel_tests.rs` 的基础 `channel simulate --json` 用例现在除 `tool_surface.available/governed` 与 callable tools 结构体外，也锁住 `runtime_observability.tool_surface_callable_tools` 包含 `file_read`，让 channel JSON 和 app-server turn/completed 事件面使用同一套 runtime observability tool surface 摘要。
+- 该回归不改变运行逻辑、不打印 raw tool trace/payload，也不连接真实 Feishu 或 provider。验证已通过 `cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo test -q --test cli_channel_tests --test app_server_tests --test runtime_report_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 third-test 复验覆盖 GoalRun checkpoint 时间摘要
 - 本轮在 `6bb88d7` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认 candidate 与 third-test 都已打印 latest GoalRun checkpoint 时间：`candidate_project_goal_run_last_checkpoint_created_at=...` 与 `project_goal_run_last_checkpoint_created_at=...`，当前 project checkpoint count 为 96，checkpoint log complete 为 true；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。

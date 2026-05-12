@@ -219,6 +219,12 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         parsed["runtime_observability"]["tool_surface_governed"],
         "true"
     );
+    assert!(
+        parsed["runtime_observability"]["tool_surface_callable_tools"]
+            .as_str()
+            .expect("runtime tool surface callable tools should be string")
+            .contains("file_read")
+    );
     assert_eq!(
         parsed["tool_calls"]
             .as_array()
