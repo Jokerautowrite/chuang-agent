@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 M7/tool protocol 与 compaction 主链复验
+- 本轮按验收矩阵补跑 M7/tool runtime 相关主链：`cargo test -q --test tool_runtime_tests --test agent_runtime_tests --test context_engine_tests --test app_server_tests` 已通过，覆盖 tool protocol typed failure/correction、context packing/compaction summary、agent runtime extra meta 注入，以及 app-server 的 runtime observability 事件面。
+- 现有 smoke/candidate 已覆盖 `runtime_meta.context_compaction_summary_json`、`context_compaction_summary_json`、`context_pack_trace` 与 `context_compaction_events` 的状态/报告可见性。本轮不新增结构，只记录复验；下一轮入口：继续扫文档/脚本里旧 M7 字段计数或工具协议门禁是否有漂移。
+
 # 2026-05-12 M5/M6/M7 矩阵复验
 - 在 `goal collect` / `goal step` / `goal show` admission locator 回归补齐后，本轮重跑 M5/M6/M7 相关矩阵：`cargo test -q --test subagent_tree_ledger_tests --test subagent_tree_events_tests --test runtime_report_tests --test cli_goal_tests` 与 `cargo test -q --test runtime_event_ledger_tests --test mcp_fake_adapter_tests --test governance_tests --test kernel_status_tests` 均通过，覆盖 runtime ledger、MCP fake approval/elicitation、governance、subagent children summary/report admission refs、runtime report surface 和 goal 文本查询面。
 - `cargo fmt --all --check` 与 `git diff --check` 同步通过。下一轮入口：继续按验收矩阵看 `tool_runtime_tests / agent_runtime_tests / context_engine_tests / app_server_tests` 的 M7/tool protocol correction 与 compaction 主链是否还需要提升到更高层 smoke/candidate 门禁。
