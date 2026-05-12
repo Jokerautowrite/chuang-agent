@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live operator/static smoke 矩阵复验
+- 在 readiness JSON runtime surface 抽样补强后，本轮复跑 live operator scripts、live runner readiness view 与 CLI smoke 静态矩阵，确认 candidate/third-test wrapper、readiness 聚合面和基础 smoke 仍同口径覆盖 M5/M6/M7 字段。
+- 验证已通过 `cargo test -q --test live_operator_scripts_tests --test live_runner_readiness_view_tests --test cli_smoke_tests`；GoalRun checkpoint 写入 `checkpoint-1778603613057551464`，count 到 131。本轮只跑本地测试，不连接真实 Feishu/provider，不触碰 Hermes。
+
 # 2026-05-12 readiness JSON runtime surface 抽样补强
 - 本轮继续补 M5/M6/M7 readiness 聚合面的静态回归：`tests/live_runner_readiness_view_tests.rs` 的 aggregated JSON 用例现在额外锁住 `runtime_meta.runtime_event_ledger_json`、`runtime_meta.context_compaction_events`、`runtime_event_count`、`runtime_event_approval_resolved_count`、goal/subagent summary JSON、admission ref count、`context_pack_trace` 和 `context_compaction_events`。
 - 这让 readiness JSON 抽样更接近 candidate/third-test 脚本门禁，不再只靠 11/26 总数和少量字段。验证已通过 `cargo test -q --test live_runner_readiness_view_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778603497683696073`，count 到 130。
