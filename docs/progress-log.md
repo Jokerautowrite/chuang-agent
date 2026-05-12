@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验覆盖 readiness sample
+- 本轮在全量 `cargo test -q` 后再次跑通 `sh scripts/chuang-candidate-verify.sh`，确认 readiness JSON runtime surface 抽样补强后，complete-local、goal 正负 smoke、live rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 与 provider readiness 候选链仍通过。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_live_readiness_state=local_ready_live_pending`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 133，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778604053130231541`，count 到 134。
+
 # 2026-05-12 全量 cargo test 复验 runtime surface gates
 - 在 readiness JSON 抽样、live operator/static 矩阵和 app/channel/runtime/status 联合矩阵后，本轮跑通全量 `cargo test -q`，确认本批 M5/M6/M7 状态面与回归补强没有破坏其他模块。
 - 验证已通过 `cargo test -q`；GoalRun checkpoint 写入 `checkpoint-1778603863826550697`，count 到 133。本轮仅本地测试和文档记录，不连接真实 Feishu/provider，不触碰 Hermes。
