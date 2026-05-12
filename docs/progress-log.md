@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel/app-server runtime event observability 补强
+- 本轮补齐 M5/M7 turn 面缺口：`runtime_observability_meta` 现在对 runtime event ledger 汇总字段提供稳定 `0` 默认值，确保无工具调用的 channel/app-server turn 也能查询 `runtime_event_count`、tool started/finished、approval requested/resolved 与 elicitation requested 计数，不再只在 status/doctor surface 可见。
+- 同步补 `tests/cli_channel_tests.rs` 与 `tests/app_server_tests.rs` 回归，锁住 `channel simulate --json`、`turn/start` response 和 `turn/completed` event 的 runtime event observability 字段。验证已通过 `cargo test -q --test cli_channel_tests`、`cargo test -q --test app_server_tests`、`cargo test -q --test runtime_report_tests`。GoalRun checkpoint 写入 `checkpoint-1778606346019524172`，count 到 141。
+
 # 2026-05-12 third-test 复验覆盖 docs sync
 - 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认 third-test/runbook/acceptance 文档同步后 final/candidate、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 只读摘要仍同口径。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 139，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778605550913493798`，count 到 140。

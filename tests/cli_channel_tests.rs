@@ -173,6 +173,27 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         parsed["runtime_observability"]["tool_unified_execution_failure_count"],
         "0"
     );
+    assert_eq!(parsed["runtime_observability"]["runtime_event_count"], "0");
+    assert_eq!(
+        parsed["runtime_observability"]["runtime_event_tool_started_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["runtime_event_tool_finished_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["runtime_event_approval_requested_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["runtime_event_approval_resolved_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["runtime_event_elicitation_requested_count"],
+        "0"
+    );
     assert!(
         parsed["runtime_observability"]["runtime_response_trace_chars"]
             .as_str()

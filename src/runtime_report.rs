@@ -465,6 +465,18 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
     metadata
         .entry("tool_protocol_error_count".to_string())
         .or_insert_with(|| "0".to_string());
+    for key in [
+        "runtime_event_count",
+        "runtime_event_tool_started_count",
+        "runtime_event_tool_finished_count",
+        "runtime_event_approval_requested_count",
+        "runtime_event_approval_resolved_count",
+        "runtime_event_elicitation_requested_count",
+    ] {
+        metadata
+            .entry(key.to_string())
+            .or_insert_with(|| "0".to_string());
+    }
     metadata.insert(
         "tool_typed_failure_count".to_string(),
         typed_failures.len().to_string(),

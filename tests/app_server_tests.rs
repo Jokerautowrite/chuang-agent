@@ -223,6 +223,34 @@ transport = "stub"
             ["tool_unified_execution_failure_count"],
         "0"
     );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["runtime_event_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["runtime_event_tool_started_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["runtime_event_tool_finished_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["runtime_event_approval_requested_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["runtime_event_approval_resolved_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["runtime_event_elicitation_requested_count"],
+        "0"
+    );
     assert!(
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_response_trace_chars"]
             .as_str()
@@ -414,6 +442,35 @@ transport = "stub"
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]
             ["tool_unified_execution_failure_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["runtime_event_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["runtime_event_tool_started_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["runtime_event_tool_finished_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["runtime_event_approval_requested_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["runtime_event_approval_resolved_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["runtime_event_elicitation_requested_count"],
         "0"
     );
     assert!(
