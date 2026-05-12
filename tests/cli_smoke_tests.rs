@@ -31,6 +31,12 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
     assert!(mvp_smoke.contains("assert data[\"approval_ticket_count\"] == 1"));
     assert!(mvp_smoke.contains("data[\"goal_run\"][\"plan_exists\"] is True"));
+    assert!(mvp_smoke.contains("policy_tool_status = data[\"policy_tool_status\"]"));
+    assert!(mvp_smoke.contains("policy_tool_status = status[\"policy_tool_status\"]"));
+    assert!(mvp_smoke.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
+    assert!(mvp_smoke.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
+    assert!(mvp_smoke.contains("file_write[\"external_commit\"] is False"));
+    assert!(mvp_smoke.contains("file_write[\"requires_approval\"] is False"));
     assert!(mvp_smoke.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
     assert!(mvp_smoke.contains("runtime_report_surface[\"artifact_count\"] == 11"));
     assert!(mvp_smoke.contains("runtime_report_surface[\"observability_field_count\"] == 26"));
@@ -105,6 +111,13 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("provider_id\"] == \"complete-local-openai\""));
     assert!(wrapper.contains("live_worker_available"));
     assert!(wrapper.contains("worker_runtime_state\"] == \"local_contract_only\""));
+    assert!(wrapper.contains("policy_tool_status = data[\"policy_tool_status\"]"));
+    assert!(wrapper.contains("policy_tool_status = data[\"status\"][\"policy_tool_status\"]"));
+    assert!(wrapper.contains("policy_tool_status = status[\"policy_tool_status\"]"));
+    assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
+    assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
+    assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
+    assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
     assert!(wrapper.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
     assert!(
         wrapper.contains("runtime_report_surface = data[\"status\"][\"runtime_report_surface\"]")

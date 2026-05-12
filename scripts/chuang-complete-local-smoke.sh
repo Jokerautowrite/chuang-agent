@@ -89,6 +89,14 @@ assert data["channel_readiness"]["overall_state"] == "ready"
 assert data["goal_run"]["ok"] is True
 assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
+policy_tool_status = data["policy_tool_status"]
+assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
+assert policy_tool_status["tool_descriptor_count"] == 12
+file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
+assert file_write["external_commit"] is False
+assert file_write["requires_approval"] is False
+assert "write" in file_write["risk_tags"]
 runtime_report_surface = data["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
 assert runtime_report_surface["artifact_count"] == 11
@@ -157,6 +165,14 @@ assert data["status"]["release_readiness"]["connects_real_external_services"] is
 assert data["status"]["goal_run"]["ok"] is True
 assert data["status"]["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["status"]["goal_run"]["plan_exists"] is True
+policy_tool_status = data["status"]["policy_tool_status"]
+assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
+assert policy_tool_status["tool_descriptor_count"] == 12
+file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
+assert file_write["external_commit"] is False
+assert file_write["requires_approval"] is False
+assert "write" in file_write["risk_tags"]
 runtime_report_surface = data["status"]["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
 assert runtime_report_surface["artifact_count"] == 11
@@ -209,6 +225,14 @@ assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
 assert data["goal_run"]["ok"] is True
 assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
+policy_tool_status = data["policy_tool_status"]
+assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
+assert policy_tool_status["tool_descriptor_count"] == 12
+file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
+assert file_write["external_commit"] is False
+assert file_write["requires_approval"] is False
+assert "write" in file_write["risk_tags"]
 runtime_report_surface = data["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
 assert runtime_report_surface["artifact_count"] == 11
@@ -263,6 +287,14 @@ assert status["release_readiness"]["verifies_real_external_services"] is False
 assert status["goal_run"]["ok"] is True
 assert status["goal_run"]["goal_id"] == "mainline-mvp"
 assert status["goal_run"]["plan_exists"] is True
+policy_tool_status = status["policy_tool_status"]
+assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
+assert policy_tool_status["tool_descriptor_count"] == 12
+file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
+assert file_write["external_commit"] is False
+assert file_write["requires_approval"] is False
+assert "write" in file_write["risk_tags"]
 runtime_report_surface = status["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
 assert runtime_report_surface["artifact_count"] == 11

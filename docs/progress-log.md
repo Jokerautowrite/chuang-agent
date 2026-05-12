@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 MVP/complete-local 并入 policy tool status 门禁
+- 本轮继续把 M5 governance/tool descriptor 状态面推进到基础本地验收：`scripts/chuang-mvp-smoke.sh` 现在在 status、doctor、app-server health 三个 JSON 面断言 `policy_tool_status`，`scripts/chuang-complete-local-smoke.sh` 进一步在 status、doctor、app-server health diagnostic 和 console snapshot 四个面断言同一组字段。
+- 门禁抽样锁住 `active_permission_profile=local_ga`、`ga_tool_descriptor_mapped_count=9`、`tool_descriptor_count=12`，以及 `file_write.external_commit=false`、`file_write.requires_approval=false`、`write` risk tag。验证已通过 `sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-complete-local-smoke.sh`、`cargo test -q --test cli_smoke_tests` 和 `sh -n` 脚本语法检查。
+
 # 2026-05-12 live runner readiness 并入 policy tool status
 - 本轮继续把 M5 governance/tool descriptor 状态面推进到只读 readiness 聚合：`scripts/chuang-live-runner-readiness-view.sh` 现在从 status、doctor、app-server health 中聚合 `policy_tool_status`，JSON 输出保留完整 GA descriptor 风险字段，文本面打印 active profile、descriptor 映射数和 missing 摘要。
 - `candidate verify` 与 `third-test smoke` 已在 live runner readiness 阶段断言 `policy_tool_status.active_permission_profile=local_ga`、`ga_tool_descriptor_mapped_count=9`、`tool_descriptor_count=12`，并抽样锁住 `file_write` 的 `external_commit=false`、`requires_approval=false` 和 `write` risk tag。验证已通过 `cargo test -q --test live_operator_scripts_tests --test live_runner_readiness_view_tests --test cli_smoke_tests`、`cargo fmt --all --check`、`git diff --check` 和 `sh scripts/chuang-candidate-verify.sh`。
