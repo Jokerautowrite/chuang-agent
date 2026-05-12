@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 runtime/status/readiness 状态面矩阵复验
+- 本轮复验 M5/M6/M7 状态面核心矩阵：runtime report、kernel status、CLI status/doctor 和 live runner readiness view 均保持 `runtime_report_surface`、event ledger、goal handoff/subagent children、context compaction、tool protocol error 与 live readiness 口径一致。
+- 验证已通过 `cargo test -q --test runtime_report_tests --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test live_runner_readiness_view_tests`；GoalRun checkpoint 写入 `checkpoint-1778602948290785968`，count 到 126。本轮仅本地测试和文档记录，不连接真实 provider/Feishu，不触碰 Hermes。
+
 # 2026-05-12 app-server/channel/Feishu observability 矩阵复验
 - 本轮只读复验 M5/M6/M7 通道状态面：app-server 与 channel 仍覆盖 `liveReadiness/live_readiness`、`runtimeObservability/runtime_observability`、`toolProtocolErrors/tool_protocol_errors`、`toolEvents` 和非零 tool protocol error 路径；Feishu turn summary 继续只展示短摘要，不输出 raw tool trace、ACTION payload、live readiness raw current/next action 或 secret 形态。
 - 验证已通过 `cargo test -q --test app_server_tests --test cli_channel_tests` 和 `node scripts/chuang-feishu-turn-summary-smoke.js`；GoalRun checkpoint 写入 `checkpoint-1778602843107530408`，count 到 125。本轮不连接真实 Feishu/provider，不触碰 Hermes。
