@@ -221,7 +221,11 @@ assert boundaries["restarts_worker"] is False
 assert boundaries["modifies_repo"] is False
 assert boundaries["deletes_logs"] is False
 assert boundaries["touches_services"] is False
+assert isinstance(data["interactive_state"], str) and data["interactive_state"]
+assert isinstance(data["activity_hint"], str) and data["activity_hint"]
 print("candidate_goal_run_status_overall=" + str(data["overall_status"]))
+print("candidate_goal_run_status_interactive_state=" + str(data["interactive_state"]))
+print("candidate_goal_run_status_activity_hint=" + str(data["activity_hint"]))
 print("candidate_goal_run_status_ok=" + str(data["ok"]).lower())
 '
 

@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate/third-test goal run status 抽样补齐
+- 本轮继续沿 M6/M7 goal 状态可观测性往高层门禁推进：`scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 goal run status 只读摘要现在除 `overall_status` / `ok` 外，也断言并打印 `interactive_state` 与 `activity_hint`，让人工和第三测试日志能直接判断终端 goal worker 是 working/thinking/idle/session_missing 等状态。
+- 回归同步补到 `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs`，锁住 candidate/third-test wrapper 必须保留这些字段；真实验收已通过 `cargo test -q --test cli_smoke_tests`、`cargo test -q --test live_operator_scripts_tests`、`bash scripts/chuang-goal-run-status.sh --json` 抽样、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check` 和 `git diff --check`。
+
 # 2026-05-12 third-test policy surface clean-tree 复验通过
 - 本轮在 `f1df21f` 和 handoff 刷新后，从干净工作树完整跑通 `sh scripts/chuang-third-test-smoke.sh`，继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 关键新增状态面已进入第三测试链路：candidate 阶段输出 `candidate_policy_tool_status_ga_tool_descriptors=9/12`，third-test 阶段输出 `live_runner_readiness_view_policy_tool_status_ga_tool_descriptors=9/12`；`runtime_report_surface` 仍为 11/26，provider readiness 只显示 `api_key_state=<set>`，未打印 secret。

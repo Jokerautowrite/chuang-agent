@@ -442,6 +442,8 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("cannot_mark_complete_from_readonly_checklist"));
     assert!(wrapper.contains("candidate_live_operator_real_live_acceptance"));
     assert!(wrapper.contains("candidate_goal_run_status_overall"));
+    assert!(wrapper.contains("candidate_goal_run_status_interactive_state"));
+    assert!(wrapper.contains("candidate_goal_run_status_activity_hint"));
     assert!(wrapper.contains("connects_real_feishu\"] is False"));
     assert!(wrapper.contains("connects_real_provider\"] is False"));
     assert!(wrapper.contains("performs_desktop_actions\"] is False"));
@@ -605,6 +607,8 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("live_operator_real_live_acceptance="));
     assert!(wrapper.contains("live_operator_real_live_gap_count="));
     assert!(wrapper.contains("goal_run_status_overall="));
+    assert!(wrapper.contains("goal_run_status_interactive_state="));
+    assert!(wrapper.contains("goal_run_status_activity_hint="));
     assert!(wrapper.contains("third_test_candidate_smoke_ok"));
     assert!(wrapper.contains("boundaries[\"connects_real_feishu\"] is False"));
     assert!(wrapper.contains("boundaries[\"sends_feishu_messages\"] is False"));
