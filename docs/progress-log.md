@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 MCP structural risk tag 查询面补齐
+- 本轮继续推进 M5 MCP fake adapter 到治理查询面的主链：`mcp_tool_descriptor_risk()` 现在会把 MCP spec 的结构化 `destructive=true` 显式补成 `destructive` risk tag，和已有 `open_world`、`external_commit`、`omitted_risk_tightened` 摘要保持一致；`classify_tag()` 也识别 `destructive` / `destructive_action` 为删除/破坏类风险，避免 MCP 服务端只给布尔高危而没给标签时，治理状态面无法按高危类别检索。
+- 回归 `mcp_descriptor_conversion_marks_structural_risks_as_queryable_tags` 已锁住 destructive/open_world 结构风险都会进入 `ToolDescriptorRisk.risk_tags`。验证已通过 `cargo fmt --all --check` 和 `cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests`。下一轮继续扫 M6 goal/subagent 状态面和 M7 高层 runtime surface 是否还有类似查询摘要缺口。
+
 # 2026-05-12 protocol error surface third-test 复验记录
 - 本轮从干净工作树继续接上 M5/M6/M7 主链，确认 `runtime_meta.tool_protocol_errors_json` 与 `tool_protocol_error_count` 已进入 status/doctor/app-server health、live runner readiness、candidate verify、third-test smoke 和 MVP/complete-local 门禁；当前 `runtime_report_surface` 统一为 11 个 artifact / 26 个 observability 字段。
 - 已复核高层回归：`tests/live_runner_readiness_view_tests.rs` 的 JSON/text 输出断言已锁住 11/26、`runtime_meta.tool_protocol_errors_json`、`tool_protocol_error_count`、goal handoff admission refs、subagent children admission refs 和 `context_compaction_summary_json`；`tests/live_operator_scripts_tests.rs` 也锁住 candidate/third-test wrapper 的 11/26 静态门禁。

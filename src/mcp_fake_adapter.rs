@@ -360,6 +360,9 @@ pub fn mcp_tool_descriptor_risk<'a>(
     risk_tags_storage.clear();
     risk_tags_storage.extend(spec.risk_tags.iter().map(String::as_str));
 
+    if risk.destructive && !risk_tags_storage.contains(&"destructive") {
+        risk_tags_storage.push("destructive");
+    }
     if risk.open_world && !risk_tags_storage.contains(&"open_world") {
         risk_tags_storage.push("open_world");
     }

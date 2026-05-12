@@ -287,16 +287,18 @@ fn mcp_descriptor_converts_into_tool_descriptor_risk_view_without_runtime_side_e
 }
 
 #[test]
-fn mcp_descriptor_conversion_marks_open_world_as_approval_required_even_without_explicit_tag() {
+fn mcp_descriptor_conversion_marks_structural_risks_as_queryable_tags() {
     let spec = McpToolSpec::new("net.search", "Open-world search", schema())
         .read_only(false)
-        .destructive(false)
+        .destructive(true)
         .open_world(true)
         .external_commit(false);
     let mut tags = Vec::new();
     let risk = mcp_tool_descriptor_risk(&spec, &mut tags);
 
+    assert!(risk.destructive);
     assert!(risk.requires_approval);
+    assert!(risk.risk_tags.contains(&"destructive"));
     assert!(risk.risk_tags.contains(&"open_world"));
 }
 

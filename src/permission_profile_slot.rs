@@ -306,7 +306,9 @@ pub fn classify_tag(raw: &str) -> Option<PermissionTag> {
         "verification_code" | "verification_code_input" | "otp" => {
             Some(PermissionTag::VerificationCode)
         }
-        "delete" | "remove" | "rm" => Some(PermissionTag::Delete),
+        "delete" | "remove" | "rm" | "destructive" | "destructive_action" => {
+            Some(PermissionTag::Delete)
+        }
         "cleanup" | "clean_up" => Some(PermissionTag::Cleanup),
         "reset" => Some(PermissionTag::Reset),
         "uninstall" => Some(PermissionTag::Uninstall),
