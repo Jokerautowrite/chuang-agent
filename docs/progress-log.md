@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test clean-tree 复验覆盖本批 M5/M6/M7
+- 本轮在 `4c655f3` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认本批新增状态已进入第三测试链路：candidate 与 third-test 均打印项目 `GoalRun` checkpoint 摘要，当前 `project_goal_run_checkpoint_count=80`、latest checkpoint 为 `checkpoint-1778591135678614133`；MVP/complete-local 中的 `chuang-feishu-turn-summary-smoke.js` 也覆盖 Feishu 文本工具执行摘要和协议错误 raw payload 不外泄。provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 Feishu turn summary 透出工具执行摘要
 - 本轮继续沿 M7 channel/Feishu 输出面补 runtime observability：`scripts/chuang-feishu-turn-summary.js` 的过程摘要现在会从 `runtimeObservability` / provider meta 读取 `tool_unified_execution_status`、`tool_unified_execution_failure_count` 与 `tool_protocol_error_count`，在 Feishu 文本里显示工具执行状态、失败数和协议错误计数。
 - 安全边界同步收紧：存在工具协议错误时不再把 `tool_trace` 原样放进 Feishu 文本，避免 `ACTION: ...` raw payload 泄漏到通道消息；只保留稳定计数摘要。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check` 和 `git diff --check`。
