@@ -52,6 +52,14 @@ M1 RuntimeEventLedger
 
 M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter。M7 可先做 TurnContext snapshot 读面，但 compaction/error-correction 需要 M1 ledger 事件。
 
+## 2026-05-12 Current Implementation Status
+
+- M5 主链状态：fake MCP/list/call/risk/approval/elicitation 合同已进入 crate 与回归；runtime event ledger、tool protocol errors、approval/elicitation 计数和 channel/app-server turn observability 已可在 runtime_report/status/doctor/readiness/candidate/third-test 面复验。
+- M6 主链状态：subagent tree/report admission/parent handoff/GoalRun checkpoint evidence 已进入 runtime report surface 与 GoalRun/status/doctor/app-server/goal show 文本面；latest checkpoint 的 created_at、completed workers、validation notes 可直接查询。
+- M7 主链状态：TurnContext、context pack trace、compaction events、context_compaction_summary_json、tool protocol correction/typed failure 已进入 runtime report artifacts、observability、status/doctor/app-server/channel 和 high-level smoke gates。
+- 当前剩余边界：真实 live worker、真实 desktop/browser/wiki/GBrain acceptance receipt 仍在 `docs/acceptance-next-matrix.md` 跟踪；这些不是 fake-first 合同缺口，不能把 local-ready/readiness 误标成 live-ready。
+- 当前复验入口：`cargo test -q`、`sh scripts/chuang-candidate-verify.sh`、`sh scripts/chuang-third-test-smoke.sh` 已在 2026-05-12 对最新 M5/M6/M7 主链口径通过；具体 checkpoint 见 `docs/progress-log.md` 顶部记录。
+
 ## M1 RuntimeEventLedger
 
 ### M1.1 RuntimeEvent schema

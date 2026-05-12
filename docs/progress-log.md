@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 implementation slices 同步 M5/M6/M7 当前状态
+- 本轮同步 `docs/codex-claude-implementation-slices-v1.md`，新增 2026-05-12 current implementation status：标明 M5 fake MCP/risk/approval/elicitation、M6 subagent tree/report admission/GoalRun evidence、M7 TurnContext/compaction/tool protocol correction 已进入主链可观测面。
+- 文档同时保留真实 live worker、desktop/browser/wiki/GBrain receipt 仍未完成的边界，避免把 local-ready/readiness 当成 live-ready。验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md`。GoalRun checkpoint 写入 `checkpoint-1778607354052184840`，count 到 148。
+
 # 2026-05-12 全量 cargo test 复验 goal/runtime surfaces
 - 本轮在 runtime event observability 默认计数、channel/app-server turn 输出、candidate/third-test 复验和 `goal show` checkpoint evidence 文本面补齐后，跑通全量 `cargo test -q`，确认近期 M5/M6/M7 输出面改动没有破坏其他模块。
 - 验证已通过 `cargo test -q`。GoalRun checkpoint 写入 `checkpoint-1778607192734477991`，count 到 147。
