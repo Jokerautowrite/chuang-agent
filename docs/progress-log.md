@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 unified execution failure classes 高层门禁补齐
+- 本轮继续沿 M4/M7 unified execution 状态面补高层抽样：MVP smoke、complete-local smoke、candidate verify、third-test smoke 现在在 `runtime_report_surface.observability_fields` 中同时断言 `tool_unified_execution_status`、`tool_unified_execution_failure_count` 与 `tool_unified_execution_failure_classes`，不再只靠底层 `runtime_report_tests` 覆盖 failure class 字段。
+- status/doctor/app-server health、live runner readiness view 和相关静态 wrapper 测试也同步锁住这组三件套，确认 `runtime_report_surface` 的 26 字段在本地门禁、候选门禁和只读 readiness 面同口径。验证已通过 `cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests`、`cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests --test live_runner_readiness_view_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`sh -n` 和 `git diff --check`。
+
 # 2026-05-12 app-server/channel runtime trace chars 回归补齐
 - 本轮继续沿 M7 app-server/channel 输出面补 `runtime_report_surface` 字段抽样：`tests/app_server_tests.rs` 现在同时锁住 `turn/start` 响应与 `turn/completed` 事件中的 `runtimeObservability.runtime_response_trace_chars` 为可解析正整数；`tests/cli_channel_tests.rs` 也锁住 `channel simulate --json` 暴露同一字段。
 - 这确认 app-server 和 channel 继续消费同一份 `runtime_observability_meta()`，让 runtime response trace 不只在 status/doctor/app-server health 的 surface 列表里可见，也在真实 turn 输出面可查。验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`、`cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo fmt --all --check` 和 `git diff --check`。

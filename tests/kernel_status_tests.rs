@@ -391,6 +391,16 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .runtime_report_surface
         .observability_fields
         .iter()
+        .any(|field| field == "tool_unified_execution_failure_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "tool_unified_execution_failure_classes"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
         .any(|field| field == "context_pack_trace"));
     assert!(status
         .runtime_report_surface

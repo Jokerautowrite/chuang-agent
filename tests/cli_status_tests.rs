@@ -133,6 +133,8 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("runtime_event_approval_resolved_count"));
     assert!(stdout.contains("runtime_event_elicitation_requested_count"));
     assert!(stdout.contains("tool_unified_execution_status"));
+    assert!(stdout.contains("tool_unified_execution_failure_count"));
+    assert!(stdout.contains("tool_unified_execution_failure_classes"));
     assert!(stdout.contains("context_pack_trace"));
     assert!(stdout.contains("context_compaction_summary_json"));
     assert!(stdout.contains("runtime_response.trace"));

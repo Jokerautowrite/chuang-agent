@@ -44,6 +44,9 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("tool_protocol_error_count"));
     assert!(mvp_smoke.contains("runtime_response.trace"));
     assert!(mvp_smoke.contains("runtime_response_trace_chars"));
+    assert!(mvp_smoke.contains("tool_unified_execution_status"));
+    assert!(mvp_smoke.contains("tool_unified_execution_failure_count"));
+    assert!(mvp_smoke.contains("tool_unified_execution_failure_classes"));
     assert!(mvp_smoke.contains("runtime_event_tool_started_count"));
     assert!(mvp_smoke.contains("runtime_event_tool_finished_count"));
     assert!(mvp_smoke.contains("runtime_event_approval_requested_count"));
@@ -129,6 +132,9 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("tool_protocol_error_count"));
     assert!(wrapper.contains("runtime_response.trace"));
     assert!(wrapper.contains("runtime_response_trace_chars"));
+    assert!(wrapper.contains("tool_unified_execution_status"));
+    assert!(wrapper.contains("tool_unified_execution_failure_count"));
+    assert!(wrapper.contains("tool_unified_execution_failure_classes"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
     assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
@@ -383,6 +389,9 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(candidate_wrapper.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(candidate_wrapper.contains("tool_protocol_error_count"));
     assert!(candidate_wrapper.contains("runtime_response.trace"));
+    assert!(candidate_wrapper.contains("tool_unified_execution_status"));
+    assert!(candidate_wrapper.contains("tool_unified_execution_failure_count"));
+    assert!(candidate_wrapper.contains("tool_unified_execution_failure_classes"));
     assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));
     assert!(candidate_wrapper.contains("goal_handoff_report_admission_reason_codes"));

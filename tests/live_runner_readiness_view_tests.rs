@@ -426,6 +426,15 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .any(|field| field == "runtime_response_trace_chars"));
     assert!(observability_fields
         .iter()
+        .any(|field| field == "tool_unified_execution_status"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "tool_unified_execution_failure_count"));
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "tool_unified_execution_failure_classes"));
+    assert!(observability_fields
+        .iter()
         .any(|field| field == "goal_handoff_report_admission_refs"));
     assert!(observability_fields
         .iter()
@@ -522,6 +531,9 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     assert!(stdout.contains("policy_tool_status.missing=none"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
+    assert!(stdout.contains("tool_unified_execution_status"));
+    assert!(stdout.contains("tool_unified_execution_failure_count"));
+    assert!(stdout.contains("tool_unified_execution_failure_classes"));
     assert!(stdout.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(stdout.contains("runtime_meta.subagent_children_summary_json"));
     assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));

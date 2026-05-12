@@ -1756,6 +1756,21 @@ transport = "stub"
         .as_array()
         .expect("runtime report observability fields should be array")
         .iter()
+        .any(|field| field == "tool_unified_execution_status"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "tool_unified_execution_failure_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "tool_unified_execution_failure_classes"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
         .any(|field| field == "runtime_event_tool_started_count"));
     assert!(parsed["runtime_report_surface"]["observability_fields"]
         .as_array()
@@ -2465,6 +2480,9 @@ transport = "stub"
     assert!(stdout.contains("runtime_event_elicitation_requested_count"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
+    assert!(stdout.contains("tool_unified_execution_status"));
+    assert!(stdout.contains("tool_unified_execution_failure_count"));
+    assert!(stdout.contains("tool_unified_execution_failure_classes"));
     assert!(stdout.contains("runtime_meta.runtime_event_ledger_json"));
     assert!(stdout.contains("runtime_meta.context_compaction_events"));
     assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));
