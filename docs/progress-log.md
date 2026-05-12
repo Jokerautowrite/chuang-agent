@@ -1,5 +1,10 @@
 # 协作进度日志
 
+# 2026-05-12 protocol error surface third-test 复验记录
+- 本轮从干净工作树继续接上 M5/M6/M7 主链，确认 `runtime_meta.tool_protocol_errors_json` 与 `tool_protocol_error_count` 已进入 status/doctor/app-server health、live runner readiness、candidate verify、third-test smoke 和 MVP/complete-local 门禁；当前 `runtime_report_surface` 统一为 11 个 artifact / 26 个 observability 字段。
+- 已复核高层回归：`tests/live_runner_readiness_view_tests.rs` 的 JSON/text 输出断言已锁住 11/26、`runtime_meta.tool_protocol_errors_json`、`tool_protocol_error_count`、goal handoff admission refs、subagent children admission refs 和 `context_compaction_summary_json`；`tests/live_operator_scripts_tests.rs` 也锁住 candidate/third-test wrapper 的 11/26 静态门禁。
+- 上一轮 clean-tree `sh scripts/chuang-third-test-smoke.sh` 已通过并输出 `live_runner_readiness_view_runtime_report_surface_artifacts=11`、`live_runner_readiness_view_runtime_report_surface_observability_fields=26`、`third_test_candidate_smoke_ok`。本轮下一步继续扫 M5/M6/M7 是否还有 goal/subagent 状态面或 MCP governance 查询面未并入高层验收。
+
 # 2026-05-12 app-server runtime compaction summary 事件面回归
 - 本轮继续沿 M7 主链把 app-server turn 事件面补齐：`tests/app_server_tests.rs` 的 `app_server_turn_uses_workspace_provider_config` 现在在 `turn/start` 响应和 `turn/completed` 事件两处都断言 `runtimeObservability.context_compaction_summary_json` 存在，并包含稳定的 `dropped_count` 字段。这样 app-server 事件订阅面、channel simulate 面、status/doctor/health 面对 compaction summary 的可查询口径保持一致。
 - 验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`。下一轮入口：继续扫 tool protocol correction 是否也需要进入 channel/app-server 高层事件面回归。
