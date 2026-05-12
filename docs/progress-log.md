@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 permission destructive risk tag 别名回归
+- 本轮继续沿 M5 MCP/governance 主链补权限层回归：`local_ga_profile_requires_explicit_target_approval_for_destructive_tags` 现在把 `destructive` 和 `destructive_action` 纳入删除/破坏类别名矩阵，确保 MCP structural risk tag 补出的 `destructive` 不会在权限分类层被降级。
+- 这和 `mcp_tool_descriptor_risk()` 的结构化风险标签对齐：服务端只给 `destructive=true` 而没有原始 `delete/rm` 标签时，治理仍会走 `RequireExplicitTargetApproval`。验证已通过 `cargo test -q --test permission_profile_slot_tests local_ga_profile_requires_explicit_target_approval_for_destructive_tags`、`cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests` 和 `cargo fmt --all --check`。
+
 # 2026-05-12 runtime report protocol error 摘要脱敏回归
 - 本轮继续沿 M7 runtime report 查询面加固协议错误 artifact 边界：`runtime_report_promotes_tool_report_metadata_to_artifact` 现在除断言 `runtime_meta.tool_protocol_errors_json` artifact 描述包含 `count=2`、`invalid_action_json`、`plain_text_response` 外，也显式断言 description 不包含 `ACTION payload is invalid`、原始 `ACTION: {`、`plain text is not accepted` 或 `hello` raw payload。
 - 这保证高层 report artifact 摘要只暴露稳定 code/count，原始协议片段和错误 message 仍留在受控 JSON artifact/事件面里，不进入可扫摘要。验证已通过 `cargo test -q --test runtime_report_tests runtime_report_promotes_tool_report_metadata_to_artifact`、`cargo test -q --test runtime_report_tests` 和 `cargo fmt --all --check`。

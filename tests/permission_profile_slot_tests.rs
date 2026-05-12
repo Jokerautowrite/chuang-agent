@@ -85,7 +85,16 @@ fn local_ga_profile_requires_approval_for_external_commit_tags() {
 fn local_ga_profile_requires_explicit_target_approval_for_destructive_tags() {
     let profile = local_ga_profile();
 
-    for raw_tag in ["delete", "rm", "cleanup", "reset", "uninstall", "purge"] {
+    for raw_tag in [
+        "delete",
+        "rm",
+        "destructive",
+        "destructive_action",
+        "cleanup",
+        "reset",
+        "uninstall",
+        "purge",
+    ] {
         let tag = classify_tag(raw_tag).expect("tag should classify");
         let decision = decide_tag(&profile, tag);
         assert_eq!(
