@@ -1,6 +1,6 @@
 # Third Test Candidate Quick Entry
 
-更新时间：2026-05-10
+更新时间：2026-05-12
 
 这一页只回答四件事：现在哪些已经是 `local-ready`，哪些必须人工 live check，怎么跑第三测试版候选，和 100% 前最后的硬门槛是什么。
 
@@ -8,7 +8,7 @@
 
 第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、single worker rehearsal 证据，然后再回到本地 `final verify` 绿。
 
-2026-05-10 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。第三测试候选的本地 gates 已收口到 `final verify`、live-readonly preflight、live-gaps、candidate verify、operator checklist/receipt 模板结构和 provider readiness 只读检查。下一步不再卡“桥是否挂上”或“本地门禁是否可跑”，而是收集 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。
+2026-05-12 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。第三测试候选的本地 gates 已收口到 `final verify`、live-readonly preflight、live-gaps、candidate verify、operator checklist/receipt 模板结构、provider readiness 只读检查，以及 `runtime_report_surface=11/26` 的 runtime/report 状态面复验。最新 `sh scripts/chuang-candidate-verify.sh` 输出 `chuang_candidate_verify_ok`，`sh scripts/chuang-third-test-smoke.sh` 输出 `third_test_candidate_smoke_ok`，全量 `cargo test -q` 已通过。下一步不再卡“桥是否挂上”或“本地门禁是否可跑”，而是收集 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。
 
 当前固定状态词：
 
@@ -25,12 +25,14 @@
 - `sh scripts/chuang-final-verify.sh`
 - `sh scripts/chuang-live-readonly-preflight.sh`
 - `bash scripts/chuang-live-gaps-check.sh`
-- `sh scripts/chuang-candidate-verify.sh`
+- `sh scripts/chuang-candidate-verify.sh` -> `chuang_candidate_verify_ok`
+- `sh scripts/chuang-third-test-smoke.sh` -> `third_test_candidate_smoke_ok`
+- `cargo test -q`
 - `scripts/chuang-provider-readiness-check.sh`
 - `cargo run --quiet -- channel feishu-check --env-file /home/user/.codex-im/chuang-feishu-bridge.env --json`
 - `node scripts/chuang-feishu-command-smoke.js`
 
-这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。
+这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。runtime/report 状态面当前固定 `runtime_report_surface=11/26`，runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 和 unified execution 摘要都已进入 readiness/status/channel/app-server 复验面。
 
 本地 gate completion 的含义到这里为止：脚本、模板、诊断面和只读证据链可复验。它不能替代 `service_evidence` / `service_receipts` / `real_live_acceptance.services` 七项真实 evidence，也不能把 `can_mark_real_live_ready=false` 的模板默认值改写成 acceptance 结论。
 
