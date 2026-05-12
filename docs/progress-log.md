@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 runtime report protocol error 摘要脱敏回归
+- 本轮继续沿 M7 runtime report 查询面加固协议错误 artifact 边界：`runtime_report_promotes_tool_report_metadata_to_artifact` 现在除断言 `runtime_meta.tool_protocol_errors_json` artifact 描述包含 `count=2`、`invalid_action_json`、`plain_text_response` 外，也显式断言 description 不包含 `ACTION payload is invalid`、原始 `ACTION: {`、`plain text is not accepted` 或 `hello` raw payload。
+- 这保证高层 report artifact 摘要只暴露稳定 code/count，原始协议片段和错误 message 仍留在受控 JSON artifact/事件面里，不进入可扫摘要。验证已通过 `cargo test -q --test runtime_report_tests runtime_report_promotes_tool_report_metadata_to_artifact`、`cargo test -q --test runtime_report_tests` 和 `cargo fmt --all --check`。
+
 # 2026-05-12 goal step JSON admission locator 回归加固
 - 本轮继续沿 M6 goal 主链补查询面一致性：`tests/cli_goal_tests.rs` 的 `cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointing` 现在在 `goal step --json` receipt 中直接断言 `collection.handoff_query_summary` 携带 `parent_context_handoff_count=2`、`report_admission_ref_count=2`、`report_validated=2`，并锁住两条 `goal-report-admission://...` admission locator、`Accepted` 状态、`report_validated` reason code 和 `report://...` evidence ref。
 - 这把 `goal step --json` 和既有 `goal step` 文本面、`goal collect`、`goal show --json` 的 admission locator 口径对齐，避免主控只在文本或 show 面能查到 report admission 证据。验证已通过 `cargo test -q --test cli_goal_tests cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointing`、`cargo test -q --test cli_goal_tests --test goal_dispatch_tests` 和 `cargo fmt --all --check`。

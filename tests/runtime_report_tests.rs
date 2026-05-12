@@ -1051,6 +1051,10 @@ fn runtime_report_promotes_tool_report_metadata_to_artifact() {
     assert!(protocol_description.contains("count=2"));
     assert!(protocol_description.contains("invalid_action_json"));
     assert!(protocol_description.contains("plain_text_response"));
+    assert!(!protocol_description.contains("ACTION payload is invalid"));
+    assert!(!protocol_description.contains("ACTION: {"));
+    assert!(!protocol_description.contains("plain text is not accepted"));
+    assert!(!protocol_description.contains("hello"));
     assert!(report
         .artifacts
         .iter()
