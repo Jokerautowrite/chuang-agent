@@ -123,6 +123,8 @@ SERVICE_RECEIPTS = [
             "api_key_state": "<set|missing>",
             "provider_live_request_receipt_ref": "<fill_after_test>",
             "runtime_report_id": "<fill_after_test>",
+            "does_not_call_provider": True,
+            "does_not_read_provider_readiness": True,
         },
         "required": [
             "provider transport is not stub/fake",

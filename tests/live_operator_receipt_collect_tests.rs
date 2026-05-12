@@ -163,6 +163,14 @@ fn live_operator_receipt_collect_script_merges_base_and_overlay_receipts() {
         "<set>"
     );
     assert_eq!(
+        data["service_evidence"]["provider"]["does_not_call_provider"],
+        true
+    );
+    assert_eq!(
+        data["service_evidence"]["provider"]["does_not_read_provider_readiness"],
+        true
+    );
+    assert_eq!(
         data["service_evidence"]["subagent_live_rehearsal"]["dispatch_id"],
         "dispatch-123"
     );

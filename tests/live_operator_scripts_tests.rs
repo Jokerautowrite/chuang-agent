@@ -62,6 +62,8 @@ fn live_operator_receipt_script_is_readonly_and_template_only() {
     assert!(script.contains("\"deletes_files\": False"));
     assert!(script.contains("\"reuses_codex_or_hermes_credentials\": False"));
     assert!(script.contains("\"provider_live_request_receipt_ref\""));
+    assert!(script.contains("\"does_not_call_provider\": True"));
+    assert!(script.contains("\"does_not_read_provider_readiness\": True"));
     assert!(script.contains("\"capability_routing_ref\""));
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("rm "));
@@ -194,6 +196,14 @@ fn live_operator_receipt_script_outputs_redacted_json_template() {
     assert_eq!(
         data["service_evidence"]["provider"]["provider_live_request_receipt_ref"],
         "<fill_after_test>"
+    );
+    assert_eq!(
+        data["service_evidence"]["provider"]["does_not_call_provider"],
+        true
+    );
+    assert_eq!(
+        data["service_evidence"]["provider"]["does_not_read_provider_readiness"],
+        true
     );
     assert_eq!(
         data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"],
