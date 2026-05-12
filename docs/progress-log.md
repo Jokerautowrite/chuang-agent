@@ -1790,3 +1790,7 @@
 # 2026-05-12 tool protocol error artifact 合同回归
 - 本轮在 runtime report 层补了非零协议错误合同回归：`runtime_report_promotes_tool_report_metadata_to_artifact` 现在构造 `tool_protocol_errors_json`，并断言 `runtime_meta.tool_protocol_errors_json` artifact 存在，description 含 `count=2`、`invalid_action_json` 与 `plain_text_response`。
 - 验证已通过 `cargo test -q --test runtime_report_tests runtime_report_promotes_tool_report_metadata_to_artifact`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：继续看 app-server/channel 是否能通过现有 provider 配置稳定触发非零协议错误；若不能，保持 runtime 层合同优先，不引入测试后门。
+
+# 2026-05-12 app-server 非零 tool protocol error 高层回归
+- 本轮用现有 OpenAI-compatible HTTP 本地测试服务补了 app-server 高层非零协议错误路径：第一轮真实 provider 返回缺少 `path` 的 `file_read` ACTION，tool loop 记录 `invalid_action_json` 后把错误反馈给模型，第二轮 provider 返回 FINAL。
+- `tests/app_server_tests.rs` 现在断言 `turn/start` 响应和 `turn/completed` 事件都暴露 `toolProtocolErrorCount=1`、`runtimeObservability.tool_protocol_error_count=1`、`toolProtocolErrors[0].code=invalid_action_json`、`toolEvents.kind=protocol_error` 和 provider meta 中的 `tool_protocol_errors_json`；没有新增 scripted provider 后门。验证已通过 `cargo test -q --test app_server_tests app_server_turn`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：把同类非零路径继续评估到 `channel simulate`，如果 channel 只能走单轮 stub，则保留 app-server 覆盖并转向 M5/M6/M7 全矩阵复验。

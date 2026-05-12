@@ -448,6 +448,174 @@ transport = "stub"
 }
 
 #[test]
+fn app_server_turn_surfaces_nonzero_tool_protocol_errors() {
+    let workspace = temp_workspace("tool-protocol-error");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Chuang test soul\n").expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Chuang test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Chuang test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
+        .expect("agents registry should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep the response minimal and testable.\n",
+    )
+    .expect("rules should write");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let scripted_outputs = [
+            r#"ACTION: {"type":"tool_call","call":{"tool":"file_read"}}"#,
+            r#"ACTION: {"type":"final","answer":"已修正协议错误。"}"#,
+        ];
+        for content in scripted_outputs {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let _ = read_http_request(&mut stream);
+            let body = serde_json::json!({
+                "id": "chatcmpl-tool-protocol",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop"
+                }]
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
+    });
+
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-protocol"
+base_url = "http://{address}/v1"
+model = "gpt-app-server-protocol"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("config should write");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"读取文件"}}}}"#,
+        workspace.display()
+    )
+    .expect("turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("server thread should finish");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let responses = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let turn_response = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("turn/start response should be present");
+
+    assert_eq!(turn_response["result"]["turn"]["status"], "completed");
+    assert_eq!(turn_response["result"]["turn"]["toolProtocolErrorCount"], 1);
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_protocol_error_count"],
+        "1"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["tool_unified_execution_status"],
+        "ok"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["tool_unified_execution_failure_count"],
+        "0"
+    );
+    let protocol_errors = turn_response["result"]["turn"]["toolProtocolErrors"]
+        .as_array()
+        .expect("tool protocol errors should be array");
+    assert_eq!(protocol_errors.len(), 1);
+    assert_eq!(protocol_errors[0]["code"], "invalid_action_json");
+    assert!(protocol_errors[0]["message"]
+        .as_str()
+        .expect("protocol error message")
+        .contains("missing field"));
+    assert!(
+        turn_response["result"]["turn"]["providerMeta"]["tool_protocol_errors_json"]
+            .as_str()
+            .expect("provider meta protocol errors")
+            .contains("invalid_action_json")
+    );
+    assert!(turn_response["result"]["turn"]["toolEvents"]
+        .as_array()
+        .expect("tool events should be array")
+        .iter()
+        .any(|event| event["kind"] == "protocol_error"));
+
+    let turn_completed = responses
+        .iter()
+        .find(|value| value["method"] == "turn/completed")
+        .expect("turn completed event should be present");
+    assert_eq!(
+        turn_completed["params"]["turn"]["toolProtocolErrorCount"],
+        1
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["tool_protocol_error_count"],
+        "1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["toolProtocolErrors"]
+            .as_array()
+            .expect("event tool protocol errors should be array")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn app_server_second_turn_injects_recent_thread_history() {
     let workspace = temp_workspace("recent-thread-history");
     write_basic_stub_workspace(&workspace);
