@@ -118,6 +118,10 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         .as_str()
         .expect("context compaction events should be a string")
         .contains("context_compaction_started"));
+    assert!(parsed["runtime_observability"]["context_compaction_summary_json"]
+        .as_str()
+        .expect("context compaction summary should be a string")
+        .contains("\"dropped_count\""));
     assert_eq!(
         parsed["runtime_observability"]["knowledge_context_preview_enabled"],
         "false"
