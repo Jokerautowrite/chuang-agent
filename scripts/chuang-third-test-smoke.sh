@@ -205,6 +205,8 @@ assert service_ids == [
 ]
 assert data["service_receipts"][0]["evidence"]["runtime_report_id"] == "<fill_after_test>"
 assert data["service_receipts"][1]["evidence"]["api_key_state"] == "<set|missing>"
+assert data["service_receipts"][1]["evidence"]["does_not_call_provider"] is True
+assert data["service_receipts"][1]["evidence"]["does_not_read_provider_readiness"] is True
 assert data["service_receipts"][2]["evidence"]["allowlist_receipt_ref"] == "<fill_after_test>"
 assert data["service_receipts"][2]["evidence"]["capability_routing_ref"] == "<fill_after_test>"
 assert data["service_receipts"][5]["evidence"]["writes_core_memory"] is False

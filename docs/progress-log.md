@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate/third-test 锁住 provider receipt 只读边界
+- 本轮把 provider receipt 新增的 `does_not_call_provider` 与 `does_not_read_provider_readiness` 继续抬到候选门禁：`scripts/chuang-candidate-verify.sh` 和 `scripts/chuang-third-test-smoke.sh` 的 live operator receipt 模板断言现在会检查 provider evidence 保留这两个字段。
+- `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs` 已锁住 wrapper 不会丢掉这些断言；`sh scripts/chuang-candidate-verify.sh` 复验通过，仍只读 receipt 模板、不连接 provider、不打印 secret。验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests`、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 live receipt 文档同步 provider 只读边界
 - 本轮同步 `docs/live-receipt-collection.md` 的 provider evidence 字段表，把 `does_not_call_provider` 与 `does_not_read_provider_readiness` 纳入 provider receipt/operator receipt collector 文档口径，和刚落地的 `chuang-provider-live-receipt.sh`、operator receipt template、collector JSON 输出保持一致。
 - 本轮只改文档，不运行真实 provider、不读取 secret、不触碰 Hermes；用于避免后续人工 overlay 仍只填 provider ref 而漏掉“模板不发请求、不读 readiness”的边界字段。验证已通过文档 diff 审计与 `git diff --check`。

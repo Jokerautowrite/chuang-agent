@@ -188,6 +188,8 @@ for key in [
 service_ids = [item["id"] for item in data["service_receipts"]]
 assert service_ids == ["feishu", "provider", "subagent_live_rehearsal", "desktop", "browser", "wiki", "gbrain"]
 assert sorted(data["service_evidence"].keys()) == sorted(service_ids)
+assert data["service_evidence"]["provider"]["does_not_call_provider"] is True
+assert data["service_evidence"]["provider"]["does_not_read_provider_readiness"] is True
 assert data["service_evidence"]["subagent_live_rehearsal"]["gate_receipt_ref"] == "<fill_after_test>"
 assert data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"] == "<fill_after_test>"
 assert data["service_evidence"]["subagent_live_rehearsal"]["capability_routing_ref"] == "<fill_after_test>"
