@@ -93,6 +93,10 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     assert_eq!(parsed["tool_call_count"], 0);
     assert_eq!(parsed["tool_protocol_error_count"], 0);
     assert_eq!(
+        parsed["runtime_observability"]["tool_protocol_error_count"],
+        "0"
+    );
+    assert_eq!(
         parsed["runtime_observability"]["model_name"],
         "gpt-channel-test"
     );
@@ -118,10 +122,12 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         .as_str()
         .expect("context compaction events should be a string")
         .contains("context_compaction_started"));
-    assert!(parsed["runtime_observability"]["context_compaction_summary_json"]
-        .as_str()
-        .expect("context compaction summary should be a string")
-        .contains("\"dropped_count\""));
+    assert!(
+        parsed["runtime_observability"]["context_compaction_summary_json"]
+            .as_str()
+            .expect("context compaction summary should be a string")
+            .contains("\"dropped_count\"")
+    );
     assert_eq!(
         parsed["runtime_observability"]["knowledge_context_preview_enabled"],
         "false"
