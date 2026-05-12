@@ -898,10 +898,13 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
     assert!(wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
     assert!(wrapper.contains("policy_tool_status = data[\"policy_tool_status\"]"));
+    assert!(wrapper.contains("live_readiness = data[\"live_readiness\"]"));
     assert!(wrapper.contains("runtime_surface[\"artifact_count\"] == 11"));
     assert!(wrapper.contains("runtime_surface[\"observability_field_count\"] == 26"));
     assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
+    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(wrapper.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
     assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
@@ -923,6 +926,9 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("candidate_runtime_report_surface_artifacts="));
     assert!(wrapper.contains("candidate_runtime_report_surface_observability_fields="));
     assert!(wrapper.contains("candidate_policy_tool_status_ga_tool_descriptors="));
+    assert!(wrapper.contains("candidate_live_readiness_state="));
+    assert!(wrapper.contains("candidate_live_readiness_real_external_acceptance_pending="));
+    assert!(wrapper.contains("candidate_live_readiness_ready_does_not_mean_live="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_state="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_blocked_reason="));
@@ -967,10 +973,13 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
     assert!(wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
     assert!(wrapper.contains("policy_tool_status = data[\"policy_tool_status\"]"));
+    assert!(wrapper.contains("live_readiness = data[\"live_readiness\"]"));
     assert!(wrapper.contains("runtime_surface[\"artifact_count\"] == 11"));
     assert!(wrapper.contains("runtime_surface[\"observability_field_count\"] == 26"));
     assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
+    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(wrapper.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
     assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
@@ -991,6 +1000,10 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
         wrapper.contains("live_runner_readiness_view_runtime_report_surface_observability_fields=")
     );
     assert!(wrapper.contains("live_runner_readiness_view_policy_tool_status_ga_tool_descriptors="));
+    assert!(wrapper.contains("live_runner_readiness_view_live_readiness_state="));
+    assert!(wrapper
+        .contains("live_runner_readiness_view_live_readiness_real_external_acceptance_pending="));
+    assert!(wrapper.contains("live_runner_readiness_view_live_readiness_ready_does_not_mean_live="));
     assert!(wrapper.contains("live_runner_readiness_view_state="));
     assert!(wrapper.contains("live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("live_runner_readiness_view_blocked_reason="));

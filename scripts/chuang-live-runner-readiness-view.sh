@@ -352,6 +352,29 @@ if not isinstance(policy_tool_status, dict):
         "blocked_reason": "policy_tool_status unavailable in readonly sources",
     }
 
+live_readiness = first_nonempty(
+    get_path(status_payload, "live_readiness", default=None),
+    get_path(doctor_payload, "status", "live_readiness", default=None),
+    get_path(health_payload, "live_readiness", default=None),
+)
+if not isinstance(live_readiness, dict):
+    live_readiness = {
+        "ok": False,
+        "overall_state": "unavailable",
+        "local_ready_scope": "unknown",
+        "ga_local_mapped_only": False,
+        "desktop_browser_live_gated": False,
+        "browser_worker_frozen": False,
+        "live_worker_available": False,
+        "real_external_acceptance_pending": True,
+        "provider_live_request_verified_by_status": False,
+        "mapped_does_not_mean_live": True,
+        "gated_does_not_mean_ready": True,
+        "frozen_does_not_mean_ready": True,
+        "ready_does_not_mean_live": True,
+        "blocked_reason": "live_readiness unavailable in readonly sources",
+    }
+
 status_layer = find_layer(status_subagent, "live_runner_rehearsal") if status_subagent else None
 doctor_layer = find_layer(doctor_subagent, "live_runner_rehearsal") if doctor_subagent else None
 health_layer = find_layer(health_subagent, "live_runner_rehearsal") if health_subagent else None
@@ -550,6 +573,7 @@ result = {
     "config_path": CONFIG_PATH or None,
     "runtime_report_surface": runtime_report_surface,
     "policy_tool_status": policy_tool_status,
+    "live_readiness": live_readiness,
     "live_runner_rehearsal": live_runner_rehearsal,
     "source_evidence_refs": live_runner_rehearsal["source_evidence_refs"],
     "sources": sources,
@@ -575,6 +599,15 @@ else:
     print("policy_tool_status.ga_tool_descriptors=" + str(policy_tool_status.get("ga_tool_descriptor_mapped_count", 0)) + "/" + str(policy_tool_status.get("tool_descriptor_count", 0)))
     print("policy_tool_status.missing=" + format_text_list(policy_tool_status.get("ga_tool_descriptor_missing", [])))
     print("policy_tool_status.blocked_reason=" + str(policy_tool_status.get("blocked_reason", "none")))
+    print("live_readiness.ok=" + str(live_readiness.get("ok", False)).lower())
+    print("live_readiness.state=" + str(live_readiness.get("overall_state", "unknown")))
+    print("live_readiness.ga_local_mapped_only=" + str(live_readiness.get("ga_local_mapped_only", False)).lower())
+    print("live_readiness.desktop_browser_live_gated=" + str(live_readiness.get("desktop_browser_live_gated", False)).lower())
+    print("live_readiness.browser_worker_frozen=" + str(live_readiness.get("browser_worker_frozen", False)).lower())
+    print("live_readiness.live_worker_available=" + str(live_readiness.get("live_worker_available", False)).lower())
+    print("live_readiness.real_external_acceptance_pending=" + str(live_readiness.get("real_external_acceptance_pending", False)).lower())
+    print("live_readiness.provider_live_request_verified_by_status=" + str(live_readiness.get("provider_live_request_verified_by_status", False)).lower())
+    print("live_readiness.ready_does_not_mean_live=" + str(live_readiness.get("ready_does_not_mean_live", False)).lower())
     print("live_runner_rehearsal.state=" + str(live_runner_rehearsal["state"]))
     print("live_runner_rehearsal.ready_for_live=" + str(live_runner_rehearsal["ready_for_live"]).lower())
     print("live_runner_rehearsal.starts_external_worker=" + str(live_runner_rehearsal["starts_external_worker"]).lower())

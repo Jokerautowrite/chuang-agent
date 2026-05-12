@@ -66,6 +66,7 @@ data = json.load(sys.stdin)
 rehearsal = data["live_runner_rehearsal"]
 runtime_surface = data["runtime_report_surface"]
 policy_tool_status = data["policy_tool_status"]
+live_readiness = data["live_readiness"]
 assert data["readonly"] is True
 assert data["connects_real_provider"] is False
 assert data["connects_real_feishu"] is False
@@ -75,6 +76,15 @@ assert runtime_surface["observability_field_count"] == 26
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
+assert live_readiness["ok"] is True
+assert live_readiness["overall_state"] == "local_ready_live_pending"
+assert live_readiness["ga_local_mapped_only"] is True
+assert live_readiness["desktop_browser_live_gated"] is True
+assert live_readiness["browser_worker_frozen"] is True
+assert live_readiness["live_worker_available"] is False
+assert live_readiness["real_external_acceptance_pending"] is True
+assert live_readiness["provider_live_request_verified_by_status"] is False
+assert live_readiness["ready_does_not_mean_live"] is True
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False
 assert file_write["requires_approval"] is False
@@ -113,6 +123,9 @@ assert rehearsal["next_action"]
 print("live_runner_readiness_view_runtime_report_surface_artifacts=" + str(runtime_surface["artifact_count"]))
 print("live_runner_readiness_view_runtime_report_surface_observability_fields=" + str(runtime_surface["observability_field_count"]))
 print("live_runner_readiness_view_policy_tool_status_ga_tool_descriptors=" + str(policy_tool_status["ga_tool_descriptor_mapped_count"]) + "/" + str(policy_tool_status["tool_descriptor_count"]))
+print("live_runner_readiness_view_live_readiness_state=" + str(live_readiness["overall_state"]))
+print("live_runner_readiness_view_live_readiness_real_external_acceptance_pending=" + str(live_readiness["real_external_acceptance_pending"]).lower())
+print("live_runner_readiness_view_live_readiness_ready_does_not_mean_live=" + str(live_readiness["ready_does_not_mean_live"]).lower())
 print("live_runner_readiness_view_state=" + str(rehearsal["state"]))
 print("live_runner_readiness_view_ready_for_live=" + str(rehearsal["ready_for_live"]).lower())
 print("live_runner_readiness_view_blocked_reason=" + str(rehearsal["blocked_reason"]))

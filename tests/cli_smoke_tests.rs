@@ -392,6 +392,7 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(wrapper.contains("exit 2"));
     assert!(wrapper.contains("chuang_final_verify_ok"));
     assert!(candidate_wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
+    assert!(candidate_wrapper.contains("live_readiness = data[\"live_readiness\"]"));
     assert!(candidate_wrapper.contains("runtime_surface[\"artifact_count\"] == 11"));
     assert!(candidate_wrapper.contains("runtime_surface[\"observability_field_count\"] == 26"));
     assert!(candidate_wrapper.contains("runtime_meta.tool_protocol_errors_json"));
@@ -400,6 +401,9 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(candidate_wrapper.contains("tool_unified_execution_status"));
     assert!(candidate_wrapper.contains("tool_unified_execution_failure_count"));
     assert!(candidate_wrapper.contains("tool_unified_execution_failure_classes"));
+    assert!(candidate_wrapper
+        .contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(candidate_wrapper.contains("candidate_live_readiness_state="));
     assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));
     assert!(candidate_wrapper.contains("goal_handoff_report_admission_reason_codes"));

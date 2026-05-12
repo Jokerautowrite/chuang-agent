@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live readiness 防混摘要进入 readiness/candidate 门禁
+- 本轮继续把刚补齐的 `live_readiness` 状态面抬到高层验收：`scripts/chuang-live-runner-readiness-view.sh` 现在从 status/doctor/app-server health 聚合 `live_readiness`，JSON 顶层和文本面都会展示 `local_ready_live_pending`、live worker unavailable、真实外部验收 pending、provider live request 未由 status 验证，以及 ready 不等于 live 的边界。
+- `scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 live runner readiness 阶段同步断言这些字段，并打印 candidate/third-test 的 live readiness 摘要；本轮仍只读、不连接真实 provider/Feishu、不启动 worker、不触碰 Hermes。验证已通过 `cargo test -q --test live_runner_readiness_view_tests`、`cargo test -q --test live_operator_scripts_tests`、`cargo test -q --test cli_smoke_tests final_verify_wrapper_requires_clean_tree_and_candidate_verify`、`bash scripts/chuang-live-runner-readiness-view.sh --json` 抽样、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 live readiness 防混摘要进入 status/doctor/health
 - 本轮继续沿 M5/M6/M7 状态可观测主链补人读/服务健康面：`status` 文本、`doctor` check/text、`app-server health` JSON/text 现在都透出同一份 `live_readiness` anti-confusion 摘要，直接展示 `local_ready_live_pending`、GA 仅本地映射、桌面/浏览器 live gate、BrowserWorker frozen、live worker unavailable、真实外部验收仍 pending，以及 ready/gated/mapped/frozen 不等于 live 的边界。
 - 这一步只提升已有 `kernel_status.live_readiness` 字段，不连接 provider/Feishu、不启动 worker、不读取或打印 secret；回归锁住 `cli_status_tests`、`cli_doctor_tests` 与 `app_server_tests` 的 JSON/text 查询面。验证已通过 `cargo test -q --test cli_status_tests --test cli_doctor_tests --test app_server_tests`、`cargo fmt --all --check`、`git diff --check`。

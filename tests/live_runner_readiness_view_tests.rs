@@ -331,6 +331,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
             "connects_real_feishu".to_string(),
             "connects_real_provider".to_string(),
             "deletes_files".to_string(),
+            "live_readiness".to_string(),
             "live_runner_rehearsal".to_string(),
             "modifies_repo".to_string(),
             "policy_tool_status".to_string(),
@@ -391,6 +392,20 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         .expect("file_write risk tags should be array")
         .iter()
         .any(|tag| tag == "write"));
+
+    let live_readiness = &parsed["live_readiness"];
+    assert_eq!(live_readiness["ok"], true);
+    assert_eq!(live_readiness["overall_state"], "local_ready_live_pending");
+    assert_eq!(live_readiness["ga_local_mapped_only"], true);
+    assert_eq!(live_readiness["desktop_browser_live_gated"], true);
+    assert_eq!(live_readiness["browser_worker_frozen"], true);
+    assert_eq!(live_readiness["live_worker_available"], false);
+    assert_eq!(live_readiness["real_external_acceptance_pending"], true);
+    assert_eq!(
+        live_readiness["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(live_readiness["ready_does_not_mean_live"], true);
 
     let runtime_surface = &parsed["runtime_report_surface"];
     assert_eq!(runtime_surface["ok"], true);
@@ -529,6 +544,15 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     assert!(stdout.contains("policy_tool_status.active_permission_profile=local_ga"));
     assert!(stdout.contains("policy_tool_status.ga_tool_descriptors=9/12"));
     assert!(stdout.contains("policy_tool_status.missing=none"));
+    assert!(stdout.contains("live_readiness.ok=true"));
+    assert!(stdout.contains("live_readiness.state=local_ready_live_pending"));
+    assert!(stdout.contains("live_readiness.ga_local_mapped_only=true"));
+    assert!(stdout.contains("live_readiness.desktop_browser_live_gated=true"));
+    assert!(stdout.contains("live_readiness.browser_worker_frozen=true"));
+    assert!(stdout.contains("live_readiness.live_worker_available=false"));
+    assert!(stdout.contains("live_readiness.real_external_acceptance_pending=true"));
+    assert!(stdout.contains("live_readiness.provider_live_request_verified_by_status=false"));
+    assert!(stdout.contains("live_readiness.ready_does_not_mean_live=true"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
     assert!(stdout.contains("tool_unified_execution_status"));
