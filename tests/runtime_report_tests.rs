@@ -991,6 +991,11 @@ fn runtime_report_promotes_tool_report_metadata_to_artifact() {
         r#"{"schema_version":6,"status":"completed","workspace_root":"/tmp/work","rounds":2,"call_count":1,"calls":[]}"#
             .to_string(),
     );
+    extra.insert(
+        "tool_protocol_errors_json".to_string(),
+        r#"[{"code":"invalid_action_json","message":"ACTION payload is invalid","raw":"ACTION: {"},{"code":"plain_text_response","message":"plain text is not accepted","raw":"hello"}]"#
+            .to_string(),
+    );
     let result = chuang_agent::agent_runtime::RuntimeResult {
         prompt: "prompt".to_string(),
         response: chuang_agent::agent_runtime::RuntimeResponse {
@@ -1033,6 +1038,19 @@ fn runtime_report_promotes_tool_report_metadata_to_artifact() {
         .as_deref()
         .expect("description")
         .contains("calls=1"));
+    let protocol_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.tool_protocol_errors_json")
+        .expect("tool protocol errors artifact should exist");
+    assert_eq!(protocol_artifact.kind, ArtifactKind::Log);
+    let protocol_description = protocol_artifact
+        .description
+        .as_deref()
+        .expect("protocol description");
+    assert!(protocol_description.contains("count=2"));
+    assert!(protocol_description.contains("invalid_action_json"));
+    assert!(protocol_description.contains("plain_text_response"));
     assert!(report
         .artifacts
         .iter()

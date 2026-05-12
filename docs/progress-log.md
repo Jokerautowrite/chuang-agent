@@ -1786,3 +1786,7 @@
 # 2026-05-12 tool protocol errors 提升到 runtime report surface
 - 本轮把 M7/tool protocol 非零错误从 provider meta 可见推进到 runtime report 查询面：`runtime_report` 现在会把 `tool_protocol_errors_json` 提升为 `runtime_meta.tool_protocol_errors_json` artifact，并给出错误数量与 code 摘要；`runtime_report_surface` 同步提升到 11 个 artifact / 26 个 observability 字段，新增 `tool_protocol_error_count`。
 - status/doctor/app-server health、readiness view、MVP/complete-local/candidate/third-test 脚本与静态回归已同步到 11/26，并显式断言 `runtime_meta.tool_protocol_errors_json` 与 `tool_protocol_error_count`。验证已通过 runtime/status/doctor/smoke/readiness/operator/app-server 相关 cargo 测试、完整 `sh scripts/chuang-mvp-smoke.sh` 和 `sh scripts/chuang-candidate-verify.sh`。下一轮入口：继续寻找 app-server/channel 能否稳定构造非零 tool protocol 错误路径；若没有脚本 provider 入口，优先加 runtime 层合同测试而不造后门。
+
+# 2026-05-12 tool protocol error artifact 合同回归
+- 本轮在 runtime report 层补了非零协议错误合同回归：`runtime_report_promotes_tool_report_metadata_to_artifact` 现在构造 `tool_protocol_errors_json`，并断言 `runtime_meta.tool_protocol_errors_json` artifact 存在，description 含 `count=2`、`invalid_action_json` 与 `plain_text_response`。
+- 验证已通过 `cargo test -q --test runtime_report_tests runtime_report_promotes_tool_report_metadata_to_artifact`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：继续看 app-server/channel 是否能通过现有 provider 配置稳定触发非零协议错误；若不能，保持 runtime 层合同优先，不引入测试后门。
