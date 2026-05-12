@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖最新 smoke/channel guard
+- 本轮在 `cba1c20` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认最新 MVP channel live readiness guard 与 third-test unified execution 静态门禁未破坏第三测试链路：third-test 打印 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`project_goal_run_checkpoint_count=116`、checkpoint log complete 为 true；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret、未触碰 Hermes。
+
 # 2026-05-12 candidate 复验覆盖最新 smoke/channel guard
 - 本轮在 `45aba43` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，完整继承 complete-local、goal-mode 正负 smoke、channel simulate live readiness 断言、Feishu turn summary smoke、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 与 provider readiness 只读检查；最终输出 `chuang_candidate_verify_ok`。
 - 复验确认 candidate 仍打印 `candidate_live_readiness_state=local_ready_live_pending`、`candidate_runtime_report_surface=11/26`、`candidate_policy_tool_status=9/12`，GoalRun checkpoint count 到 115 且 checkpoint log complete 为 true；provider readiness 只显示 `api_key_state=<set>`，未发真实 provider 请求、未打印 secret、未触碰 Hermes。
