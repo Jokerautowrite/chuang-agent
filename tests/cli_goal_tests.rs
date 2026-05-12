@@ -563,6 +563,38 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
         ready_to_checkpoint["goal_operability"]["goal_collect"]["completed_worker_ids"],
         serde_json::json!(["goal-worker-1", "goal-worker-2"])
     );
+    let handoff_summary =
+        &ready_to_checkpoint["goal_operability"]["goal_collect"]["handoff_query_summary"];
+    assert_eq!(
+        handoff_summary["parent_context_handoff_count"],
+        serde_json::Value::Number(2.into())
+    );
+    assert_eq!(
+        handoff_summary["report_admission_ref_count"],
+        serde_json::Value::Number(2.into())
+    );
+    assert_eq!(
+        handoff_summary["report_admission_reason_codes"]["report_validated"],
+        serde_json::Value::Number(2.into())
+    );
+    let admission_refs = handoff_summary["report_admission_refs"]
+        .as_array()
+        .expect("admission refs");
+    assert_eq!(admission_refs.len(), 2);
+    assert!(admission_refs.iter().all(|entry| entry["admission_id"]
+        .as_str()
+        .expect("admission id")
+        .starts_with("goal-report-admission://")));
+    assert!(admission_refs
+        .iter()
+        .all(|entry| entry["admission_status"] == "Accepted"));
+    assert!(admission_refs
+        .iter()
+        .all(|entry| entry["reason_code"] == "report_validated"));
+    assert!(admission_refs.iter().all(|entry| entry["evidence_ref"]
+        .as_str()
+        .expect("evidence ref")
+        .starts_with("report://")));
     let ready_validation_notes = ready_to_checkpoint["goal_operability"]["goal_collect"]
         ["checkpoint_suggestion"]["validation_notes"]
         .as_array()

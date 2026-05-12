@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal show JSON admission locator 回归加固
+- 本轮继续收 M6 goal/subagent 查询面：`tests/cli_goal_tests.rs` 的 `cli_goal_show_surfaces_next_command_and_stage_readiness` 现在在 checkpoint-ready 的 `goal show --json` 路径里直接断言 `handoff_query_summary` 携带 `parent_context_handoff_count=2`、`report_admission_ref_count=2`、`report_validated=2`，并逐项锁住 `goal-report-admission://...` admission locator、`Accepted` 状态、`report_validated` reason code 和 `report://...` evidence ref。
+- 这让 `goal show` 的 JSON 面和既有文本面、`goal collect` / `goal step` 面保持同一套 admission locator 口径，不再只验证 checkpoint worker/validation note。验证已通过 `cargo test -q --test cli_goal_tests cli_goal_show_surfaces_next_command_and_stage_readiness`；下一步继续扫 subagent tree/list children 或 candidate smoke 是否还缺同类 JSON locator 抽样。
+
 # 2026-05-12 MCP structural risk tag 查询面补齐
 - 本轮继续推进 M5 MCP fake adapter 到治理查询面的主链：`mcp_tool_descriptor_risk()` 现在会把 MCP spec 的结构化 `destructive=true` 显式补成 `destructive` risk tag，和已有 `open_world`、`external_commit`、`omitted_risk_tightened` 摘要保持一致；`classify_tag()` 也识别 `destructive` / `destructive_action` 为删除/破坏类风险，避免 MCP 服务端只给布尔高危而没给标签时，治理状态面无法按高危类别检索。
 - 回归 `mcp_descriptor_conversion_marks_structural_risks_as_queryable_tags` 已锁住 destructive/open_world 结构风险都会进入 `ToolDescriptorRisk.risk_tags`。验证已通过 `cargo fmt --all --check` 和 `cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests`。下一轮继续扫 M6 goal/subagent 状态面和 M7 高层 runtime surface 是否还有类似查询摘要缺口。
