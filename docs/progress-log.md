@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验 event observability 口径
+- 本轮在 runtime/status/channel 矩阵后跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认 complete-local、goal 正负 smoke、live runner rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 与 provider readiness 仍能通过最新 runtime event observability 口径。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_live_readiness_state=local_ready_live_pending`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 143，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778606779317651318`，count 到 144。
+
 # 2026-05-12 runtime/status/channel event observability 矩阵复验
 - 本轮复验当前 runtime event observability 新口径：无工具 turn 的 `runtime_event_*` 字段在 runtime_report、channel/app-server turn、status/doctor/readiness 相关矩阵中保持稳定可查；当前顶部记录为准，旧历史日志中“无工具 turn 不显示/不伪造 runtime_event_count”的说法不再代表当前合同。
 - 验证已通过 `cargo test -q --test live_runner_readiness_view_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests --test cli_channel_tests --test runtime_report_tests`。GoalRun checkpoint 写入 `checkpoint-1778606671783719619`，count 到 143。
