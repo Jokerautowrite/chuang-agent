@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 channel tool surface 文本面
+- 本轮在 `293c75d` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认最新 channel tool surface 文本面改动未破坏第三测试链路：candidate/third-test 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=91`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 candidate 复验覆盖 channel tool surface 文本面
 - 本轮在 `d88a32f` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，继承 complete-local、goal-mode 正负 smoke、live runner rehearsal、live gaps、live runner readiness、operator checklist/receipt 和 goal run status 摘要；最终输出 `chuang_candidate_verify_ok`。
 - 复验确认 channel tool surface 文本面改动未破坏候选链路：candidate 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=90`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
