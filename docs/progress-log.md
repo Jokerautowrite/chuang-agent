@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal step JSON admission locator 回归加固
+- 本轮继续沿 M6 goal 主链补查询面一致性：`tests/cli_goal_tests.rs` 的 `cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointing` 现在在 `goal step --json` receipt 中直接断言 `collection.handoff_query_summary` 携带 `parent_context_handoff_count=2`、`report_admission_ref_count=2`、`report_validated=2`，并锁住两条 `goal-report-admission://...` admission locator、`Accepted` 状态、`report_validated` reason code 和 `report://...` evidence ref。
+- 这把 `goal step --json` 和既有 `goal step` 文本面、`goal collect`、`goal show --json` 的 admission locator 口径对齐，避免主控只在文本或 show 面能查到 report admission 证据。验证已通过 `cargo test -q --test cli_goal_tests cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointing`、`cargo test -q --test cli_goal_tests --test goal_dispatch_tests` 和 `cargo fmt --all --check`。
+
 # 2026-05-12 third-test clean-tree 复验通过
 - 本轮在干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、complete-local、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 只读摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 关键状态面继续保持 `live_runner_readiness_view_runtime_report_surface_artifacts=11`、`live_runner_readiness_view_runtime_report_surface_observability_fields=26`，provider readiness 只显示 `api_key_state=<set>` / `connects_real_provider=false`，没有打印 secret。下一轮继续推进剩余 M5/M6/M7 高层查询边角或主链接线代码缺口。

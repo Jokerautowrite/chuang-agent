@@ -1868,6 +1868,31 @@ fn cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointin
         receipt["collection"]["ready_to_checkpoint"],
         serde_json::Value::Bool(true)
     );
+    let handoff_summary = &receipt["collection"]["handoff_query_summary"];
+    assert_eq!(handoff_summary["parent_context_handoff_count"], 2);
+    assert_eq!(handoff_summary["report_admission_ref_count"], 2);
+    assert_eq!(
+        handoff_summary["report_admission_reason_codes"]["report_validated"],
+        2
+    );
+    let admission_refs = handoff_summary["report_admission_refs"]
+        .as_array()
+        .expect("step admission refs should be array");
+    assert_eq!(admission_refs.len(), 2);
+    assert!(admission_refs.iter().all(|entry| entry["admission_id"]
+        .as_str()
+        .expect("admission id")
+        .starts_with("goal-report-admission://")));
+    assert!(admission_refs
+        .iter()
+        .all(|entry| entry["admission_status"] == "Accepted"));
+    assert!(admission_refs
+        .iter()
+        .all(|entry| entry["reason_code"] == "report_validated"));
+    assert!(admission_refs.iter().all(|entry| entry["evidence_ref"]
+        .as_str()
+        .expect("evidence ref")
+        .starts_with("report://")));
     assert_eq!(receipt["checkpoint_recorded"], false);
     assert_eq!(receipt["writes_progress_log"], false);
     assert_eq!(receipt["writes_handoff"], false);
