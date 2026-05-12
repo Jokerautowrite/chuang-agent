@@ -1895,6 +1895,7 @@ fn cli_goal_step_text_exposes_handoff_query_summary() {
     assert!(stdout.contains("goal_step_handoff_query_report_admission_ref_count: 2"));
     assert!(stdout.contains("goal_step_handoff_query_report_admission_reason_codes:"));
     assert!(stdout.contains("goal_step_handoff_query_report_admission_refs:"));
+    assert!(stdout.contains("admission_id=goal-report-admission://"));
 }
 
 #[test]

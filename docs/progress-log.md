@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal step admission locator 回归加固
+- 本轮继续沿 M6 goal 查询面做小步回归加固：`tests/cli_goal_tests.rs` 的 `cli_goal_step_text_exposes_handoff_query_summary` 现在不只检查 `goal_step_handoff_query_report_admission_refs` 字段名，还显式断言文本输出包含 `admission_id=goal-report-admission://`。这样前台 bounded `goal step` 的 handoff query 文本面会持续携带可点击/可追踪的 admission locator，而不是只显示空字段名。
+- 验证已通过 `cargo test -q --test cli_goal_tests cli_goal_step_text_exposes_handoff_query_summary`。下一轮入口：继续检查 `goal show` / candidate / third-test 是否需要对具体 admission locator 做运行态只读抽查，而不只检查字段集合。
+
 # 2026-05-12 third-test clean-tree 复验与 handoff 刷新
 - 刚提交 `8360ac3 feat(runtime): lock runtime report query surfaces` 后，已在干净工作树补跑 `sh scripts/chuang-third-test-smoke.sh`，完整串过 final verify、candidate verify、complete-local、live readonly preflight、live gaps、readiness view、operator checklist、receipt template 和 goal run status 只读摘要；第三测试入口确认 `runtime_report_surface` 仍为 10 个 artifact / 25 个 observability 字段。
 - 同步刷新 `docs/handoff-current.md` 顶部过期的 20/23 字段口径到当前 25 字段，避免交接文档和已提交门禁漂移。下一轮入口：继续回到 goal run / subagent tree admission locator 的更高层文本摘要，或补 final/candidate/third-test 对 goal 查询面的只读抽查。
