@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate/third-test GoalRun checkpoint 时间摘要
+- 本轮继续把 M6/M7 GoalRun 状态证据往候选门禁抬：`scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 goal run status 摘要现在会打印 latest checkpoint 的 `created_at`，和 checkpoint id、完整性、worker count、validation note count 同屏展示。
+- `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs` 已锁住 candidate/third-test wrapper 保留该字段；candidate 复验已确认实际输出 `candidate_project_goal_run_last_checkpoint_created_at=...`。验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests`、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 GoalRun status 文本面补 checkpoint 时间
 - 本轮继续沿 M6/M7 goal 状态可观测性补人读状态面：`scripts/chuang-goal-run-status.sh` 文本输出现在除 project GoalRun checkpoint id/summary、worker count、validation note count 外，也打印 `project_goal_run_last_checkpoint_created_at`，方便人工确认当前 status 面对应哪一次 checkpoint。
 - JSON 面已有 `last_checkpoint_created_at`，本轮只补文本面和回归，不启动 worker、不修改运行态服务、不打印 validation note 原文。验证已通过 `cargo test -q --test cli_smoke_tests goal_run_status_script_reads_watchdog_and_overnight_status_without_actions`、`cargo test -q --test cli_smoke_tests`、`bash scripts/chuang-goal-run-status.sh` 抽样、`cargo fmt --all --check`、`git diff --check`。

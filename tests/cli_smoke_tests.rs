@@ -465,6 +465,7 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("candidate_project_goal_run_checkpoint_count="));
     assert!(wrapper.contains("candidate_project_goal_run_checkpoint_log_complete="));
     assert!(wrapper.contains("candidate_project_goal_run_last_checkpoint="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_checkpoint_created_at="));
     assert!(wrapper.contains("candidate_project_goal_run_last_completed_worker_count="));
     assert!(wrapper.contains("candidate_project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("connects_real_feishu\"] is False"));
@@ -638,6 +639,7 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("project_goal_run_checkpoint_count="));
     assert!(wrapper.contains("project_goal_run_checkpoint_log_complete="));
     assert!(wrapper.contains("project_goal_run_last_checkpoint="));
+    assert!(wrapper.contains("project_goal_run_last_checkpoint_created_at="));
     assert!(wrapper.contains("project_goal_run_last_completed_worker_count="));
     assert!(wrapper.contains("project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("third_test_candidate_smoke_ok"));
