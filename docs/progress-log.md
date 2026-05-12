@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 全量 cargo test 复验 handoff observability 默认值
+- 本轮在 runtime observability handoff/subagent 默认字段补强、candidate verify 和 third-test 复验后，跑通全量 `cargo test -q`，确认当前代码与测试全仓绿色。
+- 验证已通过 `cargo test -q`。GoalRun checkpoint 写入 `checkpoint-1778608503509953372`，count 到 157。
+
 # 2026-05-12 third-test 复验 handoff observability 默认值
 - 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认 runtime observability handoff/subagent 默认字段补强已经通过 final/candidate、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 只读摘要链路。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 155，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778608385954760227`，count 到 156。
