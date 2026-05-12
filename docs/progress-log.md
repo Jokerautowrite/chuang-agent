@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 全量 cargo test 复验 runtime surface gates
+- 在 readiness JSON 抽样、live operator/static 矩阵和 app/channel/runtime/status 联合矩阵后，本轮跑通全量 `cargo test -q`，确认本批 M5/M6/M7 状态面与回归补强没有破坏其他模块。
+- 验证已通过 `cargo test -q`；GoalRun checkpoint 写入 `checkpoint-1778603863826550697`，count 到 133。本轮仅本地测试和文档记录，不连接真实 Feishu/provider，不触碰 Hermes。
+
 # 2026-05-12 app/channel/runtime/status 联合矩阵复验
 - 本轮复跑 app-server、channel、runtime report 与 kernel status 联合矩阵，确认非零 tool protocol error、runtime report 合同、11/26 runtime surface、status surface 与 channel/app-server 输出仍同口径。
 - 验证已通过 `cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests`；GoalRun checkpoint 写入 `checkpoint-1778603718019054097`，count 到 132。本轮只跑本地测试，不连接真实 Feishu/provider，不触碰 Hermes。
