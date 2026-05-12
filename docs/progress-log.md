@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 readiness/candidate runtime surface 复验
+- 本轮在 M5 structural risk、M6 goal JSON locator 和 subagent children 三态回归之后，复跑高层 readiness/candidate 静态矩阵：`cargo test -q --test live_runner_readiness_view_tests --test live_operator_scripts_tests --test cli_smoke_tests` 全部通过，覆盖 live runner readiness JSON/text、candidate/third-test wrapper 断言和 smoke wrapper 静态继承。
+- 只读运行态抽查 `bash scripts/chuang-live-runner-readiness-view.sh --json` 确认 `runtime_report_surface` 仍为 11 个 artifact / 26 个 observability 字段，并且 `runtime_meta.tool_protocol_errors_json`、`tool_protocol_error_count`、`subagent_children_report_admission_refs` 均在聚合状态面可见。下一步继续跑更宽 M5/M6/M7 矩阵，必要时再补 candidate wrapper 的运行态门禁。
+
 # 2026-05-12 subagent children listed 三态回归加固
 - 本轮继续补 M6 subagent tree/list children 事件面：`tests/subagent_tree_events_tests.rs` 的 `list_event_snapshots_children_and_their_evidence_refs` 现在同时覆盖 accepted、rejected、missing 三类 child report 状态，锁住 `children_summary` 里的 `accepted_report_count=1`、`rejected_report_count=1`、`missing_report_count=1`、`report_admission_refs` 两条 admission refs，以及 `report_validated` / `command_protocol_report_rejected` reason-code 分布。
 - 这保证 `subagent_children_listed` runtime bridge 事件不会只对 accepted report 暴露 admission locator，而漏掉 rejected report 的状态、reason code 和 evidence ref。验证已通过 `cargo test -q --test subagent_tree_events_tests list_event_snapshots_children_and_their_evidence_refs`；下一步继续跑 M6 矩阵并看这些状态是否还需要进入更高层 smoke/candidate 抽样。
