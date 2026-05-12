@@ -176,9 +176,12 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
     assert!(wrapper.contains("runtime_event_approval_requested_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_ref_count"));
+    assert!(wrapper.contains("goal_handoff_parent_context_handoff_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_refs"));
     assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
     assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_child_count"));
+    assert!(wrapper.contains("subagent_children_accepted_report_count"));
     assert!(wrapper.contains("subagent_children_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_reason_codes"));
     assert!(wrapper.contains("subagent_children_missing_report_count"));
@@ -443,8 +446,13 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));
     assert!(candidate_wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(candidate_wrapper.contains("goal_handoff_parent_context_handoff_count"));
+    assert!(candidate_wrapper.contains("goal_handoff_report_admission_ref_count"));
     assert!(candidate_wrapper.contains("goal_handoff_report_admission_refs"));
     assert!(candidate_wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(candidate_wrapper.contains("subagent_children_child_count"));
+    assert!(candidate_wrapper.contains("subagent_children_accepted_report_count"));
+    assert!(candidate_wrapper.contains("subagent_children_missing_report_count"));
     assert!(candidate_wrapper.contains("subagent_children_report_admission_refs"));
     assert!(candidate_wrapper.contains("subagent_children_report_reason_codes"));
     assert!(!wrapper.contains("rm "));

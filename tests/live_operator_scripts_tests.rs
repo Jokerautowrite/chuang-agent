@@ -919,8 +919,13 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("tool_unified_execution_failure_count"));
     assert!(wrapper.contains("tool_unified_execution_failure_classes"));
     assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(wrapper.contains("goal_handoff_parent_context_handoff_count"));
+    assert!(wrapper.contains("goal_handoff_report_admission_ref_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_child_count"));
+    assert!(wrapper.contains("subagent_children_accepted_report_count"));
+    assert!(wrapper.contains("subagent_children_missing_report_count"));
     assert!(wrapper.contains("subagent_children_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_reason_codes"));
     assert!(wrapper.contains("candidate_runtime_report_surface_artifacts="));
