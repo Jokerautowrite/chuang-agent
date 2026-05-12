@@ -62,7 +62,6 @@ function buildProcessSection(turn) {
   const responseKind = normalizeText(providerMeta.response_kind);
   const finishReason = normalizeText(providerMeta.response_finish_reason);
   const toolCallCount = pickNumber(turn.toolCallCount || providerMeta.tool_call_count);
-  const toolTrace = truncateText(normalizeText(turn.toolTrace || providerMeta.tool_trace), 240);
   const unifiedStatus = normalizeText(
     observability.tool_unified_execution_status || providerMeta.tool_unified_execution_status
   );
@@ -76,9 +75,6 @@ function buildProcessSection(turn) {
   const lines = ["过程摘要", `- ${toolState}`];
   if (toolCallCount > 0) {
     lines.push(`- 工具调用 ${toolCallCount} 次`);
-    if (toolTrace && protocolErrorCount === 0) {
-      lines.push(`- 工具轨迹：${toolTrace}`);
-    }
   }
   if (unifiedStatus || unifiedFailureCount > 0) {
     lines.push(`- 工具执行 ${unifiedStatus || "unknown"} / 失败 ${unifiedFailureCount}`);

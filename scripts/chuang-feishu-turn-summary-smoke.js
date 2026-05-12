@@ -61,6 +61,24 @@ assert(!process.includes("工具协议错误"));
 assert(!process.includes("trace transport="));
 assert(!process.includes("api_key=len:67"));
 
+const toolTraceProcess = buildProcessSection({
+  status: "completed",
+  providerMeta: {
+    response_kind: "chat.completion",
+    response_finish_reason: "stop",
+    tool_call_count: "1",
+    tool_trace: "trace transport=openai-compatible base_url=https://api.pptoken.org/v1 api_key=len:67",
+    tool_unified_execution_status: "ok",
+    tool_unified_execution_failure_count: "0",
+    tool_protocol_error_count: "0",
+  },
+});
+assert(toolTraceProcess.includes("工具调用 1 次"));
+assert(toolTraceProcess.includes("工具执行 ok / 失败 0"));
+assert(!toolTraceProcess.includes("工具轨迹"));
+assert(!toolTraceProcess.includes("trace transport="));
+assert(!toolTraceProcess.includes("api_key=len:67"));
+
 const toolProblemProcess = buildProcessSection({
   status: "completed",
   providerMeta: {

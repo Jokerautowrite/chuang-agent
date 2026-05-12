@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 Feishu process summary 不再输出 raw tool_trace
+- 本轮继续沿 M7 Feishu 通道输出面收紧正文边界：`scripts/chuang-feishu-turn-summary.js` 的过程摘要不再展示兼容 `tool_trace` 原文，即使工具调用成功且协议错误为 0，也只显示工具调用数、统一执行状态、失败数、协议错误计数和 provider finish 摘要。
+- `scripts/chuang-feishu-turn-summary-smoke.js` 新增无协议错误但 `providerMeta.tool_trace` 含 base_url/api_key 长度摘要的场景，锁住 Feishu 文本不输出 `工具轨迹`、`trace transport=` 或 `api_key=len:...`；结构化 app-server/channel JSON 仍保留 tool trace 供本地审计。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 third-test 复验覆盖 GoalRun evidence counts
 - 本轮在 `78f15f3` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认 M6 新增高层字段已进入 candidate 与 third-test：`project_goal_run_checkpoint_count=83`、`project_goal_run_checkpoint_log_complete=true`、latest completed worker count 为 1、validation note count 为 3；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
