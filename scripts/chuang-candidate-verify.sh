@@ -198,6 +198,9 @@ assert real_live["status"] == "not_verified"
 assert real_live["gap_count"] == 7
 assert real_live["cannot_mark_complete_from_template"] is True
 assert real_live["requires_operator_evidence"] is True
+for service in real_live["services"]:
+    assert service["manual_live_required"] is True
+    assert service["must_not_count_as_complete"] is True
 assert real_live["services"][2]["required"] == [
     "single worker only",
     "gate receipt is explicit",

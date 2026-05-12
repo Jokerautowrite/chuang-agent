@@ -488,6 +488,8 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
         "assert data[\"service_evidence\"][\"subagent_live_rehearsal\"][\"report_admission_ref\"] == \"<fill_after_test>\""
     ));
     assert!(wrapper.contains("assert real_live[\"services\"][2][\"required\"] == ["));
+    assert!(wrapper.contains("assert service[\"manual_live_required\"] is True"));
+    assert!(wrapper.contains("assert service[\"must_not_count_as_complete\"] is True"));
     assert!(wrapper.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
     assert!(wrapper.contains("unset CHUANG_REAL_CONTROL_ENABLE"));
     assert!(wrapper.contains("unset CHUANG_REAL_ACTUATOR_ENABLE"));
@@ -654,6 +656,8 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     ));
     assert!(wrapper
         .contains("assert data[\"real_live_acceptance\"][\"services\"][2][\"required\"] == ["));
+    assert!(wrapper.contains("assert service[\"manual_live_required\"] is True"));
+    assert!(wrapper.contains("assert service[\"must_not_count_as_complete\"] is True"));
     assert!(wrapper.contains(
         "[\"feishu\", \"provider\", \"subagent_live_rehearsal\", \"desktop\", \"browser\", \"wiki\", \"gbrain\"]"
     ));

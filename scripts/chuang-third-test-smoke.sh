@@ -212,6 +212,9 @@ assert data["service_evidence"]["subagent_live_rehearsal"]["gate_receipt_ref"] =
 assert data["service_evidence"]["subagent_live_rehearsal"]["allowlist_receipt_ref"] == "<fill_after_test>"
 assert data["service_evidence"]["subagent_live_rehearsal"]["capability_routing_ref"] == "<fill_after_test>"
 assert data["service_evidence"]["subagent_live_rehearsal"]["report_admission_ref"] == "<fill_after_test>"
+for service in data["real_live_acceptance"]["services"]:
+    assert service["manual_live_required"] is True
+    assert service["must_not_count_as_complete"] is True
 assert data["real_live_acceptance"]["services"][2]["required"] == [
     "single worker only",
     "gate receipt is explicit",

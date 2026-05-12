@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live operator receipt 服务级 ready 边界加固
+- 本轮继续沿 M5/M6/M7 只读 live acceptance 主链补高层门禁：`scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 现在在 operator receipt 模板结构断言里逐项锁住 `real_live_acceptance.services[*].manual_live_required=true` 与 `must_not_count_as_complete=true`，避免把只读 receipt 模板或未闭环 evidence 误升格为真实 live ready。
+- `tests/live_operator_receipt_collect_tests.rs` 同步补 overlay 提权回归：即使 overlay 声称服务已 verified、关闭 manual/live 禁止字段或清空 required evidence，collector 仍保持 `can_mark_real_live_ready=false`、`real_live_acceptance.complete=false`，并恢复 7 个 canonical 服务的 manual/live 必填边界。验证已通过 `cargo test -q --test live_operator_receipt_collect_tests --test live_operator_scripts_tests --test cli_smoke_tests`、`cargo fmt --all --check`、`sh -n` 和 `git diff --check`；GoalRun 写入 `checkpoint-1778590077713349783`，checkpoint count 到 78。
+
 # 2026-05-12 live runner rehearsal admission 身份字段加固
 - 本轮继续沿 M6 subagent/report admission 证据链补运行态抽样：`scripts/chuang-live-runner-rehearsal-smoke.sh` 现在不仅断言 `report_admission.status=Accepted` 与 `reason_code=report_validated`，还在 run-once、report、collect 三个输出面锁住 `controller_agent_id=cli-subagent-controller`、task/agent/report id 与 dispatch/report 对齐，以及 `decided_at` 为 UTC 时间戳。
 - 对应静态回归补到 `tests/cli_smoke_tests.rs`，确认 live runner rehearsal smoke 不会退化成只检查状态字符串。验证已通过 `sh scripts/chuang-live-runner-rehearsal-smoke.sh`、`cargo test -q --test cli_smoke_tests live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission`、`cargo fmt --all --check`、`sh -n` 和 `git diff --check`。

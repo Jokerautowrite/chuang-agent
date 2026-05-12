@@ -310,7 +310,23 @@ fn live_operator_receipt_collect_script_refuses_overlay_live_ready_boundary_esca
             "status": "verified",
             "gap_count": 0,
             "cannot_mark_complete_from_template": false,
-            "requires_operator_evidence": false
+            "requires_operator_evidence": false,
+            "services": [
+                {
+                    "id": "feishu",
+                    "completion_state": "verified",
+                    "manual_live_required": false,
+                    "must_not_count_as_complete": false,
+                    "required": []
+                },
+                {
+                    "id": "subagent_live_rehearsal",
+                    "completion_state": "verified",
+                    "manual_live_required": false,
+                    "must_not_count_as_complete": false,
+                    "required": []
+                }
+            ]
         }
     });
     let overlay_path = write_temp_json(&temp_dir, "overlay.json", &overlay);
@@ -356,4 +372,23 @@ fn live_operator_receipt_collect_script_refuses_overlay_live_ready_boundary_esca
         data["real_live_acceptance"]["requires_operator_evidence"],
         true
     );
+    let services = data["real_live_acceptance"]["services"]
+        .as_array()
+        .expect("real live acceptance services should be an array");
+    assert_eq!(services.len(), 7);
+    assert_eq!(services[0]["id"], "feishu");
+    assert_eq!(services[0]["completion_state"], "verified");
+    assert_eq!(services[2]["id"], "subagent_live_rehearsal");
+    assert_eq!(services[2]["completion_state"], "verified");
+    for service in services {
+        assert_eq!(service["manual_live_required"], true);
+        assert_eq!(service["must_not_count_as_complete"], true);
+        assert!(
+            service["required"]
+                .as_array()
+                .expect("service required list should be an array")
+                .len()
+                > 0
+        );
+    }
 }
