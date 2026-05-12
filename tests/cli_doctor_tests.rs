@@ -97,6 +97,20 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("tool_unified_execution_status"));
     assert!(stdout.contains("context_pack_trace"));
     assert!(stdout.contains("context_compaction_summary_json"));
+    assert!(stdout.contains("runtime_response.trace"));
+    assert!(stdout.contains("runtime_response_trace_chars"));
+    assert!(stdout.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(stdout.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(stdout.contains("goal_handoff_parent_context_handoff_count"));
+    assert!(stdout.contains("goal_handoff_report_admission_ref_count"));
+    assert!(stdout.contains("goal_handoff_report_admission_refs"));
+    assert!(stdout.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(stdout.contains("subagent_children_child_count"));
+    assert!(stdout.contains("subagent_children_accepted_report_count"));
+    assert!(stdout.contains("subagent_children_report_admission_ref_count"));
+    assert!(stdout.contains("subagent_children_report_admission_refs"));
+    assert!(stdout.contains("subagent_children_missing_report_count"));
+    assert!(stdout.contains("subagent_children_report_reason_codes"));
     assert!(stdout.contains(
         "atomic_tools_ok: true manifest_schema_version=1 action_schema_version=1 report_schema_version=6"
     ));
