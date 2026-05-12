@@ -527,6 +527,48 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
 }
 
 #[test]
+fn runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger() {
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "gpt-observable".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: Some("local-openai-compatible".to_string()),
+                recall_hit_count: Some(0),
+                finish_reason: Some("stop".to_string()),
+                extra: BTreeMap::new(),
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 20,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    for key in [
+        "runtime_event_count",
+        "runtime_event_tool_started_count",
+        "runtime_event_tool_finished_count",
+        "runtime_event_approval_requested_count",
+        "runtime_event_approval_resolved_count",
+        "runtime_event_elicitation_requested_count",
+    ] {
+        assert_eq!(observability.get(key), Some(&"0".to_string()));
+    }
+}
+
+#[test]
 fn runtime_report_observability_meta_includes_typed_execution_failures() {
     let mut extra = BTreeMap::new();
     extra.insert(

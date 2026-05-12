@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 runtime_report 默认 runtime event counts 合同
+- 本轮在 channel/app-server turn 面补强后继续收口底层合同：新增 `runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger`，直接断言没有 `runtime_event_ledger_json` 时，`runtime_observability_meta` 仍稳定输出 runtime event count、tool started/finished、approval requested/resolved 和 elicitation requested 六个字段为 `0`。
+- 验证已通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger` 和 `cargo test -q --test runtime_report_tests --test cli_channel_tests --test app_server_tests`。GoalRun checkpoint 写入 `checkpoint-1778606540067668529`，count 到 142。
+
 # 2026-05-12 channel/app-server runtime event observability 补强
 - 本轮补齐 M5/M7 turn 面缺口：`runtime_observability_meta` 现在对 runtime event ledger 汇总字段提供稳定 `0` 默认值，确保无工具调用的 channel/app-server turn 也能查询 `runtime_event_count`、tool started/finished、approval requested/resolved 与 elicitation requested 计数，不再只在 status/doctor surface 可见。
 - 同步补 `tests/cli_channel_tests.rs` 与 `tests/app_server_tests.rs` 回归，锁住 `channel simulate --json`、`turn/start` response 和 `turn/completed` event 的 runtime event observability 字段。验证已通过 `cargo test -q --test cli_channel_tests`、`cargo test -q --test app_server_tests`、`cargo test -q --test runtime_report_tests`。GoalRun checkpoint 写入 `checkpoint-1778606346019524172`，count 到 141。
