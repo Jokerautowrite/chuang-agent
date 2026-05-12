@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 live docs 与 wrapper 静态矩阵复验
+- 本轮在 third-test、runbook、acceptance 文档同步后，复跑 wrapper 静态矩阵，确认 `cli_smoke_tests` 与 `live_operator_scripts_tests` 仍锁住 candidate、third-test、complete-local 的 runtime surface 字段集合。
+- 验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests` 和 `git diff --check` 文档检查。
+
 # 2026-05-13 third-test/runbook/acceptance 同步 wrapper guard 证据
 - 本轮同步 `docs/third-test-candidate.md`、`docs/live-operator-test-runbook.md` 与 `docs/acceptance-next-matrix.md`，把本地 runtime/report 证据口径更新到 2026-05-13：GoalRun checkpoint `checkpoint-1778614688417630606`、count 159，以及 readiness/status/channel/app-server/health/wrapper 同口径复验。
 - 文档继续保留真实 live receipt 边界：Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 仍需各自证据，不能由本地 readiness 或 wrapper guard 代替。验证已通过 `git diff --check -- docs/third-test-candidate.md docs/live-operator-test-runbook.md docs/acceptance-next-matrix.md`。
