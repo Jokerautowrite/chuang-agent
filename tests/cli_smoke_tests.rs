@@ -106,14 +106,18 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("runtime_report_surface = status[\"runtime_report_surface\"]"));
     assert!(wrapper.contains("runtime_report_surface[\"artifact_count\"] == 10"));
     assert!(wrapper.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(wrapper.contains("runtime_response.trace"));
+    assert!(wrapper.contains("runtime_response_trace_chars"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
     assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
     assert!(wrapper.contains("runtime_event_approval_requested_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_ref_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_refs"));
+    assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
     assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
     assert!(wrapper.contains("subagent_children_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_reason_codes"));
     assert!(wrapper.contains("subagent_children_missing_report_count"));
     assert!(wrapper.contains("context_compaction_summary_json"));
     assert!(wrapper.contains("for gate in data[\"live_adapter_gates\"][\"gates\"]"));

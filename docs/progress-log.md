@@ -1774,3 +1774,7 @@
 # 2026-05-12 readiness JSON runtime surface 字段补齐
 - 本轮继续把 M5/M6/M7 查询面往 readiness JSON 聚合面补齐：`tests/live_runner_readiness_view_tests.rs` 的 aggregated JSON 回归现在显式断言 `runtime_response.trace`、`runtime_response_trace_chars`、`runtime_meta.goal_handoff_query_summary_json`、`runtime_meta.subagent_children_summary_json`、goal handoff admission refs/reason-codes、subagent children admission refs/reason-codes 和 `context_compaction_summary_json` 都在 `runtime_report_surface` 中。
 - 这让 candidate/third-test 依赖的只读聚合 JSON 与文本面同口径，不再只靠 10/25 总数或少数字段抽样。验证已通过 `cargo test -q --test live_runner_readiness_view_tests live_runner_readiness_view_script_outputs_aggregated_json_view`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：继续扫 `complete-local` / candidate wrapper 静态测试与 goal-mode smoke 是否还缺同类字段抽样。
+
+# 2026-05-12 complete-local runtime surface 同口径补齐
+- 本轮把 `scripts/chuang-complete-local-smoke.sh` 的 4 个 runtime_report_surface 检查块补到 candidate/third-test 同口径：全部显式断言 `runtime_response.trace`、`runtime_response_trace_chars`、`runtime_meta.context_compaction_summary_json`、goal handoff admission reason codes 和 subagent children reason codes，避免 complete-local 门禁落后于 readiness/candidate 聚合面。
+- `tests/cli_smoke_tests.rs` 的 complete-local 静态回归同步锁住这些字段；验证已通过 `cargo test -q --test cli_smoke_tests complete_local_smoke_wrapper_reuses_safe_local_acceptance`、`cargo fmt --all --check`、`git diff --check` 和完整 `sh scripts/chuang-complete-local-smoke.sh`。下一轮入口：继续扫 MVP smoke 与 goal-mode smoke 的字段抽样是否也需要补齐 reason-code/trace chars，或者转去 tool protocol correction 的非零路径测试。
