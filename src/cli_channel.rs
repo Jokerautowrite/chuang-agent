@@ -302,12 +302,28 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
                 "tool_protocol_error_count: {}",
                 output.tool_protocol_error_count
             );
+            println!(
+                "tool_protocol_error_codes: {}",
+                format_tool_protocol_error_codes(&output.tool_protocol_errors)
+            );
             println!("reply: {}", output.outbound.text);
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
 
     Ok(())
+}
+
+fn format_tool_protocol_error_codes(errors: &[Value]) -> String {
+    let codes = errors
+        .iter()
+        .filter_map(|error| error.get("code").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if codes.is_empty() {
+        "none".to_string()
+    } else {
+        codes.join(",")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

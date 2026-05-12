@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel text protocol error code 面补齐
+- 本轮继续沿 M7 channel 输出面补协议错误可观测性：`channel simulate` 文本输出现在会在 `tool_protocol_error_count` 后打印 `tool_protocol_error_codes`，只展示稳定 code 列表，不打印 raw payload 或错误 message，避免文本回执里泄漏模型原始协议片段。
+- 新增回归 `cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload` 通过本地 OpenAI-compatible HTTP provider 触发一次 `invalid_action_json`，确认文本面输出 `tool_protocol_error_count: 1`、`tool_protocol_error_codes: invalid_action_json` 和最终修正回复，同时不包含 `ACTION:` / 原始 tool_call JSON。验证已通过 `cargo test -q --test cli_channel_tests cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload`。
+
 # 2026-05-12 app-server protocol error completed 事件面加固
 - 本轮继续沿 M7 app-server/channel 主链补非零协议错误事件面：`tests/app_server_tests.rs` 的 `app_server_turn_surfaces_nonzero_tool_protocol_errors` 现在不只在 `turn/start` 响应里检查 `toolProtocolErrors`、provider meta 和 `toolEvents.kind=protocol_error`，也在 `turn/completed` 事件里锁住 `invalid_action_json`、`providerMeta.tool_protocol_errors_json` 和 protocol_error event。
 - 这保证工具协议错误被模型修正后，订阅事件面和请求响应面都能查询同一份 `runtime_meta.tool_protocol_errors_json` 来源，而不会只剩 `toolProtocolErrorCount=1`。验证已通过 `cargo test -q --test app_server_tests app_server_turn_surfaces_nonzero_tool_protocol_errors`；下一步继续跑 app-server/channel/runtime_report 组合矩阵。

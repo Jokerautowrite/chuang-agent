@@ -375,6 +375,116 @@ transport = "http"
 }
 
 #[test]
+fn cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload() {
+    let workspace = temp_workspace("simulate-text-tool-protocol-error");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Channel test soul\n")
+        .expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Channel test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Channel test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n").expect("agents should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep channel replies concise.\n",
+    )
+    .expect("rules should write");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let scripted_outputs = [
+            r#"ACTION: {"type":"tool_call","call":{"tool":"file_read"}}"#,
+            r#"ACTION: {"type":"final","answer":"已修正协议错误。"}"#,
+        ];
+        for content in scripted_outputs {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let _ = read_http_request(&mut stream);
+            let body = serde_json::json!({
+                "id": "chatcmpl-channel-text-tool-protocol",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop"
+                }]
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
+    });
+
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "channel-text-protocol"
+base_url = "http://{address}/v1"
+model = "gpt-channel-text-protocol"
+api_key_env = "CHUANG_AGENT_CHANNEL_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("config should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("simulate")
+        .arg("--workspace-root")
+        .arg(&workspace)
+        .arg("--message-id")
+        .arg("msg-protocol-text-1")
+        .arg("--sender-id")
+        .arg("user-1")
+        .arg("--thread-id")
+        .arg("thread-protocol-text-1")
+        .arg("--text")
+        .arg("读取文件")
+        .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
+        .output()
+        .expect("channel simulate should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("server thread should finish");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("tool_protocol_error_count: 1"));
+    assert!(stdout.contains("tool_protocol_error_codes: invalid_action_json"));
+    assert!(stdout.contains("reply: 已修正协议错误。"));
+    assert!(!stdout.contains("missing field"));
+    assert!(!stdout.contains("ACTION:"));
+    assert!(!stdout.contains(r#""type":"tool_call""#));
+}
+
+#[test]
 fn cli_channel_simulate_can_forward_goal_context() {
     let workspace = temp_workspace("simulate-goal");
     write_workspace_config(&workspace);
