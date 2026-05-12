@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 M5/M6/M7 宽矩阵复验
+- 本轮在 `bcc9699`、`4391a05`、`044ae20`、`26ea423` 后复跑 M5/M6/M7 相关宽矩阵：`cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests --test subagent_tree_events_tests --test subagent_tree_ledger_tests --test cli_goal_tests --test goal_dispatch_tests --test runtime_report_tests` 全部通过，覆盖 MCP structural risk tags、permission/tool descriptor、subagent children admission states、goal admission locator JSON/text、goal dispatch handoff summary 与 runtime report surface。
+- `cargo fmt --all --check` 与 `git diff --check` 同步通过，当前主链仍保持 11 个 artifact / 26 个 observability 字段。下一轮继续看 app-server/channel 的协议错误非零路径是否还需要锁更多 report artifact 字段，或把 candidate/third-test 运行态门禁再收紧一层。
+
 # 2026-05-12 readiness/candidate runtime surface 复验
 - 本轮在 M5 structural risk、M6 goal JSON locator 和 subagent children 三态回归之后，复跑高层 readiness/candidate 静态矩阵：`cargo test -q --test live_runner_readiness_view_tests --test live_operator_scripts_tests --test cli_smoke_tests` 全部通过，覆盖 live runner readiness JSON/text、candidate/third-test wrapper 断言和 smoke wrapper 静态继承。
 - 只读运行态抽查 `bash scripts/chuang-live-runner-readiness-view.sh --json` 确认 `runtime_report_surface` 仍为 11 个 artifact / 26 个 observability 字段，并且 `runtime_meta.tool_protocol_errors_json`、`tool_protocol_error_count`、`subagent_children_report_admission_refs` 均在聚合状态面可见。下一步继续跑更宽 M5/M6/M7 矩阵，必要时再补 candidate wrapper 的运行态门禁。
