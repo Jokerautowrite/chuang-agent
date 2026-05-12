@@ -14,6 +14,8 @@ Environment overrides:
   CHUANG_GOAL_RUN_ROOT              overnight run root
   CHUANG_GOAL_OVERNIGHT_STATUS_FILE overnight status JSON path
   CHUANG_GOAL_TMUX_SESSION          tmux session to observe for interactive goal mode
+  CHUANG_AGENT_ROOT                   Chuang repo root for GoalRun checkpoint lookup
+  CHUANG_PROJECT_GOAL_RUN_FILE        project GoalRun JSON file to summarize
 
 Readonly boundaries:
   dispatches_tasks=false
@@ -48,8 +50,10 @@ WATCHDOG_REPORT_FILE="${CHUANG_GOAL_WATCHDOG_REPORT_FILE:-$HOME_DIR/.codex/chuan
 RUN_ROOT="${CHUANG_GOAL_RUN_ROOT:-$HOME_DIR/.codex/chuang-goal-runs}"
 OVERNIGHT_STATUS_FILE="${CHUANG_GOAL_OVERNIGHT_STATUS_FILE:-}"
 TMUX_SESSION="${CHUANG_GOAL_TMUX_SESSION:-chuang-codex-claude-goal}"
+AGENT_ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+PROJECT_GOAL_RUN_FILE="${CHUANG_PROJECT_GOAL_RUN_FILE:-$AGENT_ROOT/context/goal-runs/mainline-mvp.json}"
 
-export FORMAT WATCHDOG_REPORT_FILE RUN_ROOT OVERNIGHT_STATUS_FILE TMUX_SESSION
+export FORMAT WATCHDOG_REPORT_FILE RUN_ROOT OVERNIGHT_STATUS_FILE TMUX_SESSION AGENT_ROOT PROJECT_GOAL_RUN_FILE
 
 python3 - <<'PY'
 import json
@@ -63,6 +67,8 @@ WATCHDOG_REPORT_FILE = Path(os.environ["WATCHDOG_REPORT_FILE"])
 RUN_ROOT = Path(os.environ["RUN_ROOT"])
 OVERNIGHT_STATUS_FILE = os.environ.get("OVERNIGHT_STATUS_FILE", "")
 TMUX_SESSION = os.environ["TMUX_SESSION"]
+AGENT_ROOT = Path(os.environ["AGENT_ROOT"])
+PROJECT_GOAL_RUN_FILE = Path(os.environ["PROJECT_GOAL_RUN_FILE"])
 
 BOUNDARIES = {
     "readonly": True,
@@ -421,6 +427,50 @@ def summarize_overnight():
     return result
 
 
+def summarize_project_goal_run():
+    status = read_json_file(PROJECT_GOAL_RUN_FILE)
+    data = status.get("data")
+    base = {
+        "available": bool(status.get("available")),
+        "readable": bool(status.get("readable")),
+        "path": str(PROJECT_GOAL_RUN_FILE),
+        "agent_root": str(AGENT_ROOT),
+        "goal_id": None,
+        "checkpoint_count": 0,
+        "checkpoint_log_complete": False,
+        "last_checkpoint_id": None,
+        "last_checkpoint_summary": None,
+        "last_checkpoint_created_at": None,
+        "last_completed_worker_ids": [],
+        "last_validation_notes": [],
+        "error": status.get("error"),
+    }
+    if not isinstance(data, dict):
+        return base
+    goal_spec = data.get("goal_spec") if isinstance(data.get("goal_spec"), dict) else {}
+    checkpoints = data.get("checkpoint_log") if isinstance(data.get("checkpoint_log"), list) else []
+    base["goal_id"] = goal_spec.get("goal_id")
+    base["checkpoint_count"] = len(checkpoints)
+    if checkpoints and isinstance(checkpoints[-1], dict):
+        last = checkpoints[-1]
+        completed_worker_ids = last.get("completed_worker_ids") if isinstance(last.get("completed_worker_ids"), list) else []
+        validation_notes = last.get("validation_notes") if isinstance(last.get("validation_notes"), list) else []
+        base.update({
+            "last_checkpoint_id": last.get("checkpoint_id"),
+            "last_checkpoint_summary": last.get("summary"),
+            "last_checkpoint_created_at": last.get("created_at"),
+            "last_completed_worker_ids": [str(item) for item in completed_worker_ids],
+            "last_validation_notes": [str(item) for item in validation_notes],
+        })
+        base["checkpoint_log_complete"] = bool(
+            last.get("checkpoint_id")
+            and last.get("summary")
+            and completed_worker_ids
+            and validation_notes
+        )
+    return base
+
+
 def infer_interactive_state(tmux_observation, watchdog):
     tail_tmux = tmux_observation.get("pane_tail")
     if not isinstance(tail_tmux, list):
@@ -513,6 +563,7 @@ def infer_overall(watchdog, overnight, tmux_observation):
 
 watchdog = summarize_watchdog()
 overnight = summarize_overnight()
+project_goal_run = summarize_project_goal_run()
 tmux_observation = observe_tmux(TMUX_SESSION)
 interactive = infer_interactive_state(tmux_observation, watchdog)
 payload = {
@@ -522,6 +573,7 @@ payload = {
     "watchdog": watchdog,
     "overnight": overnight,
     "tmux_observation": tmux_observation,
+    "project_goal_run": project_goal_run,
     "interactive_state": interactive["interactive_state"],
     "activity_hint": interactive["activity_hint"],
     "freshness": {
@@ -566,6 +618,14 @@ else:
     print("tmux_observation_session_present: " + str(tmux.get("session_present", "unknown")).lower())
     print("tmux_observation_window_count: " + str(tmux.get("window_count", "unknown")))
     print("tmux_observation_pane_count: " + str(tmux.get("pane_count", "unknown")))
+    goal_run = payload.get("project_goal_run") or {}
+    print("project_goal_run_available: " + str(goal_run.get("available", False)).lower())
+    print("project_goal_run_file: " + str(goal_run.get("path") or "unknown"))
+    print("project_goal_run_goal_id: " + str(goal_run.get("goal_id") or "unknown"))
+    print("project_goal_run_checkpoint_count: " + str(goal_run.get("checkpoint_count", 0)))
+    print("project_goal_run_checkpoint_log_complete: " + str(goal_run.get("checkpoint_log_complete", False)).lower())
+    print("project_goal_run_last_checkpoint: " + str(goal_run.get("last_checkpoint_id") or "none"))
+    print("project_goal_run_last_checkpoint_summary: " + str(goal_run.get("last_checkpoint_summary") or "none"))
     print("interactive_state: " + str(payload.get("interactive_state") or "unknown"))
     print("activity_hint: " + str(payload.get("activity_hint") or "unknown"))
 PY

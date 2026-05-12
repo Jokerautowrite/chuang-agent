@@ -243,9 +243,15 @@ assert boundaries["deletes_logs"] is False
 assert boundaries["touches_services"] is False
 assert isinstance(data["interactive_state"], str) and data["interactive_state"]
 assert isinstance(data["activity_hint"], str) and data["activity_hint"]
+project_goal_run = data["project_goal_run"]
+assert project_goal_run["goal_id"] in ("mainline-mvp", None)
+assert isinstance(project_goal_run["checkpoint_count"], int)
+assert isinstance(project_goal_run["checkpoint_log_complete"], bool)
 print("goal_run_status_overall=" + str(data["overall_status"]))
 print("goal_run_status_interactive_state=" + str(data["interactive_state"]))
 print("goal_run_status_activity_hint=" + str(data["activity_hint"]))
+print("project_goal_run_checkpoint_count=" + str(project_goal_run["checkpoint_count"]))
+print("project_goal_run_last_checkpoint=" + str(project_goal_run["last_checkpoint_id"]))
 print("goal_run_status_ok=" + str(data["ok"]).lower())
 '
 

@@ -461,6 +461,9 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("candidate_goal_run_status_overall"));
     assert!(wrapper.contains("candidate_goal_run_status_interactive_state"));
     assert!(wrapper.contains("candidate_goal_run_status_activity_hint"));
+    assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
+    assert!(wrapper.contains("candidate_project_goal_run_checkpoint_count="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_checkpoint="));
     assert!(wrapper.contains("connects_real_feishu\"] is False"));
     assert!(wrapper.contains("connects_real_provider\"] is False"));
     assert!(wrapper.contains("performs_desktop_actions\"] is False"));
@@ -628,6 +631,9 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("goal_run_status_overall="));
     assert!(wrapper.contains("goal_run_status_interactive_state="));
     assert!(wrapper.contains("goal_run_status_activity_hint="));
+    assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
+    assert!(wrapper.contains("project_goal_run_checkpoint_count="));
+    assert!(wrapper.contains("project_goal_run_last_checkpoint="));
     assert!(wrapper.contains("third_test_candidate_smoke_ok"));
     assert!(wrapper.contains("boundaries[\"connects_real_feishu\"] is False"));
     assert!(wrapper.contains("boundaries[\"sends_feishu_messages\"] is False"));
@@ -766,6 +772,8 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert!(script.contains("CHUANG_GOAL_WATCHDOG_REPORT_FILE"));
     assert!(script.contains("CHUANG_GOAL_RUN_ROOT"));
     assert!(script.contains("CHUANG_GOAL_OVERNIGHT_STATUS_FILE"));
+    assert!(script.contains("CHUANG_AGENT_ROOT"));
+    assert!(script.contains("CHUANG_PROJECT_GOAL_RUN_FILE"));
     assert!(script.contains("\"dispatches_tasks\": False"));
     assert!(script.contains("\"starts_worker\": False"));
     assert!(script.contains("\"restarts_worker\": False"));
@@ -792,6 +800,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     let run_root = root.join("runs");
     let latest_run = run_root.join("20260507-010203");
     let lexically_newer_stale_run = run_root.join("zzzz-stale-run");
+    let project_goal_run = root.join("mainline-mvp.json");
     fs::create_dir_all(&watchdog_dir).expect("watchdog dir should be created");
     fs::create_dir_all(&latest_run).expect("latest run dir should be created");
     fs::create_dir_all(&lexically_newer_stale_run).expect("stale run dir should be created");
@@ -843,12 +852,30 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         r#"{"status":"finished","iteration":1,"updated_at":"2025-01-01T00:00:00Z"}"#,
     )
     .expect("stale overnight status should write");
+    fs::write(
+        &project_goal_run,
+        serde_json::json!({
+            "goal_spec": {"goal_id": "mainline-mvp"},
+            "checkpoint_log": [
+                {
+                    "checkpoint_id": "checkpoint-goal-status-test",
+                    "summary": "goal status checkpoint summary",
+                    "created_at": "2026-05-12T12:00:00Z",
+                    "completed_worker_ids": ["main-process"],
+                    "validation_notes": ["goal status script test"]
+                }
+            ]
+        })
+        .to_string(),
+    )
+    .expect("project goal run should write");
 
     let output = Command::new("bash")
         .arg(script_path)
         .arg("--json")
         .env("CHUANG_GOAL_WATCHDOG_REPORT_FILE", &watchdog_report)
         .env("CHUANG_GOAL_RUN_ROOT", &run_root)
+        .env("CHUANG_PROJECT_GOAL_RUN_FILE", &project_goal_run)
         .current_dir(&manifest_dir)
         .output()
         .expect("goal run status script should execute");
@@ -905,6 +932,22 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(data["overnight"]["summary"]["fields"]["status"], "running");
     assert_eq!(data["overnight"]["summary"]["fields"]["iterations"], "3");
     assert_eq!(data["freshness"]["overnight"]["stale"], true);
+    assert_eq!(data["project_goal_run"]["available"], true);
+    assert_eq!(data["project_goal_run"]["goal_id"], "mainline-mvp");
+    assert_eq!(data["project_goal_run"]["checkpoint_count"], 1);
+    assert_eq!(data["project_goal_run"]["checkpoint_log_complete"], true);
+    assert_eq!(
+        data["project_goal_run"]["last_checkpoint_id"],
+        "checkpoint-goal-status-test"
+    );
+    assert_eq!(
+        data["project_goal_run"]["last_checkpoint_summary"],
+        "goal status checkpoint summary"
+    );
+    assert_eq!(
+        data["project_goal_run"]["last_completed_worker_ids"],
+        serde_json::json!(["main-process"])
+    );
     assert_eq!(data["interactive_state"], "working");
     assert!(data["activity_hint"]
         .as_str()
