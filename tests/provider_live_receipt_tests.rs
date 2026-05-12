@@ -47,6 +47,8 @@ fn provider_live_receipt_script_outputs_readonly_template_without_readiness_surf
             "api_key_state".to_string(),
             "blocked_reason".to_string(),
             "connects_real_provider".to_string(),
+            "does_not_call_provider".to_string(),
+            "does_not_read_provider_readiness".to_string(),
             "next_action".to_string(),
             "prints_secret_values".to_string(),
             "provider_kind".to_string(),
@@ -62,6 +64,8 @@ fn provider_live_receipt_script_outputs_readonly_template_without_readiness_surf
     assert_eq!(data["readonly"], true);
     assert_eq!(data["connects_real_provider"], false);
     assert_eq!(data["prints_secret_values"], false);
+    assert_eq!(data["does_not_call_provider"], true);
+    assert_eq!(data["does_not_read_provider_readiness"], true);
     assert_eq!(data["provider_kind"], "<fill_after_test>");
     assert_eq!(data["transport"], "<fill_after_test>");
     assert_eq!(data["api_key_state"], "<missing>");

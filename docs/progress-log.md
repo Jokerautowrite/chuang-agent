@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 provider live receipt JSON 边界字段补齐
+- 本轮继续沿 M5/M7 live receipt 状态面补一致性：`scripts/chuang-provider-live-receipt.sh --json` 现在和 help/text 输出一样显式带出 `does_not_call_provider=true` 与 `does_not_read_provider_readiness=true`，避免 JSON 消费方只看到 `connects_real_provider=false` 而漏掉 provider receipt 模板不读 readiness、不发请求的边界。
+- `tests/provider_live_receipt_tests.rs` 已锁住新增字段；本轮仍只生成本地只读 receipt 模板，不连接 provider、不读取 secret、不打印 secret。验证已通过 `cargo test -q --test provider_live_receipt_tests`、`cargo test -q --test provider_live_receipt_tests --test live_operator_receipt_collect_tests --test live_operator_scripts_tests --test feishu_live_receipt_tests --test live_runner_rehearsal_receipt_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 channel JSON 锁住 tool surface callable meta
 - 本轮继续沿 M7 channel 输出面补 JSON 回归：`tests/cli_channel_tests.rs` 的基础 `channel simulate --json` 用例现在除 `tool_surface.available/governed` 与 callable tools 结构体外，也锁住 `runtime_observability.tool_surface_callable_tools` 包含 `file_read`，让 channel JSON 和 app-server turn/completed 事件面使用同一套 runtime observability tool surface 摘要。
 - 该回归不改变运行逻辑、不打印 raw tool trace/payload，也不连接真实 Feishu 或 provider。验证已通过 `cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo test -q --test cli_channel_tests --test app_server_tests --test runtime_report_tests`、`cargo fmt --all --check`、`git diff --check`。

@@ -74,6 +74,8 @@ result = {
     "readonly": True,
     "connects_real_provider": False,
     "prints_secret_values": False,
+    "does_not_call_provider": True,
+    "does_not_read_provider_readiness": True,
     "provider_kind": os.environ["CHUANG_PROVIDER_KIND"].strip() or "<fill_after_test>",
     "transport": os.environ["CHUANG_PROVIDER_TRANSPORT"].strip() or "<fill_after_test>",
     "api_key_state": sanitized_api_key_state(os.environ["CHUANG_PROVIDER_API_KEY_STATE"]),
