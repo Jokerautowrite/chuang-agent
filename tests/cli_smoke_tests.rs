@@ -31,6 +31,28 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
     assert!(mvp_smoke.contains("assert data[\"approval_ticket_count\"] == 1"));
     assert!(mvp_smoke.contains("data[\"goal_run\"][\"plan_exists\"] is True"));
+    assert!(mvp_smoke.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
+    assert!(mvp_smoke.contains("runtime_report_surface[\"artifact_count\"] == 10"));
+    assert!(mvp_smoke.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(mvp_smoke.contains("runtime_event_tool_started_count"));
+    assert!(mvp_smoke.contains("runtime_event_tool_finished_count"));
+    assert!(mvp_smoke.contains("runtime_event_approval_requested_count"));
+    assert!(mvp_smoke.contains("runtime_event_approval_resolved_count"));
+    assert!(mvp_smoke.contains("runtime_event_elicitation_requested_count"));
+    assert!(mvp_smoke.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(mvp_smoke.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(mvp_smoke.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(mvp_smoke.contains("goal_handoff_query_summary_json"));
+    assert!(mvp_smoke.contains("subagent_children_summary_json"));
+    assert!(mvp_smoke.contains("goal_handoff_parent_context_handoff_count"));
+    assert!(mvp_smoke.contains("goal_handoff_report_admission_ref_count"));
+    assert!(mvp_smoke.contains("goal_handoff_report_admission_refs"));
+    assert!(mvp_smoke.contains("subagent_children_child_count"));
+    assert!(mvp_smoke.contains("subagent_children_accepted_report_count"));
+    assert!(mvp_smoke.contains("subagent_children_report_admission_ref_count"));
+    assert!(mvp_smoke.contains("subagent_children_report_admission_refs"));
+    assert!(mvp_smoke.contains("subagent_children_missing_report_count"));
+    assert!(mvp_smoke.contains("context_compaction_summary_json"));
     assert!(mvp_smoke.contains("checks_by_name[\"goal_run_readiness\"]"));
     assert!(mvp_smoke.contains("data[\"provider_readiness\"]"));
     assert!(mvp_smoke.contains("data[\"subagent_readiness\"][\"live_worker_available\"] is False"));
@@ -77,6 +99,23 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("provider_id\"] == \"complete-local-openai\""));
     assert!(wrapper.contains("live_worker_available"));
     assert!(wrapper.contains("worker_runtime_state\"] == \"local_contract_only\""));
+    assert!(wrapper.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
+    assert!(
+        wrapper.contains("runtime_report_surface = data[\"status\"][\"runtime_report_surface\"]")
+    );
+    assert!(wrapper.contains("runtime_report_surface = status[\"runtime_report_surface\"]"));
+    assert!(wrapper.contains("runtime_report_surface[\"artifact_count\"] == 10"));
+    assert!(wrapper.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(wrapper.contains("runtime_event_approval_requested_count"));
+    assert!(wrapper.contains("goal_handoff_report_admission_ref_count"));
+    assert!(wrapper.contains("goal_handoff_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_missing_report_count"));
+    assert!(wrapper.contains("context_compaction_summary_json"));
     assert!(wrapper.contains("for gate in data[\"live_adapter_gates\"][\"gates\"]"));
     assert!(!wrapper.contains("rm "));
     assert!(!wrapper.contains("systemctl"));
@@ -290,26 +329,40 @@ fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission()
 }
 
 #[test]
-fn final_verify_wrapper_requires_clean_tree_and_complete_local_smoke() {
+fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let wrapper = fs::read_to_string(manifest_dir.join("scripts/chuang-final-verify.sh"))
         .expect("final verify wrapper should be readable");
+    let candidate_wrapper =
+        fs::read_to_string(manifest_dir.join("scripts/chuang-candidate-verify.sh"))
+            .expect("candidate verify wrapper should be readable");
 
     let clean_tree_check = wrapper
         .find("git status --short")
         .expect("final verify should check for a clean tree first");
-    let complete_local_smoke = wrapper
-        .find("sh scripts/chuang-complete-local-smoke.sh")
-        .expect("final verify should run complete-local smoke");
+    let candidate_verify = wrapper
+        .find("sh scripts/chuang-candidate-verify.sh")
+        .expect("final verify should run candidate verify");
     let final_diff_check = wrapper
         .find("git diff --check")
         .expect("final verify should run a final diff check");
 
-    assert!(clean_tree_check < complete_local_smoke);
-    assert!(complete_local_smoke < final_diff_check);
+    assert!(clean_tree_check < candidate_verify);
+    assert!(candidate_verify < final_diff_check);
     assert!(wrapper.contains("working tree must be clean before final verify"));
     assert!(wrapper.contains("exit 2"));
     assert!(wrapper.contains("chuang_final_verify_ok"));
+    assert!(candidate_wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
+    assert!(candidate_wrapper.contains("runtime_surface[\"artifact_count\"] == 10"));
+    assert!(candidate_wrapper.contains("runtime_surface[\"observability_field_count\"] == 25"));
+    assert!(candidate_wrapper.contains("runtime_response.trace"));
+    assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(candidate_wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(candidate_wrapper.contains("goal_handoff_report_admission_refs"));
+    assert!(candidate_wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(candidate_wrapper.contains("subagent_children_report_admission_refs"));
+    assert!(candidate_wrapper.contains("subagent_children_report_reason_codes"));
     assert!(!wrapper.contains("rm "));
     assert!(!wrapper.contains("reset"));
     assert!(!wrapper.contains("git checkout"));
@@ -686,8 +739,10 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     let watchdog_dir = root.join("watchdog");
     let run_root = root.join("runs");
     let latest_run = run_root.join("20260507-010203");
+    let lexically_newer_stale_run = run_root.join("zzzz-stale-run");
     fs::create_dir_all(&watchdog_dir).expect("watchdog dir should be created");
     fs::create_dir_all(&latest_run).expect("latest run dir should be created");
+    fs::create_dir_all(&lexically_newer_stale_run).expect("stale run dir should be created");
 
     let watchdog_report = watchdog_dir.join("latest-watchdog-report.json");
     fs::write(
@@ -731,6 +786,11 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
         .expect("run log should write");
     fs::write(latest_run.join("last-message.md"), "continuing goal work\n")
         .expect("last message should write");
+    fs::write(
+        lexically_newer_stale_run.join("status.json"),
+        r#"{"status":"finished","iteration":1,"updated_at":"2025-01-01T00:00:00Z"}"#,
+    )
+    .expect("stale overnight status should write");
 
     let output = Command::new("bash")
         .arg(script_path)
@@ -778,6 +838,10 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(
         data["overnight"]["latest_run_dir"],
         latest_run.display().to_string()
+    );
+    assert_ne!(
+        data["overnight"]["latest_run_dir"],
+        lexically_newer_stale_run.display().to_string()
     );
     assert_eq!(data["overnight"]["status_json"]["available"], true);
     assert_eq!(

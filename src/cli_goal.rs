@@ -313,6 +313,26 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
                 ))
             );
             println!(
+                "goal_collect_handoff_query_parent_context_handoff_count: {}",
+                receipt.handoff_query_summary.parent_context_handoff_count
+            );
+            println!(
+                "goal_collect_handoff_query_parent_context_handoff_refs: {}",
+                format_text_list(&receipt.handoff_query_summary.parent_context_handoff_refs)
+            );
+            println!(
+                "goal_collect_handoff_query_report_admission_ref_count: {}",
+                receipt.handoff_query_summary.report_admission_ref_count
+            );
+            println!(
+                "goal_collect_handoff_query_report_admission_reason_codes: {}",
+                format_key_value_list(&receipt.handoff_query_summary.report_admission_reason_codes)
+            );
+            println!(
+                "goal_collect_handoff_query_report_admission_refs: {}",
+                format_admission_ref_list(&receipt.handoff_query_summary.report_admission_refs)
+            );
+            println!(
                 "goal_collect_blocked_report_run_ids: {}",
                 format_text_list(&receipt.blocked_report_run_ids)
             );
@@ -403,6 +423,47 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
             println!(
                 "goal_step_missing_run_ids: {}",
                 format_text_list(&receipt.collection.missing_run_ids)
+            );
+            println!(
+                "goal_step_handoff_query_parent_context_handoff_count: {}",
+                receipt
+                    .collection
+                    .handoff_query_summary
+                    .parent_context_handoff_count
+            );
+            println!(
+                "goal_step_handoff_query_parent_context_handoff_refs: {}",
+                format_text_list(
+                    &receipt
+                        .collection
+                        .handoff_query_summary
+                        .parent_context_handoff_refs
+                )
+            );
+            println!(
+                "goal_step_handoff_query_report_admission_ref_count: {}",
+                receipt
+                    .collection
+                    .handoff_query_summary
+                    .report_admission_ref_count
+            );
+            println!(
+                "goal_step_handoff_query_report_admission_reason_codes: {}",
+                format_key_value_list(
+                    &receipt
+                        .collection
+                        .handoff_query_summary
+                        .report_admission_reason_codes
+                )
+            );
+            println!(
+                "goal_step_handoff_query_report_admission_refs: {}",
+                format_admission_ref_list(
+                    &receipt
+                        .collection
+                        .handoff_query_summary
+                        .report_admission_refs
+                )
             );
             println!("goal_step_checkpoint_recorded: false");
             println!("goal_step_writes_progress_log: false");
@@ -730,6 +791,26 @@ fn print_goal_operability_text(status: &GoalOperabilityStatus) {
             ))
         );
         println!(
+            "goal_operability_handoff_query_parent_context_handoff_count: {}",
+            collect.handoff_query_summary.parent_context_handoff_count
+        );
+        println!(
+            "goal_operability_handoff_query_parent_context_handoff_refs: {}",
+            format_text_list(&collect.handoff_query_summary.parent_context_handoff_refs)
+        );
+        println!(
+            "goal_operability_handoff_query_report_admission_ref_count: {}",
+            collect.handoff_query_summary.report_admission_ref_count
+        );
+        println!(
+            "goal_operability_handoff_query_report_admission_reason_codes: {}",
+            format_key_value_list(&collect.handoff_query_summary.report_admission_reason_codes)
+        );
+        println!(
+            "goal_operability_handoff_query_report_admission_refs: {}",
+            format_admission_ref_list(&collect.handoff_query_summary.report_admission_refs)
+        );
+        println!(
             "goal_operability_collect_ready_to_checkpoint: {}",
             collect.ready_to_checkpoint
         );
@@ -767,6 +848,40 @@ fn parent_context_handoff_refs(
             })
         })
         .collect()
+}
+
+fn format_key_value_list(map: &std::collections::BTreeMap<String, usize>) -> String {
+    if map.is_empty() {
+        return "[]".to_string();
+    }
+    let mut parts = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        parts.push(format!("{key}={value}"));
+    }
+    parts.join(" | ")
+}
+
+fn format_admission_ref_list(
+    refs: &[chuang_agent::goal_dispatch::GoalReportAdmissionRef],
+) -> String {
+    if refs.is_empty() {
+        return "[]".to_string();
+    }
+    refs.iter()
+        .map(|entry| {
+            format!(
+                "admission_id={} report_id={} task_id={} agent_id={} status={} reason_code={} evidence_ref={}",
+                entry.admission_id.as_deref().unwrap_or("none"),
+                entry.report_id,
+                entry.task_id,
+                entry.agent_id,
+                entry.admission_status,
+                entry.reason_code,
+                entry.evidence_ref.as_deref().unwrap_or("none")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 fn goal_dispatch_command_line(goal_root: &Path, queue_root: &Path, goal_id: &str) -> String {

@@ -285,6 +285,12 @@ def first_nonempty(*values, default=None):
     return default
 
 
+def format_text_list(values):
+    if not isinstance(values, list) or not values:
+        return "none"
+    return ",".join(str(value) for value in values)
+
+
 def find_layer(subagent_readiness, name):
     layers = subagent_readiness.get("layers")
     if not isinstance(layers, list):
@@ -315,6 +321,21 @@ health_payload = health_source.get("payload", {}) if health_source["available"] 
 status_subagent = get_path(status_payload, "subagent_readiness", default={}) or {}
 doctor_subagent = get_path(doctor_payload, "status", "subagent_readiness", default={}) or {}
 health_subagent = get_path(health_payload, "subagent_readiness", default={}) or {}
+
+runtime_report_surface = first_nonempty(
+    get_path(status_payload, "runtime_report_surface", default=None),
+    get_path(doctor_payload, "status", "runtime_report_surface", default=None),
+    get_path(health_payload, "runtime_report_surface", default=None),
+)
+if not isinstance(runtime_report_surface, dict):
+    runtime_report_surface = {
+        "ok": False,
+        "artifact_count": 0,
+        "observability_field_count": 0,
+        "artifact_locators": [],
+        "observability_fields": [],
+        "blocked_reason": "runtime_report_surface unavailable in readonly sources",
+    }
 
 status_layer = find_layer(status_subagent, "live_runner_rehearsal") if status_subagent else None
 doctor_layer = find_layer(doctor_subagent, "live_runner_rehearsal") if doctor_subagent else None
@@ -512,6 +533,7 @@ result = {
     "binary_blocked_reason": BINARY_BLOCKED_REASON or None,
     "workspace_root": WORKSPACE_ROOT,
     "config_path": CONFIG_PATH or None,
+    "runtime_report_surface": runtime_report_surface,
     "live_runner_rehearsal": live_runner_rehearsal,
     "source_evidence_refs": live_runner_rehearsal["source_evidence_refs"],
     "sources": sources,
@@ -527,6 +549,12 @@ else:
     print("binary_blocked_reason=" + str(result["binary_blocked_reason"] or "none"))
     print("workspace_root=" + str(result["workspace_root"]))
     print("config_path=" + str(result["config_path"] or "none"))
+    print("runtime_report_surface.ok=" + str(runtime_report_surface["ok"]).lower())
+    print("runtime_report_surface.artifact_count=" + str(runtime_report_surface["artifact_count"]))
+    print("runtime_report_surface.observability_field_count=" + str(runtime_report_surface["observability_field_count"]))
+    print("runtime_report_surface.artifact_locators=" + format_text_list(runtime_report_surface.get("artifact_locators", [])))
+    print("runtime_report_surface.observability_fields=" + format_text_list(runtime_report_surface.get("observability_fields", [])))
+    print("runtime_report_surface.blocked_reason=" + str(runtime_report_surface.get("blocked_reason", "none")))
     print("live_runner_rehearsal.state=" + str(live_runner_rehearsal["state"]))
     print("live_runner_rehearsal.ready_for_live=" + str(live_runner_rehearsal["ready_for_live"]).lower())
     print("live_runner_rehearsal.starts_external_worker=" + str(live_runner_rehearsal["starts_external_worker"]).lower())

@@ -65,6 +65,29 @@ assert isinstance(data["goal_run"]["plan_exists"], bool)
 assert data["goal_run"]["plan_exists"] is True
 assert isinstance(data["goal_run"]["checkpoint_count"], int)
 assert data["goal_run"]["path"].endswith("/context/goal-runs/mainline-mvp.json")
+runtime_report_surface = data["runtime_report_surface"]
+assert runtime_report_surface["ok"] is True
+assert runtime_report_surface["artifact_count"] == 10
+assert runtime_report_surface["observability_field_count"] == 25
+assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.context_compaction_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_event_tool_started_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_tool_finished_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
+assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_parent_context_handoff_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_child_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_accepted_report_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_missing_report_count" in runtime_report_surface["observability_fields"]
+assert "context_compaction_summary_json" in runtime_report_surface["observability_fields"]
 assert data["plugin_registry"]["available"] is True
 assert data["plugin_registry"]["ok"] is True
 assert data["local_contract_readiness"]["ok"] is True
@@ -217,6 +240,29 @@ assert status["goal_run"]["ok"] is True
 assert status["goal_run"]["goal_id"] == "mainline-mvp"
 assert status["goal_run"]["plan_exists"] is True
 assert isinstance(status["goal_run"]["checkpoint_count"], int)
+runtime_report_surface = status["runtime_report_surface"]
+assert runtime_report_surface["ok"] is True
+assert runtime_report_surface["artifact_count"] == 10
+assert runtime_report_surface["observability_field_count"] == 25
+assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.context_compaction_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_event_tool_started_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_tool_finished_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
+assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_parent_context_handoff_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_child_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_accepted_report_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_missing_report_count" in runtime_report_surface["observability_fields"]
+assert "context_compaction_summary_json" in runtime_report_surface["observability_fields"]
 goal_run_readiness = checks_by_name["goal_run_readiness"]
 assert goal_run_readiness["ok"] is True
 assert "goal_id=mainline-mvp" in goal_run_readiness["detail"]
@@ -493,6 +539,29 @@ assert data["provider_readiness"]["placeholder_warning_count"] == 1
 assert data["subagent_readiness"]["live_worker_available"] is False
 assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 assert data["subagent_readiness"]["live_adapter_ready"] is False
+runtime_report_surface = data["runtime_report_surface"]
+assert runtime_report_surface["ok"] is True
+assert runtime_report_surface["artifact_count"] == 10
+assert runtime_report_surface["observability_field_count"] == 25
+assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_meta.context_compaction_summary_json" in runtime_report_surface["artifact_locators"]
+assert "runtime_event_tool_started_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_tool_finished_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
+assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
+assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_parent_context_handoff_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "goal_handoff_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_child_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_accepted_report_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_ref_count" in runtime_report_surface["observability_fields"]
+assert "subagent_children_report_admission_refs" in runtime_report_surface["observability_fields"]
+assert "subagent_children_missing_report_count" in runtime_report_surface["observability_fields"]
+assert "context_compaction_summary_json" in runtime_report_surface["observability_fields"]
 '
 
 printf '%s\n' "[smoke] repl launcher"

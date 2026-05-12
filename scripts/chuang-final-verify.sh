@@ -12,8 +12,8 @@ if [ -n "$status_short" ]; then
     exit 2
 fi
 
-printf '%s\n' "[final-verify] complete local smoke"
-sh scripts/chuang-complete-local-smoke.sh
+printf '%s\n' "[final-verify] candidate verify"
+sh scripts/chuang-candidate-verify.sh
 
 printf '%s\n' "[final-verify] final diff check"
 git diff --check

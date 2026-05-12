@@ -1472,16 +1472,61 @@ transport = "stub"
     assert_eq!(parsed["goal_run"]["ok"], true);
     assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert_eq!(parsed["runtime_report_surface"]["ok"], true);
-    assert_eq!(parsed["runtime_report_surface"]["artifact_count"], 7);
+    assert_eq!(parsed["runtime_report_surface"]["artifact_count"], 10);
     assert_eq!(
         parsed["runtime_report_surface"]["observability_field_count"],
-        7
+        25
     );
     assert!(parsed["runtime_report_surface"]["artifact_locators"]
         .as_array()
         .expect("runtime report artifact locators should be array")
         .iter()
         .any(|locator| locator == "runtime_meta.runtime_event_ledger_json"));
+    assert!(parsed["runtime_report_surface"]["artifact_locators"]
+        .as_array()
+        .expect("runtime report artifact locators should be array")
+        .iter()
+        .any(|locator| locator == "runtime_meta.context_compaction_summary_json"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "runtime_event_tool_started_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "runtime_event_tool_finished_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "runtime_event_approval_requested_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "runtime_event_approval_resolved_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "runtime_event_elicitation_requested_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_refs"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_refs"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "context_compaction_summary_json"));
     assert!(parsed["runtime_report_surface"]["observability_fields"]
         .as_array()
         .expect("runtime report observability fields should be array")
@@ -2147,9 +2192,16 @@ transport = "stub"
     ));
     assert!(stdout.contains("goal_run: ok=true"));
     assert!(stdout.contains("goal_run_readiness: ok=true plan_exists=true goal_id=mainline-mvp"));
-    assert!(stdout.contains("runtime_report_surface: ok=true artifacts=7 observability_fields=7"));
+    assert!(stdout.contains("runtime_report_surface: ok=true artifacts=10 observability_fields=25"));
+    assert!(stdout.contains("runtime_event_tool_started_count"));
+    assert!(stdout.contains("runtime_event_tool_finished_count"));
+    assert!(stdout.contains("runtime_event_approval_requested_count"));
+    assert!(stdout.contains("runtime_event_approval_resolved_count"));
+    assert!(stdout.contains("runtime_event_elicitation_requested_count"));
     assert!(stdout.contains("runtime_meta.runtime_event_ledger_json"));
     assert!(stdout.contains("runtime_meta.context_compaction_events"));
+    assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(stdout.contains("context_compaction_summary_json"));
     assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
     assert!(stdout.contains("goal_run_last_checkpoint:"));
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));

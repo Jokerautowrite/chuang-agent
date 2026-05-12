@@ -3,10 +3,12 @@ use std::collections::BTreeSet;
 
 use crate::agent_runtime::{ContextDebugInfo, RuntimeResult};
 use crate::context_engine::ContextCompactionSummary;
+use crate::goal_dispatch::GoalDispatchHandoffSummary;
 use crate::subagent_report::{
     governance_metadata, ArtifactKind, ArtifactRef, ExecutionStatus, ReportBuilder,
     RuntimeReportInput, SubagentReport, SubagentReportBuilder,
 };
+use crate::subagent_tree_ledger::SubagentChildrenSummary;
 use crate::tool_runtime::ToolLoopReport;
 
 pub fn build_runtime_report(
@@ -37,9 +39,13 @@ pub fn build_runtime_report(
     report
         .artifacts
         .extend(runtime_event_ledger_artifacts(result));
+    report.artifacts.extend(runtime_trace_artifacts(result));
     report
         .artifacts
         .extend(context_compaction_artifacts(result));
+    report
+        .artifacts
+        .extend(handoff_query_summary_artifacts(result));
     report
         .artifacts
         .extend(runtime_observability_artifacts(result));
@@ -134,31 +140,16 @@ fn runtime_event_ledger_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         return Vec::new();
     };
 
-    let description = serde_json::from_str::<Vec<serde_json::Value>>(raw_ledger)
-        .map(|events| {
-            let mut tool_started_count = 0usize;
-            let mut tool_finished_count = 0usize;
-            let mut approval_requested_count = 0usize;
-            let mut approval_resolved_count = 0usize;
-            let mut elicitation_requested_count = 0usize;
-            for event in &events {
-                match event.get("event_type").and_then(|value| value.as_str()) {
-                    Some("tool_started") => tool_started_count += 1,
-                    Some("tool_finished") => tool_finished_count += 1,
-                    Some("approval_requested") => approval_requested_count += 1,
-                    Some("approval_resolved") => approval_resolved_count += 1,
-                    Some("elicitation_requested") => elicitation_requested_count += 1,
-                    _ => {}
-                }
-            }
+    let description = runtime_event_ledger_summary_from_json(raw_ledger)
+        .map(|summary| {
             format!(
                 "runtime_event_ledger count={} tool_started={} tool_finished={} approval_requested={} approval_resolved={} elicitation_requested={}",
-                events.len(),
-                tool_started_count,
-                tool_finished_count,
-                approval_requested_count,
-                approval_resolved_count,
-                elicitation_requested_count
+                summary.event_count,
+                summary.tool_started_count,
+                summary.tool_finished_count,
+                summary.approval_requested_count,
+                summary.approval_resolved_count,
+                summary.elicitation_requested_count
             )
         })
         .unwrap_or_else(|_| "runtime_event_ledger present but could not be parsed".to_string());
@@ -167,6 +158,21 @@ fn runtime_event_ledger_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         kind: ArtifactKind::Log,
         locator: "runtime_meta.runtime_event_ledger_json".to_string(),
         description: Some(description),
+    }]
+}
+
+fn runtime_trace_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    if result.response.trace.is_empty() {
+        return Vec::new();
+    }
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_response.trace".to_string(),
+        description: Some(format!(
+            "runtime_response_trace chars={}",
+            result.response.trace.chars().count()
+        )),
     }]
 }
 
@@ -226,6 +232,10 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
     if let Some(finish_reason) = &result.response.meta.finish_reason {
         metadata.insert("finish_reason".to_string(), finish_reason.clone());
     }
+    metadata.insert(
+        "runtime_response_trace_chars".to_string(),
+        result.response.trace.chars().count().to_string(),
+    );
     if let Some(pack_trace) = packed_context_field(&result.packed_context_preview, "pack_trace") {
         metadata.insert("context_pack_trace".to_string(), pack_trace);
     }
@@ -328,6 +338,8 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "tool_report_schema_version",
         "tool_instruction_context_injected",
         "runtime_event_count",
+        "goal_handoff_query_summary_json",
+        "subagent_children_summary_json",
         "context_pack_trace",
         "context_compaction_events",
         "context_compaction_summary_json",
@@ -335,6 +347,85 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         if let Some(value) = extra.get(key) {
             metadata.insert(key.to_string(), value.clone());
         }
+    }
+    if let Some(summary) = extra
+        .get("runtime_event_ledger_json")
+        .and_then(|raw| runtime_event_ledger_summary_from_json(raw).ok())
+    {
+        metadata.insert(
+            "runtime_event_count".to_string(),
+            summary.event_count.to_string(),
+        );
+        metadata.insert(
+            "runtime_event_tool_started_count".to_string(),
+            summary.tool_started_count.to_string(),
+        );
+        metadata.insert(
+            "runtime_event_tool_finished_count".to_string(),
+            summary.tool_finished_count.to_string(),
+        );
+        metadata.insert(
+            "runtime_event_approval_requested_count".to_string(),
+            summary.approval_requested_count.to_string(),
+        );
+        metadata.insert(
+            "runtime_event_approval_resolved_count".to_string(),
+            summary.approval_resolved_count.to_string(),
+        );
+        metadata.insert(
+            "runtime_event_elicitation_requested_count".to_string(),
+            summary.elicitation_requested_count.to_string(),
+        );
+    }
+    if let Some(summary) = extra
+        .get("goal_handoff_query_summary_json")
+        .and_then(|raw| serde_json::from_str::<GoalDispatchHandoffSummary>(raw).ok())
+    {
+        metadata.insert(
+            "goal_handoff_parent_context_handoff_count".to_string(),
+            summary.parent_context_handoff_count.to_string(),
+        );
+        metadata.insert(
+            "goal_handoff_report_admission_ref_count".to_string(),
+            summary.report_admission_ref_count.to_string(),
+        );
+        metadata.insert(
+            "goal_handoff_report_admission_reason_codes".to_string(),
+            format_reason_code_counts(&summary.report_admission_reason_codes),
+        );
+        metadata.insert(
+            "goal_handoff_report_admission_refs".to_string(),
+            format_goal_admission_refs(&summary.report_admission_refs),
+        );
+    }
+    if let Some(summary) = extra
+        .get("subagent_children_summary_json")
+        .and_then(|raw| serde_json::from_str::<SubagentChildrenSummary>(raw).ok())
+    {
+        metadata.insert(
+            "subagent_children_child_count".to_string(),
+            summary.child_count.to_string(),
+        );
+        metadata.insert(
+            "subagent_children_accepted_report_count".to_string(),
+            summary.accepted_report_count.to_string(),
+        );
+        metadata.insert(
+            "subagent_children_report_admission_ref_count".to_string(),
+            summary.report_admission_refs.len().to_string(),
+        );
+        metadata.insert(
+            "subagent_children_missing_report_count".to_string(),
+            summary.missing_report_count.to_string(),
+        );
+        metadata.insert(
+            "subagent_children_report_reason_codes".to_string(),
+            format_reason_code_counts(&summary.report_reason_codes),
+        );
+        metadata.insert(
+            "subagent_children_report_admission_refs".to_string(),
+            format_subagent_admission_refs(&summary.report_admission_refs),
+        );
     }
     metadata
         .entry("tool_call_count".to_string())
@@ -396,6 +487,105 @@ fn context_compaction_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     artifacts
 }
 
+fn handoff_query_summary_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let mut artifacts = Vec::new();
+    if let Some(raw_summary) = result
+        .response
+        .meta
+        .extra
+        .get("goal_handoff_query_summary_json")
+    {
+        let description = serde_json::from_str::<GoalDispatchHandoffSummary>(raw_summary)
+            .map(|summary| {
+                format!(
+                    "goal_handoff_query_summary parent_context_handoffs={} report_admission_refs={} reason_codes={}",
+                    summary.parent_context_handoff_count,
+                    summary.report_admission_ref_count,
+                    format_reason_code_counts(&summary.report_admission_reason_codes)
+                )
+            })
+            .unwrap_or_else(|_| {
+                "goal_handoff_query_summary present but could not be parsed".to_string()
+            });
+        artifacts.push(ArtifactRef {
+            kind: ArtifactKind::Log,
+            locator: "runtime_meta.goal_handoff_query_summary_json".to_string(),
+            description: Some(description),
+        });
+    }
+    if let Some(raw_summary) = result
+        .response
+        .meta
+        .extra
+        .get("subagent_children_summary_json")
+    {
+        let description = serde_json::from_str::<SubagentChildrenSummary>(raw_summary)
+            .map(|summary| {
+                format!(
+                    "subagent_children_summary children={} open={} reported={} closed={} accepted_reports={} report_admission_refs={} rejected_reports={} missing_reports={} reason_codes={}",
+                    summary.child_count,
+                    summary.open_child_count,
+                    summary.reported_child_count,
+                    summary.closed_child_count,
+                    summary.accepted_report_count,
+                    summary.report_admission_refs.len(),
+                    summary.rejected_report_count,
+                    summary.missing_report_count,
+                    format_reason_code_counts(&summary.report_reason_codes)
+                )
+            })
+            .unwrap_or_else(|_| {
+                "subagent_children_summary present but could not be parsed".to_string()
+            });
+        artifacts.push(ArtifactRef {
+            kind: ArtifactKind::Log,
+            locator: "runtime_meta.subagent_children_summary_json".to_string(),
+            description: Some(description),
+        });
+    }
+    artifacts
+}
+
+fn format_reason_code_counts(map: &BTreeMap<String, usize>) -> String {
+    if map.is_empty() {
+        return "none".to_string();
+    }
+    map.iter()
+        .map(|(reason, count)| format!("{reason}={count}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_goal_admission_refs(refs: &[crate::goal_dispatch::GoalReportAdmissionRef]) -> String {
+    if refs.is_empty() {
+        return "none".to_string();
+    }
+
+    refs.iter()
+        .map(|admission| {
+            admission
+                .admission_id
+                .as_deref()
+                .unwrap_or(admission.report_id.as_str())
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_subagent_admission_refs(
+    refs: &[crate::subagent_tree_ledger::ReportAdmissionRef],
+) -> String {
+    if refs.is_empty() {
+        return "none".to_string();
+    }
+
+    refs.iter()
+        .map(|admission| admission.admission_id.clone())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn packed_context_field(preview: &str, key: &str) -> Option<String> {
     preview
         .lines()
@@ -410,7 +600,7 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     }
 
     let description = format!(
-        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={} tool_typed_failures={} tool_unified_execution_status={} tool_unified_execution_failures={} runtime_events={}",
+        "runtime_observability model={} provider={} goal={} session={} tool_calls={} tool_protocol_errors={} tool_started={} tool_finished={} tool_typed_failures={} tool_unified_execution_status={} tool_unified_execution_failures={} runtime_events={} approval_requested={} approval_resolved={} elicitation_requested={} goal_handoffs={} goal_admissions={} goal_admission_ref_locators={} goal_admission_reason_codes={} subagent_children={} subagent_accepted_reports={} subagent_admission_refs={} subagent_admission_ref_locators={} subagent_missing_reports={} subagent_reason_codes={}",
         observability
             .get("model_name")
             .map(String::as_str)
@@ -437,6 +627,14 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
             .map(String::as_str)
             .unwrap_or("0"),
         observability
+            .get("runtime_event_tool_started_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("runtime_event_tool_finished_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
             .get("tool_typed_failure_count")
             .map(String::as_str)
             .unwrap_or("0"),
@@ -451,7 +649,59 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         observability
             .get("runtime_event_count")
             .map(String::as_str)
-            .unwrap_or("0")
+            .unwrap_or("0"),
+        observability
+            .get("runtime_event_approval_requested_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("runtime_event_approval_resolved_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("runtime_event_elicitation_requested_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("goal_handoff_parent_context_handoff_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("goal_handoff_report_admission_ref_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("goal_handoff_report_admission_refs")
+            .map(String::as_str)
+            .unwrap_or("none"),
+        observability
+            .get("goal_handoff_report_admission_reason_codes")
+            .map(String::as_str)
+            .unwrap_or("none"),
+        observability
+            .get("subagent_children_child_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("subagent_children_accepted_report_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("subagent_children_report_admission_ref_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("subagent_children_report_admission_refs")
+            .map(String::as_str)
+            .unwrap_or("none"),
+        observability
+            .get("subagent_children_missing_report_count")
+            .map(String::as_str)
+            .unwrap_or("0"),
+        observability
+            .get("subagent_children_report_reason_codes")
+            .map(String::as_str)
+            .unwrap_or("none")
     );
 
     vec![ArtifactRef {
@@ -459,6 +709,37 @@ fn runtime_observability_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
         locator: "runtime_meta.observability".to_string(),
         description: Some(description),
     }]
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RuntimeEventLedgerJsonSummary {
+    event_count: usize,
+    tool_started_count: usize,
+    tool_finished_count: usize,
+    approval_requested_count: usize,
+    approval_resolved_count: usize,
+    elicitation_requested_count: usize,
+}
+
+fn runtime_event_ledger_summary_from_json(
+    raw_ledger: &str,
+) -> Result<RuntimeEventLedgerJsonSummary, serde_json::Error> {
+    let events = serde_json::from_str::<Vec<serde_json::Value>>(raw_ledger)?;
+    let mut summary = RuntimeEventLedgerJsonSummary {
+        event_count: events.len(),
+        ..RuntimeEventLedgerJsonSummary::default()
+    };
+    for event in &events {
+        match event.get("event_type").and_then(|value| value.as_str()) {
+            Some("tool_started") => summary.tool_started_count += 1,
+            Some("tool_finished") => summary.tool_finished_count += 1,
+            Some("approval_requested") => summary.approval_requested_count += 1,
+            Some("approval_resolved") => summary.approval_resolved_count += 1,
+            Some("elicitation_requested") => summary.elicitation_requested_count += 1,
+            _ => {}
+        }
+    }
+    Ok(summary)
 }
 
 fn collect_typed_failures(extra: &BTreeMap<String, String>) -> BTreeSet<String> {

@@ -16,10 +16,14 @@ fn goal_mode_smoke_script_is_closed_loop_only_and_readonly() {
     assert!(script.contains("[goal-mode] step"));
     assert!(script.contains("[goal-mode] collect"));
     assert!(script.contains("[goal-mode] checkpoint-from-collect"));
+    assert!(script.contains("handoff_query_summary"));
+    assert!(script.contains("goal-report-admission://"));
     assert!(script.contains("goal_mode_smoke_ok"));
     assert!(script.contains("CHUANG_GOAL_MODE_SMOKE_BIN"));
     assert!(script.contains("--runner fake"));
     assert!(script.contains("--from-collect"));
+    assert!(script.contains("--subagent-queue-root \"$queue_root\""));
+    assert!(script.contains("goal_operability\"][\"goal_collect\"][\"handoff_query_summary\"]"));
     assert!(!script.contains("--validation-note"));
     assert!(!script.contains("--completed-worker-id"));
     assert!(!script.contains("systemctl"));

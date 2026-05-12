@@ -109,6 +109,17 @@ assert data["goal_id"] == "goal-mode-smoke"
 assert data["available_report_count"] == 2
 assert data["missing_run_ids"] == []
 assert data["ready_to_checkpoint"] is True
+summary = data["handoff_query_summary"]
+assert summary["parent_context_handoff_count"] == 2
+assert summary["report_admission_ref_count"] == 2
+assert summary["report_admission_reason_codes"] == {"report_validated": 2}
+assert len(summary["parent_context_handoff_refs"]) == 2
+assert len(summary["report_admission_refs"]) == 2
+for admission_ref in summary["report_admission_refs"]:
+    assert admission_ref["admission_id"].startswith("goal-report-admission://")
+    assert admission_ref["admission_status"] == "Accepted"
+    assert admission_ref["reason_code"] == "report_validated"
+    assert admission_ref["evidence_ref"].startswith("report://")
 assert data["checkpoint_suggestion"]["summary"] == "checkpoint ready for goal_id=goal-mode-smoke workers=goal-worker-1 | goal-worker-2"
 assert data["checkpoint_suggestion"]["completed_worker_ids"] == ["goal-worker-1", "goal-worker-2"]
 '
@@ -144,6 +155,7 @@ show_output="$(
   goal_cmd goal show \
     --root "$goal_root" \
     --goal-id "$goal_id" \
+    --subagent-queue-root "$queue_root" \
     --json
 )"
 printf '%s' "$show_output" | python3 -c '
@@ -156,6 +168,9 @@ assert len(data["checkpoint_log"]) == 1
 assert data["checkpoint_log"][0]["checkpoint_id"] == "goal-mode-smoke-checkpoint"
 assert data["goal_run_diagnostics"]["last_checkpoint_id"] == "goal-mode-smoke-checkpoint"
 assert data["goal_run_diagnostics"]["checkpoint_log_complete"] is True
+assert data["goal_operability"]["goal_collect"]["handoff_query_summary"]["parent_context_handoff_count"] == 2
+assert data["goal_operability"]["goal_collect"]["handoff_query_summary"]["report_admission_ref_count"] == 2
+assert data["goal_operability"]["goal_collect"]["handoff_query_summary"]["report_admission_reason_codes"] == {"report_validated": 2}
 '
 
 printf 'goal_mode_smoke_ok work_dir=%s goal_root=%s queue_root=%s checkpoint_id=%s\n' \

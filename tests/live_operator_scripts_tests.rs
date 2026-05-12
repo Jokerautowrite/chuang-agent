@@ -816,6 +816,22 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
     assert!(wrapper.contains("scripts/chuang-live-operator-checklist.sh --json"));
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
+    assert!(wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
+    assert!(wrapper.contains("runtime_surface[\"artifact_count\"] == 10"));
+    assert!(wrapper.contains("runtime_surface[\"observability_field_count\"] == 25"));
+    assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(wrapper.contains("runtime_event_approval_requested_count"));
+    assert!(wrapper.contains("runtime_event_elicitation_requested_count"));
+    assert!(wrapper.contains("runtime_response.trace"));
+    assert!(wrapper.contains("runtime_response_trace_chars"));
+    assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(wrapper.contains("goal_handoff_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_reason_codes"));
+    assert!(wrapper.contains("candidate_runtime_report_surface_artifacts="));
+    assert!(wrapper.contains("candidate_runtime_report_surface_observability_fields="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_state="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("candidate_live_runner_readiness_view_blocked_reason="));
@@ -846,6 +862,24 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
     assert!(wrapper.contains("scripts/chuang-live-operator-checklist.sh --json"));
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
+    assert!(wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
+    assert!(wrapper.contains("runtime_surface[\"artifact_count\"] == 10"));
+    assert!(wrapper.contains("runtime_surface[\"observability_field_count\"] == 25"));
+    assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(wrapper.contains("runtime_event_approval_requested_count"));
+    assert!(wrapper.contains("runtime_event_elicitation_requested_count"));
+    assert!(wrapper.contains("runtime_response.trace"));
+    assert!(wrapper.contains("runtime_response_trace_chars"));
+    assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(wrapper.contains("goal_handoff_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_report_admission_refs"));
+    assert!(wrapper.contains("subagent_children_report_reason_codes"));
+    assert!(wrapper.contains("live_runner_readiness_view_runtime_report_surface_artifacts="));
+    assert!(
+        wrapper.contains("live_runner_readiness_view_runtime_report_surface_observability_fields=")
+    );
     assert!(wrapper.contains("live_runner_readiness_view_state="));
     assert!(wrapper.contains("live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("live_runner_readiness_view_blocked_reason="));

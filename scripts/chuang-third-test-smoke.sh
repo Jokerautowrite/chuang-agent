@@ -64,14 +64,41 @@ import sys
 
 data = json.load(sys.stdin)
 rehearsal = data["live_runner_rehearsal"]
+runtime_surface = data["runtime_report_surface"]
 assert data["readonly"] is True
 assert data["connects_real_provider"] is False
 assert data["connects_real_feishu"] is False
+assert runtime_surface["ok"] is True
+assert runtime_surface["artifact_count"] == 10
+assert runtime_surface["observability_field_count"] == 25
+assert "runtime_response.trace" in runtime_surface["artifact_locators"]
+assert "runtime_meta.goal_handoff_query_summary_json" in runtime_surface["artifact_locators"]
+assert "runtime_meta.subagent_children_summary_json" in runtime_surface["artifact_locators"]
+assert "runtime_meta.context_compaction_summary_json" in runtime_surface["artifact_locators"]
+assert "runtime_event_tool_started_count" in runtime_surface["observability_fields"]
+assert "runtime_event_tool_finished_count" in runtime_surface["observability_fields"]
+assert "runtime_event_approval_requested_count" in runtime_surface["observability_fields"]
+assert "runtime_event_approval_resolved_count" in runtime_surface["observability_fields"]
+assert "runtime_event_elicitation_requested_count" in runtime_surface["observability_fields"]
+assert "runtime_response_trace_chars" in runtime_surface["observability_fields"]
+assert "goal_handoff_parent_context_handoff_count" in runtime_surface["observability_fields"]
+assert "goal_handoff_report_admission_ref_count" in runtime_surface["observability_fields"]
+assert "goal_handoff_report_admission_refs" in runtime_surface["observability_fields"]
+assert "goal_handoff_report_admission_reason_codes" in runtime_surface["observability_fields"]
+assert "subagent_children_child_count" in runtime_surface["observability_fields"]
+assert "subagent_children_accepted_report_count" in runtime_surface["observability_fields"]
+assert "subagent_children_report_admission_ref_count" in runtime_surface["observability_fields"]
+assert "subagent_children_report_admission_refs" in runtime_surface["observability_fields"]
+assert "subagent_children_missing_report_count" in runtime_surface["observability_fields"]
+assert "subagent_children_report_reason_codes" in runtime_surface["observability_fields"]
+assert "context_compaction_summary_json" in runtime_surface["observability_fields"]
 assert rehearsal["ready_for_live"] is False
 assert rehearsal["starts_external_worker"] is False
 assert rehearsal["capability_mismatch_blocks_live"] is True
 assert rehearsal["blocked_reason"]
 assert rehearsal["next_action"]
+print("live_runner_readiness_view_runtime_report_surface_artifacts=" + str(runtime_surface["artifact_count"]))
+print("live_runner_readiness_view_runtime_report_surface_observability_fields=" + str(runtime_surface["observability_field_count"]))
 print("live_runner_readiness_view_state=" + str(rehearsal["state"]))
 print("live_runner_readiness_view_ready_for_live=" + str(rehearsal["ready_for_live"]).lower())
 print("live_runner_readiness_view_blocked_reason=" + str(rehearsal["blocked_reason"]))

@@ -1317,6 +1317,11 @@ fn cli_goal_collect_can_seed_checkpoint_from_ready_reports() {
     assert!(stdout.contains("goal_collect_ready_to_checkpoint: true"));
     assert!(stdout.contains("goal_collect_parent_context_handoff_count: 2"));
     assert!(stdout.contains("goal_collect_parent_context_handoff_refs:"));
+    assert!(stdout.contains("goal_collect_handoff_query_parent_context_handoff_count: 2"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_ref_count: 2"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_reason_codes:"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_refs:"));
+    assert!(stdout.contains("admission_id=goal-report-admission://"));
     assert!(stdout.contains(
         "goal_collect_checkpoint_summary: checkpoint ready for goal_id=collect-goal workers=goal-worker-1 | goal-worker-2"
     ));
@@ -1624,6 +1629,10 @@ fn cli_goal_collect_surfaces_blocked_report_reasons_for_failed_and_mismatched_re
     assert!(stdout.contains("goal_operability_checkpoint_ready: false"));
     assert!(stdout.contains("goal_operability_parent_context_handoff_count: 0"));
     assert!(stdout.contains("goal_operability_parent_context_handoff_refs:"));
+    assert!(stdout.contains("goal_operability_handoff_query_parent_context_handoff_count: 0"));
+    assert!(stdout.contains("goal_operability_handoff_query_report_admission_ref_count: 0"));
+    assert!(stdout.contains("goal_operability_handoff_query_report_admission_reason_codes:"));
+    assert!(stdout.contains("goal_operability_handoff_query_report_admission_refs:"));
     assert!(stdout.contains("goal_operability_collect_blocked_report_run_ids:"));
     assert!(stdout.contains("goal_operability_collect_blocked_report_reasons:"));
     assert!(stdout.contains("report status is not success"));
@@ -1732,6 +1741,11 @@ fn cli_goal_collect_blocks_malformed_report_from_checkpoint_material() {
     assert!(stdout.contains("goal_collect_ready_to_checkpoint: false"));
     assert!(stdout.contains("goal_collect_parent_context_handoff_count: 1"));
     assert!(stdout.contains("goal_collect_parent_context_handoff_refs:"));
+    assert!(stdout.contains("goal_collect_handoff_query_parent_context_handoff_count: 1"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_ref_count: 1"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_reason_codes:"));
+    assert!(stdout.contains("goal_collect_handoff_query_report_admission_refs:"));
+    assert!(stdout.contains("admission_id=goal-report-admission://"));
     assert!(stdout.contains("goal_collect_blocked_report_run_ids:"));
     assert!(stdout.contains("goal_collect_blocked_report_reasons:"));
     assert!(stdout.contains("report parse failed"));
@@ -1845,6 +1859,42 @@ fn cli_goal_step_runs_manifest_workers_and_collects_reports_without_checkpointin
         run["checkpoint_log"].as_array().expect("checkpoints").len(),
         0
     );
+}
+
+#[test]
+fn cli_goal_step_text_exposes_handoff_query_summary() {
+    let root = temp_goal_root("step-text-handoff");
+    let queue_root = temp_goal_root("step-text-handoff-queue");
+    plan_dispatch_goal(&root, &queue_root, "step-text-handoff-goal");
+
+    let step = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-text-handoff-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "2",
+            "--max-concurrency",
+            "2",
+        ])
+        .output()
+        .expect("goal step should execute");
+
+    assert!(
+        step.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&step.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&step.stdout);
+    assert!(stdout.contains("goal_step_handoff_query_parent_context_handoff_count: 2"));
+    assert!(stdout.contains("goal_step_handoff_query_report_admission_ref_count: 2"));
+    assert!(stdout.contains("goal_step_handoff_query_report_admission_reason_codes:"));
+    assert!(stdout.contains("goal_step_handoff_query_report_admission_refs:"));
 }
 
 #[test]

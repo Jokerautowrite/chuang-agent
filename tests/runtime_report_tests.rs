@@ -89,6 +89,22 @@ fn runtime_report_builder_carries_runtime_debug_fields() {
     assert!(report.summary.contains("model=stub-responder"));
     assert!(report.summary.contains("packed_tokens="));
     assert_eq!(report.stdout_preview, Some(result.response.body.clone()));
+    let trace_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_response.trace")
+        .expect("runtime response trace artifact should exist");
+    assert_eq!(trace_artifact.kind, ArtifactKind::Log);
+    assert!(trace_artifact
+        .description
+        .as_deref()
+        .expect("trace description should exist")
+        .contains("runtime_response_trace chars="));
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("runtime_response_trace_chars"),
+        Some(&result.response.trace.chars().count().to_string())
+    );
     let debug = report.context_debug.expect("context debug should exist");
     assert_eq!(debug.dropped_segment_ids, result.dropped_segment_ids);
     assert!(debug.drop_reasons.iter().any(|reason| {
@@ -450,6 +466,26 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
         Some(&"2".to_string())
     );
     assert_eq!(
+        observability.get("runtime_event_tool_started_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_tool_finished_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_approval_requested_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_approval_resolved_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_elicitation_requested_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
         observability.get("tool_typed_failure_count"),
         Some(&"0".to_string())
     );
@@ -476,6 +512,8 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
     assert!(description.contains("tool_unified_execution_status=ok"));
     assert!(description.contains("tool_unified_execution_failures=0"));
     assert!(description.contains("runtime_events=2"));
+    assert!(description.contains("tool_started=1"));
+    assert!(description.contains("tool_finished=1"));
     let runtime_event_artifact = report
         .artifacts
         .iter()
@@ -1129,9 +1167,50 @@ fn runtime_report_promotes_runtime_event_ledger_metadata_to_artifact() {
     assert!(description.contains("tool_started=1"));
     assert!(description.contains("tool_finished=1"));
     assert!(description.contains("approval_requested=1"));
+    assert!(description.contains("approval_resolved=0"));
     assert!(description.contains("elicitation_requested=1"));
     assert!(!description.contains("secret-preview-value"));
     assert!(!description.contains("call-approval-secret-value"));
+
+    let observability = runtime_observability_meta(&result);
+    assert_eq!(
+        observability.get("runtime_event_count"),
+        Some(&"4".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_tool_started_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_tool_finished_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_approval_requested_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_approval_resolved_count"),
+        Some(&"0".to_string())
+    );
+    assert_eq!(
+        observability.get("runtime_event_elicitation_requested_count"),
+        Some(&"1".to_string())
+    );
+
+    let observability_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.observability")
+        .expect("observability artifact should exist");
+    let observability_description = observability_artifact
+        .description
+        .as_deref()
+        .expect("description");
+    assert!(observability_description.contains("tool_started=1"));
+    assert!(observability_description.contains("tool_finished=1"));
+    assert!(observability_description.contains("approval_requested=1"));
+    assert!(observability_description.contains("elicitation_requested=1"));
 }
 
 #[test]
@@ -1285,4 +1364,217 @@ fn runtime_report_promotes_context_compaction_summary_without_segment_payloads()
         .as_deref()
         .expect("description should exist")
         .contains("trace_steps=normalize_tokens,dedupe"));
+}
+
+#[test]
+fn runtime_report_promotes_goal_and_subagent_handoff_query_summaries() {
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "goal_handoff_query_summary_json".to_string(),
+        json!({
+            "parent_context_handoff_count": 1,
+            "parent_context_handoff_refs": ["report://agent-1/report-1"],
+            "report_admission_ref_count": 1,
+            "report_admission_reason_codes": {"report_validated": 1},
+            "report_admission_refs": [{
+                "admission_id": "goal-report-admission://agent-1/report-1",
+                "report_id": "report-1",
+                "task_id": "task-1",
+                "agent_id": "agent-1",
+                "admission_status": "Accepted",
+                "reason_code": "report_validated",
+                "evidence_ref": "report://agent-1/report-1"
+            }]
+        })
+        .to_string(),
+    );
+    extra.insert(
+        "subagent_children_summary_json".to_string(),
+        json!({
+            "parent_thread_id": "root-thread",
+            "child_count": 2,
+            "open_child_count": 1,
+            "reported_child_count": 1,
+            "closed_child_count": 1,
+            "accepted_report_count": 1,
+            "rejected_report_count": 0,
+            "missing_report_count": 1,
+            "child_thread_ids": ["child-thread-1", "child-thread-2"],
+            "report_admission_refs": [{
+                "admission_id": "admission-1",
+                "report_id": "report-1",
+                "status": "Accepted",
+                "reason_code": "report_validated",
+                "evidence_ref": "queue://reports/report-1"
+            }],
+            "report_reason_codes": {"report_validated": 1}
+        })
+        .to_string(),
+    );
+
+    let result = chuang_agent::agent_runtime::RuntimeResult {
+        prompt: "prompt".to_string(),
+        response: chuang_agent::agent_runtime::RuntimeResponse {
+            model_name: "stub-responder".to_string(),
+            body: "body".to_string(),
+            trace: "trace".to_string(),
+            meta: ResponderMeta {
+                provider: None,
+                recall_hit_count: None,
+                finish_reason: None,
+                extra,
+            },
+        },
+        recall_summary: "summary".to_string(),
+        recall_hit_count: 0,
+        context_engine_kind: "deterministic_budget".to_string(),
+        packed_context_preview: "preview".to_string(),
+        packed_token_count: 12,
+        dropped_segment_ids: Vec::new(),
+        context_debug: chuang_agent::agent_runtime::ContextDebugInfo {
+            drop_reasons: Vec::new(),
+            budget_exceeded: false,
+            budget_exceeded_reasons: Vec::new(),
+            working_reservation: None,
+        },
+    };
+
+    let observability = runtime_observability_meta(&result);
+    assert!(observability.contains_key("goal_handoff_query_summary_json"));
+    assert!(observability.contains_key("subagent_children_summary_json"));
+    assert_eq!(
+        observability.get("goal_handoff_parent_context_handoff_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("goal_handoff_report_admission_ref_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_child_count"),
+        Some(&"2".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_accepted_report_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_report_admission_ref_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_missing_report_count"),
+        Some(&"1".to_string())
+    );
+    assert_eq!(
+        observability.get("goal_handoff_report_admission_reason_codes"),
+        Some(&"report_validated=1".to_string())
+    );
+    assert_eq!(
+        observability.get("goal_handoff_report_admission_refs"),
+        Some(&"goal-report-admission://agent-1/report-1".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_report_reason_codes"),
+        Some(&"report_validated=1".to_string())
+    );
+    assert_eq!(
+        observability.get("subagent_children_report_admission_refs"),
+        Some(&"admission-1".to_string())
+    );
+
+    let report = build_runtime_report(
+        &result,
+        "report-handoff-query-summary",
+        "task-handoff-query-summary",
+        "agent-handoff-query-summary",
+        None,
+    );
+    let goal_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.goal_handoff_query_summary_json")
+        .expect("goal handoff query summary artifact should exist");
+    assert_eq!(goal_artifact.kind, ArtifactKind::Log);
+    assert!(goal_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("report_admission_refs=1"));
+    assert!(goal_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("reason_codes=report_validated=1"));
+    let observability_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.observability")
+        .expect("observability artifact should exist");
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("goal_handoffs=1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("goal_admissions=1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("goal_admission_ref_locators=goal-report-admission://agent-1/report-1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("subagent_children=2"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("subagent_accepted_reports=1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("subagent_admission_refs=1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("subagent_admission_ref_locators=admission-1"));
+    assert!(observability_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("subagent_missing_reports=1"));
+
+    let subagent_artifact = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.locator == "runtime_meta.subagent_children_summary_json")
+        .expect("subagent children summary artifact should exist");
+    assert_eq!(subagent_artifact.kind, ArtifactKind::Log);
+    assert!(subagent_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("children=2"));
+    assert!(subagent_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("report_admission_refs=1"));
+    assert!(subagent_artifact
+        .description
+        .as_deref()
+        .expect("description should exist")
+        .contains("missing_reports=1"));
+
+    let encoded = serde_json::to_string(&report.artifacts).expect("artifacts should serialize");
+    assert!(!encoded.contains("secret report payload"));
+    assert!(!encoded.contains("stdout secret value"));
 }

@@ -336,6 +336,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
             "prints_secret_values".to_string(),
             "readonly".to_string(),
             "reads_secret_values".to_string(),
+            "runtime_report_surface".to_string(),
             "schema_version".to_string(),
             "source_evidence_refs".to_string(),
             "sources".to_string(),
@@ -425,4 +426,36 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         rehearsal["subagent_readiness"]["app_server_health"]["mode"],
         "queued_external"
     );
+}
+
+#[test]
+fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() {
+    let output = Command::new("bash")
+        .arg("scripts/chuang-live-runner-readiness-view.sh")
+        .env("CHUANG_AGENT_ROOT", manifest_dir())
+        .current_dir(manifest_dir())
+        .output()
+        .expect("script should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("runtime_report_surface.ok=true"));
+    assert!(stdout.contains("runtime_report_surface.artifact_count=10"));
+    assert!(stdout.contains("runtime_report_surface.observability_field_count=25"));
+    assert!(stdout.contains("runtime_report_surface.artifact_locators="));
+    assert!(stdout.contains("runtime_report_surface.observability_fields="));
+    assert!(stdout.contains("runtime_meta.goal_handoff_query_summary_json"));
+    assert!(stdout.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(stdout.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(stdout.contains("goal_handoff_report_admission_refs"));
+    assert!(stdout.contains("subagent_children_report_admission_ref_count"));
+    assert!(stdout.contains("subagent_children_report_admission_refs"));
+    assert!(stdout.contains("subagent_children_report_reason_codes"));
+    assert!(stdout.contains("context_compaction_summary_json"));
 }

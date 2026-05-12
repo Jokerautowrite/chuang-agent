@@ -108,13 +108,57 @@ def read_json_file(path: Path):
         }
 
 
+def run_dir_structured_timestamp_ns(path: Path):
+    for status_path in (
+        path / "status.json",
+        path / "run-status.json",
+        path / "latest-run-status.json",
+    ):
+        status = read_json_file(status_path)
+        data = status.get("data")
+        if not isinstance(data, dict):
+            continue
+        for key in ("updated_at", "generated_at", "timestamp", "last_updated_at"):
+            parsed = parse_iso8601(data.get(key))
+            if parsed is not None:
+                return int(parsed.timestamp() * 1_000_000_000)
+    return 0
+
+
+def run_dir_mtime_ns(path: Path):
+    candidates = [
+        path / "status.json",
+        path / "run-status.json",
+        path / "latest-run-status.json",
+        path / "summary.md",
+        path / "run.log",
+        path / "last-message.md",
+        path / "events.jsonl",
+        path,
+    ]
+    newest_mtime_ns = 0
+    for candidate in candidates:
+        try:
+            newest_mtime_ns = max(newest_mtime_ns, candidate.stat().st_mtime_ns)
+        except OSError:
+            continue
+    return newest_mtime_ns
+
+
+def run_dir_sort_key(path: Path):
+    structured_timestamp_ns = run_dir_structured_timestamp_ns(path)
+    if structured_timestamp_ns > 0:
+        return (1, structured_timestamp_ns, path.name)
+    return (0, run_dir_mtime_ns(path), path.name)
+
+
 def list_run_dirs(root: Path):
     if not root.exists() or not root.is_dir():
         return []
     try:
         return sorted(
             [path for path in root.iterdir() if path.is_dir()],
-            key=lambda path: path.name,
+            key=run_dir_sort_key,
             reverse=True,
         )
     except OSError:

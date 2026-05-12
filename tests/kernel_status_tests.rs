@@ -346,7 +346,22 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .runtime_report_surface
         .artifact_locators
         .iter()
+        .any(|locator| locator == "runtime_response.trace"));
+    assert!(status
+        .runtime_report_surface
+        .artifact_locators
+        .iter()
         .any(|locator| locator == "runtime_meta.context_compaction_events"));
+    assert!(status
+        .runtime_report_surface
+        .artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.context_compaction_summary_json"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "runtime_response_trace_chars"));
     assert!(status
         .runtime_report_surface
         .observability_fields
@@ -357,6 +372,26 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .observability_fields
         .iter()
         .any(|field| field == "context_pack_trace"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "context_compaction_summary_json"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_reason_codes"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_ref_count"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "subagent_children_report_reason_codes"));
     assert!(status.plugin_registry.available);
     assert!(status.plugin_registry.ok);
     assert_eq!(status.plugin_registry.plugin_count, 5);

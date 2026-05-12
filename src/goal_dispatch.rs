@@ -54,6 +54,8 @@ pub struct GoalDispatchCollectionReceipt {
     pub completed_worker_ids: Vec<String>,
     pub report_summaries: Vec<String>,
     pub parent_context_handoffs: Vec<ParentContextHandoff>,
+    #[serde(default)]
+    pub handoff_query_summary: GoalDispatchHandoffSummary,
     pub ready_to_checkpoint: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_suggestion: Option<GoalCheckpointSuggestion>,
@@ -65,6 +67,32 @@ pub struct GoalCheckpointSuggestion {
     pub summary: String,
     pub completed_worker_ids: Vec<String>,
     pub validation_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalDispatchHandoffSummary {
+    #[serde(default)]
+    pub parent_context_handoff_count: usize,
+    #[serde(default)]
+    pub parent_context_handoff_refs: Vec<String>,
+    #[serde(default)]
+    pub report_admission_ref_count: usize,
+    #[serde(default)]
+    pub report_admission_reason_codes: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub report_admission_refs: Vec<GoalReportAdmissionRef>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalReportAdmissionRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_id: Option<String>,
+    pub report_id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub admission_status: String,
+    pub reason_code: String,
+    pub evidence_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +276,8 @@ where
     let mut completed_worker_ids = Vec::new();
     let mut report_summaries = Vec::new();
     let mut parent_context_handoffs = Vec::new();
+    let mut report_admission_refs = Vec::new();
+    let mut report_admission_reason_codes = BTreeMap::new();
 
     for dispatch in &manifest.dispatches {
         let run_id = RunId(dispatch.run_id.clone());
@@ -287,6 +317,11 @@ where
                     ));
                     continue;
                 }
+                let report_admission_ref = build_goal_report_admission_ref(&report, &admission);
+                *report_admission_reason_codes
+                    .entry(report_admission_ref.reason_code.clone())
+                    .or_insert(0) += 1;
+                report_admission_refs.push(report_admission_ref);
                 completed_worker_ids.push(dispatch.worker_id.clone());
                 parent_context_handoffs.push(build_parent_context_handoff(&report, &admission));
                 report_summaries.push(report.summary);
@@ -305,6 +340,13 @@ where
         && available_report_count == manifest.dispatch_count
         && missing_run_ids.is_empty()
         && blocked_report_run_ids.is_empty();
+    let handoff_query_summary = GoalDispatchHandoffSummary {
+        parent_context_handoff_count: parent_context_handoffs.len(),
+        parent_context_handoff_refs: parent_context_handoff_refs(&parent_context_handoffs),
+        report_admission_ref_count: report_admission_refs.len(),
+        report_admission_reason_codes,
+        report_admission_refs,
+    };
     let checkpoint_suggestion = if ready_to_checkpoint {
         Some(build_checkpoint_suggestion(
             &manifest,
@@ -329,6 +371,7 @@ where
         completed_worker_ids,
         report_summaries,
         parent_context_handoffs,
+        handoff_query_summary,
         ready_to_checkpoint,
         checkpoint_suggestion,
         manifest_path: goal_dispatch_manifest_path(goal_root, &manifest.goal_id)?
@@ -349,6 +392,56 @@ fn build_goal_collect_report_admission(
         AgentId("goal-collect-controller".to_string()),
         Timestamp(current_rfc3339_timestamp()),
     ))
+}
+
+fn build_goal_report_admission_ref(
+    report: &SubagentReport,
+    admission: &crate::subagent_report::ReportAdmission,
+) -> GoalReportAdmissionRef {
+    GoalReportAdmissionRef {
+        admission_id: Some(format!(
+            "goal-report-admission://{}/{}",
+            report.agent_id.0, report.report_id.0
+        )),
+        report_id: admission
+            .report_id
+            .as_ref()
+            .unwrap_or(&report.report_id)
+            .0
+            .clone(),
+        task_id: admission
+            .task_id
+            .as_ref()
+            .unwrap_or(&report.task_id)
+            .0
+            .clone(),
+        agent_id: admission
+            .agent_id
+            .as_ref()
+            .unwrap_or(&report.agent_id)
+            .0
+            .clone(),
+        admission_status: match admission.status {
+            ReportAdmissionStatus::Accepted => "Accepted".to_string(),
+            ReportAdmissionStatus::Rejected => "Rejected".to_string(),
+        },
+        reason_code: admission.reason_code.clone(),
+        evidence_ref: Some(format!(
+            "report://{}/{}",
+            report.agent_id.0, report.report_id.0
+        )),
+    }
+}
+
+fn parent_context_handoff_refs(handoffs: &[ParentContextHandoff]) -> Vec<String> {
+    handoffs
+        .iter()
+        .map(|handoff| {
+            handoff.provenance_ref.clone().unwrap_or_else(|| {
+                format!("proposal_only:{}", handoff.admission_reason_code.as_str())
+            })
+        })
+        .collect()
 }
 
 fn read_report_for_collect(
