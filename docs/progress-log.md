@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server completed 事件面锁住 tool surface 摘要
+- 本轮继续沿 M7 app-server/channel 输出面补回归：`tests/app_server_tests.rs` 的 `app_server_turn_uses_workspace_provider_config` 现在在 `turn/completed` 事件里不仅确认 `toolSurface.available/governed`，还锁住 `toolSurface.callable_tools` 包含 `file_read`/`list_dir`，并确认 `runtimeObservability.tool_surface_available`、`tool_surface_governed` 和 `tool_surface_callable_tools` 同步透出。
+- 这样 app-server 事件订阅面和 `turn/start` 响应面、channel simulate JSON/文本面保持同一套 tool surface 可观测口径，不需要解析 raw trace，也不打印 payload 或 secret。验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`、`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 live-gaps 防混矩阵回归加固
 - 本轮继续沿 M5/M6/M7 live readiness 主链补高层测试：`tests/live_operator_scripts_tests.rs` 的 `live_gaps_check_uses_provider_env_file_when_available` 现在不只确认 provider env 脱敏为 `<set>`，还锁住 `live-gaps --json` 的 `check_name`、summary、marker、只读边界、local contract/preflight/real-live 三段矩阵，以及 `live_worker_adapter_pending`、`live_runner_gate_disabled`、`manual_operator_live_receipt_missing`、`real_external_services_not_verified` 四个 gap id。
 - 这保证 candidate/third-test 依赖的 live-gaps 状态面持续表达“local/preflight ready 不等于 real live ready”，且不连接 Feishu/provider、不启动 worker、不启 live gate、不打印 secret。验证已通过 `cargo test -q --test live_operator_scripts_tests live_gaps_check_uses_provider_env_file_when_available`、`cargo test -q --test live_operator_scripts_tests --test live_operator_receipt_collect_tests --test live_runner_readiness_view_tests`、`cargo fmt --all --check`、`git diff --check`。

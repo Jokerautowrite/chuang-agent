@@ -432,6 +432,33 @@ transport = "stub"
         turn_completed["params"]["turn"]["toolSurface"]["governed"],
         true
     );
+    assert!(
+        turn_completed["params"]["turn"]["toolSurface"]["callable_tools"]
+            .as_array()
+            .expect("event callable tools should be array")
+            .iter()
+            .any(|tool| tool == "file_read")
+    );
+    assert!(
+        turn_completed["params"]["turn"]["toolSurface"]["callable_tools"]
+            .as_array()
+            .expect("event callable tools should be array")
+            .iter()
+            .any(|tool| tool == "list_dir")
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["tool_surface_available"],
+        "true"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["tool_surface_governed"],
+        "true"
+    );
+    assert!(turn_completed["params"]["turn"]["runtimeObservability"]
+        ["tool_surface_callable_tools"]
+        .as_str()
+        .expect("event callable tools metadata should be string")
+        .contains("file_read"));
     assert_eq!(
         turn_completed["params"]["turn"]["toolEvents"]
             .as_array()
