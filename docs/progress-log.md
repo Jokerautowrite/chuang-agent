@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 GoalRun 记录 runtime surface 矩阵 checkpoint
+- 本轮把 runtime surface turn/status/readiness/health 覆盖矩阵写入 `mainline-mvp` GoalRun 运行态：最新 checkpoint 为 `checkpoint-1778614041510506082`，checkpoint count 到 158，summary 为 `runtime surface turn status readiness health coverage verified`。
+- 运行态文件 `context/goal-runs/mainline-mvp.json` 仍是 ignored，不纳入提交；项目仓库只记录 progress-log。验证证据为聚合矩阵 `cargo test -q --test app_server_tests --test cli_channel_tests --test kernel_status_tests --test live_runner_readiness_view_tests --test runtime_report_tests` 与 `git diff --check`。
+
 # 2026-05-13 runtime surface 聚合矩阵复验
 - 本轮在 channel/app-server turn、status/readiness、app-server health 三批 handoff/subagent runtime surface 回归后，跑通聚合矩阵，确认新增字段集合断言没有互相冲突，也没有扰动 runtime_report 底层合同。
 - 验证已通过 `cargo test -q --test app_server_tests --test cli_channel_tests --test kernel_status_tests --test live_runner_readiness_view_tests --test runtime_report_tests`；同步漂移扫描确认当前执行性 docs/scripts 没有残留 10/20、10/25 或旧测试名，命中项只在历史 progress/handoff 说明中。
