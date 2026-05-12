@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 runtime/status/channel event observability 矩阵复验
+- 本轮复验当前 runtime event observability 新口径：无工具 turn 的 `runtime_event_*` 字段在 runtime_report、channel/app-server turn、status/doctor/readiness 相关矩阵中保持稳定可查；当前顶部记录为准，旧历史日志中“无工具 turn 不显示/不伪造 runtime_event_count”的说法不再代表当前合同。
+- 验证已通过 `cargo test -q --test live_runner_readiness_view_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests --test cli_channel_tests --test runtime_report_tests`。GoalRun checkpoint 写入 `checkpoint-1778606671783719619`，count 到 143。
+
 # 2026-05-12 runtime_report 默认 runtime event counts 合同
 - 本轮在 channel/app-server turn 面补强后继续收口底层合同：新增 `runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger`，直接断言没有 `runtime_event_ledger_json` 时，`runtime_observability_meta` 仍稳定输出 runtime event count、tool started/finished、approval requested/resolved 和 elicitation requested 六个字段为 `0`。
 - 验证已通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger` 和 `cargo test -q --test runtime_report_tests --test cli_channel_tests --test app_server_tests`。GoalRun checkpoint 写入 `checkpoint-1778606540067668529`，count 到 142。
