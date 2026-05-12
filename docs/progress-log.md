@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate 复验覆盖最新 smoke/channel guard
+- 本轮在 `45aba43` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，完整继承 complete-local、goal-mode 正负 smoke、channel simulate live readiness 断言、Feishu turn summary smoke、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 与 provider readiness 只读检查；最终输出 `chuang_candidate_verify_ok`。
+- 复验确认 candidate 仍打印 `candidate_live_readiness_state=local_ready_live_pending`、`candidate_runtime_report_surface=11/26`、`candidate_policy_tool_status=9/12`，GoalRun checkpoint count 到 115 且 checkpoint log complete 为 true；provider readiness 只显示 `api_key_state=<set>`，未发真实 provider 请求、未打印 secret、未触碰 Hermes。
+
 # 2026-05-12 M5/M6/M7 宽矩阵复验
 - 本轮在 `2f37e65` 后继续复验 M5/M6/M7 主链接线宽矩阵：runtime report、goal dispatch/CLI、live runner readiness view、channel simulate 和 app-server turn/health 相关回归全部通过，确认 11/26 runtime surface、GoalRun/report admission、live readiness channel surface、unified execution 和 app-server/channel 输出仍同口径。
 - 验证已通过 `cargo test -q --test runtime_report_tests --test goal_dispatch_tests --test cli_goal_tests --test live_runner_readiness_view_tests --test cli_channel_tests --test app_server_tests`；本轮只跑本地测试，不连接真实 provider/Feishu、不启动 worker、不触碰 Hermes。
