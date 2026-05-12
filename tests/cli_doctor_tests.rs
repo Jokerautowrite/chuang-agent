@@ -189,6 +189,14 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains(
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
+    assert!(stdout.contains("live_readiness: ok=true state=local_ready_live_pending"));
+    assert!(stdout.contains("local_ready_scope=ready/local-ready only covers local contracts"));
+    assert!(stdout.contains("ga_local_mapped_only=true"));
+    assert!(stdout.contains("desktop_browser_live_gated=true"));
+    assert!(stdout.contains("browser_worker_frozen=true"));
+    assert!(stdout.contains("real_external_acceptance_pending=true"));
+    assert!(stdout.contains("provider_live_request_verified_by_status=false"));
+    assert!(stdout.contains("ready_does_not_mean_live=true"));
     assert!(stdout.contains(
         "live_adapter_gate name=subagent_runner state=disabled enabled=false default_enabled=false env_value_state=unset required_env=CHUANG_CODEX_RUNNER_ENABLE audit_label=subagent.runner.live"
     ));
@@ -244,7 +252,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 23);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 24);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -338,6 +346,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
                 .as_str()
                 .expect("live adapter preflight detail")
                 .contains("next_actions=")));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "live_readiness"
+            && check["detail"]
+                .as_str()
+                .expect("live readiness detail")
+                .contains("ready_does_not_mean_live=true")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -657,6 +674,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
                 .as_str()
                 .expect("live runner capability mismatch reason")
                 .contains("required_capabilities")));
+    assert_eq!(parsed["status"]["live_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["status"]["live_readiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(
+        parsed["status"]["live_readiness"]["ready_does_not_mean_live"],
+        true
+    );
     assert_eq!(parsed["status"]["live_adapter_gates"]["ok"], true);
     assert_eq!(
         parsed["status"]["live_adapter_gates"]["overall_state"],

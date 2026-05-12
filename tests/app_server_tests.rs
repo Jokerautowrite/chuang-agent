@@ -2082,6 +2082,24 @@ transport = "stub"
                 .as_str()
                 .expect("layer capability mismatch reason should be text")
                 .contains("required_capabilities")));
+    assert_eq!(parsed["live_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["live_readiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(parsed["live_readiness"]["ga_local_mapped_only"], true);
+    assert_eq!(parsed["live_readiness"]["desktop_browser_live_gated"], true);
+    assert_eq!(parsed["live_readiness"]["browser_worker_frozen"], true);
+    assert_eq!(parsed["live_readiness"]["live_worker_available"], false);
+    assert_eq!(
+        parsed["live_readiness"]["real_external_acceptance_pending"],
+        true
+    );
+    assert_eq!(
+        parsed["live_readiness"]["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(parsed["live_readiness"]["ready_does_not_mean_live"], true);
     assert_eq!(parsed["live_adapter_gates"]["ok"], true);
     assert_eq!(
         parsed["live_adapter_gates"]["overall_state"],
@@ -2565,6 +2583,14 @@ transport = "stub"
     assert!(stdout.contains(
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
+    assert!(stdout.contains("live_readiness: ok=true state=local_ready_live_pending"));
+    assert!(stdout.contains("local_ready_scope=ready/local-ready only covers local contracts"));
+    assert!(stdout.contains("ga_local_mapped_only=true"));
+    assert!(stdout.contains("desktop_browser_live_gated=true"));
+    assert!(stdout.contains("browser_worker_frozen=true"));
+    assert!(stdout.contains("real_external_acceptance_pending=true"));
+    assert!(stdout.contains("provider_live_request_verified_by_status=false"));
+    assert!(stdout.contains("ready_does_not_mean_live=true"));
     assert!(stdout.contains(
         "live_adapter_gate name=subagent_runner state=disabled enabled=false default_enabled=false env_value_state=unset required_env=CHUANG_CODEX_RUNNER_ENABLE audit_label=subagent.runner.live"
     ));

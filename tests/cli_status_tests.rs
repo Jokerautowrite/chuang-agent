@@ -253,6 +253,14 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "live_adapter_gates: ok=true state=disabled_by_default gates=3 enabled=0 disabled=3"
     ));
+    assert!(stdout.contains("live_readiness: ok=true state=local_ready_live_pending"));
+    assert!(stdout.contains("local_ready_scope=ready/local-ready only covers local contracts"));
+    assert!(stdout.contains("ga_local_mapped_only=true"));
+    assert!(stdout.contains("desktop_browser_live_gated=true"));
+    assert!(stdout.contains("browser_worker_frozen=true"));
+    assert!(stdout.contains("real_external_acceptance_pending=true"));
+    assert!(stdout.contains("provider_live_request_verified_by_status=false"));
+    assert!(stdout.contains("ready_does_not_mean_live=true"));
     assert!(stdout.contains(
         "live_adapter_gate name=control_apply state=disabled enabled=false default_enabled=false env_value_state=unset required_env=CHUANG_REAL_CONTROL_ENABLE audit_label=control.apply.live"
     ));

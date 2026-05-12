@@ -211,6 +211,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "channel_readiness": status.channel_readiness,
         "subagent_readiness": status.subagent_readiness,
         "live_adapter_gates": status.live_adapter_gates,
+        "live_readiness": status.live_readiness,
         "external_ai_readiness": status.external_ai_readiness,
         "db_path": runtime.db_path.display().to_string(),
         "identity_memory_root": identity_memory_root,
@@ -577,6 +578,23 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 gate.next_action
             );
         }
+        let live_readiness = &status.live_readiness;
+        println!(
+            "live_readiness: ok={} state={} local_ready_scope={} ga_local_mapped_only={} desktop_browser_live_gated={} browser_worker_frozen={} live_worker_available={} real_external_acceptance_pending={} provider_live_request_verified_by_status={} mapped_does_not_mean_live={} gated_does_not_mean_ready={} frozen_does_not_mean_ready={} ready_does_not_mean_live={}",
+            live_readiness.ok,
+            live_readiness.overall_state,
+            live_readiness.local_ready_scope,
+            live_readiness.ga_local_mapped_only,
+            live_readiness.desktop_browser_live_gated,
+            live_readiness.browser_worker_frozen,
+            live_readiness.live_worker_available,
+            live_readiness.real_external_acceptance_pending,
+            live_readiness.provider_live_request_verified_by_status,
+            live_readiness.mapped_does_not_mean_live,
+            live_readiness.gated_does_not_mean_ready,
+            live_readiness.frozen_does_not_mean_ready,
+            live_readiness.ready_does_not_mean_live
+        );
         println!(
             "release_readiness: ok={} name={} state={}",
             status.release_readiness.ok,

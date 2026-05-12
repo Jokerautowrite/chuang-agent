@@ -677,6 +677,22 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
+        "live_readiness: ok={} state={} local_ready_scope={} ga_local_mapped_only={} desktop_browser_live_gated={} browser_worker_frozen={} live_worker_available={} real_external_acceptance_pending={} provider_live_request_verified_by_status={} mapped_does_not_mean_live={} gated_does_not_mean_ready={} frozen_does_not_mean_ready={} ready_does_not_mean_live={}",
+        status.live_readiness.ok,
+        status.live_readiness.overall_state,
+        status.live_readiness.local_ready_scope,
+        status.live_readiness.ga_local_mapped_only,
+        status.live_readiness.desktop_browser_live_gated,
+        status.live_readiness.browser_worker_frozen,
+        status.live_readiness.live_worker_available,
+        status.live_readiness.real_external_acceptance_pending,
+        status.live_readiness.provider_live_request_verified_by_status,
+        status.live_readiness.mapped_does_not_mean_live,
+        status.live_readiness.gated_does_not_mean_ready,
+        status.live_readiness.frozen_does_not_mean_ready,
+        status.live_readiness.ready_does_not_mean_live
+    );
+    println!(
         "external_ai_readiness: ok={} state={} layers={} ready={} partial={} deferred={} blocked={}",
         status.external_ai_readiness.ok,
         status.external_ai_readiness.overall_state,

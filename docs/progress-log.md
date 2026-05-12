@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live readiness 防混摘要进入 status/doctor/health
+- 本轮继续沿 M5/M6/M7 状态可观测主链补人读/服务健康面：`status` 文本、`doctor` check/text、`app-server health` JSON/text 现在都透出同一份 `live_readiness` anti-confusion 摘要，直接展示 `local_ready_live_pending`、GA 仅本地映射、桌面/浏览器 live gate、BrowserWorker frozen、live worker unavailable、真实外部验收仍 pending，以及 ready/gated/mapped/frozen 不等于 live 的边界。
+- 这一步只提升已有 `kernel_status.live_readiness` 字段，不连接 provider/Feishu、不启动 worker、不读取或打印 secret；回归锁住 `cli_status_tests`、`cli_doctor_tests` 与 `app_server_tests` 的 JSON/text 查询面。验证已通过 `cargo test -q --test cli_status_tests --test cli_doctor_tests --test app_server_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 third-test 复验覆盖 provider receipt 边界门禁
 - 本轮在 `1d04c49` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认 provider receipt 边界字段已进入 candidate/third-test 的 live operator receipt 模板断言；GoalRun checkpoint count 到 102，checkpoint log complete 为 true，provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
