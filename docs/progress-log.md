@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 GoalRun status 文本面补 checkpoint 时间
+- 本轮继续沿 M6/M7 goal 状态可观测性补人读状态面：`scripts/chuang-goal-run-status.sh` 文本输出现在除 project GoalRun checkpoint id/summary、worker count、validation note count 外，也打印 `project_goal_run_last_checkpoint_created_at`，方便人工确认当前 status 面对应哪一次 checkpoint。
+- JSON 面已有 `last_checkpoint_created_at`，本轮只补文本面和回归，不启动 worker、不修改运行态服务、不打印 validation note 原文。验证已通过 `cargo test -q --test cli_smoke_tests goal_run_status_script_reads_watchdog_and_overnight_status_without_actions`、`cargo test -q --test cli_smoke_tests`、`bash scripts/chuang-goal-run-status.sh` 抽样、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 app-server completed 事件面锁住 tool surface 摘要
 - 本轮继续沿 M7 app-server/channel 输出面补回归：`tests/app_server_tests.rs` 的 `app_server_turn_uses_workspace_provider_config` 现在在 `turn/completed` 事件里不仅确认 `toolSurface.available/governed`，还锁住 `toolSurface.callable_tools` 包含 `file_read`/`list_dir`，并确认 `runtimeObservability.tool_surface_available`、`tool_surface_governed` 和 `tool_surface_callable_tools` 同步透出。
 - 这样 app-server 事件订阅面和 `turn/start` 响应面、channel simulate JSON/文本面保持同一套 tool surface 可观测口径，不需要解析 raw trace，也不打印 payload 或 secret。验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`、`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests`、`cargo fmt --all --check`、`git diff --check`。

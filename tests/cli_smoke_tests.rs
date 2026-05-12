@@ -780,6 +780,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert!(script.contains("CHUANG_GOAL_OVERNIGHT_STATUS_FILE"));
     assert!(script.contains("CHUANG_AGENT_ROOT"));
     assert!(script.contains("CHUANG_PROJECT_GOAL_RUN_FILE"));
+    assert!(script.contains("project_goal_run_last_checkpoint_created_at:"));
     assert!(script.contains("project_goal_run_last_completed_worker_count:"));
     assert!(script.contains("project_goal_run_last_validation_note_count:"));
     assert!(script.contains("\"dispatches_tasks\": False"));
@@ -951,6 +952,10 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(
         data["project_goal_run"]["last_checkpoint_summary"],
         "goal status checkpoint summary"
+    );
+    assert_eq!(
+        data["project_goal_run"]["last_checkpoint_created_at"],
+        "2026-05-12T12:00:00Z"
     );
     assert_eq!(
         data["project_goal_run"]["last_completed_worker_ids"],

@@ -626,6 +626,7 @@ else:
     print("project_goal_run_checkpoint_log_complete: " + str(goal_run.get("checkpoint_log_complete", False)).lower())
     print("project_goal_run_last_checkpoint: " + str(goal_run.get("last_checkpoint_id") or "none"))
     print("project_goal_run_last_checkpoint_summary: " + str(goal_run.get("last_checkpoint_summary") or "none"))
+    print("project_goal_run_last_checkpoint_created_at: " + str(goal_run.get("last_checkpoint_created_at") or "none"))
     print("project_goal_run_last_completed_worker_count: " + str(len(goal_run.get("last_completed_worker_ids") or [])))
     print("project_goal_run_last_validation_note_count: " + str(len(goal_run.get("last_validation_notes") or [])))
     print("interactive_state: " + str(payload.get("interactive_state") or "unknown"))
