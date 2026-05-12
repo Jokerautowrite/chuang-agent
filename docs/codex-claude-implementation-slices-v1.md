@@ -64,7 +64,7 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M1.1 RuntimeEvent schema
 
-- 写入范围：新增 `src/runtime_event.rs` 或 `src/runtime_event/mod.rs`；在 `src/lib.rs` re-export；新增 `tests/runtime_event_ledger_tests.rs`。
+- 写入范围：新增 `src/runtime_event_ledger.rs` 或 `src/runtime_event/mod.rs`；在 `src/lib.rs` re-export；新增 `tests/runtime_event_ledger_tests.rs`。
 - 接口：`RuntimeEvent`、`RuntimeEventKind`、`RuntimeEventIds`、`RuntimeEvidenceRef`、`RiskDecisionSnapshot`、`RuntimeEventLedger` trait。
 - 测试：事件 serde roundtrip；必填 `thread_id` / `turn_id` / `created_at`；unknown kind 拒绝；secret-like preview 拒绝或脱敏。
 - 验收命令：`cargo fmt --all --check`；`cargo test -q --test runtime_event_ledger_tests`; `git diff --check`。
@@ -98,18 +98,18 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M2.1 ToolDescriptor schema
 
-- 写入范围：新增 `src/tool_registry.rs`；桥接 `src/atomic_tool.rs`；新增 `tests/tool_registry_tests.rs`。
+- 写入范围：新增或扩展 `src/tool_registry_slot.rs`；桥接 `src/atomic_tool.rs`；新增 `tests/tool_registry_slot_tests.rs`。
 - 接口：`ToolDescriptor { name, namespace, schema, read_only, mutating, destructive, external_commit, concurrent_safe, requires_approval, risk_tags }`。
 - 测试：descriptor serde；required flags 完整；destructive 与 read_only 互斥；risk tags 稳定。
-- 验收命令：`cargo test -q --test tool_registry_tests --test atomic_tool_tests`; `cargo fmt --all --check`; `git diff --check`。
+- 验收命令：`cargo test -q --test tool_registry_slot_tests --test atomic_tool_tests`; `cargo fmt --all --check`; `git diff --check`。
 - 风险边界：governance 不能继续只靠工具名字猜风险；descriptor 是风险判断输入，不是最终授权。
 
 ### M2.2 ToolHandler registry contract
 
-- 写入范围：`src/tool_registry.rs`、`src/tool_runtime.rs`、`tests/tool_registry_tests.rs`。
+- 写入范围：`src/tool_registry_slot.rs`、`src/tool_runtime.rs`、`tests/tool_registry_slot_tests.rs`。
 - 接口：`ToolHandler::descriptor()`、`precheck()`、`execute()`、`postprocess()`；`ToolRegistry::register()`、`get()`、`dispatch()`。
 - 测试：fake read-only tool；fake mutating tool；unknown tool structured error；handler panic/invalid output 被包装为 typed failure。
-- 验收命令：`cargo test -q --test tool_registry_tests --test tool_runtime_tests`。
+- 验收命令：`cargo test -q --test tool_registry_slot_tests --test tool_runtime_tests`。
 - 风险边界：registry dispatch 必须写 M1 ledger；handler 不能自行绕过 governance 或直接调用 actuator live path。
 
 ### M2.3 Existing atomic tools descriptor bridge
@@ -140,15 +140,15 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M3.2 Risk evaluator
 
-- 写入范围：`src/governance.rs`、`src/tool_registry.rs`、`tests/governance_tests.rs`。
+- 写入范围：`src/governance.rs`、`src/tool_registry_slot.rs`、`tests/governance_tests.rs`。
 - 接口：`evaluate(descriptor, params, profile) -> PermissionDecision`。
 - 测试：read/list/status allow；file_write/code_execute/open_app/click/input allow_with_audit；external/send/payment/verification require approval；secret/network/service deny or approval；destructive exact-target approval required.
-- 验收命令：`cargo test -q --test governance_tests --test tool_registry_tests`。
+- 验收命令：`cargo test -q --test governance_tests --test tool_registry_slot_tests`。
 - 风险边界：普通本地动作不应无理由拒绝；高危动作不能因 prompt 说“可以”而放行。
 
 ### M3.3 Approval request + audit receipt
 
-- 写入范围：`src/governance.rs`、`src/runtime_event.rs`、`src/runtime_report.rs`、CLI/status tests。
+- 写入范围：`src/governance.rs`、`src/runtime_event_ledger.rs`、`src/runtime_report.rs`、CLI/status tests。
 - 接口：`ApprovalRequest`、`ApprovalDecision`、`AuditReceipt`；approval_requested/resolved ledger events。
 - 测试：approval missing blocks external commit；deny reason 可见；approval scope 限制 action/target；audit receipt 无 secret。
 - 验收命令：`cargo test -q --test governance_tests --test runtime_report_tests --test kernel_status_tests`。
@@ -166,10 +166,10 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M4.1 ExecutionRequest / ExecutionResult
 
-- 写入范围：新增 `src/unified_exec.rs`；桥接 `src/tool_runtime.rs`、`src/actuator.rs`、`src/control_plane.rs`。
+- 写入范围：新增或扩展 `src/unified_execution_slot.rs`；桥接 `src/tool_runtime.rs`、`src/actuator.rs`、`src/control_plane.rs`。
 - 接口：`ExecutionRequest`、`ExecutionResult`、`ExecutionOutputPreview`、`ExecutionEnvironmentSnapshot`、`ExecutionFailureKind`。
 - 测试：request serde；result preview 限流；cwd/env/sandbox/audit label 写入 receipt；secret env 脱敏。
-- 验收命令：`cargo test -q --test unified_exec_tests --test tool_runtime_tests --test control_actuator_contract_tests`。
+- 验收命令：`cargo test -q --test unified_execution_slot_tests --test tool_runtime_tests --test control_actuator_contract_tests`。
 - 风险边界：ExecutionResult 不得包含完整 secret env；不提供 destructive cleanup helper。
 
 ### M4.2 Shell/code_execute bridge
@@ -200,41 +200,41 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M5.1 Fake stdio MCP server/client
 
-- 写入范围：新增 `src/mcp_adapter.rs` 或 `src/mcp/`; tests `tests/mcp_adapter_tests.rs`。
+- 写入范围：新增或扩展 `src/mcp_fake_adapter.rs`; tests `tests/mcp_fake_adapter_tests.rs`。
 - 接口：tools/list、tools/call、server stderr capture, timeout config.
 - 测试：valid list/call; malformed JSON; timeout; stderr noise; missing tool; process exit.
-- 验收命令：`cargo test -q --test mcp_adapter_tests`。
+- 验收命令：`cargo test -q --test mcp_fake_adapter_tests`。
 - 风险边界：fake server only; no real network MCP; no secret in stderr preview.
 
 ### M5.2 MCP descriptor into ToolRegistry
 
-- 写入范围：`src/mcp_adapter.rs`、`src/tool_registry.rs`、`tests/mcp_adapter_tests.rs`、`tests/tool_registry_tests.rs`.
+- 写入范围：`src/mcp_fake_adapter.rs`、`src/tool_registry_slot.rs`、`tests/mcp_fake_adapter_tests.rs`、`tests/tool_registry_slot_tests.rs`.
 - 接口：MCP tool -> `ToolDescriptor` with risk tags and approval requirement.
 - 测试：read-only MCP allow; mutating MCP allow_with_audit; destructive/open-world MCP require approval; unknown schema rejected.
-- 验收命令：`cargo test -q --test mcp_adapter_tests --test tool_registry_tests --test governance_tests`。
+- 验收命令：`cargo test -q --test mcp_fake_adapter_tests --test tool_registry_slot_tests --test governance_tests`。
 - 风险边界：MCP tools cannot bypass governance; descriptor cannot default destructive=false when server omits risk.
 
 ### M5.3 Approval + elicitation events
 
-- 写入范围：`src/mcp_adapter.rs`、`src/runtime_event.rs`、`src/governance.rs`。
+- 写入范围：`src/mcp_fake_adapter.rs`、`src/runtime_event_ledger.rs`、`src/governance.rs`。
 - 接口：approval_required, elicitation_required, tool_result, tool_error events.
 - 测试：approval-required MCP call blocks without approval; elicitation-required returns structured request; event previews redacted.
-- 验收命令：`cargo test -q --test mcp_adapter_tests --test runtime_event_ledger_tests --test governance_tests`。
+- 验收命令：`cargo test -q --test mcp_fake_adapter_tests --test runtime_event_ledger_tests --test governance_tests`。
 - 风险边界：elicitation cannot ask for secrets unless policy explicitly approves secret access; default is deny/redact.
 
 ## M6 SubagentTreeLedger
 
 ### M6.1 Agent tree schema
 
-- 写入范围：新增 `src/subagent_tree.rs`; `src/subagent_queue.rs`; tests `tests/subagent_tree_tests.rs`.
+- 写入范围：新增或扩展 `src/subagent_tree_ledger.rs`; `src/subagent_queue.rs`; tests `tests/subagent_tree_ledger_tests.rs`.
 - 接口：`AgentNode`、`SpawnEdge`、`AgentRole`、`AgentTreeLedger`、depth/concurrency limits.
 - 测试：root/child relation; max depth reject; max concurrent reject; nickname/status serialization.
-- 验收命令：`cargo test -q --test subagent_tree_tests --test subagent_queue_tests`。
+- 验收命令：`cargo test -q --test subagent_tree_ledger_tests --test subagent_queue_tests`。
 - 风险边界：agent tree is trace/state, not permission grant; child capabilities still go through governance.
 
 ### M6.2 Spawn/send/wait/close/list events
 
-- 写入范围：`src/cli_subagent.rs`、`src/subagent_queue.rs`、`src/live_subagent_rehearsal.rs`、`src/runtime_event.rs`.
+- 写入范围：`src/cli_subagent.rs`、`src/subagent_queue.rs`、`src/live_subagent_rehearsal.rs`、`src/runtime_event_ledger.rs`.
 - 接口：subagent_spawned, subagent_message_sent, subagent_wait_started, subagent_closed, subagent_reported.
 - 测试：queued dispatch creates spawn edge; run-loop updates status; close is explicit and non-destructive; list answers who/what/status/evidence.
 - 验收命令：`cargo test -q --test cli_subagent_dispatch_tests --test subagent_queue_tests --test live_runner_readiness_view_tests`。
@@ -260,7 +260,7 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M7.2 Compaction event + deterministic trace
 
-- 写入范围：`src/context_engine.rs`、`src/context_engine/summary_compression.rs`、`src/runtime_event.rs`.
+- 写入范围：`src/context_engine.rs`、`src/context_engine/summary_compression.rs`、`src/runtime_event_ledger.rs`.
 - 接口：context_compaction_started, context_compaction_completed, context_segment_dropped events; pack trace remains deterministic.
 - 测试：budget pressure preserves core/session/tool/history; compaction event contains reason and dropped segment ids; no full sensitive segment dump.
 - 验收命令：`cargo test -q --test context_engine_tests --test agent_runtime_tests --test runtime_event_ledger_tests`。
@@ -280,12 +280,12 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 | --- | --- | --- | --- |
 | Format and whitespace | all slices | `cargo fmt --all --check`; `git diff --check` | no formatting drift or whitespace errors |
 | Ledger contract | M1, M4-M7 | `cargo test -q --test runtime_event_ledger_tests` | event schema, append/query, redaction, typed failures pass |
-| Registry contract | M2, M5 | `cargo test -q --test tool_registry_tests --test atomic_tool_tests` | descriptors complete; dispatch stable; risk flags correct |
+| Registry contract | M2, M5 | `cargo test -q --test tool_registry_slot_tests --test atomic_tool_tests` | descriptors complete; dispatch stable; risk flags correct |
 | Governance policy | M3-M5 | `cargo test -q --test governance_tests --test kernel_status_tests --test cli_doctor_tests` | local actions `allow_with_audit`; high-risk approval/deny |
 | Tool runtime | M2, M4, M7 | `cargo test -q --test tool_runtime_tests --test agent_runtime_tests --test runtime_report_tests` | tool events, previews, typed failures, protocol correction pass |
 | Actuator/browser boundary | M4 | `cargo test -q --test actuator_tests --test browser_read_tests --test genesis_actuator_tests` | observe/read split preserved; live actions audited |
-| MCP fake | M5 | `cargo test -q --test mcp_adapter_tests --test tool_registry_tests --test governance_tests` | fake MCP cannot bypass governance or leak secret previews |
-| Subagent tree | M6 | `cargo test -q --test subagent_tree_tests --test subagent_queue_tests --test subagent_report_tests` | spawn tree, admission, report context handoff pass |
+| MCP fake | M5 | `cargo test -q --test mcp_fake_adapter_tests --test tool_registry_slot_tests --test governance_tests` | fake MCP cannot bypass governance or leak secret previews |
+| Subagent tree | M6 | `cargo test -q --test subagent_tree_ledger_tests --test subagent_queue_tests --test subagent_report_tests` | spawn tree, admission, report context handoff pass |
 | Context snapshot/compaction | M7 | `cargo test -q --test context_engine_tests --test agent_runtime_tests --test app_server_tests` | TurnContext stable; compaction preserves boundaries |
 | Status/doctor/app-server surface | M2-M4, M6-M7 | `cargo test -q --test cli_status_tests --test cli_doctor_tests --test app_server_tests --test cli_console_tests` | JSON/text surfaces expose profile, tools, gates, events without secrets |
 | Local smoke after first batch | M1-M3 | `sh scripts/chuang-complete-local-smoke.sh` | local contract remains green; no real service required |

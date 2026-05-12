@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 implementation slices 验收命令名对齐
+- 本轮修正 `docs/codex-claude-implementation-slices-v1.md` 里的旧测试名，把 `mcp_adapter_tests`、`tool_registry_tests`、`subagent_tree_tests`、`unified_exec_tests` 等历史占位更新为当前实际的 `mcp_fake_adapter_tests`、`tool_registry_slot_tests`、`subagent_tree_ledger_tests`、`unified_execution_slot_tests`，并同步相关源码路径命名。
+- 验证已通过 `cargo test -q --test mcp_fake_adapter_tests --test tool_registry_slot_tests --test subagent_tree_ledger_tests --test unified_execution_slot_tests` 和 `git diff --check -- docs/codex-claude-implementation-slices-v1.md`。GoalRun checkpoint 写入 `checkpoint-1778607500054296795`，count 到 149。
+
 # 2026-05-12 implementation slices 同步 M5/M6/M7 当前状态
 - 本轮同步 `docs/codex-claude-implementation-slices-v1.md`，新增 2026-05-12 current implementation status：标明 M5 fake MCP/risk/approval/elicitation、M6 subagent tree/report admission/GoalRun evidence、M7 TurnContext/compaction/tool protocol correction 已进入主链可观测面。
 - 文档同时保留真实 live worker、desktop/browser/wiki/GBrain receipt 仍未完成的边界，避免把 local-ready/readiness 当成 live-ready。验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md`。GoalRun checkpoint 写入 `checkpoint-1778607354052184840`，count 到 148。
