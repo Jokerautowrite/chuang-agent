@@ -34,6 +34,8 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
     assert!(mvp_smoke.contains("runtime_report_surface[\"artifact_count\"] == 10"));
     assert!(mvp_smoke.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(mvp_smoke.contains("runtime_response.trace"));
+    assert!(mvp_smoke.contains("runtime_response_trace_chars"));
     assert!(mvp_smoke.contains("runtime_event_tool_started_count"));
     assert!(mvp_smoke.contains("runtime_event_tool_finished_count"));
     assert!(mvp_smoke.contains("runtime_event_approval_requested_count"));
@@ -47,10 +49,12 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("goal_handoff_parent_context_handoff_count"));
     assert!(mvp_smoke.contains("goal_handoff_report_admission_ref_count"));
     assert!(mvp_smoke.contains("goal_handoff_report_admission_refs"));
+    assert!(mvp_smoke.contains("goal_handoff_report_admission_reason_codes"));
     assert!(mvp_smoke.contains("subagent_children_child_count"));
     assert!(mvp_smoke.contains("subagent_children_accepted_report_count"));
     assert!(mvp_smoke.contains("subagent_children_report_admission_ref_count"));
     assert!(mvp_smoke.contains("subagent_children_report_admission_refs"));
+    assert!(mvp_smoke.contains("subagent_children_report_reason_codes"));
     assert!(mvp_smoke.contains("subagent_children_missing_report_count"));
     assert!(mvp_smoke.contains("context_compaction_summary_json"));
     assert!(mvp_smoke.contains("checks_by_name[\"goal_run_readiness\"]"));

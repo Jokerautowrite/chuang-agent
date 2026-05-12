@@ -1778,3 +1778,7 @@
 # 2026-05-12 complete-local runtime surface 同口径补齐
 - 本轮把 `scripts/chuang-complete-local-smoke.sh` 的 4 个 runtime_report_surface 检查块补到 candidate/third-test 同口径：全部显式断言 `runtime_response.trace`、`runtime_response_trace_chars`、`runtime_meta.context_compaction_summary_json`、goal handoff admission reason codes 和 subagent children reason codes，避免 complete-local 门禁落后于 readiness/candidate 聚合面。
 - `tests/cli_smoke_tests.rs` 的 complete-local 静态回归同步锁住这些字段；验证已通过 `cargo test -q --test cli_smoke_tests complete_local_smoke_wrapper_reuses_safe_local_acceptance`、`cargo fmt --all --check`、`git diff --check` 和完整 `sh scripts/chuang-complete-local-smoke.sh`。下一轮入口：继续扫 MVP smoke 与 goal-mode smoke 的字段抽样是否也需要补齐 reason-code/trace chars，或者转去 tool protocol correction 的非零路径测试。
+
+# 2026-05-12 MVP smoke runtime surface 同口径补齐
+- 本轮把 `scripts/chuang-mvp-smoke.sh` 的 3 个 runtime_report_surface 检查块补齐到 complete-local/candidate 同口径：显式断言 `runtime_response.trace`、`runtime_response_trace_chars`、goal handoff admission reason codes 和 subagent children reason codes，避免 MVP/second-test 基础门禁落后于后续验证脚本。
+- `tests/cli_smoke_tests.rs` 的 second-test wrapper 静态回归同步锁住这些字段；验证已通过 `cargo test -q --test cli_smoke_tests second_test_smoke_wrapper_reuses_safe_mvp_smoke`、`cargo fmt --all --check`、`git diff --check` 和完整 `sh scripts/chuang-mvp-smoke.sh`。下一轮入口：继续查 tool protocol correction 的高层非零路径，或跑 M5/M6/M7 汇总矩阵确认连续 checkpoint 后状态一致。
