@@ -299,6 +299,18 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
             }
             println!("tool_call_count: {}", output.tool_call_count);
             println!(
+                "tool_surface_available: {}",
+                format_tool_surface_bool(&output.tool_surface, "available")
+            );
+            println!(
+                "tool_surface_governed: {}",
+                format_tool_surface_bool(&output.tool_surface, "governed")
+            );
+            println!(
+                "tool_surface_callable_tools: {}",
+                format_tool_surface_callable_tools(&output.tool_surface)
+            );
+            println!(
                 "tool_unified_execution_status: {}",
                 output
                     .runtime_observability
@@ -328,6 +340,35 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn format_tool_surface_bool(surface: &Option<Value>, key: &str) -> String {
+    surface
+        .as_ref()
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_bool)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn format_tool_surface_callable_tools(surface: &Option<Value>) -> String {
+    let tools = surface
+        .as_ref()
+        .and_then(|value| value.get("callable_tools"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if tools.is_empty() {
+        "none".to_string()
+    } else {
+        tools.join(",")
+    }
 }
 
 fn format_tool_protocol_error_codes(errors: &[Value]) -> String {

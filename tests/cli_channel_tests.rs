@@ -484,6 +484,10 @@ transport = "http"
     server.join().expect("server thread should finish");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    assert!(stdout.contains("tool_surface_available: true"));
+    assert!(stdout.contains("tool_surface_governed: true"));
+    assert!(stdout.contains("tool_surface_callable_tools:"));
+    assert!(stdout.contains("file_read"));
     assert!(stdout.contains("tool_unified_execution_status: ok"));
     assert!(stdout.contains("tool_unified_execution_failure_count: 0"));
     assert!(stdout.contains("tool_protocol_error_count: 1"));

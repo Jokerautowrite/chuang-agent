@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel simulate 文本面透出 tool surface 摘要
+- 本轮继续沿 M5/M7 channel 输出面补人读摘要：`channel simulate` 非 JSON 输出现在会打印 `tool_surface_available`、`tool_surface_governed` 与 `tool_surface_callable_tools`，让通道本地演练文本面能直接确认工具面存在且受治理约束。
+- JSON 面保持原结构不变，仍保留完整 `tool_surface` / `runtime_observability` / `tool_events`；文本面只输出工具名列表和布尔摘要，不打印 raw tool trace 或协议 payload。验证已通过 `cargo test -q --test cli_channel_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 M6 goal/subagent admission 矩阵复验
 - 本轮在最新 app-server/channel 文本面收口后，复跑 M6 goal/subagent admission 宽矩阵：`cargo test -q --test goal_dispatch_tests --test cli_goal_tests --test subagent_tree_events_tests --test subagent_tree_ledger_tests` 全部通过。
 - 复验覆盖 goal collect/step/show 的 handoff query summary、report admission refs/reason codes、subagent children admission refs，以及 legacy JSON 兼容；`cargo fmt --all --check`、`git diff --check` 同步通过，工作树保持干净。
