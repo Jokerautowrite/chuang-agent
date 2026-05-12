@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal smoke/admission 小矩阵复验
+- 在 goal show admission refs gate 与 negative show not-ready gate 落地后，本轮复跑 goal 小矩阵，确认 CLI goal、dispatch、正向 goal-mode smoke 和负向 not-ready smoke 同口径，未破坏 collect/checkpoint/show 主链。
+- 验证已通过 `cargo test -q --test cli_goal_tests --test goal_dispatch_tests --test goal_mode_smoke_tests --test goal_mode_negative_smoke_tests`，共覆盖 39 个测试；GoalRun checkpoint 写入 `checkpoint-1778602695850563771`，count 到 124。本轮仅本地测试和文档记录，不触碰 Hermes、不打印 secret。
+
 # 2026-05-12 goal negative show 锁住 not-ready 状态
 - 本轮继续补 M6 goal/subagent 负例状态面：`scripts/chuang-goal-mode-negative-smoke.sh` 的 `show-no-checkpoint` 阶段现在带同一个 `--subagent-queue-root`，并断言 `goal_pipeline_state=step_pending`、`goal_checkpoint_ready=false`、next command/reason、`goal_collect.ready_to_checkpoint=false`、1 个 missing run、无 blocked report、无 checkpoint suggestion。
 - `tests/goal_mode_negative_smoke_tests.rs` 同步锁住这些脚本断言，避免 not-ready show 面退化成只看 checkpoint log 为空。验证已通过 `sh scripts/chuang-goal-mode-negative-smoke.sh`、`cargo test -q --test goal_mode_negative_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778602598066990929`，count 到 123。
