@@ -523,8 +523,14 @@ printf '%s' "$channel_output" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 meta = data["provider_meta"]
+live_readiness = data["live_readiness"]
 assert meta["goal_context_injected"] == "true"
 assert meta["goal_objective"] == "mvp channel goal"
+assert live_readiness["overall_state"] == "local_ready_live_pending"
+assert live_readiness["real_external_acceptance_pending"] is True
+assert live_readiness["provider_live_request_verified_by_status"] is False
+assert live_readiness["ready_does_not_mean_live"] is True
+assert "live_readiness" not in data["runtime_observability"]
 '
 
 printf '%s\n' "[smoke] feishu preflight"

@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 MVP smoke 锁住 channel live readiness 通道面
+- 本轮继续沿 M5/M6/M7 live readiness 通道主链补防退化门禁：`scripts/chuang-mvp-smoke.sh` 的 `channel simulate --json` 阶段现在直接断言顶层 `live_readiness.overall_state=local_ready_live_pending`、真实外部验收 pending、provider live request 未由 status 验证、ready 不等于 live，并确认 `runtime_observability` 不混入 workspace readiness。
+- `tests/cli_smoke_tests.rs` 同步锁住 MVP smoke 的 channel live readiness 断言、Feishu turn summary smoke 继续覆盖稳定短摘要与 raw current 不外泄、complete-local 继续运行 turn summary smoke。本轮仍只跑本地 stub/fixture，不连接真实 provider/Feishu、不触碰 Hermes。验证已通过 `cargo test -q --test cli_smoke_tests`、`node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check` 和 `git diff --check`。
+
 # 2026-05-12 文档同步 live readiness 通道链
 - 本轮从 `ff3925e` 和干净工作树继续推进 M5/M6/M7 主链审计，确认 app-server/channel/Feishu 已有回归覆盖：`channel simulate --json` 顶层 `live_readiness`、channel 文本 live readiness 三字段、app-server `turn/start`/`turn/completed` 顶层 `liveReadiness`、Feishu turn summary 稳定短摘要均已锁住。
 - `docs/handoff-current.md` 与 `docs/acceptance-next-matrix.md` 已同步最新 checkpoint、GoalRun count 111、third-test pass 和 live readiness 通道查询面边界；继续强调 `runtimeObservability` 只承载单轮 runtime report，workspace readiness 不等于 real live ready。验证已通过 `cargo test -q --test cli_channel_tests --test app_server_tests`、`node scripts/chuang-feishu-turn-summary-smoke.js` 和 `git diff --check`；下一步写 GoalRun checkpoint 并提交 git checkpoint。

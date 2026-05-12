@@ -24,6 +24,9 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
         .expect("second-test smoke wrapper should be readable");
     let mvp_smoke = fs::read_to_string(manifest_dir.join("scripts/chuang-mvp-smoke.sh"))
         .expect("mvp smoke should be readable");
+    let feishu_turn_summary_smoke =
+        fs::read_to_string(manifest_dir.join("scripts/chuang-feishu-turn-summary-smoke.js"))
+            .expect("feishu turn summary smoke should be readable");
 
     assert!(wrapper.contains("CHUANG_SMOKE_NAME=second_test"));
     assert!(wrapper.contains("scripts/chuang-mvp-smoke.sh"));
@@ -35,6 +38,19 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("assert_live_readiness(data[\"live_readiness\"])"));
     assert!(mvp_smoke.contains("assert_live_readiness(status[\"live_readiness\"])"));
     assert!(mvp_smoke.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(mvp_smoke.contains("[smoke] channel simulate"));
+    assert!(mvp_smoke.contains("live_readiness = data[\"live_readiness\"]"));
+    assert!(mvp_smoke.contains("live_readiness[\"real_external_acceptance_pending\"] is True"));
+    assert!(
+        mvp_smoke.contains("live_readiness[\"provider_live_request_verified_by_status\"] is False")
+    );
+    assert!(mvp_smoke.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
+    assert!(mvp_smoke.contains("assert \"live_readiness\" not in data[\"runtime_observability\"]"));
+    assert!(mvp_smoke.contains("chuang-feishu-turn-summary-smoke.js"));
+    assert!(feishu_turn_summary_smoke
+        .contains("live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live"));
+    assert!(feishu_turn_summary_smoke.contains("raw current text should stay out"));
+    assert!(feishu_turn_summary_smoke.contains("!process.includes(\"raw current text\")"));
     assert!(mvp_smoke.contains("policy_tool_status = data[\"policy_tool_status\"]"));
     assert!(mvp_smoke.contains("policy_tool_status = status[\"policy_tool_status\"]"));
     assert!(mvp_smoke.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
@@ -101,6 +117,7 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("scripts/chuang-goal-mode-smoke.sh"));
     assert!(wrapper.contains("scripts/chuang-goal-mode-negative-smoke.sh"));
     assert!(wrapper.contains("chuang-feishu-command-smoke.js"));
+    assert!(wrapper.contains("chuang-feishu-turn-summary-smoke.js"));
     assert!(wrapper.contains("chuang-feishu-session-smoke.js"));
     assert!(wrapper.contains("chuang-feishu-rich-message-smoke.js"));
     assert!(
