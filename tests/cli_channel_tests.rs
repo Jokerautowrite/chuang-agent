@@ -194,6 +194,46 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         parsed["runtime_observability"]["runtime_event_elicitation_requested_count"],
         "0"
     );
+    assert_eq!(
+        parsed["runtime_observability"]["goal_handoff_parent_context_handoff_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["goal_handoff_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["goal_handoff_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["goal_handoff_report_admission_reason_codes"],
+        "none"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_child_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_accepted_report_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_missing_report_count"],
+        "0"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_report_reason_codes"],
+        "none"
+    );
     assert!(
         parsed["runtime_observability"]["runtime_response_trace_chars"]
             .as_str()

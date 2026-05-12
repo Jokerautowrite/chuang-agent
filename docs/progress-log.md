@@ -1,5 +1,10 @@
 # 协作进度日志
 
+# 2026-05-13 channel/app-server handoff-subagent 默认字段回归
+- 本轮按 goal 模式先拆成 A/B/C 三路，并尝试派多个 `gpt-5.3-codex` worker；当前工具层仍把空 `items` 与 `message` 同时传入，`spawn_agent` 返回 `Provide either message or items, but not both`，因此没有成功派出子代理，改由主控按同一拆分本地推进并记录限制。
+- A/B 已完成：`tests/cli_channel_tests.rs` 与 `tests/app_server_tests.rs` 现在分别锁住 channel simulate、app-server `turn/start` response 和 `turn/completed` event 的 handoff/subagent 默认 runtime observability 字段，确认无 handoff/subagent ledger 时 count 为 `0`、refs/reason codes 为 `none`。
+- C 只读扫描了 M5/M6/M7 当前执行性口径：脚本与当前 docs 已保持 `runtime_report_surface=11/26`，旧 `10/20`、`10/25` 主要位于历史 progress 记录，不作为本轮改动目标。验证已通过 `cargo test -q --test cli_channel_tests --test app_server_tests --test runtime_report_tests` 和 `git diff --check -- tests/cli_channel_tests.rs tests/app_server_tests.rs`。
+
 # 2026-05-13 八小时 Chuang goal 模式进度归档
 - 本轮从干净工作树持续推进 M5/M6/M7 与 Codex+Claude 主链接线，累计形成 runtime event ledger、runtime_report artifacts/observability、channel/app-server turn 输出、status/doctor readiness、GoalRun checkpoint evidence、handoff/subagent 默认可观测字段等一组主链 checkpoint。
 - 当前最新提交为 `2e0a5fc docs: record full cargo test after handoff defaults`；工作树干净，`main` 相对 `origin/main` ahead 180。GoalRun checkpoint count 到 157，最新 checkpoint 为 `checkpoint-1778608503509953372`。

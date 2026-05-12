@@ -251,6 +251,55 @@ transport = "stub"
             ["runtime_event_elicitation_requested_count"],
         "0"
     );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["goal_handoff_parent_context_handoff_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_reason_codes"],
+        "none"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["subagent_children_child_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["subagent_children_accepted_report_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["subagent_children_missing_report_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_reason_codes"],
+        "none"
+    );
     assert!(
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_response_trace_chars"]
             .as_str()
@@ -472,6 +521,55 @@ transport = "stub"
         turn_completed["params"]["turn"]["runtimeObservability"]
             ["runtime_event_elicitation_requested_count"],
         "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["goal_handoff_parent_context_handoff_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["goal_handoff_report_admission_reason_codes"],
+        "none"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["subagent_children_child_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["subagent_children_accepted_report_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_admission_ref_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["subagent_children_missing_report_count"],
+        "0"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_admission_refs"],
+        "none"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["runtimeObservability"]
+            ["subagent_children_report_reason_codes"],
+        "none"
     );
     assert!(
         turn_completed["params"]["turn"]["runtimeObservability"]["runtime_response_trace_chars"]
