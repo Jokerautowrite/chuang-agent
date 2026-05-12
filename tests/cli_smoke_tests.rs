@@ -32,8 +32,10 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("assert data[\"approval_ticket_count\"] == 1"));
     assert!(mvp_smoke.contains("data[\"goal_run\"][\"plan_exists\"] is True"));
     assert!(mvp_smoke.contains("runtime_report_surface = data[\"runtime_report_surface\"]"));
-    assert!(mvp_smoke.contains("runtime_report_surface[\"artifact_count\"] == 10"));
-    assert!(mvp_smoke.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(mvp_smoke.contains("runtime_report_surface[\"artifact_count\"] == 11"));
+    assert!(mvp_smoke.contains("runtime_report_surface[\"observability_field_count\"] == 26"));
+    assert!(mvp_smoke.contains("runtime_meta.tool_protocol_errors_json"));
+    assert!(mvp_smoke.contains("tool_protocol_error_count"));
     assert!(mvp_smoke.contains("runtime_response.trace"));
     assert!(mvp_smoke.contains("runtime_response_trace_chars"));
     assert!(mvp_smoke.contains("runtime_event_tool_started_count"));
@@ -108,8 +110,10 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
         wrapper.contains("runtime_report_surface = data[\"status\"][\"runtime_report_surface\"]")
     );
     assert!(wrapper.contains("runtime_report_surface = status[\"runtime_report_surface\"]"));
-    assert!(wrapper.contains("runtime_report_surface[\"artifact_count\"] == 10"));
-    assert!(wrapper.contains("runtime_report_surface[\"observability_field_count\"] == 25"));
+    assert!(wrapper.contains("runtime_report_surface[\"artifact_count\"] == 11"));
+    assert!(wrapper.contains("runtime_report_surface[\"observability_field_count\"] == 26"));
+    assert!(wrapper.contains("runtime_meta.tool_protocol_errors_json"));
+    assert!(wrapper.contains("tool_protocol_error_count"));
     assert!(wrapper.contains("runtime_response.trace"));
     assert!(wrapper.contains("runtime_response_trace_chars"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
@@ -361,8 +365,10 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(wrapper.contains("exit 2"));
     assert!(wrapper.contains("chuang_final_verify_ok"));
     assert!(candidate_wrapper.contains("runtime_surface = data[\"runtime_report_surface\"]"));
-    assert!(candidate_wrapper.contains("runtime_surface[\"artifact_count\"] == 10"));
-    assert!(candidate_wrapper.contains("runtime_surface[\"observability_field_count\"] == 25"));
+    assert!(candidate_wrapper.contains("runtime_surface[\"artifact_count\"] == 11"));
+    assert!(candidate_wrapper.contains("runtime_surface[\"observability_field_count\"] == 26"));
+    assert!(candidate_wrapper.contains("runtime_meta.tool_protocol_errors_json"));
+    assert!(candidate_wrapper.contains("tool_protocol_error_count"));
     assert!(candidate_wrapper.contains("runtime_response.trace"));
     assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));

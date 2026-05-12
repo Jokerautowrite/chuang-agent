@@ -36,8 +36,9 @@ assert data["readonly"] is True
 assert data["connects_real_provider"] is False
 assert data["connects_real_feishu"] is False
 assert runtime_surface["ok"] is True
-assert runtime_surface["artifact_count"] == 10
-assert runtime_surface["observability_field_count"] == 25
+assert runtime_surface["artifact_count"] == 11
+assert runtime_surface["observability_field_count"] == 26
+assert "runtime_meta.tool_protocol_errors_json" in runtime_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_surface["artifact_locators"]
 assert "runtime_meta.subagent_children_summary_json" in runtime_surface["artifact_locators"]
@@ -47,6 +48,7 @@ assert "runtime_event_tool_finished_count" in runtime_surface["observability_fie
 assert "runtime_event_approval_requested_count" in runtime_surface["observability_fields"]
 assert "runtime_event_approval_resolved_count" in runtime_surface["observability_fields"]
 assert "runtime_event_elicitation_requested_count" in runtime_surface["observability_fields"]
+assert "tool_protocol_error_count" in runtime_surface["observability_fields"]
 assert "runtime_response_trace_chars" in runtime_surface["observability_fields"]
 assert "goal_handoff_parent_context_handoff_count" in runtime_surface["observability_fields"]
 assert "goal_handoff_report_admission_ref_count" in runtime_surface["observability_fields"]

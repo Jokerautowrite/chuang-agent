@@ -341,6 +341,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .runtime_report_surface
         .artifact_locators
         .iter()
+        .any(|locator| locator == "runtime_meta.tool_protocol_errors_json"));
+    assert!(status
+        .runtime_report_surface
+        .artifact_locators
+        .iter()
         .any(|locator| locator == "runtime_meta.runtime_event_ledger_json"));
     assert!(status
         .runtime_report_surface
@@ -357,6 +362,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .artifact_locators
         .iter()
         .any(|locator| locator == "runtime_meta.context_compaction_summary_json"));
+    assert!(status
+        .runtime_report_surface
+        .observability_fields
+        .iter()
+        .any(|field| field == "tool_protocol_error_count"));
     assert!(status
         .runtime_report_surface
         .observability_fields

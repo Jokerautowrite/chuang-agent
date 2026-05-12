@@ -35,6 +35,9 @@ pub fn build_runtime_report(
     .build();
 
     report.artifacts.extend(tool_report_artifacts(result));
+    report
+        .artifacts
+        .extend(tool_protocol_error_artifacts(result));
     report.artifacts.extend(tool_events_artifacts(result));
     report
         .artifacts
@@ -84,6 +87,35 @@ fn tool_report_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
     vec![ArtifactRef {
         kind: ArtifactKind::Log,
         locator: "runtime_meta.tool_report_json".to_string(),
+        description: Some(description),
+    }]
+}
+
+fn tool_protocol_error_artifacts(result: &RuntimeResult) -> Vec<ArtifactRef> {
+    let Some(raw_errors) = result.response.meta.extra.get("tool_protocol_errors_json") else {
+        return Vec::new();
+    };
+
+    let description = serde_json::from_str::<Vec<serde_json::Value>>(raw_errors)
+        .map(|errors| {
+            let codes = errors
+                .iter()
+                .filter_map(|error| error.get("code").and_then(|value| value.as_str()))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "tool_protocol_errors count={} codes={}",
+                errors.len(),
+                if codes.is_empty() { "none" } else { &codes }
+            )
+        })
+        .unwrap_or_else(|_| "tool_protocol_errors present but could not be parsed".to_string());
+
+    vec![ArtifactRef {
+        kind: ArtifactKind::Log,
+        locator: "runtime_meta.tool_protocol_errors_json".to_string(),
         description: Some(description),
     }]
 }

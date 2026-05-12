@@ -374,11 +374,14 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
 
     let runtime_surface = &parsed["runtime_report_surface"];
     assert_eq!(runtime_surface["ok"], true);
-    assert_eq!(runtime_surface["artifact_count"], 10);
-    assert_eq!(runtime_surface["observability_field_count"], 25);
+    assert_eq!(runtime_surface["artifact_count"], 11);
+    assert_eq!(runtime_surface["observability_field_count"], 26);
     let artifact_locators = runtime_surface["artifact_locators"]
         .as_array()
         .expect("artifact locators");
+    assert!(artifact_locators
+        .iter()
+        .any(|locator| locator == "runtime_meta.tool_protocol_errors_json"));
     assert!(artifact_locators
         .iter()
         .any(|locator| locator == "runtime_response.trace"));
@@ -395,6 +398,9 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
     let observability_fields = runtime_surface["observability_fields"]
         .as_array()
         .expect("observability fields");
+    assert!(observability_fields
+        .iter()
+        .any(|field| field == "tool_protocol_error_count"));
     assert!(observability_fields
         .iter()
         .any(|field| field == "runtime_response_trace_chars"));
@@ -487,10 +493,12 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("runtime_report_surface.ok=true"));
-    assert!(stdout.contains("runtime_report_surface.artifact_count=10"));
-    assert!(stdout.contains("runtime_report_surface.observability_field_count=25"));
+    assert!(stdout.contains("runtime_report_surface.artifact_count=11"));
+    assert!(stdout.contains("runtime_report_surface.observability_field_count=26"));
     assert!(stdout.contains("runtime_report_surface.artifact_locators="));
     assert!(stdout.contains("runtime_report_surface.observability_fields="));
+    assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
+    assert!(stdout.contains("tool_protocol_error_count"));
     assert!(stdout.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(stdout.contains("runtime_meta.subagent_children_summary_json"));
     assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));

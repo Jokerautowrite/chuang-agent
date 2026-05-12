@@ -1782,3 +1782,7 @@
 # 2026-05-12 MVP smoke runtime surface 同口径补齐
 - 本轮把 `scripts/chuang-mvp-smoke.sh` 的 3 个 runtime_report_surface 检查块补齐到 complete-local/candidate 同口径：显式断言 `runtime_response.trace`、`runtime_response_trace_chars`、goal handoff admission reason codes 和 subagent children reason codes，避免 MVP/second-test 基础门禁落后于后续验证脚本。
 - `tests/cli_smoke_tests.rs` 的 second-test wrapper 静态回归同步锁住这些字段；验证已通过 `cargo test -q --test cli_smoke_tests second_test_smoke_wrapper_reuses_safe_mvp_smoke`、`cargo fmt --all --check`、`git diff --check` 和完整 `sh scripts/chuang-mvp-smoke.sh`。下一轮入口：继续查 tool protocol correction 的高层非零路径，或跑 M5/M6/M7 汇总矩阵确认连续 checkpoint 后状态一致。
+
+# 2026-05-12 tool protocol errors 提升到 runtime report surface
+- 本轮把 M7/tool protocol 非零错误从 provider meta 可见推进到 runtime report 查询面：`runtime_report` 现在会把 `tool_protocol_errors_json` 提升为 `runtime_meta.tool_protocol_errors_json` artifact，并给出错误数量与 code 摘要；`runtime_report_surface` 同步提升到 11 个 artifact / 26 个 observability 字段，新增 `tool_protocol_error_count`。
+- status/doctor/app-server health、readiness view、MVP/complete-local/candidate/third-test 脚本与静态回归已同步到 11/26，并显式断言 `runtime_meta.tool_protocol_errors_json` 与 `tool_protocol_error_count`。验证已通过 runtime/status/doctor/smoke/readiness/operator/app-server 相关 cargo 测试、完整 `sh scripts/chuang-mvp-smoke.sh` 和 `sh scripts/chuang-candidate-verify.sh`。下一轮入口：继续寻找 app-server/channel 能否稳定构造非零 tool protocol 错误路径；若没有脚本 provider 入口，优先加 runtime 层合同测试而不造后门。

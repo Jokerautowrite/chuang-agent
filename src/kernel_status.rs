@@ -834,6 +834,7 @@ fn build_policy_tool_status_surface(
 fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
     let artifact_locators = vec![
         "runtime_meta.tool_report_json".to_string(),
+        "runtime_meta.tool_protocol_errors_json".to_string(),
         "runtime_meta.tool_events_json".to_string(),
         "runtime_meta.runtime_event_ledger_json".to_string(),
         "runtime_response.trace".to_string(),
@@ -852,6 +853,7 @@ fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
         "runtime_event_approval_resolved_count".to_string(),
         "runtime_event_elicitation_requested_count".to_string(),
         "runtime_response_trace_chars".to_string(),
+        "tool_protocol_error_count".to_string(),
         "goal_handoff_query_summary_json".to_string(),
         "goal_handoff_parent_context_handoff_count".to_string(),
         "goal_handoff_report_admission_ref_count".to_string(),
@@ -878,7 +880,7 @@ fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
         observability_field_count: observability_fields.len(),
         artifact_locators,
         observability_fields,
-        current: "runtime report promotes tool reports, tool events, runtime response trace, runtime event ledger, unified execution failure summary, context compaction trace surfaces, and handoff/subagent query summaries with admission ref counts, locator summaries, and reason-code distributions".to_string(),
+        current: "runtime report promotes tool reports, tool protocol errors, tool events, runtime response trace, runtime event ledger, unified execution failure summary, context compaction trace surfaces, and handoff/subagent query summaries with admission ref counts, locator summaries, and reason-code distributions".to_string(),
         next_action: "keep app-server and channel outputs consuming runtime_observability_meta; add new fields here before relying on them in operators".to_string(),
     }
 }

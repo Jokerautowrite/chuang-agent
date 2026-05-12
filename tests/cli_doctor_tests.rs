@@ -85,7 +85,9 @@ fn cli_doctor_reports_mvp_health_in_text() {
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
     assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
-    assert!(stdout.contains("runtime_report_surface: ok=true artifacts=10 observability_fields=25"));
+    assert!(stdout.contains("runtime_report_surface: ok=true artifacts=11 observability_fields=26"));
+    assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
+    assert!(stdout.contains("tool_protocol_error_count"));
     assert!(stdout.contains("runtime_meta.runtime_event_ledger_json"));
     assert!(stdout.contains("runtime_meta.context_compaction_events"));
     assert!(stdout.contains("runtime_meta.context_compaction_summary_json"));

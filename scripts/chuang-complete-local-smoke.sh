@@ -91,8 +91,9 @@ assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
 runtime_report_surface = data["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
-assert runtime_report_surface["artifact_count"] == 10
-assert runtime_report_surface["observability_field_count"] == 25
+assert runtime_report_surface["artifact_count"] == 11
+assert runtime_report_surface["observability_field_count"] == 26
+assert "runtime_meta.tool_protocol_errors_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
@@ -102,6 +103,7 @@ assert "runtime_event_tool_finished_count" in runtime_report_surface["observabil
 assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "tool_protocol_error_count" in runtime_report_surface["observability_fields"]
 assert "runtime_response_trace_chars" in runtime_report_surface["observability_fields"]
 assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
 assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
@@ -157,8 +159,9 @@ assert data["status"]["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["status"]["goal_run"]["plan_exists"] is True
 runtime_report_surface = data["status"]["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
-assert runtime_report_surface["artifact_count"] == 10
-assert runtime_report_surface["observability_field_count"] == 25
+assert runtime_report_surface["artifact_count"] == 11
+assert runtime_report_surface["observability_field_count"] == 26
+assert "runtime_meta.tool_protocol_errors_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
@@ -168,6 +171,7 @@ assert "runtime_event_tool_finished_count" in runtime_report_surface["observabil
 assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "tool_protocol_error_count" in runtime_report_surface["observability_fields"]
 assert "runtime_response_trace_chars" in runtime_report_surface["observability_fields"]
 assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
 assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
@@ -207,8 +211,9 @@ assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
 runtime_report_surface = data["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
-assert runtime_report_surface["artifact_count"] == 10
-assert runtime_report_surface["observability_field_count"] == 25
+assert runtime_report_surface["artifact_count"] == 11
+assert runtime_report_surface["observability_field_count"] == 26
+assert "runtime_meta.tool_protocol_errors_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
@@ -218,6 +223,7 @@ assert "runtime_event_tool_finished_count" in runtime_report_surface["observabil
 assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "tool_protocol_error_count" in runtime_report_surface["observability_fields"]
 assert "runtime_response_trace_chars" in runtime_report_surface["observability_fields"]
 assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
 assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
@@ -259,8 +265,9 @@ assert status["goal_run"]["goal_id"] == "mainline-mvp"
 assert status["goal_run"]["plan_exists"] is True
 runtime_report_surface = status["runtime_report_surface"]
 assert runtime_report_surface["ok"] is True
-assert runtime_report_surface["artifact_count"] == 10
-assert runtime_report_surface["observability_field_count"] == 25
+assert runtime_report_surface["artifact_count"] == 11
+assert runtime_report_surface["observability_field_count"] == 26
+assert "runtime_meta.tool_protocol_errors_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_report_surface["artifact_locators"]
 assert "runtime_meta.subagent_children_summary_json" in runtime_report_surface["artifact_locators"]
@@ -270,6 +277,7 @@ assert "runtime_event_tool_finished_count" in runtime_report_surface["observabil
 assert "runtime_event_approval_requested_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_approval_resolved_count" in runtime_report_surface["observability_fields"]
 assert "runtime_event_elicitation_requested_count" in runtime_report_surface["observability_fields"]
+assert "tool_protocol_error_count" in runtime_report_surface["observability_fields"]
 assert "runtime_response_trace_chars" in runtime_report_surface["observability_fields"]
 assert "goal_handoff_query_summary_json" in runtime_report_surface["observability_fields"]
 assert "subagent_children_summary_json" in runtime_report_surface["observability_fields"]
