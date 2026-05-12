@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 GoalRun 记录 wrapper guard checkpoint
+- 本轮把 smoke/operator wrapper runtime surface 静态 guard 矩阵写入 `mainline-mvp` GoalRun 运行态：最新 checkpoint 为 `checkpoint-1778614688417630606`，checkpoint count 到 159，summary 为 `smoke operator runtime surface wrapper guards verified`。
+- 运行态文件 `context/goal-runs/mainline-mvp.json` 仍是 ignored，不纳入提交；项目仓库只记录 progress-log。验证证据为 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests --test live_runner_readiness_view_tests` 与 `git diff --check`。
+
 # 2026-05-13 smoke/operator wrapper runtime surface 字段抽样补齐
 - 本轮继续扫 smoke/operator wrapper 静态回归，确认脚本本体已经完整断言 handoff/subagent runtime surface 字段集合；补齐 `tests/live_operator_scripts_tests.rs` 与 `tests/cli_smoke_tests.rs` 对 candidate/third-test/complete-local wrapper 的字段名抽样，避免 wrapper 静态测试只覆盖 admission refs 和 reason codes。
 - 本批仍不改脚本逻辑和生产代码，只增强回归覆盖。验证已通过 `cargo test -q --test live_operator_scripts_tests --test cli_smoke_tests` 和 `git diff --check -- tests/live_operator_scripts_tests.rs tests/cli_smoke_tests.rs`。
