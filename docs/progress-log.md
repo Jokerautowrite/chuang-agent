@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 runtime observability 默认 handoff/subagent counts
+- 本轮继续补 M6 可查询稳定性：`runtime_observability_meta` 在没有 goal handoff / subagent children summary JSON 时，也会稳定输出 handoff/subagent 派生计数字段 `0`、refs/reason codes 字段 `none`，避免 channel/app-server/status 调用方把字段缺失和“当前无 handoff/admission”混淆。
+- 回归已补到 `tests/runtime_report_tests.rs`；验证已通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_without_ledgers` 和 `cargo test -q --test runtime_report_tests --test app_server_tests --test cli_channel_tests --test live_runner_readiness_view_tests`。GoalRun checkpoint 写入 `checkpoint-1778608187560743370`，count 到 154。
+
 # 2026-05-12 全量 cargo test 复验文档路径对齐后状态
 - 本轮在 implementation slices 测试名、status output 路径对齐，以及 candidate/third-test 复验后，跑通全量 `cargo test -q`，确认当前 M5/M6/M7 文档口径和代码回归仍保持全仓绿色。
 - 验证已通过 `cargo test -q`。GoalRun checkpoint 写入 `checkpoint-1778607944152601998`，count 到 153。

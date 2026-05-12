@@ -527,7 +527,7 @@ fn runtime_report_observability_meta_promotes_goal_session_tool_provider_fields(
 }
 
 #[test]
-fn runtime_report_observability_meta_defaults_runtime_event_counts_without_ledger() {
+fn runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_without_ledgers() {
     let result = chuang_agent::agent_runtime::RuntimeResult {
         prompt: "prompt".to_string(),
         response: chuang_agent::agent_runtime::RuntimeResponse {
@@ -563,8 +563,22 @@ fn runtime_report_observability_meta_defaults_runtime_event_counts_without_ledge
         "runtime_event_approval_requested_count",
         "runtime_event_approval_resolved_count",
         "runtime_event_elicitation_requested_count",
+        "goal_handoff_parent_context_handoff_count",
+        "goal_handoff_report_admission_ref_count",
+        "subagent_children_child_count",
+        "subagent_children_accepted_report_count",
+        "subagent_children_report_admission_ref_count",
+        "subagent_children_missing_report_count",
     ] {
         assert_eq!(observability.get(key), Some(&"0".to_string()));
+    }
+    for key in [
+        "goal_handoff_report_admission_refs",
+        "goal_handoff_report_admission_reason_codes",
+        "subagent_children_report_admission_refs",
+        "subagent_children_report_reason_codes",
+    ] {
+        assert_eq!(observability.get(key), Some(&"none".to_string()));
     }
 }
 

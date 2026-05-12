@@ -472,10 +472,26 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "runtime_event_approval_requested_count",
         "runtime_event_approval_resolved_count",
         "runtime_event_elicitation_requested_count",
+        "goal_handoff_parent_context_handoff_count",
+        "goal_handoff_report_admission_ref_count",
+        "subagent_children_child_count",
+        "subagent_children_accepted_report_count",
+        "subagent_children_report_admission_ref_count",
+        "subagent_children_missing_report_count",
     ] {
         metadata
             .entry(key.to_string())
             .or_insert_with(|| "0".to_string());
+    }
+    for key in [
+        "goal_handoff_report_admission_refs",
+        "goal_handoff_report_admission_reason_codes",
+        "subagent_children_report_admission_refs",
+        "subagent_children_report_reason_codes",
+    ] {
+        metadata
+            .entry(key.to_string())
+            .or_insert_with(|| "none".to_string());
     }
     metadata.insert(
         "tool_typed_failure_count".to_string(),
