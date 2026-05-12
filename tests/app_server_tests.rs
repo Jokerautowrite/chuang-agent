@@ -2022,7 +2022,47 @@ transport = "stub"
         .as_array()
         .expect("runtime report observability fields should be array")
         .iter()
+        .any(|field| field == "goal_handoff_parent_context_handoff_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_ref_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "goal_handoff_report_admission_reason_codes"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
         .any(|field| field == "subagent_children_report_admission_refs"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_child_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_accepted_report_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_report_admission_ref_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_missing_report_count"));
+    assert!(parsed["runtime_report_surface"]["observability_fields"]
+        .as_array()
+        .expect("runtime report observability fields should be array")
+        .iter()
+        .any(|field| field == "subagent_children_report_reason_codes"));
     assert!(parsed["runtime_report_surface"]["observability_fields"]
         .as_array()
         .expect("runtime report observability fields should be array")

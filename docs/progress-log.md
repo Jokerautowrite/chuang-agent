@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 app-server health runtime surface 字段集合补齐
+- 本轮继续补 app-server health JSON 的 runtime surface 回归：`tests/app_server_tests.rs` 现在不仅锁住 `runtime_report_surface=11/26` 和少量抽样字段，也完整抽样 handoff/subagent admission/count/reason-code 字段集合。
+- 这一步保持生产代码不变，目标是让 health JSON、status、readiness 和 turn 输出对 M6 handoff/subagent observability 使用同一组可查询字段。验证已通过 `cargo test -q --test app_server_tests` 和 `git diff --check -- tests/app_server_tests.rs`。
+
 # 2026-05-13 status/readiness runtime surface 字段集合补齐
 - 本轮继续沿 M6/M7 可查询面补回归：`tests/kernel_status_tests.rs` 与 `tests/live_runner_readiness_view_tests.rs` 现在完整抽样 handoff/subagent runtime surface 字段集合，补齐 `goal_handoff_parent_context_handoff_count`、`goal_handoff_report_admission_ref_count`、`goal_handoff_report_admission_refs`、`subagent_children_child_count`、`subagent_children_accepted_report_count`、`subagent_children_report_admission_refs` 和 `subagent_children_missing_report_count` 等字段在 status/readiness 只读面的存在性。
 - 这一步不改生产代码，只把已经存在的 `runtime_report_surface=11/26` 合同锁得更细，避免 readiness JSON 只靠总数或少数字段抽样。验证已通过 `cargo test -q --test kernel_status_tests --test live_runner_readiness_view_tests` 和 `git diff --check -- tests/kernel_status_tests.rs tests/live_runner_readiness_view_tests.rs`。
