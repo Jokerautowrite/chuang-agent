@@ -327,6 +327,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|tool| tool.name == "file_write"
             && !tool.read_only
             && tool.mutating
+            && !tool.destructive
+            && !tool.external_commit
+            && !tool.requires_approval
+            && tool.risk_tags.iter().any(|tag| tag == "write")
+            && tool.risk_tags.iter().any(|tag| tag == "audit")
             && tool.local_ga_decision == "allow_with_audit"));
     assert!(status
         .policy_tool_status
@@ -335,6 +340,11 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|tool| tool.name == "code_execute"
             && !tool.read_only
             && tool.mutating
+            && !tool.destructive
+            && !tool.external_commit
+            && !tool.requires_approval
+            && tool.risk_tags.iter().any(|tag| tag == "code_execution")
+            && tool.risk_tags.iter().any(|tag| tag == "shell")
             && tool.local_ga_decision == "allow_with_audit"));
     assert!(status.runtime_report_surface.ok);
     assert!(status

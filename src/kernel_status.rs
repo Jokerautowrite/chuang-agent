@@ -75,6 +75,9 @@ pub struct GaToolDescriptorStatus {
     pub read_only: bool,
     pub mutating: bool,
     pub destructive: bool,
+    pub external_commit: bool,
+    pub requires_approval: bool,
+    pub risk_tags: Vec<String>,
     pub local_ga_decision: String,
 }
 
@@ -784,6 +787,13 @@ fn build_policy_tool_status_surface(
                 read_only: descriptor.read_only,
                 mutating: descriptor.mutating,
                 destructive: descriptor.destructive,
+                external_commit: descriptor.external_commit,
+                requires_approval: descriptor.requires_approval,
+                risk_tags: descriptor
+                    .risk_tags
+                    .iter()
+                    .map(|tag| (*tag).to_string())
+                    .collect(),
                 local_ga_decision: decision_label(local_ga_decision.decision).to_string(),
             });
         } else {

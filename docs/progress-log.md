@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 policy tool status 风险字段可观测性补齐
+- 本轮继续沿 M5 governance/tool descriptor 主链补状态面：`policy_tool_status.ga_tool_descriptors` 现在在 JSON 面除 name/read_only/mutating/destructive/local decision 外，也暴露 `external_commit`、`requires_approval` 和 `risk_tags`，让 operator 能直接查询 GA 映射工具的完整 descriptor 风险元数据。
+- `tests/kernel_status_tests.rs` 已锁住 `file_write` 和 `code_execute` 在状态面保留 local mutating、non-destructive、non-external、no descriptor-level approval 以及 `write/audit`、`code_execution/shell` tags。验证已通过 `cargo test -q --test kernel_status_tests`、`cargo test -q --test cli_status_tests --test cli_doctor_tests --test app_server_tests` 和 `cargo fmt --all --check`。
+
 # 2026-05-12 permission destructive risk tag 别名回归
 - 本轮继续沿 M5 MCP/governance 主链补权限层回归：`local_ga_profile_requires_explicit_target_approval_for_destructive_tags` 现在把 `destructive` 和 `destructive_action` 纳入删除/破坏类别名矩阵，确保 MCP structural risk tag 补出的 `destructive` 不会在权限分类层被降级。
 - 这和 `mcp_tool_descriptor_risk()` 的结构化风险标签对齐：服务端只给 `destructive=true` 而没有原始 `delete/rm` 标签时，治理仍会走 `RequireExplicitTargetApproval`。验证已通过 `cargo test -q --test permission_profile_slot_tests local_ga_profile_requires_explicit_target_approval_for_destructive_tags`、`cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests` 和 `cargo fmt --all --check`。
