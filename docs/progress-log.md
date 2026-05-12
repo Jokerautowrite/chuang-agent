@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 M5/M6/M7 矩阵复验
+- 在 `goal collect` / `goal step` / `goal show` admission locator 回归补齐后，本轮重跑 M5/M6/M7 相关矩阵：`cargo test -q --test subagent_tree_ledger_tests --test subagent_tree_events_tests --test runtime_report_tests --test cli_goal_tests` 与 `cargo test -q --test runtime_event_ledger_tests --test mcp_fake_adapter_tests --test governance_tests --test kernel_status_tests` 均通过，覆盖 runtime ledger、MCP fake approval/elicitation、governance、subagent children summary/report admission refs、runtime report surface 和 goal 文本查询面。
+- `cargo fmt --all --check` 与 `git diff --check` 同步通过。下一轮入口：继续按验收矩阵看 `tool_runtime_tests / agent_runtime_tests / context_engine_tests / app_server_tests` 的 M7/tool protocol correction 与 compaction 主链是否还需要提升到更高层 smoke/candidate 门禁。
+
 # 2026-05-12 goal show admission locator 回归加固
 - 本轮继续沿 M6 goal 查询面加固文本层验收：`tests/cli_goal_tests.rs` 的 `cli_goal_show_surfaces_next_command_and_stage_readiness` 现在在 checkpoint-ready 的 `goal show` 文本场景里显式断言 `goal_operability_handoff_query_report_admission_ref_count: 2`、`goal_operability_handoff_query_report_admission_refs:` 和 `admission_id=goal-report-admission://`。这样 `goal collect`、`goal step`、`goal show` 三个文本入口都锁住 admission locator 不会退化成只有字段名。
 - 验证已通过 `cargo test -q --test cli_goal_tests cli_goal_show_surfaces_next_command_and_stage_readiness`。下一轮入口：继续看 subagent tree/list children 文本或 runtime event 面是否也需要同类具体 locator 回归。
