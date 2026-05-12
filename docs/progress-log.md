@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server turn 事件透出 live readiness
+- 本轮继续把 `live_readiness` 状态面推进到 app-server turn 面：`turn/start` 响应和 `turn/completed` 事件现在都带顶层 `liveReadiness`，覆盖 `local_ready_live_pending`、真实外部验收 pending、provider live request 未由 status 验证与 ready 不等于 live，方便 app-server/channel 订阅者不用另查 health 就能看到 live 边界。
+- 该字段保持在 turn 顶层，不并入 `runtimeObservability`，避免把 workspace readiness 与单轮 runtime report 混淆；Feishu summary smoke 复验确认现有过程摘要不外泄 raw trace。验证已通过 `cargo test -q --test app_server_tests`、`node scripts/chuang-feishu-turn-summary-smoke.js`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 channel simulate 透出 live readiness 摘要
 - 本轮继续把 `live_readiness` 状态面推进到通道演练面：`channel simulate --json` 现在顶层返回 workspace/status 级 `live_readiness`，文本输出打印 `live_readiness_state`、`live_readiness_real_external_acceptance_pending` 与 `live_readiness_ready_does_not_mean_live`，让 Feishu 独立通道本地演练能直接看到“local ready 不等于 real live ready”。
 - 该字段保持在 channel 输出顶层，不写入单次 `runtime_observability`，避免混淆 runtime report 与 workspace readiness 合同；回归覆盖 JSON 与文本协议错误路径。验证已通过 `cargo test -q --test cli_channel_tests`、`cargo test -q --test cli_smoke_tests second_test_smoke_wrapper_reuses_safe_mvp_smoke`、`cargo fmt --all --check`、`git diff --check`。

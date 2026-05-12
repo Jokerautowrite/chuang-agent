@@ -753,6 +753,9 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
 
     let runtime = build_runtime_for_workspace(&workspace_root)?;
     let runtime = override_runtime_model(runtime, params);
+    let live_readiness = build_chuang_mvp_status(&runtime, &kernel_config_from_runtime(&runtime)?)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?
+        .live_readiness;
     let context_max_tokens = runtime.context_budget.max_tokens;
     let started_at = Instant::now();
     let conversation_history = recent_thread_history(state, &thread_id, 6);
@@ -859,6 +862,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                     "toolEvents": tool_events,
                     "providerMeta": result.response.meta.extra.clone(),
                     "runtimeObservability": runtime_observability.clone(),
+                    "liveReadiness": live_readiness.clone(),
                 }
             }
         }),
@@ -886,6 +890,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
             "contextMaxTokens": context_max_tokens,
             "providerMeta": result.response.meta.extra,
             "runtimeObservability": runtime_observability,
+            "liveReadiness": live_readiness,
             "trace": result.response.trace,
             "apiCallCount": 1,
             "toolCallCount": tool_call_count,

@@ -196,6 +196,24 @@ transport = "stub"
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_report_id"],
         "report-turn-1"
     );
+    assert_eq!(turn_response["result"]["turn"]["liveReadiness"]["ok"], true);
+    assert_eq!(
+        turn_response["result"]["turn"]["liveReadiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["liveReadiness"]["real_external_acceptance_pending"],
+        true
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["liveReadiness"]
+            ["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["liveReadiness"]["ready_does_not_mean_live"],
+        true
+    );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["tool_unified_execution_status"],
         "ok"
@@ -367,6 +385,27 @@ transport = "stub"
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]["runtime_report_id"],
         "report-turn-1"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["liveReadiness"]["ok"],
+        true
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["liveReadiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["liveReadiness"]["real_external_acceptance_pending"],
+        true
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["liveReadiness"]
+            ["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(
+        turn_completed["params"]["turn"]["liveReadiness"]["ready_does_not_mean_live"],
+        true
     );
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]["tool_unified_execution_status"],
