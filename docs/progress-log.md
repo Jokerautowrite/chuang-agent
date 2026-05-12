@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test policy surface clean-tree 复验通过
+- 本轮在 `f1df21f` 和 handoff 刷新后，从干净工作树完整跑通 `sh scripts/chuang-third-test-smoke.sh`，继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 关键新增状态面已进入第三测试链路：candidate 阶段输出 `candidate_policy_tool_status_ga_tool_descriptors=9/12`，third-test 阶段输出 `live_runner_readiness_view_policy_tool_status_ga_tool_descriptors=9/12`；`runtime_report_surface` 仍为 11/26，provider readiness 只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 MVP/complete-local 并入 policy tool status 门禁
 - 本轮继续把 M5 governance/tool descriptor 状态面推进到基础本地验收：`scripts/chuang-mvp-smoke.sh` 现在在 status、doctor、app-server health 三个 JSON 面断言 `policy_tool_status`，`scripts/chuang-complete-local-smoke.sh` 进一步在 status、doctor、app-server health diagnostic 和 console snapshot 四个面断言同一组字段。
 - 门禁抽样锁住 `active_permission_profile=local_ga`、`ga_tool_descriptor_mapped_count=9`、`tool_descriptor_count=12`，以及 `file_write.external_commit=false`、`file_write.requires_approval=false`、`write` risk tag。验证已通过 `sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-complete-local-smoke.sh`、`cargo test -q --test cli_smoke_tests` 和 `sh -n` 脚本语法检查。
