@@ -6,12 +6,13 @@ use chuang_agent::channel_adapter::{
     app_server_turn_start_request, ChannelInboundMessage, ChannelOutboundMessage,
 };
 use chuang_agent::goal_mode::GoalSpec;
+use chuang_agent::kernel_status::{build_chuang_mvp_status, LiveReadinessStatus};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::app_server::build_runtime_for_workspace;
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
-use crate::cli_runtime::run_with_options;
+use crate::cli_runtime::{kernel_config_from_runtime, run_with_options};
 use crate::cli_types::{CliOptions, RunCliRequest};
 use chuang_agent::runtime_report::runtime_observability_meta;
 use chuang_agent::tool_loop_meta::{parse_json_value, ToolLoopMeta};
@@ -34,6 +35,7 @@ struct ChannelSimulateOutput {
     tool_events: Vec<Value>,
     provider_meta: BTreeMap<String, String>,
     runtime_observability: BTreeMap<String, String>,
+    live_readiness: LiveReadinessStatus,
 }
 
 pub(crate) fn channel_command(args: &[String]) -> Result<(), String> {
@@ -231,6 +233,10 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
     let request = parse_channel_simulate(args)?;
     let app_server_request = app_server_turn_start_request(1, &request.inbound)?;
     let runtime = build_runtime_for_workspace(&request.inbound.workspace_root)?;
+    let kernel = kernel_config_from_runtime(&runtime)?;
+    let live_readiness = build_chuang_mvp_status(&runtime, &kernel)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?
+        .live_readiness;
     let thread_id = request
         .inbound
         .thread_id
@@ -279,6 +285,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
         tool_events: tool_meta.tool_events,
         provider_meta: result.response.meta.extra,
         runtime_observability,
+        live_readiness,
     };
 
     match request.output {
@@ -298,6 +305,18 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
                 println!("finish_reason: {reason}");
             }
             println!("tool_call_count: {}", output.tool_call_count);
+            println!(
+                "live_readiness_state: {}",
+                output.live_readiness.overall_state
+            );
+            println!(
+                "live_readiness_real_external_acceptance_pending: {}",
+                output.live_readiness.real_external_acceptance_pending
+            );
+            println!(
+                "live_readiness_ready_does_not_mean_live: {}",
+                output.live_readiness.ready_does_not_mean_live
+            );
             println!(
                 "tool_surface_available: {}",
                 format_tool_surface_bool(&output.tool_surface, "available")

@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel simulate 透出 live readiness 摘要
+- 本轮继续把 `live_readiness` 状态面推进到通道演练面：`channel simulate --json` 现在顶层返回 workspace/status 级 `live_readiness`，文本输出打印 `live_readiness_state`、`live_readiness_real_external_acceptance_pending` 与 `live_readiness_ready_does_not_mean_live`，让 Feishu 独立通道本地演练能直接看到“local ready 不等于 real live ready”。
+- 该字段保持在 channel 输出顶层，不写入单次 `runtime_observability`，避免混淆 runtime report 与 workspace readiness 合同；回归覆盖 JSON 与文本协议错误路径。验证已通过 `cargo test -q --test cli_channel_tests`、`cargo test -q --test cli_smoke_tests second_test_smoke_wrapper_reuses_safe_mvp_smoke`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 MVP/complete-local 门禁锁住 live readiness
 - 本轮继续把 `live_readiness` 防混摘要下沉到基础本地门禁：`scripts/chuang-mvp-smoke.sh` 现在在 status、doctor、app-server health 三个 JSON 面断言 `local_ready_live_pending`、本地映射/桌面浏览器 gate/BrowserWorker frozen、live worker unavailable、真实外部验收 pending、provider live request 未由 status 验证与 ready 不等于 live；`scripts/chuang-complete-local-smoke.sh` 同步覆盖 status、doctor、app-server health diagnostic 和 console snapshot。
 - `tests/cli_smoke_tests.rs` 已锁住 MVP/complete-local wrapper 保留这些断言。本轮仍只跑本地 stub/fixture 门禁，不连接真实 provider/Feishu、不启动 live worker、不触碰 Hermes。验证已通过 `sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-complete-local-smoke.sh`、`cargo test -q --test cli_smoke_tests`、`cargo fmt --all --check`、`git diff --check`。

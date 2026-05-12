@@ -133,6 +133,24 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     assert_eq!(parsed["model_name"], "gpt-channel-test");
     assert_eq!(parsed["tool_call_count"], 0);
     assert_eq!(parsed["tool_protocol_error_count"], 0);
+    assert_eq!(parsed["live_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["live_readiness"]["overall_state"],
+        "local_ready_live_pending"
+    );
+    assert_eq!(parsed["live_readiness"]["ga_local_mapped_only"], true);
+    assert_eq!(parsed["live_readiness"]["desktop_browser_live_gated"], true);
+    assert_eq!(parsed["live_readiness"]["browser_worker_frozen"], true);
+    assert_eq!(parsed["live_readiness"]["live_worker_available"], false);
+    assert_eq!(
+        parsed["live_readiness"]["real_external_acceptance_pending"],
+        true
+    );
+    assert_eq!(
+        parsed["live_readiness"]["provider_live_request_verified_by_status"],
+        false
+    );
+    assert_eq!(parsed["live_readiness"]["ready_does_not_mean_live"], true);
     assert_eq!(
         parsed["runtime_observability"]["tool_protocol_error_count"],
         "0"
@@ -497,6 +515,9 @@ transport = "http"
     assert!(stdout.contains("tool_unified_execution_status: ok"));
     assert!(stdout.contains("tool_unified_execution_failure_count: 0"));
     assert!(stdout.contains("tool_protocol_error_count: 1"));
+    assert!(stdout.contains("live_readiness_state: local_ready_live_pending"));
+    assert!(stdout.contains("live_readiness_real_external_acceptance_pending: true"));
+    assert!(stdout.contains("live_readiness_ready_does_not_mean_live: true"));
     assert!(stdout.contains("tool_protocol_error_codes: invalid_action_json"));
     assert!(stdout.contains("reply: 已修正协议错误。"));
     assert!(!stdout.contains("missing field"));
