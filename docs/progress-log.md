@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 third-test/runbook/acceptance 同步 wrapper guard 证据
+- 本轮同步 `docs/third-test-candidate.md`、`docs/live-operator-test-runbook.md` 与 `docs/acceptance-next-matrix.md`，把本地 runtime/report 证据口径更新到 2026-05-13：GoalRun checkpoint `checkpoint-1778614688417630606`、count 159，以及 readiness/status/channel/app-server/health/wrapper 同口径复验。
+- 文档继续保留真实 live receipt 边界：Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 仍需各自证据，不能由本地 readiness 或 wrapper guard 代替。验证已通过 `git diff --check -- docs/third-test-candidate.md docs/live-operator-test-runbook.md docs/acceptance-next-matrix.md`。
+
 # 2026-05-13 handoff 同步 wrapper guard checkpoint
 - 本轮同步 `docs/handoff-current.md` 顶部最新 M5/M6/M7 checkpoint，记录 wrapper guard coverage、GoalRun checkpoint `checkpoint-1778614688417630606` 和 checkpoint count 159。
 - 这一步只更新交接文档，便于下轮从最新 wrapper guard 状态续接；验证已通过 `git diff --check -- docs/handoff-current.md`。

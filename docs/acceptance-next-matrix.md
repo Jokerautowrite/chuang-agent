@@ -1,6 +1,6 @@
 # Acceptance Next Matrix
 
-更新时间：2026-05-12
+更新时间：2026-05-13
 
 快速入口：见 [第三测试版候选一页入口](./third-test-candidate.md) 和 [Live Operator Test Runbook](./live-operator-test-runbook.md)。
 
@@ -100,7 +100,7 @@ final verify 本地闭环通过
 | final verify | 已完成 | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 本地门禁可作为 live 前后对照 |
 | live-readiness preflight | local-preflight-ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | live 前只读排查入口已收口，但不是 live-ready |
 | live-gaps matrix | 已完成 | `bash scripts/chuang-live-gaps-check.sh` -> `marker=live_gaps_check_ok` | 明确区分本地合同 ready、preflight ready-but-no-start、real live pending；不连接真实服务、不启动 worker |
-| runtime/report surface | 已完成 | `cargo test -q --test live_runner_readiness_view_tests`；`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests`；`cargo test -q` | `runtime_report_surface=11/26`，runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 和 unified execution 摘要均可在 readiness/status/channel/app-server 面复验；不包含 secret/raw trace 外泄 |
+| runtime/report surface | 已完成 | `cargo test -q --test live_runner_readiness_view_tests`；`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests`；`cargo test -q` | `runtime_report_surface=11/26`，runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 和 unified execution 摘要均可在 readiness/status/channel/app-server/health/wrapper 面复验；GoalRun checkpoint count 到 159；不包含 secret/raw trace 外泄 |
 | candidate verify | 已完成 | `sh scripts/chuang-candidate-verify.sh` -> `chuang_candidate_verify_ok`，并包含 complete-local、live runner rehearsal、live gaps、operator checklist/receipt、goal run status 和 provider readiness check | 本地候选门禁已经覆盖 live gaps、operator/goal 只读摘要、receipt 模板结构和 provider readiness 只读状态；receipt collector 属于本地收口工具，仍需人工 evidence；缺 env 会显式报告 blocker |
 | Feishu evidence | 已完成 | `node --check scripts/chuang-feishu-live-preflight.js && node scripts/chuang-feishu-live-preflight-smoke.js && node scripts/chuang-feishu-command-smoke.js` | 本地命令和诊断链已可复验；`/tools` 已列出当前可见能力与边界 |
 | Feishu live contact | 已推进 | 老爸在 Chuang 专用 Feishu 会话中确认 `/health`、`/session`、`/tools`：bridge=ready、app-server=running、session=`chuang-thread-1`、workspace=`/home/user/projects/chuang-agent`、Feishu/provider env 均为 `<set>`；普通文本 `哈喽` 成功返回 | bridge/session/tools 现场证据已拿到；普通文本已通过主链和 provider 返回，并生成 runtime report `report-turn-1` |
