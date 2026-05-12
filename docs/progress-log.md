@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 全量 cargo test 复验 goal/runtime surfaces
+- 本轮在 runtime event observability 默认计数、channel/app-server turn 输出、candidate/third-test 复验和 `goal show` checkpoint evidence 文本面补齐后，跑通全量 `cargo test -q`，确认近期 M5/M6/M7 输出面改动没有破坏其他模块。
+- 验证已通过 `cargo test -q`。GoalRun checkpoint 写入 `checkpoint-1778607192734477991`，count 到 147。
+
 # 2026-05-12 goal show checkpoint evidence 文本面补齐
 - 本轮补齐 M6 GoalRun 可观测性边角：`goal show` 文本输出现在除了 latest checkpoint id/summary/writeback/incomplete reasons，还直接展示 `goal_last_checkpoint_created_at`、`goal_last_checkpoint_completed_worker_ids` 和 `goal_last_checkpoint_validation_notes`，与 JSON/status/doctor 的 checkpoint 续接证据对齐。
 - 回归已补到 `tests/cli_goal_tests.rs`；验证已通过 `cargo test -q --test cli_goal_tests --test goal_mode_smoke_tests --test goal_mode_negative_smoke_tests`。GoalRun checkpoint 写入 `checkpoint-1778607060318359662`，count 到 146。
