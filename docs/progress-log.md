@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate 复验覆盖 channel tool surface 文本面
+- 本轮在 `d88a32f` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，继承 complete-local、goal-mode 正负 smoke、live runner rehearsal、live gaps、live runner readiness、operator checklist/receipt 和 goal run status 摘要；最终输出 `chuang_candidate_verify_ok`。
+- 复验确认 channel tool surface 文本面改动未破坏候选链路：candidate 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=90`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 channel simulate 文本面透出 tool surface 摘要
 - 本轮继续沿 M5/M7 channel 输出面补人读摘要：`channel simulate` 非 JSON 输出现在会打印 `tool_surface_available`、`tool_surface_governed` 与 `tool_surface_callable_tools`，让通道本地演练文本面能直接确认工具面存在且受治理约束。
 - JSON 面保持原结构不变，仍保留完整 `tool_surface` / `runtime_observability` / `tool_events`；文本面只输出工具名列表和布尔摘要，不打印 raw tool trace 或协议 payload。验证已通过 `cargo test -q --test cli_channel_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
