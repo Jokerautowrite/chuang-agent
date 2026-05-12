@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 GoalRun status checkpoint evidence 计数进入候选门禁
+- 本轮继续沿 M6/M7 goal 状态可观测性补高层日志：`scripts/chuang-goal-run-status.sh` 文本面现在除 checkpoint count/latest id/summary 外，也打印 latest completed worker count 与 validation note count，便于人工确认本轮 checkpoint 有完成者和验证证据。
+- `scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 同步断言 `last_completed_worker_ids` / `last_validation_notes` 为结构化列表，并只打印 checkpoint 完整性、worker 数和 note 数，不扩散 validation note 原文。验证已通过 `cargo test -q --test cli_smoke_tests`、`cargo test -q --test live_operator_scripts_tests`、`bash scripts/chuang-goal-run-status.sh --json` 抽样、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 Feishu turn summary providerMeta fallback 回归
 - 本轮继续沿 M7 app-server/channel/Feishu 输出面补边角：`scripts/chuang-feishu-turn-summary-smoke.js` 新增 providerMeta-only 场景，锁住 Feishu 过程摘要即使只从 `providerMeta` 读取 `tool_unified_execution_status`、`tool_unified_execution_failure_count`、`tool_protocol_error_count` 和 `tool_call_count`，也会显示稳定工具执行摘要。
 - 脱敏边界同步覆盖 fallback：当 `providerMeta.tool_protocol_error_count > 0` 且 `providerMeta.tool_trace` 含 raw `ACTION` payload 时，Feishu 文本仍只显示协议错误计数，不输出原始 payload。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests`、`cargo fmt --all --check`。

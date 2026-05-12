@@ -233,11 +233,16 @@ project_goal_run = data["project_goal_run"]
 assert project_goal_run["goal_id"] in ("mainline-mvp", None)
 assert isinstance(project_goal_run["checkpoint_count"], int)
 assert isinstance(project_goal_run["checkpoint_log_complete"], bool)
+assert isinstance(project_goal_run["last_completed_worker_ids"], list)
+assert isinstance(project_goal_run["last_validation_notes"], list)
 print("candidate_goal_run_status_overall=" + str(data["overall_status"]))
 print("candidate_goal_run_status_interactive_state=" + str(data["interactive_state"]))
 print("candidate_goal_run_status_activity_hint=" + str(data["activity_hint"]))
 print("candidate_project_goal_run_checkpoint_count=" + str(project_goal_run["checkpoint_count"]))
+print("candidate_project_goal_run_checkpoint_log_complete=" + str(project_goal_run["checkpoint_log_complete"]).lower())
 print("candidate_project_goal_run_last_checkpoint=" + str(project_goal_run["last_checkpoint_id"]))
+print("candidate_project_goal_run_last_completed_worker_count=" + str(len(project_goal_run["last_completed_worker_ids"])))
+print("candidate_project_goal_run_last_validation_note_count=" + str(len(project_goal_run["last_validation_notes"])))
 print("candidate_goal_run_status_ok=" + str(data["ok"]).lower())
 '
 

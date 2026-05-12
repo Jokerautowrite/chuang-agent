@@ -520,6 +520,9 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("live_runner_readiness_view_state="));
     assert!(wrapper.contains("live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("live_runner_readiness_view_blocked_reason="));
+    assert!(wrapper.contains("project_goal_run_checkpoint_log_complete="));
+    assert!(wrapper.contains("project_goal_run_last_completed_worker_count="));
+    assert!(wrapper.contains("project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("assert service[\"manual_live_required\"] is True"));
     assert!(wrapper.contains("assert service[\"must_not_count_as_complete\"] is True"));
     assert!(wrapper.contains("goal_run_status_interactive_state="));
@@ -852,6 +855,9 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("candidate_live_runner_readiness_view_blocked_reason="));
     assert!(wrapper.contains("candidate_goal_run_status_interactive_state="));
     assert!(wrapper.contains("candidate_goal_run_status_activity_hint="));
+    assert!(wrapper.contains("candidate_project_goal_run_checkpoint_log_complete="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_completed_worker_count="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("assert service[\"manual_live_required\"] is True"));
     assert!(wrapper.contains("assert service[\"must_not_count_as_complete\"] is True"));
 }

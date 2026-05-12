@@ -463,7 +463,10 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("candidate_goal_run_status_activity_hint"));
     assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
     assert!(wrapper.contains("candidate_project_goal_run_checkpoint_count="));
+    assert!(wrapper.contains("candidate_project_goal_run_checkpoint_log_complete="));
     assert!(wrapper.contains("candidate_project_goal_run_last_checkpoint="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_completed_worker_count="));
+    assert!(wrapper.contains("candidate_project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("connects_real_feishu\"] is False"));
     assert!(wrapper.contains("connects_real_provider\"] is False"));
     assert!(wrapper.contains("performs_desktop_actions\"] is False"));
@@ -633,7 +636,10 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("goal_run_status_activity_hint="));
     assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
     assert!(wrapper.contains("project_goal_run_checkpoint_count="));
+    assert!(wrapper.contains("project_goal_run_checkpoint_log_complete="));
     assert!(wrapper.contains("project_goal_run_last_checkpoint="));
+    assert!(wrapper.contains("project_goal_run_last_completed_worker_count="));
+    assert!(wrapper.contains("project_goal_run_last_validation_note_count="));
     assert!(wrapper.contains("third_test_candidate_smoke_ok"));
     assert!(wrapper.contains("boundaries[\"connects_real_feishu\"] is False"));
     assert!(wrapper.contains("boundaries[\"sends_feishu_messages\"] is False"));
@@ -774,6 +780,8 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert!(script.contains("CHUANG_GOAL_OVERNIGHT_STATUS_FILE"));
     assert!(script.contains("CHUANG_AGENT_ROOT"));
     assert!(script.contains("CHUANG_PROJECT_GOAL_RUN_FILE"));
+    assert!(script.contains("project_goal_run_last_completed_worker_count:"));
+    assert!(script.contains("project_goal_run_last_validation_note_count:"));
     assert!(script.contains("\"dispatches_tasks\": False"));
     assert!(script.contains("\"starts_worker\": False"));
     assert!(script.contains("\"restarts_worker\": False"));
@@ -947,6 +955,10 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert_eq!(
         data["project_goal_run"]["last_completed_worker_ids"],
         serde_json::json!(["main-process"])
+    );
+    assert_eq!(
+        data["project_goal_run"]["last_validation_notes"],
+        serde_json::json!(["goal status script test"])
     );
     assert_eq!(data["interactive_state"], "working");
     assert!(data["activity_hint"]
