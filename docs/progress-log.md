@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 handoff 同步 wrapper guard checkpoint
+- 本轮同步 `docs/handoff-current.md` 顶部最新 M5/M6/M7 checkpoint，记录 wrapper guard coverage、GoalRun checkpoint `checkpoint-1778614688417630606` 和 checkpoint count 159。
+- 这一步只更新交接文档，便于下轮从最新 wrapper guard 状态续接；验证已通过 `git diff --check -- docs/handoff-current.md`。
+
 # 2026-05-13 GoalRun 记录 wrapper guard checkpoint
 - 本轮把 smoke/operator wrapper runtime surface 静态 guard 矩阵写入 `mainline-mvp` GoalRun 运行态：最新 checkpoint 为 `checkpoint-1778614688417630606`，checkpoint count 到 159，summary 为 `smoke operator runtime surface wrapper guards verified`。
 - 运行态文件 `context/goal-runs/mainline-mvp.json` 仍是 ignored，不纳入提交；项目仓库只记录 progress-log。验证证据为 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests --test live_runner_readiness_view_tests` 与 `git diff --check`。
