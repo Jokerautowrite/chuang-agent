@@ -292,6 +292,19 @@ fn list_event_snapshots_children_and_their_evidence_refs() {
     ledger
         .spawn(spawn_request("child-thread-2", "reviewer"))
         .expect("second spawn should succeed");
+    ledger
+        .spawn(spawn_request("child-thread-3", "checker"))
+        .expect("third spawn should succeed");
+    ledger
+        .register_report(
+            "child-thread-3",
+            admission(
+                "Rejected",
+                "command_protocol_report_rejected",
+                "queue://reports/rejected-1",
+            ),
+        )
+        .expect("rejected report should register");
     let children = ledger.list_children("root-thread");
 
     let event = SubagentTreeEventBuilder::new(CREATED_AT).list_event(
@@ -313,18 +326,18 @@ fn list_event_snapshots_children_and_their_evidence_refs() {
         event.runtime_event.call_id.as_deref(),
         Some("subagent-list-children:root-thread")
     );
-    assert_eq!(event.child_count, 2);
+    assert_eq!(event.child_count, 3);
     assert_eq!(event.children_summary.parent_thread_id, "root-thread");
-    assert_eq!(event.children_summary.child_count, 2);
-    assert_eq!(event.children_summary.open_child_count, 2);
-    assert_eq!(event.children_summary.reported_child_count, 1);
+    assert_eq!(event.children_summary.child_count, 3);
+    assert_eq!(event.children_summary.open_child_count, 3);
+    assert_eq!(event.children_summary.reported_child_count, 2);
     assert_eq!(event.children_summary.closed_child_count, 0);
     assert_eq!(event.children_summary.accepted_report_count, 1);
-    assert_eq!(event.children_summary.rejected_report_count, 0);
+    assert_eq!(event.children_summary.rejected_report_count, 1);
     assert_eq!(event.children_summary.missing_report_count, 1);
     assert_eq!(
         event.children_summary.child_thread_ids,
-        vec!["child-thread-1", "child-thread-2"]
+        vec!["child-thread-1", "child-thread-2", "child-thread-3"]
     );
     assert_eq!(
         event
@@ -333,7 +346,14 @@ fn list_event_snapshots_children_and_their_evidence_refs() {
             .get("report_validated"),
         Some(&1)
     );
-    assert_eq!(event.children_summary.report_admission_refs.len(), 1);
+    assert_eq!(
+        event
+            .children_summary
+            .report_reason_codes
+            .get("command_protocol_report_rejected"),
+        Some(&1)
+    );
+    assert_eq!(event.children_summary.report_admission_refs.len(), 2);
     assert_eq!(
         event.children_summary.report_admission_refs[0].admission_id,
         "admission-report_validated"
@@ -343,6 +363,24 @@ fn list_event_snapshots_children_and_their_evidence_refs() {
             .evidence_ref
             .as_deref(),
         Some("queue://reports/report-1")
+    );
+    assert_eq!(
+        event.children_summary.report_admission_refs[1].admission_id,
+        "admission-command_protocol_report_rejected"
+    );
+    assert_eq!(
+        event.children_summary.report_admission_refs[1].status,
+        "Rejected"
+    );
+    assert_eq!(
+        event.children_summary.report_admission_refs[1].reason_code,
+        "command_protocol_report_rejected"
+    );
+    assert_eq!(
+        event.children_summary.report_admission_refs[1]
+            .evidence_ref
+            .as_deref(),
+        Some("queue://reports/rejected-1")
     );
     assert!(event.consistency_warnings.is_empty());
     assert_eq!(
@@ -381,20 +419,37 @@ fn list_event_snapshots_children_and_their_evidence_refs() {
     assert!(event.children[1].admission_status.is_none());
     assert!(event.children[1].admission_reason_code.is_none());
     assert!(event.children[1].evidence_ref.is_none());
+    assert_eq!(event.children[2].child_thread_id, "child-thread-3");
+    assert_eq!(
+        event.children[2].admission_status.as_deref(),
+        Some("Rejected")
+    );
+    assert_eq!(
+        event.children[2].admission_reason_code.as_deref(),
+        Some("command_protocol_report_rejected")
+    );
+    assert_eq!(
+        event.children[2].evidence_ref.as_deref(),
+        Some("queue://reports/rejected-1")
+    );
 
     let encoded = serde_json::to_string(&event).expect("event should serialize");
     assert!(encoded.contains("\"bridge_event_kind\":\"subagent_children_listed\""));
     assert!(encoded.contains("\"children_summary\""));
-    assert!(encoded.contains("\"child_count\":2"));
+    assert!(encoded.contains("\"child_count\":3"));
     assert!(encoded.contains("\"accepted_report_count\":1"));
+    assert!(encoded.contains("\"rejected_report_count\":1"));
     assert!(encoded.contains("\"missing_report_count\":1"));
     assert!(encoded.contains("\"report_admission_refs\""));
     assert!(encoded.contains("\"root_thread_id\":\"root-thread\""));
     assert!(encoded.contains("\"parent_thread_id\":\"root-thread\""));
     assert!(encoded.contains("\"admission_id\":\"admission-report_validated\""));
     assert!(encoded.contains("\"admission_status\":\"Accepted\""));
+    assert!(encoded.contains("\"admission_status\":\"Rejected\""));
     assert!(encoded.contains("\"admission_reason_code\":\"report_validated\""));
+    assert!(encoded.contains("\"admission_reason_code\":\"command_protocol_report_rejected\""));
     assert!(encoded.contains("\"evidence_ref\":\"queue://reports/report-1\""));
+    assert!(encoded.contains("\"evidence_ref\":\"queue://reports/rejected-1\""));
     assert!(!encoded.contains("subagent report payload"));
 }
 

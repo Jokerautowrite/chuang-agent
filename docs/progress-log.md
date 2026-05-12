@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 subagent children listed 三态回归加固
+- 本轮继续补 M6 subagent tree/list children 事件面：`tests/subagent_tree_events_tests.rs` 的 `list_event_snapshots_children_and_their_evidence_refs` 现在同时覆盖 accepted、rejected、missing 三类 child report 状态，锁住 `children_summary` 里的 `accepted_report_count=1`、`rejected_report_count=1`、`missing_report_count=1`、`report_admission_refs` 两条 admission refs，以及 `report_validated` / `command_protocol_report_rejected` reason-code 分布。
+- 这保证 `subagent_children_listed` runtime bridge 事件不会只对 accepted report 暴露 admission locator，而漏掉 rejected report 的状态、reason code 和 evidence ref。验证已通过 `cargo test -q --test subagent_tree_events_tests list_event_snapshots_children_and_their_evidence_refs`；下一步继续跑 M6 矩阵并看这些状态是否还需要进入更高层 smoke/candidate 抽样。
+
 # 2026-05-12 goal show JSON admission locator 回归加固
 - 本轮继续收 M6 goal/subagent 查询面：`tests/cli_goal_tests.rs` 的 `cli_goal_show_surfaces_next_command_and_stage_readiness` 现在在 checkpoint-ready 的 `goal show --json` 路径里直接断言 `handoff_query_summary` 携带 `parent_context_handoff_count=2`、`report_admission_ref_count=2`、`report_validated=2`，并逐项锁住 `goal-report-admission://...` admission locator、`Accepted` 状态、`report_validated` reason code 和 `report://...` evidence ref。
 - 这让 `goal show` 的 JSON 面和既有文本面、`goal collect` / `goal step` 面保持同一套 admission locator 口径，不再只验证 checkpoint worker/validation note。验证已通过 `cargo test -q --test cli_goal_tests cli_goal_show_surfaces_next_command_and_stage_readiness`；下一步继续扫 subagent tree/list children 或 candidate smoke 是否还缺同类 JSON locator 抽样。
