@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 docs/status/readiness 轻量矩阵复验
+- 本轮在 third-test/runbook 文档同步后复验文档格式和状态面测试，确认 live 文档三件套 diff clean，CLI status/doctor 与 live runner readiness view 仍能看到最新 runtime surface/readiness 口径。
+- 验证已通过 `git diff --check -- docs/third-test-candidate.md docs/live-operator-test-runbook.md docs/acceptance-next-matrix.md` 和 `cargo test -q --test cli_status_tests --test cli_doctor_tests --test live_runner_readiness_view_tests`；GoalRun checkpoint 写入 `checkpoint-1778605127647195545`，count 到 138。
+
 # 2026-05-12 third-test/runbook 同步 runtime surface gates
 - 本轮同步 `docs/third-test-candidate.md` 与 `docs/live-operator-test-runbook.md`，把更新时间推进到 2026-05-12，并记录最新本地 gates：candidate verify marker、third-test marker、全量 `cargo test -q`，以及 `runtime_report_surface=11/26` 的 runtime/report 状态面复验。
 - 文档继续强调这些仍是 local-ready/readiness 证据，不替代 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。验证已通过 `git diff --check -- docs/third-test-candidate.md docs/live-operator-test-runbook.md docs/acceptance-next-matrix.md`；GoalRun checkpoint 写入 `checkpoint-1778604900321220923`，count 到 137。
