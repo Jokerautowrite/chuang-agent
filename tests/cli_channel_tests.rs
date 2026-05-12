@@ -1,4 +1,7 @@
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::Command;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::PathBuf};
 
@@ -10,6 +13,44 @@ fn temp_workspace(name: &str) -> PathBuf {
         .expect("clock should be valid")
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-agent-channel-{name}-{nanos}"))
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    let mut expected_len = None;
+    loop {
+        let read = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&buffer[..read]);
+        if expected_len.is_none() {
+            if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                    })
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_len);
+            }
+        }
+        if expected_len
+            .map(|len| request.len() >= len)
+            .unwrap_or(false)
+        {
+            break;
+        }
+    }
+    request
 }
 
 fn write_workspace_config(workspace: &PathBuf) {
@@ -199,6 +240,138 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         .as_str()
         .expect("outbound text")
         .contains("fake-responder"));
+}
+
+#[test]
+fn cli_channel_simulate_surfaces_nonzero_tool_protocol_errors() {
+    let workspace = temp_workspace("simulate-tool-protocol-error");
+    fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    fs::write(workspace.join("identity/SOUL.md"), "Channel test soul\n")
+        .expect("soul should write");
+    fs::write(workspace.join("identity/STORY.md"), "Channel test story\n")
+        .expect("story should write");
+    fs::write(
+        workspace.join("identity/FIRST_WAKE.md"),
+        "Channel test first wake\n",
+    )
+    .expect("first wake should write");
+    fs::write(workspace.join("identity/agents.toml"), "[agents]\n").expect("agents should write");
+    fs::write(
+        workspace.join("rules/core.md"),
+        "- Keep channel replies concise.\n",
+    )
+    .expect("rules should write");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let scripted_outputs = [
+            r#"ACTION: {"type":"tool_call","call":{"tool":"file_read"}}"#,
+            r#"ACTION: {"type":"final","answer":"已修正协议错误。"}"#,
+        ];
+        for content in scripted_outputs {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let _ = read_http_request(&mut stream);
+            let body = serde_json::json!({
+                "id": "chatcmpl-channel-tool-protocol",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop"
+                }]
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
+    });
+
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "channel-protocol"
+base_url = "http://{address}/v1"
+model = "gpt-channel-protocol"
+api_key_env = "CHUANG_AGENT_CHANNEL_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("config should write");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("simulate")
+        .arg("--workspace-root")
+        .arg(&workspace)
+        .arg("--message-id")
+        .arg("msg-protocol-1")
+        .arg("--sender-id")
+        .arg("user-1")
+        .arg("--thread-id")
+        .arg("thread-protocol-1")
+        .arg("--text")
+        .arg("读取文件")
+        .arg("--json")
+        .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
+        .output()
+        .expect("channel simulate should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("server thread should finish");
+    let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
+
+    assert_eq!(parsed["tool_protocol_error_count"], 1);
+    assert_eq!(
+        parsed["runtime_observability"]["tool_protocol_error_count"],
+        "1"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["tool_unified_execution_status"],
+        "ok"
+    );
+    let protocol_errors = parsed["tool_protocol_errors"]
+        .as_array()
+        .expect("tool protocol errors should be array");
+    assert_eq!(protocol_errors.len(), 1);
+    assert_eq!(protocol_errors[0]["code"], "invalid_action_json");
+    assert!(parsed["provider_meta"]["tool_protocol_errors_json"]
+        .as_str()
+        .expect("provider meta protocol errors")
+        .contains("invalid_action_json"));
+    assert!(parsed["tool_events"]
+        .as_array()
+        .expect("tool events should be array")
+        .iter()
+        .any(|event| event["kind"] == "protocol_error"));
+    assert!(parsed["outbound"]["text"]
+        .as_str()
+        .expect("outbound text")
+        .contains("已修正协议错误"));
 }
 
 #[test]

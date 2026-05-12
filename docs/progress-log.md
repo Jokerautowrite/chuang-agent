@@ -1794,3 +1794,7 @@
 # 2026-05-12 app-server 非零 tool protocol error 高层回归
 - 本轮用现有 OpenAI-compatible HTTP 本地测试服务补了 app-server 高层非零协议错误路径：第一轮真实 provider 返回缺少 `path` 的 `file_read` ACTION，tool loop 记录 `invalid_action_json` 后把错误反馈给模型，第二轮 provider 返回 FINAL。
 - `tests/app_server_tests.rs` 现在断言 `turn/start` 响应和 `turn/completed` 事件都暴露 `toolProtocolErrorCount=1`、`runtimeObservability.tool_protocol_error_count=1`、`toolProtocolErrors[0].code=invalid_action_json`、`toolEvents.kind=protocol_error` 和 provider meta 中的 `tool_protocol_errors_json`；没有新增 scripted provider 后门。验证已通过 `cargo test -q --test app_server_tests app_server_turn`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：把同类非零路径继续评估到 `channel simulate`，如果 channel 只能走单轮 stub，则保留 app-server 覆盖并转向 M5/M6/M7 全矩阵复验。
+
+# 2026-05-12 channel 非零 tool protocol error 高层回归
+- 本轮把 app-server 已验证的非零协议错误路径推进到 channel simulate：测试用现有 OpenAI-compatible HTTP 本地服务连续返回缺少 `path` 的 `file_read` ACTION 与修正 FINAL，真实走 `run_with_options` tool loop，不新增 scripted provider 后门。
+- `tests/cli_channel_tests.rs` 现在断言 channel JSON 输出包含 `tool_protocol_error_count=1`、`runtime_observability.tool_protocol_error_count=1`、`tool_protocol_errors[0].code=invalid_action_json`、`tool_events.kind=protocol_error`、provider meta 的 `tool_protocol_errors_json`，且 outbound text 为修正后的最终答复。验证已通过 `cargo test -q --test cli_channel_tests`、`cargo fmt --all --check` 和 `git diff --check`。下一轮入口：跑 app-server/channel/runtime 的联合矩阵后，继续查 M5/M6/M7 是否还有状态面或 smoke 面漏字段。
