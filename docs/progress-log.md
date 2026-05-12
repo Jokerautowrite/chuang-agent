@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 MVP smoke 复验覆盖近期状态门禁
+- 本轮在 runtime/status/readiness 矩阵后跑通完整 `sh scripts/chuang-mvp-smoke.sh`，确认 status/doctor/run、memory、knowledge、channel simulate、Feishu local smokes、app-server health、console snapshot、plugin/skill/subagent/control/experiment 本地门禁仍通过。
+- 输出 `mvp_smoke_ok`；GoalRun checkpoint 写入 `checkpoint-1778603038412061626`，count 到 127。本轮使用本地 smoke/fixture，不连接真实 Feishu/provider，不触碰 Hermes。
+
 # 2026-05-12 runtime/status/readiness 状态面矩阵复验
 - 本轮复验 M5/M6/M7 状态面核心矩阵：runtime report、kernel status、CLI status/doctor 和 live runner readiness view 均保持 `runtime_report_surface`、event ledger、goal handoff/subagent children、context compaction、tool protocol error 与 live readiness 口径一致。
 - 验证已通过 `cargo test -q --test runtime_report_tests --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test live_runner_readiness_view_tests`；GoalRun checkpoint 写入 `checkpoint-1778602948290785968`，count 到 126。本轮仅本地测试和文档记录，不连接真实 provider/Feishu，不触碰 Hermes。
