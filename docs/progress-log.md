@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验 handoff observability 默认值
+- 本轮在 runtime observability 默认 handoff/subagent counts 补强后，跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认新增默认字段没有扰动 complete-local、goal 正负 smoke、live runner rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 与 provider readiness 候选链。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 154，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778608296476641531`，count 到 155。
+
 # 2026-05-12 runtime observability 默认 handoff/subagent counts
 - 本轮继续补 M6 可查询稳定性：`runtime_observability_meta` 在没有 goal handoff / subagent children summary JSON 时，也会稳定输出 handoff/subagent 派生计数字段 `0`、refs/reason codes 字段 `none`，避免 channel/app-server/status 调用方把字段缺失和“当前无 handoff/admission”混淆。
 - 回归已补到 `tests/runtime_report_tests.rs`；验证已通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_without_ledgers` 和 `cargo test -q --test runtime_report_tests --test app_server_tests --test cli_channel_tests --test live_runner_readiness_view_tests`。GoalRun checkpoint 写入 `checkpoint-1778608187560743370`，count 到 154。
