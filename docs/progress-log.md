@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate/third-test 锁住 GoalRun no-tail 状态
+- 本轮继续沿 M6/M7 GoalRun 状态面补高层防退化：`tests/cli_smoke_tests.rs` 现在在 candidate verify 与 third-test wrapper 静态回归里确认 goal run status 继续打印 `interactive_state` / `activity_hint`，并且底层 `scripts/chuang-goal-run-status.sh` 保留 `session_present_no_tail` 与对应操作提示。
+- 这保证高层门禁不会只检查“有字符串”，而丢掉 tmux session/pane 存在但 pane tail 为空这一类可操作状态。验证已通过 `cargo test -q --test cli_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`。
+
 # 2026-05-12 GoalRun status 区分 session present no tail
 - 本轮继续沿 M6/M7 GoalRun 监工状态面补可观测性：`scripts/chuang-goal-run-status.sh` 现在在 tmux session 和 pane 都存在、但 capture-pane 没有可用尾部内容时返回 `interactive_state=session_present_no_tail`，并提示先检查 tmux pane，避免继续显示笼统 `unknown`。
 - 该入口仍只读，不派活、不启动 worker、不重启、不清理、不触碰服务；本机抽样确认当前 goal tmux session 存在但 pane tail 为空时会显示新状态。验证已通过 `cargo test -q --test cli_smoke_tests goal_run_status_script_reads_watchdog_and_overnight_status_without_actions`、`cargo test -q --test cli_smoke_tests`、`bash scripts/chuang-goal-run-status.sh --json`、`cargo fmt --all --check` 和 `git diff --check`。

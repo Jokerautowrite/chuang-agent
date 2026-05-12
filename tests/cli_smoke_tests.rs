@@ -17,6 +17,16 @@ fn write_fake_config(root: &std::path::Path) -> PathBuf {
     config_path
 }
 
+fn script_contains_goal_run_status_no_tail_state(manifest_dir: &std::path::Path) -> bool {
+    fs::read_to_string(manifest_dir.join("scripts/chuang-goal-run-status.sh"))
+        .map(|script| {
+            script.contains("session_present_no_tail")
+                && script
+                    .contains("tmux session and panes are present but no pane tail was captured")
+        })
+        .unwrap_or(false)
+}
+
 #[test]
 fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -491,6 +501,9 @@ fn candidate_verify_wrapper_sequences_dirty_tree_friendly_candidate_gates() {
     assert!(wrapper.contains("candidate_goal_run_status_overall"));
     assert!(wrapper.contains("candidate_goal_run_status_interactive_state"));
     assert!(wrapper.contains("candidate_goal_run_status_activity_hint"));
+    assert!(wrapper.contains(r#"assert isinstance(data["interactive_state"], str)"#));
+    assert!(wrapper.contains(r#"assert isinstance(data["activity_hint"], str)"#));
+    assert!(script_contains_goal_run_status_no_tail_state(&manifest_dir));
     assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
     assert!(wrapper.contains("candidate_project_goal_run_checkpoint_count="));
     assert!(wrapper.contains("candidate_project_goal_run_checkpoint_log_complete="));
@@ -667,6 +680,9 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("goal_run_status_overall="));
     assert!(wrapper.contains("goal_run_status_interactive_state="));
     assert!(wrapper.contains("goal_run_status_activity_hint="));
+    assert!(wrapper.contains(r#"assert isinstance(data["interactive_state"], str)"#));
+    assert!(wrapper.contains(r#"assert isinstance(data["activity_hint"], str)"#));
+    assert!(script_contains_goal_run_status_no_tail_state(&manifest_dir));
     assert!(wrapper.contains(r#"project_goal_run = data["project_goal_run"]"#));
     assert!(wrapper.contains("project_goal_run_checkpoint_count="));
     assert!(wrapper.contains("project_goal_run_checkpoint_log_complete="));
