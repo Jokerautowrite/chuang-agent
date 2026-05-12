@@ -335,14 +335,22 @@ fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission()
     assert!(script.contains("--runner command"));
     assert!(script.contains("--approve-exec"));
     assert!(script.contains("CHUANG_CODEX_RUNNER_WORKSPACE=\"$runner_workspace\""));
-    assert!(script.contains("assert run_once[\"report_admission\"][\"status\"] == \"Accepted\""));
-    assert!(script.contains(
-        "assert run_once[\"report_admission\"][\"reason_code\"] == \"report_validated\""
-    ));
+    assert!(script.contains("admission = run_once[\"report_admission\"]"));
+    assert!(script.contains("assert admission[\"status\"] == \"Accepted\""));
+    assert!(script.contains("assert admission[\"reason_code\"] == \"report_validated\""));
+    assert!(
+        script.contains("assert admission[\"controller_agent_id\"] == \"cli-subagent-controller\"")
+    );
+    assert!(script.contains("assert admission[\"task_id\"] == dispatch[\"task_id\"]"));
+    assert!(script.contains("assert admission[\"agent_id\"] == dispatch[\"agent_id\"]"));
+    assert!(script.contains("assert admission[\"report_id\"].startswith(\"report-\")"));
+    assert!(script.contains("assert admission[\"decided_at\"].endswith(\"Z\")"));
     assert!(script.contains("subagent report"));
     assert!(script.contains("subagent collect"));
     assert!(script.contains("data.get(\"report_available\") or data.get(\"available\")"));
-    assert!(script.contains("assert data[\"report_admission\"][\"status\"] == \"Accepted\""));
+    assert!(script.contains("assert admission[\"report_id\"] == report[\"report_id\"]"));
+    assert!(script.contains("assert admission[\"task_id\"] == report[\"task_id\"]"));
+    assert!(script.contains("assert admission[\"agent_id\"] == report[\"agent_id\"]"));
     assert!(script.contains("assert report[\"schema_version\"] == \"1.0\""));
     assert!(script.contains("assert report[\"status\"] == \"Failed\""));
     assert!(script.contains("codex runner disabled by default"));

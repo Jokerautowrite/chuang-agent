@@ -137,8 +137,14 @@ assert run_once["worker_capabilities"] == ["rehearsal"]
 assert run_once["ran"] is True
 assert run_once["run_id"] == dispatch["run_id"]
 assert run_once["report_path"]
-assert run_once["report_admission"]["status"] == "Accepted"
-assert run_once["report_admission"]["reason_code"] == "report_validated"
+admission = run_once["report_admission"]
+assert admission["status"] == "Accepted"
+assert admission["reason_code"] == "report_validated"
+assert admission["controller_agent_id"] == "cli-subagent-controller"
+assert admission["task_id"] == dispatch["task_id"]
+assert admission["agent_id"] == dispatch["agent_id"]
+assert admission["report_id"].startswith("report-")
+assert admission["decided_at"].endswith("Z")
 assert "codex runner disabled" in run_once["summary"]
 PY
 
@@ -200,9 +206,15 @@ for path in sys.argv[1:]:
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
     assert (data.get("report_available") or data.get("available")) is True
-    assert data["report_admission"]["status"] == "Accepted"
-    assert data["report_admission"]["reason_code"] == "report_validated"
+    admission = data["report_admission"]
     report = data["report"]
+    assert admission["status"] == "Accepted"
+    assert admission["reason_code"] == "report_validated"
+    assert admission["controller_agent_id"] == "cli-subagent-controller"
+    assert admission["report_id"] == report["report_id"]
+    assert admission["task_id"] == report["task_id"]
+    assert admission["agent_id"] == report["agent_id"]
+    assert admission["decided_at"].endswith("Z")
     assert report["schema_version"] == "1.0"
     assert report["status"] == "Failed"
     assert report["exit_code"] == 2
