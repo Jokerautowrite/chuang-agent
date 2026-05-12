@@ -404,9 +404,69 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
         serde_json::from_str(&stdout).expect("live gaps output should be json");
 
     assert_eq!(data["ok"], true);
+    assert_eq!(data["check_name"], "live-gaps");
+    assert_eq!(
+        data["summary"],
+        "local_contract=ready preflight=ready_but_no_start real_live=pending"
+    );
+    assert_eq!(data["marker"], "live_gaps_check_ok");
+
+    let boundaries = &data["boundaries"];
+    assert_eq!(boundaries["readonly"], true);
+    assert_eq!(boundaries["connects_real_feishu"], false);
+    assert_eq!(boundaries["connects_real_provider"], false);
+    assert_eq!(boundaries["starts_external_worker"], false);
+    assert_eq!(boundaries["enables_live_gate"], false);
+    assert_eq!(boundaries["performs_desktop_actions"], false);
+    assert_eq!(boundaries["performs_browser_actions"], false);
+    assert_eq!(boundaries["modifies_repo"], false);
+    assert_eq!(boundaries["prints_secret_values"], false);
+
+    let matrix = data["matrix"]
+        .as_array()
+        .expect("live gaps matrix should be an array");
+    let local_contract = matrix
+        .iter()
+        .find(|item| item["name"] == "local_contract")
+        .expect("local contract matrix entry should exist");
+    assert_eq!(local_contract["state"], "ready");
+    assert_eq!(local_contract["ready"], true);
+    assert_eq!(local_contract["live_worker_available"], false);
+
+    let preflight = matrix
+        .iter()
+        .find(|item| item["name"] == "preflight_ready_but_no_start")
+        .expect("preflight matrix entry should exist");
+    assert_eq!(preflight["state"], "ready_but_no_start");
+    assert_eq!(preflight["ready"], true);
+    assert_eq!(preflight["ready_for_live"], false);
+    assert_eq!(preflight["starts_external_worker"], false);
+    assert_eq!(preflight["live_worker_available"], false);
+
+    let real_live = matrix
+        .iter()
+        .find(|item| item["name"] == "real_live")
+        .expect("real live matrix entry should exist");
+    assert_eq!(real_live["state"], "pending");
+    assert_eq!(real_live["ready"], false);
+    assert_eq!(real_live["requires_manual_live_check"], true);
+    assert_eq!(real_live["connects_real_external_services"], false);
+    assert_eq!(real_live["real_live_ready"], false);
+
+    let gap_ids = data["gaps"]
+        .as_array()
+        .expect("live gaps should be an array")
+        .iter()
+        .map(|item| item["id"].as_str().expect("gap id should be string"))
+        .collect::<Vec<_>>();
+    assert!(gap_ids.contains(&"live_worker_adapter_pending"));
+    assert!(gap_ids.contains(&"live_runner_gate_disabled"));
+    assert!(gap_ids.contains(&"manual_operator_live_receipt_missing"));
+    assert!(gap_ids.contains(&"real_external_services_not_verified"));
+
     assert_eq!(data["provider_readiness"]["overall_state"], "ready");
     assert_eq!(data["provider_readiness"]["api_key_state"], "<set>");
-    assert_eq!(data["matrix"][2]["state"], "pending");
+    assert_eq!(data["provider_readiness"]["uses_redacted_state_only"], true);
     assert!(!stdout.contains("provider-secret-value"));
 }
 

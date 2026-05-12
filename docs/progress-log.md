@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live-gaps 防混矩阵回归加固
+- 本轮继续沿 M5/M6/M7 live readiness 主链补高层测试：`tests/live_operator_scripts_tests.rs` 的 `live_gaps_check_uses_provider_env_file_when_available` 现在不只确认 provider env 脱敏为 `<set>`，还锁住 `live-gaps --json` 的 `check_name`、summary、marker、只读边界、local contract/preflight/real-live 三段矩阵，以及 `live_worker_adapter_pending`、`live_runner_gate_disabled`、`manual_operator_live_receipt_missing`、`real_external_services_not_verified` 四个 gap id。
+- 这保证 candidate/third-test 依赖的 live-gaps 状态面持续表达“local/preflight ready 不等于 real live ready”，且不连接 Feishu/provider、不启动 worker、不启 live gate、不打印 secret。验证已通过 `cargo test -q --test live_operator_scripts_tests live_gaps_check_uses_provider_env_file_when_available`、`cargo test -q --test live_operator_scripts_tests --test live_operator_receipt_collect_tests --test live_runner_readiness_view_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 third-test 复验覆盖 channel tool surface 文本面
 - 本轮在 `293c75d` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认最新 channel tool surface 文本面改动未破坏第三测试链路：candidate/third-test 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=91`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
