@@ -155,6 +155,14 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         parsed["runtime_observability"]["tool_unified_execution_failure_count"],
         "0"
     );
+    assert!(
+        parsed["runtime_observability"]["runtime_response_trace_chars"]
+            .as_str()
+            .expect("runtime response trace char count should be a string")
+            .parse::<usize>()
+            .expect("runtime response trace char count should parse")
+            > 0
+    );
     assert!(parsed["runtime_observability"]["context_pack_trace"]
         .as_str()
         .expect("context pack trace should be a string")

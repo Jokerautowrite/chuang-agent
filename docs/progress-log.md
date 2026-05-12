@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server/channel runtime trace chars 回归补齐
+- 本轮继续沿 M7 app-server/channel 输出面补 `runtime_report_surface` 字段抽样：`tests/app_server_tests.rs` 现在同时锁住 `turn/start` 响应与 `turn/completed` 事件中的 `runtimeObservability.runtime_response_trace_chars` 为可解析正整数；`tests/cli_channel_tests.rs` 也锁住 `channel simulate --json` 暴露同一字段。
+- 这确认 app-server 和 channel 继续消费同一份 `runtime_observability_meta()`，让 runtime response trace 不只在 status/doctor/app-server health 的 surface 列表里可见，也在真实 turn 输出面可查。验证已通过 `cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`、`cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo fmt --all --check` 和 `git diff --check`。
+
 # 2026-05-12 candidate/third-test goal run status 抽样补齐
 - 本轮继续沿 M6/M7 goal 状态可观测性往高层门禁推进：`scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 goal run status 只读摘要现在除 `overall_status` / `ok` 外，也断言并打印 `interactive_state` 与 `activity_hint`，让人工和第三测试日志能直接判断终端 goal worker 是 working/thinking/idle/session_missing 等状态。
 - 回归同步补到 `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs`，锁住 candidate/third-test wrapper 必须保留这些字段；真实验收已通过 `cargo test -q --test cli_smoke_tests`、`cargo test -q --test live_operator_scripts_tests`、`bash scripts/chuang-goal-run-status.sh --json` 抽样、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check` 和 `git diff --check`。

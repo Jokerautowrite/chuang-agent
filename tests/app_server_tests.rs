@@ -206,6 +206,14 @@ transport = "stub"
         "0"
     );
     assert!(
+        turn_response["result"]["turn"]["runtimeObservability"]["runtime_response_trace_chars"]
+            .as_str()
+            .expect("runtime response trace char count should be a string")
+            .parse::<usize>()
+            .expect("runtime response trace char count should parse")
+            > 0
+    );
+    assert!(
         turn_response["result"]["turn"]["runtimeObservability"]["context_pack_trace"]
             .as_str()
             .expect("context pack trace should be a string")
@@ -368,6 +376,14 @@ transport = "stub"
         turn_completed["params"]["turn"]["runtimeObservability"]
             ["tool_unified_execution_failure_count"],
         "0"
+    );
+    assert!(
+        turn_completed["params"]["turn"]["runtimeObservability"]["runtime_response_trace_chars"]
+            .as_str()
+            .expect("completed runtime response trace char count should be a string")
+            .parse::<usize>()
+            .expect("completed runtime response trace char count should parse")
+            > 0
     );
     assert!(
         turn_completed["params"]["turn"]["runtimeObservability"]["context_pack_trace"]
