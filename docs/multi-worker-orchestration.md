@@ -383,7 +383,7 @@ ready_to_checkpoint=false: goal checkpoint --from-collect must fail and that fai
 ```text
 Worker ID: live-runner-readiness-view
 Objective: 对齐 status/doctor/console/app-server health 的 live runner gate、blocked reason、capability mismatch 和 next action 文本/JSON 字段；不运行 preflight、不产生真实 live evidence。
-Allowed files: src/kernel_status.rs, src/cli_output.rs, src/cli_status.rs, src/cli_doctor.rs, src/cli_console.rs, src/app_server.rs, tests/*status*/*doctor*/*console*/*app_server* 相关文件
+Allowed files: src/kernel_status.rs, src/cli_output.rs, src/cli_doctor.rs, src/cli_console.rs, src/app_server.rs, tests/*status*/*doctor*/*console*/*app_server* 相关文件
 Forbidden files/services: 不碰 Hermes/Feishu，不改 runner 执行逻辑，不启动真实 worker，不写 data/skills，不删除/清理任何文件。
 Required capability: live_runner_readiness_view
 Expected dispatch/runner mode: local tests only; no live runner start.

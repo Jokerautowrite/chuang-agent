@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 status output 文档路径对齐
+- 本轮修正执行性文档里的过期源码路径：当前 status 文本输出实现位于 `src/cli_output.rs`，不再引用不存在的 `src/cli_status.rs`；同步更新 implementation slices 与 multi-worker orchestration 的 allowed files/写入范围。
+- 验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md docs/multi-worker-orchestration.md`。GoalRun checkpoint 写入 `checkpoint-1778607647256096697`，count 到 150。
+
 # 2026-05-12 implementation slices 验收命令名对齐
 - 本轮修正 `docs/codex-claude-implementation-slices-v1.md` 里的旧测试名，把 `mcp_adapter_tests`、`tool_registry_tests`、`subagent_tree_tests`、`unified_exec_tests` 等历史占位更新为当前实际的 `mcp_fake_adapter_tests`、`tool_registry_slot_tests`、`subagent_tree_ledger_tests`、`unified_execution_slot_tests`，并同步相关源码路径命名。
 - 验证已通过 `cargo test -q --test mcp_fake_adapter_tests --test tool_registry_slot_tests --test subagent_tree_ledger_tests --test unified_execution_slot_tests` 和 `git diff --check -- docs/codex-claude-implementation-slices-v1.md`。GoalRun checkpoint 写入 `checkpoint-1778607500054296795`，count 到 149。

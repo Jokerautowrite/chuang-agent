@@ -114,7 +114,7 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M2.3 Existing atomic tools descriptor bridge
 
-- 写入范围：`src/atomic_tool.rs`、`src/tool_runtime.rs`、`src/cli_status.rs`、`src/cli_doctor.rs`、`src/app_server.rs`。
+- 写入范围：`src/atomic_tool.rs`、`src/tool_runtime.rs`、`src/cli_output.rs`、`src/cli_doctor.rs`、`src/app_server.rs`。
 - 接口：file_read、file_write、code_execute、list_dir、locate、screenshot、open_app、mouse、keyboard 的 descriptor。
 - 测试：status/doctor/app-server health 输出 descriptor 摘要；GA tools 仍 9/9 mapped；read-only 与 mutating 标记正确。
 - 验收命令：`cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests --test atomic_tool_tests`。
@@ -156,7 +156,7 @@ M1-M3 是第一批。M4-M6 不应在 M1-M3 合同未稳定前接真实 adapter�
 
 ### M3.4 Policy status surface
 
-- 写入范围：`src/kernel_status.rs`、`src/cli_status.rs`、`src/cli_doctor.rs`、`src/app_server.rs`、`src/cli_console.rs`。
+- 写入范围：`src/kernel_status.rs`、`src/cli_output.rs`、`src/cli_doctor.rs`、`src/app_server.rs`、`src/cli_console.rs`。
 - 接口：status/doctor/app-server health 输出 active profile、decision summary、high-risk defaults、prompt-policy conflict handling。
 - 测试：status/doctor text + JSON；app-server diagnostic JSON；console snapshot。
 - 验收命令：`cargo test -q --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests --test cli_console_tests`。
