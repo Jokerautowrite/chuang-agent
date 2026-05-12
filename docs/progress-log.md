@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app/channel/runtime/status 联合矩阵复验
+- 本轮复跑 app-server、channel、runtime report 与 kernel status 联合矩阵，确认非零 tool protocol error、runtime report 合同、11/26 runtime surface、status surface 与 channel/app-server 输出仍同口径。
+- 验证已通过 `cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests`；GoalRun checkpoint 写入 `checkpoint-1778603718019054097`，count 到 132。本轮只跑本地测试，不连接真实 Feishu/provider，不触碰 Hermes。
+
 # 2026-05-12 live operator/static smoke 矩阵复验
 - 在 readiness JSON runtime surface 抽样补强后，本轮复跑 live operator scripts、live runner readiness view 与 CLI smoke 静态矩阵，确认 candidate/third-test wrapper、readiness 聚合面和基础 smoke 仍同口径覆盖 M5/M6/M7 字段。
 - 验证已通过 `cargo test -q --test live_operator_scripts_tests --test live_runner_readiness_view_tests --test cli_smoke_tests`；GoalRun checkpoint 写入 `checkpoint-1778603613057551464`，count 到 131。本轮只跑本地测试，不连接真实 Feishu/provider，不触碰 Hermes。
