@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 provider receipt 边界门禁
+- 本轮在 `1d04c49` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认 provider receipt 边界字段已进入 candidate/third-test 的 live operator receipt 模板断言；GoalRun checkpoint count 到 102，checkpoint log complete 为 true，provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 candidate/third-test 锁住 provider receipt 只读边界
 - 本轮把 provider receipt 新增的 `does_not_call_provider` 与 `does_not_read_provider_readiness` 继续抬到候选门禁：`scripts/chuang-candidate-verify.sh` 和 `scripts/chuang-third-test-smoke.sh` 的 live operator receipt 模板断言现在会检查 provider evidence 保留这两个字段。
 - `tests/cli_smoke_tests.rs` 与 `tests/live_operator_scripts_tests.rs` 已锁住 wrapper 不会丢掉这些断言；`sh scripts/chuang-candidate-verify.sh` 复验通过，仍只读 receipt 模板、不连接 provider、不打印 secret。验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests`、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
