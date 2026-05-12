@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 GoalRun status 区分 session present no tail
+- 本轮继续沿 M6/M7 GoalRun 监工状态面补可观测性：`scripts/chuang-goal-run-status.sh` 现在在 tmux session 和 pane 都存在、但 capture-pane 没有可用尾部内容时返回 `interactive_state=session_present_no_tail`，并提示先检查 tmux pane，避免继续显示笼统 `unknown`。
+- 该入口仍只读，不派活、不启动 worker、不重启、不清理、不触碰服务；本机抽样确认当前 goal tmux session 存在但 pane tail 为空时会显示新状态。验证已通过 `cargo test -q --test cli_smoke_tests goal_run_status_script_reads_watchdog_and_overnight_status_without_actions`、`cargo test -q --test cli_smoke_tests`、`bash scripts/chuang-goal-run-status.sh --json`、`cargo fmt --all --check` 和 `git diff --check`。
+
 # 2026-05-12 third-test 复验覆盖最新 smoke/channel guard
 - 本轮在 `cba1c20` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认最新 MVP channel live readiness guard 与 third-test unified execution 静态门禁未破坏第三测试链路：third-test 打印 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`project_goal_run_checkpoint_count=116`、checkpoint log complete 为 true；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret、未触碰 Hermes。

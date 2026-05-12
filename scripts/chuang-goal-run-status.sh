@@ -486,6 +486,11 @@ def infer_interactive_state(tmux_observation, watchdog):
                 "interactive_state": "session_missing",
                 "activity_hint": "tmux session missing; interactive goal worker not observed",
             }
+        if tmux_observation.get("session_present") is True and (tmux_observation.get("pane_count") or 0) > 0:
+            return {
+                "interactive_state": "session_present_no_tail",
+                "activity_hint": "tmux session and panes are present but no pane tail was captured; inspect tmux pane before assuming progress",
+            }
         return {
             "interactive_state": "unknown",
             "activity_hint": "no pane tail captured; inspect tmux pane for current state",

@@ -819,6 +819,8 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
     assert!(script.contains("project_goal_run_last_checkpoint_created_at:"));
     assert!(script.contains("project_goal_run_last_completed_worker_count:"));
     assert!(script.contains("project_goal_run_last_validation_note_count:"));
+    assert!(script.contains("session_present_no_tail"));
+    assert!(script.contains("tmux session and panes are present but no pane tail was captured"));
     assert!(script.contains("\"dispatches_tasks\": False"));
     assert!(script.contains("\"starts_worker\": False"));
     assert!(script.contains("\"restarts_worker\": False"));
