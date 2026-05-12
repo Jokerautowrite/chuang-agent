@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 acceptance matrix 同步 runtime surface 证据
+- 本轮同步 `docs/acceptance-next-matrix.md` 的当前证据状态，新增 `runtime/report surface` 证据行，记录 readiness JSON 抽样、app/channel/runtime/status 联合矩阵和全量 `cargo test -q` 已覆盖 `runtime_report_surface=11/26`、runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 与 unified execution 摘要。
+- 同步把 live/readiness channel surface 与 candidate verify 行改成显式 marker：`chuang_candidate_verify_ok` / `third_test_candidate_smoke_ok`。验证已通过 `git diff --check -- docs/acceptance-next-matrix.md`；GoalRun checkpoint 写入 `checkpoint-1778604581872817304`，count 到 136。
+
 # 2026-05-12 third-test 复验覆盖 readiness sample
 - 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认 readiness JSON runtime surface 抽样补强已进入 final/candidate/third-test 复验链，live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 仍同口径。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 134，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778604230661456392`，count 到 135。
