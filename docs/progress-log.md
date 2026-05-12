@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验文档路径对齐后状态
+- 本轮在 implementation slices 测试名和 status output 文档路径对齐后，再次跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认文档/派工口径修正没有影响 complete-local、goal 正负 smoke、live runner rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 与 provider readiness 候选链。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 150，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778607730549962300`，count 到 151。
+
 # 2026-05-12 status output 文档路径对齐
 - 本轮修正执行性文档里的过期源码路径：当前 status 文本输出实现位于 `src/cli_output.rs`，不再引用不存在的 `src/cli_status.rs`；同步更新 implementation slices 与 multi-worker orchestration 的 allowed files/写入范围。
 - 验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md docs/multi-worker-orchestration.md`。GoalRun checkpoint 写入 `checkpoint-1778607647256096697`，count 到 150。
