@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 candidate verify 复验 runtime surface coverage
+- 本轮在 runtime surface turn/status/readiness/health 覆盖与文档同步后跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认 complete-local、goal 正负 smoke、live runner rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 与 provider readiness 候选链仍通过。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface_artifacts=11`、`candidate_runtime_report_surface_observability_fields=26`、GoalRun checkpoint count 到 158，最新 checkpoint 为 `checkpoint-1778614041510506082`，provider readiness 只显示 `api_key_state=<set>`。
+
 # 2026-05-13 implementation slices/handoff 同步 runtime surface coverage
 - 本轮同步执行性文档：`docs/codex-claude-implementation-slices-v1.md` 的 Current Implementation Status 更新到 2026-05-13，明确 handoff/subagent 默认 observability 字段已在 channel simulate、app-server turn/completed、status、readiness 和 app-server health JSON 中用回归锁住。
 - `docs/handoff-current.md` 顶部同步最新 M5/M6/M7 checkpoint、GoalRun checkpoint `checkpoint-1778614041510506082` 与下一轮入口。验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md docs/handoff-current.md`。
