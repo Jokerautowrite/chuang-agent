@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 Feishu turn summary 展示 live readiness 边界
+- 本轮继续把 app-server 顶层 `liveReadiness` 接到 Feishu 正文面：`scripts/chuang-feishu-turn-summary.js` 的过程摘要现在会展示 `live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live`，让用户通道回复能直接看到本轮仍是 local-ready/live-pending，而不是误读为 real live ready。
+- 输出只使用稳定布尔和状态，不展示 `current`、`next_action`、terms 或 raw trace；回归确认不会输出 `api_key` 长度摘要、raw tool trace、raw current/next action。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 app-server turn 事件透出 live readiness
 - 本轮继续把 `live_readiness` 状态面推进到 app-server turn 面：`turn/start` 响应和 `turn/completed` 事件现在都带顶层 `liveReadiness`，覆盖 `local_ready_live_pending`、真实外部验收 pending、provider live request 未由 status 验证与 ready 不等于 live，方便 app-server/channel 订阅者不用另查 health 就能看到 live 边界。
 - 该字段保持在 turn 顶层，不并入 `runtimeObservability`，避免把 workspace readiness 与单轮 runtime report 混淆；Feishu summary smoke 复验确认现有过程摘要不外泄 raw trace。验证已通过 `cargo test -q --test app_server_tests`、`node scripts/chuang-feishu-turn-summary-smoke.js`、`cargo fmt --all --check`、`git diff --check`。

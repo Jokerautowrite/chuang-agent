@@ -71,6 +71,10 @@ function buildProcessSection(turn) {
   const protocolErrorCount = pickNumber(
     turn.toolProtocolErrorCount || observability.tool_protocol_error_count || providerMeta.tool_protocol_error_count
   );
+  const liveReadiness = turn.liveReadiness && typeof turn.liveReadiness === "object" ? turn.liveReadiness : null;
+  const liveReadinessState = normalizeText(liveReadiness?.overall_state);
+  const realExternalPending = liveReadiness?.real_external_acceptance_pending === true;
+  const readyDoesNotMeanLive = liveReadiness?.ready_does_not_mean_live === true;
   const toolState = toolCallCount > 0 ? "当前轮已执行本地工具" : "当前轮未触发工具调用";
   const lines = ["过程摘要", `- ${toolState}`];
   if (toolCallCount > 0) {
@@ -81,6 +85,16 @@ function buildProcessSection(turn) {
   }
   if (protocolErrorCount > 0) {
     lines.push(`- 工具协议错误 ${protocolErrorCount} 次`);
+  }
+  if (liveReadinessState) {
+    const liveParts = [liveReadinessState];
+    if (realExternalPending) {
+      liveParts.push("真实验收待完成");
+    }
+    if (readyDoesNotMeanLive) {
+      liveParts.push("ready不等于live");
+    }
+    lines.push(`- live readiness ${liveParts.join(" / ")}`);
   }
   if (responseKind || finishReason) {
     lines.push(`- provider ${responseKind || "unknown"} / finish ${finishReason || "unknown"}`);

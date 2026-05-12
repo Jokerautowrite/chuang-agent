@@ -51,15 +51,36 @@ const process = buildProcessSection({
     tool_unified_execution_failure_count: "0",
     tool_protocol_error_count: "0",
   },
+  liveReadiness: {
+    overall_state: "local_ready_live_pending",
+    real_external_acceptance_pending: true,
+    ready_does_not_mean_live: true,
+    current: "raw current text should stay out of Feishu summary",
+    next_action: "raw next action should stay out of Feishu summary",
+  },
   toolCallCount: 0,
 });
 assert(process.startsWith("过程摘要"));
 assert(process.includes("当前轮未触发工具调用"));
 assert(process.includes("工具执行 ok / 失败 0"));
+assert(process.includes("live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live"));
 assert(process.includes("provider chat.completion / finish stop"));
 assert(!process.includes("工具协议错误"));
+assert(!process.includes("raw current text"));
+assert(!process.includes("raw next action"));
 assert(!process.includes("trace transport="));
 assert(!process.includes("api_key=len:67"));
+
+const noLiveReadinessProcess = buildProcessSection({
+  status: "completed",
+  providerMeta: {
+    response_kind: "chat.completion",
+    response_finish_reason: "stop",
+    tool_call_count: "0",
+  },
+});
+assert(noLiveReadinessProcess.includes("当前轮未触发工具调用"));
+assert(!noLiveReadinessProcess.includes("live readiness"));
 
 const toolTraceProcess = buildProcessSection({
   status: "completed",
