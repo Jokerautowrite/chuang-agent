@@ -349,6 +349,15 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             format_text_list(&status.atomic_tools.local_cli_self_check_entrypoints)
         );
         println!(
+            "policy_tool_status: active_profile={} normal_local_action_default={} high_risk_boundary={} ga_tool_descriptors={}/{} missing={}",
+            status.policy_tool_status.active_permission_profile,
+            status.policy_tool_status.local_ga_normal_local_action_default,
+            status.policy_tool_status.local_ga_high_risk_boundary_summary,
+            status.policy_tool_status.ga_tool_descriptor_mapped_count,
+            status.policy_tool_status.tool_descriptor_count,
+            status.policy_tool_status.ga_tool_descriptor_missing.len()
+        );
+        println!(
             "goal_mode: ok={} kind={} cli_entrypoint={} context_source={} default_goal_id={} allowed_slots={} checkpoint_policy=progress_log:{} handoff:{} commit:{} final_report_policy=validation:{} next_steps:{} bypasses_governance={} adds_core_slot={}",
             status.goal_mode.ok,
             status.goal_mode.kind,

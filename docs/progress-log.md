@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server health 文本面并入 policy tool status
+- 本轮继续沿 M5 governance/tool descriptor 状态面补 app-server 文本口径：`app-server health` 非 JSON 输出现在和 `status` / `doctor` 一样打印 `policy_tool_status` 摘要，包含 active profile、normal local action 默认决策、高风险边界、GA descriptor 映射数和 missing 数。
+- JSON 面保持原结构不变，仍保留完整 `policy_tool_status.ga_tool_descriptors` 风险字段；新增回归锁住 app-server health 文本面包含 `active_profile=local_ga`、`high_risk_boundary=external_send=require_approval` 和 `ga_tool_descriptors=9/12 missing=0`。验证已通过 `cargo test -q --test app_server_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 Feishu process summary 不再输出 raw tool_trace
 - 本轮继续沿 M7 Feishu 通道输出面收紧正文边界：`scripts/chuang-feishu-turn-summary.js` 的过程摘要不再展示兼容 `tool_trace` 原文，即使工具调用成功且协议错误为 0，也只显示工具调用数、统一执行状态、失败数、协议错误计数和 provider finish 摘要。
 - `scripts/chuang-feishu-turn-summary-smoke.js` 新增无协议错误但 `providerMeta.tool_trace` 含 base_url/api_key 长度摘要的场景，锁住 Feishu 文本不输出 `工具轨迹`、`trace transport=` 或 `api_key=len:...`；结构化 app-server/channel JSON 仍保留 tool trace 供本地审计。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。

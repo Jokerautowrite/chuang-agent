@@ -2467,6 +2467,9 @@ transport = "stub"
     assert!(stdout.contains(
         "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"
     ));
+    assert!(stdout.contains("policy_tool_status: active_profile=local_ga normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"));
+    assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
+    assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
     ));
