@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 docs sync
+- 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认 third-test/runbook/acceptance 文档同步后 final/candidate、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 只读摘要仍同口径。
+- 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 139，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778605550913493798`，count 到 140。
+
 # 2026-05-12 candidate verify 复验覆盖 docs sync
 - 本轮在 third-test/runbook/acceptance 文档同步后跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认文档口径更新没有影响 complete-local、goal 正负 smoke、live rehearsal/gaps/readiness、operator checklist/receipt、GoalRun status 和 provider readiness 候选链。
 - 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_live_readiness_state=local_ready_live_pending`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 138，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778605342819843503`，count 到 139。
