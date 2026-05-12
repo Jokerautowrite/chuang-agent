@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal show admission locator 回归加固
+- 本轮继续沿 M6 goal 查询面加固文本层验收：`tests/cli_goal_tests.rs` 的 `cli_goal_show_surfaces_next_command_and_stage_readiness` 现在在 checkpoint-ready 的 `goal show` 文本场景里显式断言 `goal_operability_handoff_query_report_admission_ref_count: 2`、`goal_operability_handoff_query_report_admission_refs:` 和 `admission_id=goal-report-admission://`。这样 `goal collect`、`goal step`、`goal show` 三个文本入口都锁住 admission locator 不会退化成只有字段名。
+- 验证已通过 `cargo test -q --test cli_goal_tests cli_goal_show_surfaces_next_command_and_stage_readiness`。下一轮入口：继续看 subagent tree/list children 文本或 runtime event 面是否也需要同类具体 locator 回归。
+
 # 2026-05-12 goal step admission locator 回归加固
 - 本轮继续沿 M6 goal 查询面做小步回归加固：`tests/cli_goal_tests.rs` 的 `cli_goal_step_text_exposes_handoff_query_summary` 现在不只检查 `goal_step_handoff_query_report_admission_refs` 字段名，还显式断言文本输出包含 `admission_id=goal-report-admission://`。这样前台 bounded `goal step` 的 handoff query 文本面会持续携带可点击/可追踪的 admission locator，而不是只显示空字段名。
 - 验证已通过 `cargo test -q --test cli_goal_tests cli_goal_step_text_exposes_handoff_query_summary`。下一轮入口：继续检查 `goal show` / candidate / third-test 是否需要对具体 admission locator 做运行态只读抽查，而不只检查字段集合。

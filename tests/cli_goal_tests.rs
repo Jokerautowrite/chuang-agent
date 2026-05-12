@@ -621,6 +621,9 @@ fn cli_goal_show_surfaces_next_command_and_stage_readiness() {
     ));
     assert!(stdout.contains("goal_operability_checkpoint_validation_notes:"));
     assert!(stdout.contains("worker completed"));
+    assert!(stdout.contains("goal_operability_handoff_query_report_admission_ref_count: 2"));
+    assert!(stdout.contains("goal_operability_handoff_query_report_admission_refs:"));
+    assert!(stdout.contains("admission_id=goal-report-admission://"));
 }
 
 #[test]
