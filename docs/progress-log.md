@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 runtime surface 聚合矩阵复验
+- 本轮在 channel/app-server turn、status/readiness、app-server health 三批 handoff/subagent runtime surface 回归后，跑通聚合矩阵，确认新增字段集合断言没有互相冲突，也没有扰动 runtime_report 底层合同。
+- 验证已通过 `cargo test -q --test app_server_tests --test cli_channel_tests --test kernel_status_tests --test live_runner_readiness_view_tests --test runtime_report_tests`；同步漂移扫描确认当前执行性 docs/scripts 没有残留 10/20、10/25 或旧测试名，命中项只在历史 progress/handoff 说明中。
+
 # 2026-05-13 app-server health runtime surface 字段集合补齐
 - 本轮继续补 app-server health JSON 的 runtime surface 回归：`tests/app_server_tests.rs` 现在不仅锁住 `runtime_report_surface=11/26` 和少量抽样字段，也完整抽样 handoff/subagent admission/count/reason-code 字段集合。
 - 这一步保持生产代码不变，目标是让 health JSON、status、readiness 和 turn 输出对 M6 handoff/subagent observability 使用同一组可查询字段。验证已通过 `cargo test -q --test app_server_tests` 和 `git diff --check -- tests/app_server_tests.rs`。
