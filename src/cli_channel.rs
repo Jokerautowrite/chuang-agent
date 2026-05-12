@@ -299,6 +299,22 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
             }
             println!("tool_call_count: {}", output.tool_call_count);
             println!(
+                "tool_unified_execution_status: {}",
+                output
+                    .runtime_observability
+                    .get("tool_unified_execution_status")
+                    .map(String::as_str)
+                    .unwrap_or("unknown")
+            );
+            println!(
+                "tool_unified_execution_failure_count: {}",
+                output
+                    .runtime_observability
+                    .get("tool_unified_execution_failure_count")
+                    .map(String::as_str)
+                    .unwrap_or("0")
+            );
+            println!(
                 "tool_protocol_error_count: {}",
                 output.tool_protocol_error_count
             );

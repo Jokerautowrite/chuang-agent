@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 channel simulate 文本面透出 unified execution 摘要
+- 本轮继续沿 M7 channel 输出面补文本可观测性：`channel simulate` 非 JSON 输出现在除 `tool_call_count`、协议错误计数和稳定 error codes 外，也打印 `tool_unified_execution_status` 与 `tool_unified_execution_failure_count`，让本地通道演练文本面能直接看到统一工具执行状态。
+- JSON 面不变，仍保留完整 `runtime_observability`、`tool_events`、`tool_protocol_errors` 与结构化 provider meta；文本面继续不打印 raw `ACTION` payload。验证已通过 `cargo test -q --test cli_channel_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 app-server health 文本面并入 policy tool status
 - 本轮继续沿 M5 governance/tool descriptor 状态面补 app-server 文本口径：`app-server health` 非 JSON 输出现在和 `status` / `doctor` 一样打印 `policy_tool_status` 摘要，包含 active profile、normal local action 默认决策、高风险边界、GA descriptor 映射数和 missing 数。
 - JSON 面保持原结构不变，仍保留完整 `policy_tool_status.ga_tool_descriptors` 风险字段；新增回归锁住 app-server health 文本面包含 `active_profile=local_ga`、`high_risk_boundary=external_send=require_approval` 和 `ga_tool_descriptors=9/12 missing=0`。验证已通过 `cargo test -q --test app_server_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。

@@ -484,6 +484,8 @@ transport = "http"
     server.join().expect("server thread should finish");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
+    assert!(stdout.contains("tool_unified_execution_status: ok"));
+    assert!(stdout.contains("tool_unified_execution_failure_count: 0"));
     assert!(stdout.contains("tool_protocol_error_count: 1"));
     assert!(stdout.contains("tool_protocol_error_codes: invalid_action_json"));
     assert!(stdout.contains("reply: 已修正协议错误。"));
