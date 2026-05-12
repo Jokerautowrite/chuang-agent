@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal show checkpoint evidence 文本面补齐
+- 本轮补齐 M6 GoalRun 可观测性边角：`goal show` 文本输出现在除了 latest checkpoint id/summary/writeback/incomplete reasons，还直接展示 `goal_last_checkpoint_created_at`、`goal_last_checkpoint_completed_worker_ids` 和 `goal_last_checkpoint_validation_notes`，与 JSON/status/doctor 的 checkpoint 续接证据对齐。
+- 回归已补到 `tests/cli_goal_tests.rs`；验证已通过 `cargo test -q --test cli_goal_tests --test goal_mode_smoke_tests --test goal_mode_negative_smoke_tests`。GoalRun checkpoint 写入 `checkpoint-1778607060318359662`，count 到 146。
+
 # 2026-05-12 third-test 复验 event observability 口径
 - 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认最新 runtime event observability 默认计数和 channel/app-server turn 输出补强已经通过 final/candidate、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 只读摘要链路。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface=11/26`、`live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 144，provider readiness 只显示 `api_key_state=<set>`。GoalRun checkpoint 写入 `checkpoint-1778606866445495550`，count 到 145。

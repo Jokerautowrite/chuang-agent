@@ -866,6 +866,10 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
     assert!(stdout.contains("goal_checkpoint_log_complete: true"));
     assert!(stdout.contains("goal_last_checkpoint: checkpoint-1"));
     assert!(stdout.contains("goal_last_summary: diagnostics landed"));
+    assert!(stdout.contains("goal_last_checkpoint_created_at: "));
+    assert!(stdout.contains("goal_last_checkpoint_completed_worker_ids: goal-worker"));
+    assert!(stdout
+        .contains("goal_last_checkpoint_validation_notes: cargo test -q --test cli_goal_tests"));
     assert!(stdout.contains("goal_checkpoint_writeback_manual_only: true"));
     assert!(stdout.contains(
         "goal_checkpoint_writeback_targets: docs/progress-log.md | docs/handoff-current.md"

@@ -113,6 +113,31 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                     .as_deref()
                     .unwrap_or("none")
             );
+            println!(
+                "goal_last_checkpoint_created_at: {}",
+                diagnostics
+                    .last_checkpoint_created_at
+                    .as_deref()
+                    .unwrap_or("none")
+            );
+            println!(
+                "goal_last_checkpoint_completed_worker_ids: {}",
+                format_text_list(
+                    diagnostics
+                        .last_checkpoint_completed_worker_ids
+                        .as_deref()
+                        .unwrap_or(&[])
+                )
+            );
+            println!(
+                "goal_last_checkpoint_validation_notes: {}",
+                format_text_list(
+                    diagnostics
+                        .last_checkpoint_validation_notes
+                        .as_deref()
+                        .unwrap_or(&[])
+                )
+            );
             print_goal_checkpoint_writeback("goal", &diagnostics.checkpoint_writeback);
             println!(
                 "goal_incomplete_reasons: {}",
@@ -126,10 +151,6 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                 "goal_bypasses_governance: {}",
                 diagnostics.bypasses_governance
             );
-            if let Some(last) = run.checkpoint_log.last() {
-                println!("goal_last_checkpoint: {}", last.checkpoint_id);
-                println!("goal_last_summary: {}", last.summary);
-            }
             print_goal_operability_text(&operability);
         }
         ControlOutputFormat::Json => print_json(&GoalShowOutput {
