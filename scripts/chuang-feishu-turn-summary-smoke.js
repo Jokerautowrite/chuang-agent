@@ -80,4 +80,22 @@ assert(toolProblemProcess.includes("工具执行 failed / 失败 2"));
 assert(toolProblemProcess.includes("工具协议错误 1 次"));
 assert(!toolProblemProcess.includes("ACTION: {bad json}"));
 
+const providerFallbackProcess = buildProcessSection({
+  status: "completed",
+  providerMeta: {
+    response_kind: "chat.completion",
+    response_finish_reason: "stop",
+    tool_call_count: "1",
+    tool_trace: "ACTION: {provider meta raw payload}",
+    tool_unified_execution_status: "ok",
+    tool_unified_execution_failure_count: "0",
+    tool_protocol_error_count: "2",
+  },
+});
+assert(providerFallbackProcess.includes("工具调用 1 次"));
+assert(providerFallbackProcess.includes("工具执行 ok / 失败 0"));
+assert(providerFallbackProcess.includes("工具协议错误 2 次"));
+assert(providerFallbackProcess.includes("provider chat.completion / finish stop"));
+assert(!providerFallbackProcess.includes("ACTION: {provider meta raw payload}"));
+
 console.log("chuang_feishu_turn_summary_smoke_ok");
