@@ -78,6 +78,16 @@ printf '%s\n' "[complete] status readiness"
 status_output="$(cargo run --quiet -- status --config "$config_path" --json)"
 printf '%s' "$status_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["project_readiness"]["overall_state"] == "ready"
 assert data["release_readiness"]["overall_state"] == "second_test_version_ready"
@@ -89,6 +99,7 @@ assert data["channel_readiness"]["overall_state"] == "ready"
 assert data["goal_run"]["ok"] is True
 assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
+assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
@@ -149,6 +160,16 @@ printf '%s\n' "[complete] doctor readiness"
 doctor_output="$(cargo run --quiet -- doctor --config "$config_path" --json)"
 printf '%s' "$doctor_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["ok"] is True
 checks_by_name = {check["name"]: check for check in data["checks"]}
@@ -168,6 +189,7 @@ assert data["status"]["release_readiness"]["connects_real_external_services"] is
 assert data["status"]["goal_run"]["ok"] is True
 assert data["status"]["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["status"]["goal_run"]["plan_exists"] is True
+assert_live_readiness(data["status"]["live_readiness"])
 policy_tool_status = data["status"]["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
@@ -222,6 +244,16 @@ printf '%s\n' "[complete] app-server health diagnostic"
 app_health_output="$(cargo run --quiet -- app-server health --workspace-root "$work_dir" --diagnostic --json)"
 printf '%s' "$app_health_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["ok"] is True
 assert data["diagnostic_mode"] is True
@@ -231,6 +263,7 @@ assert data["release_readiness"]["uses_stub_or_local_fixtures"] is True
 assert data["goal_run"]["ok"] is True
 assert data["goal_run"]["goal_id"] == "mainline-mvp"
 assert data["goal_run"]["plan_exists"] is True
+assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
@@ -286,6 +319,16 @@ printf '%s\n' "[complete] console snapshot"
 console_output="$(cargo run --quiet -- console snapshot --config "$config_path" --json)"
 printf '%s' "$console_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 status = data["status"]
 assert data["ok"] is True
@@ -296,6 +339,7 @@ assert status["release_readiness"]["verifies_real_external_services"] is False
 assert status["goal_run"]["ok"] is True
 assert status["goal_run"]["goal_id"] == "mainline-mvp"
 assert status["goal_run"]["plan_exists"] is True
+assert_live_readiness(status["live_readiness"])
 policy_tool_status = status["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9

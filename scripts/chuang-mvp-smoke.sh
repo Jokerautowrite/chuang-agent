@@ -49,6 +49,16 @@ printf '%s\n' "[smoke] status"
 status_output="$(cargo run --quiet -- status --config "$config_path" --json)"
 printf '%s' "$status_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["slots"]["execution"] == "generic_agent_mvp"
 assert data["atomic_tools"]["ok"] is True
@@ -65,6 +75,7 @@ assert isinstance(data["goal_run"]["plan_exists"], bool)
 assert data["goal_run"]["plan_exists"] is True
 assert isinstance(data["goal_run"]["checkpoint_count"], int)
 assert data["goal_run"]["path"].endswith("/context/goal-runs/mainline-mvp.json")
+assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
@@ -168,6 +179,7 @@ assert data["subagent_readiness"]["ok"] is True
 assert data["subagent_readiness"]["overall_state"] == "ready"
 assert data["subagent_readiness"]["local_contract_ready"] is True
 assert data["subagent_readiness"]["live_adapter_ready"] is False
+assert_live_readiness(data["live_readiness"])
 assert data["subagent_readiness"]["live_worker_available"] is False
 assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 assert "queued_external" in data["subagent_readiness"]["worker_runtime_reason"]
@@ -227,6 +239,16 @@ printf '%s\n' "[smoke] doctor"
 doctor_output="$(cargo run --quiet -- doctor --config "$config_path" --json)"
 printf '%s' "$doctor_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["ok"] is True
 checks_by_name = {check["name"]: check for check in data["checks"]}
@@ -257,6 +279,7 @@ assert status["goal_run"]["ok"] is True
 assert status["goal_run"]["goal_id"] == "mainline-mvp"
 assert status["goal_run"]["plan_exists"] is True
 assert isinstance(status["goal_run"]["checkpoint_count"], int)
+assert_live_readiness(status["live_readiness"])
 policy_tool_status = status["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
@@ -563,6 +586,16 @@ printf '%s\n' "[smoke] app-server health"
 app_health_output="$(cargo run --quiet -- app-server health --workspace-root "$work_dir" --json)"
 printf '%s' "$app_health_output" | python3 -c '
 import json, sys
+def assert_live_readiness(live_readiness):
+    assert live_readiness["ok"] is True
+    assert live_readiness["overall_state"] == "local_ready_live_pending"
+    assert live_readiness["ga_local_mapped_only"] is True
+    assert live_readiness["desktop_browser_live_gated"] is True
+    assert live_readiness["browser_worker_frozen"] is True
+    assert live_readiness["live_worker_available"] is False
+    assert live_readiness["real_external_acceptance_pending"] is True
+    assert live_readiness["provider_live_request_verified_by_status"] is False
+    assert live_readiness["ready_does_not_mean_live"] is True
 data = json.load(sys.stdin)
 assert data["ok"] is True
 assert data["provider_readiness"]["ok"] is True
@@ -573,6 +606,7 @@ assert data["provider_readiness"]["placeholder_warning_count"] == 1
 assert data["subagent_readiness"]["live_worker_available"] is False
 assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_only"
 assert data["subagent_readiness"]["live_adapter_ready"] is False
+assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9

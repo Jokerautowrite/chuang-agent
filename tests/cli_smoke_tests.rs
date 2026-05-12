@@ -31,6 +31,10 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("printf '%s_smoke_ok work_dir=%s\\n' \"$smoke_name\" \"$work_dir\""));
     assert!(mvp_smoke.contains("assert data[\"approval_ticket_count\"] == 1"));
     assert!(mvp_smoke.contains("data[\"goal_run\"][\"plan_exists\"] is True"));
+    assert!(mvp_smoke.contains("def assert_live_readiness(live_readiness):"));
+    assert!(mvp_smoke.contains("assert_live_readiness(data[\"live_readiness\"])"));
+    assert!(mvp_smoke.contains("assert_live_readiness(status[\"live_readiness\"])"));
+    assert!(mvp_smoke.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
     assert!(mvp_smoke.contains("policy_tool_status = data[\"policy_tool_status\"]"));
     assert!(mvp_smoke.contains("policy_tool_status = status[\"policy_tool_status\"]"));
     assert!(mvp_smoke.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
@@ -109,6 +113,11 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("connects_real_external_services"));
     assert!(wrapper.contains("verifies_real_external_services"));
     assert!(wrapper.contains("goal_run\"][\"plan_exists\"] is True"));
+    assert!(wrapper.contains("def assert_live_readiness(live_readiness):"));
+    assert!(wrapper.contains("assert_live_readiness(data[\"live_readiness\"])"));
+    assert!(wrapper.contains("assert_live_readiness(data[\"status\"][\"live_readiness\"])"));
+    assert!(wrapper.contains("assert_live_readiness(status[\"live_readiness\"])"));
+    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
     assert!(wrapper.contains("checks_by_name[\"goal_run_readiness\"]"));
     assert!(wrapper.contains("provider_readiness"));
     assert!(wrapper.contains("provider_id\"] == \"complete-local-openai\""));

@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 MVP/complete-local 门禁锁住 live readiness
+- 本轮继续把 `live_readiness` 防混摘要下沉到基础本地门禁：`scripts/chuang-mvp-smoke.sh` 现在在 status、doctor、app-server health 三个 JSON 面断言 `local_ready_live_pending`、本地映射/桌面浏览器 gate/BrowserWorker frozen、live worker unavailable、真实外部验收 pending、provider live request 未由 status 验证与 ready 不等于 live；`scripts/chuang-complete-local-smoke.sh` 同步覆盖 status、doctor、app-server health diagnostic 和 console snapshot。
+- `tests/cli_smoke_tests.rs` 已锁住 MVP/complete-local wrapper 保留这些断言。本轮仍只跑本地 stub/fixture 门禁，不连接真实 provider/Feishu、不启动 live worker、不触碰 Hermes。验证已通过 `sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-complete-local-smoke.sh`、`cargo test -q --test cli_smoke_tests`、`cargo fmt --all --check`、`git diff --check`。
+
 # 2026-05-12 live readiness 防混摘要进入 readiness/candidate 门禁
 - 本轮继续把刚补齐的 `live_readiness` 状态面抬到高层验收：`scripts/chuang-live-runner-readiness-view.sh` 现在从 status/doctor/app-server health 聚合 `live_readiness`，JSON 顶层和文本面都会展示 `local_ready_live_pending`、live worker unavailable、真实外部验收 pending、provider live request 未由 status 验证，以及 ready 不等于 live 的边界。
 - `scripts/chuang-candidate-verify.sh` 与 `scripts/chuang-third-test-smoke.sh` 的 live runner readiness 阶段同步断言这些字段，并打印 candidate/third-test 的 live readiness 摘要；本轮仍只读、不连接真实 provider/Feishu、不启动 worker、不触碰 Hermes。验证已通过 `cargo test -q --test live_runner_readiness_view_tests`、`cargo test -q --test live_operator_scripts_tests`、`cargo test -q --test cli_smoke_tests final_verify_wrapper_requires_clean_tree_and_candidate_verify`、`bash scripts/chuang-live-runner-readiness-view.sh --json` 抽样、`sh scripts/chuang-candidate-verify.sh`、`cargo fmt --all --check`、`git diff --check`。
