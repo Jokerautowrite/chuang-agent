@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验通过
+- 本轮在 app-server completed protocol artifact 和 channel 文本 protocol error code 面补齐后，完整跑通 `sh scripts/chuang-candidate-verify.sh`。链路覆盖 complete-local smoke、goal-mode 正/负 smoke、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 和 provider readiness 只读检查。
+- 输出确认 `candidate_runtime_report_surface_artifacts=11`、`candidate_runtime_report_surface_observability_fields=26`、provider readiness `api_key_state=<set>` 且 `connects_real_provider=false`，最终 `chuang_candidate_verify_ok`。下一步在干净工作树继续跑 third-test clean-tree 门禁，或继续补 app-server/channel 高层文本/JSON边角。
+
 # 2026-05-12 channel text protocol error code 面补齐
 - 本轮继续沿 M7 channel 输出面补协议错误可观测性：`channel simulate` 文本输出现在会在 `tool_protocol_error_count` 后打印 `tool_protocol_error_codes`，只展示稳定 code 列表，不打印 raw payload 或错误 message，避免文本回执里泄漏模型原始协议片段。
 - 新增回归 `cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload` 通过本地 OpenAI-compatible HTTP provider 触发一次 `invalid_action_json`，确认文本面输出 `tool_protocol_error_count: 1`、`tool_protocol_error_codes: invalid_action_json` 和最终修正回复，同时不包含 `ACTION:` / 原始 tool_call JSON。验证已通过 `cargo test -q --test cli_channel_tests cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload`。
