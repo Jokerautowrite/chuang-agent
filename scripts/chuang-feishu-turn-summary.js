@@ -58,17 +58,33 @@ function buildProcessSection(turn) {
     return "";
   }
   const providerMeta = turn.providerMeta && typeof turn.providerMeta === "object" ? turn.providerMeta : {};
+  const observability = turn.runtimeObservability && typeof turn.runtimeObservability === "object" ? turn.runtimeObservability : {};
   const responseKind = normalizeText(providerMeta.response_kind);
   const finishReason = normalizeText(providerMeta.response_finish_reason);
   const toolCallCount = pickNumber(turn.toolCallCount || providerMeta.tool_call_count);
   const toolTrace = truncateText(normalizeText(turn.toolTrace || providerMeta.tool_trace), 240);
+  const unifiedStatus = normalizeText(
+    observability.tool_unified_execution_status || providerMeta.tool_unified_execution_status
+  );
+  const unifiedFailureCount = pickNumber(
+    observability.tool_unified_execution_failure_count || providerMeta.tool_unified_execution_failure_count
+  );
+  const protocolErrorCount = pickNumber(
+    turn.toolProtocolErrorCount || observability.tool_protocol_error_count || providerMeta.tool_protocol_error_count
+  );
   const toolState = toolCallCount > 0 ? "当前轮已执行本地工具" : "当前轮未触发工具调用";
   const lines = ["过程摘要", `- ${toolState}`];
   if (toolCallCount > 0) {
     lines.push(`- 工具调用 ${toolCallCount} 次`);
-    if (toolTrace) {
+    if (toolTrace && protocolErrorCount === 0) {
       lines.push(`- 工具轨迹：${toolTrace}`);
     }
+  }
+  if (unifiedStatus || unifiedFailureCount > 0) {
+    lines.push(`- 工具执行 ${unifiedStatus || "unknown"} / 失败 ${unifiedFailureCount}`);
+  }
+  if (protocolErrorCount > 0) {
+    lines.push(`- 工具协议错误 ${protocolErrorCount} 次`);
   }
   if (responseKind || finishReason) {
     lines.push(`- provider ${responseKind || "unknown"} / finish ${finishReason || "unknown"}`);

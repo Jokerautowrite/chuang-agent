@@ -46,12 +46,38 @@ const process = buildProcessSection({
     tool_call_count: 0,
     tool_trace: "trace transport=openai-compatible provider=local-openai-compatible model=gpt-5.5 base_url=https://api.pptoken.org/v1 api_key=len:67",
   },
+  runtimeObservability: {
+    tool_unified_execution_status: "ok",
+    tool_unified_execution_failure_count: "0",
+    tool_protocol_error_count: "0",
+  },
   toolCallCount: 0,
 });
 assert(process.startsWith("过程摘要"));
 assert(process.includes("当前轮未触发工具调用"));
+assert(process.includes("工具执行 ok / 失败 0"));
 assert(process.includes("provider chat.completion / finish stop"));
+assert(!process.includes("工具协议错误"));
 assert(!process.includes("trace transport="));
 assert(!process.includes("api_key=len:67"));
+
+const toolProblemProcess = buildProcessSection({
+  status: "completed",
+  providerMeta: {
+    response_kind: "chat.completion",
+    response_finish_reason: "stop",
+    tool_trace: "ACTION: {bad json}",
+  },
+  runtimeObservability: {
+    tool_unified_execution_status: "failed",
+    tool_unified_execution_failure_count: "2",
+    tool_protocol_error_count: "1",
+  },
+  toolCallCount: 1,
+});
+assert(toolProblemProcess.includes("工具调用 1 次"));
+assert(toolProblemProcess.includes("工具执行 failed / 失败 2"));
+assert(toolProblemProcess.includes("工具协议错误 1 次"));
+assert(!toolProblemProcess.includes("ACTION: {bad json}"));
 
 console.log("chuang_feishu_turn_summary_smoke_ok");
