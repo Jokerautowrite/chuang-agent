@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 app-server protocol error completed 事件面加固
+- 本轮继续沿 M7 app-server/channel 主链补非零协议错误事件面：`tests/app_server_tests.rs` 的 `app_server_turn_surfaces_nonzero_tool_protocol_errors` 现在不只在 `turn/start` 响应里检查 `toolProtocolErrors`、provider meta 和 `toolEvents.kind=protocol_error`，也在 `turn/completed` 事件里锁住 `invalid_action_json`、`providerMeta.tool_protocol_errors_json` 和 protocol_error event。
+- 这保证工具协议错误被模型修正后，订阅事件面和请求响应面都能查询同一份 `runtime_meta.tool_protocol_errors_json` 来源，而不会只剩 `toolProtocolErrorCount=1`。验证已通过 `cargo test -q --test app_server_tests app_server_turn_surfaces_nonzero_tool_protocol_errors`；下一步继续跑 app-server/channel/runtime_report 组合矩阵。
+
 # 2026-05-12 M5/M6/M7 宽矩阵复验
 - 本轮在 `bcc9699`、`4391a05`、`044ae20`、`26ea423` 后复跑 M5/M6/M7 相关宽矩阵：`cargo test -q --test mcp_fake_adapter_tests --test permission_profile_slot_tests --test tool_registry_slot_tests --test subagent_tree_events_tests --test subagent_tree_ledger_tests --test cli_goal_tests --test goal_dispatch_tests --test runtime_report_tests` 全部通过，覆盖 MCP structural risk tags、permission/tool descriptor、subagent children admission states、goal admission locator JSON/text、goal dispatch handoff summary 与 runtime report surface。
 - `cargo fmt --all --check` 与 `git diff --check` 同步通过，当前主链仍保持 11 个 artifact / 26 个 observability 字段。下一轮继续看 app-server/channel 的协议错误非零路径是否还需要锁更多 report artifact 字段，或把 candidate/third-test 运行态门禁再收紧一层。

@@ -606,13 +606,22 @@ transport = "http"
         turn_completed["params"]["turn"]["runtimeObservability"]["tool_protocol_error_count"],
         "1"
     );
-    assert_eq!(
-        turn_completed["params"]["turn"]["toolProtocolErrors"]
-            .as_array()
-            .expect("event tool protocol errors should be array")
-            .len(),
-        1
+    let completed_protocol_errors = turn_completed["params"]["turn"]["toolProtocolErrors"]
+        .as_array()
+        .expect("event tool protocol errors should be array");
+    assert_eq!(completed_protocol_errors.len(), 1);
+    assert_eq!(completed_protocol_errors[0]["code"], "invalid_action_json");
+    assert!(
+        turn_completed["params"]["turn"]["providerMeta"]["tool_protocol_errors_json"]
+            .as_str()
+            .expect("completed provider meta protocol errors")
+            .contains("invalid_action_json")
     );
+    assert!(turn_completed["params"]["turn"]["toolEvents"]
+        .as_array()
+        .expect("completed tool events should be array")
+        .iter()
+        .any(|event| event["kind"] == "protocol_error"));
 }
 
 #[test]
