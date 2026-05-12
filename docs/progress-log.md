@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 implementation slices/handoff 同步 runtime surface coverage
+- 本轮同步执行性文档：`docs/codex-claude-implementation-slices-v1.md` 的 Current Implementation Status 更新到 2026-05-13，明确 handoff/subagent 默认 observability 字段已在 channel simulate、app-server turn/completed、status、readiness 和 app-server health JSON 中用回归锁住。
+- `docs/handoff-current.md` 顶部同步最新 M5/M6/M7 checkpoint、GoalRun checkpoint `checkpoint-1778614041510506082` 与下一轮入口。验证已通过 `git diff --check -- docs/codex-claude-implementation-slices-v1.md docs/handoff-current.md`。
+
 # 2026-05-13 GoalRun 记录 runtime surface 矩阵 checkpoint
 - 本轮把 runtime surface turn/status/readiness/health 覆盖矩阵写入 `mainline-mvp` GoalRun 运行态：最新 checkpoint 为 `checkpoint-1778614041510506082`，checkpoint count 到 158，summary 为 `runtime surface turn status readiness health coverage verified`。
 - 运行态文件 `context/goal-runs/mainline-mvp.json` 仍是 ignored，不纳入提交；项目仓库只记录 progress-log。验证证据为聚合矩阵 `cargo test -q --test app_server_tests --test cli_channel_tests --test kernel_status_tests --test live_runner_readiness_view_tests --test runtime_report_tests` 与 `git diff --check`。
