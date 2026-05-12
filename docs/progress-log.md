@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal show 锁住 admission refs 细节
+- 本轮继续补 M6 goal/subagent 状态面边角：`scripts/chuang-goal-mode-smoke.sh` 的 `goal show --json` 阶段现在不只断言 handoff admission 计数和 reason-code 分布，还会遍历 `goal_operability.goal_collect.handoff_query_summary.report_admission_refs`，锁住 admission id、Accepted 状态、`report_validated` reason code 与 `report://` evidence ref。
+- 这样 goal collect 与 goal show 的 admission refs 查询面同口径，避免 show 面只保留总数而丢掉可追溯 receipt。验证已通过 `sh scripts/chuang-goal-mode-smoke.sh`、`cargo test -q --test goal_mode_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778602278468615034`，count 到 122。
+
 # 2026-05-12 candidate/third-test 复验报告 no-tail GoalRun 状态
 - 本轮在 `c457f38` 后继续推进，先复用刚完成的 candidate verify，再跑通完整 `sh scripts/chuang-third-test-smoke.sh`；candidate 与 third-test 都确认 GoalRun status 进入 `interactive_state=session_present_no_tail`，并保留 `activity_hint` 提醒 tmux session/pane 存在但 pane tail 未捕获，不能误判为 worker missing。
 - 复验同时确认 `runtime_report_surface=11/26`、`live_readiness_state=local_ready_live_pending`、`policy_tool_status=9/12`、checkpoint log complete 为 true，provider readiness 只显示 `api_key_state=<set>` 且 `connects_real_provider=false`。本轮 GoalRun checkpoint 写入 `checkpoint-1778601986149763388`，checkpoint count 到 121；未触碰 Hermes、未打印 secret。
