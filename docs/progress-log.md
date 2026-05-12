@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 GoalRun no-tail guard 宽静态复验
+- 本轮在 `9953792` 后复跑高层静态矩阵，确认 candidate/third-test wrapper 的 GoalRun status 摘要、live operator scripts、no-tail 状态防退化和只读边界同口径；GoalRun status 抽样显示 `interactive_state=session_present_no_tail`、checkpoint count 到 119。
+- 验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests` 和 `bash scripts/chuang-goal-run-status.sh --json`；本轮只读状态查询和本地测试，不派活、不启动 worker、不触碰服务、不触碰 Hermes。
+
 # 2026-05-12 candidate/third-test 锁住 GoalRun no-tail 状态
 - 本轮继续沿 M6/M7 GoalRun 状态面补高层防退化：`tests/cli_smoke_tests.rs` 现在在 candidate verify 与 third-test wrapper 静态回归里确认 goal run status 继续打印 `interactive_state` / `activity_hint`，并且底层 `scripts/chuang-goal-run-status.sh` 保留 `session_present_no_tail` 与对应操作提示。
 - 这保证高层门禁不会只检查“有字符串”，而丢掉 tmux session/pane 存在但 pane tail 为空这一类可操作状态。验证已通过 `cargo test -q --test cli_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`。
