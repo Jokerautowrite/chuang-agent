@@ -13,6 +13,10 @@ fn goal_mode_negative_smoke_script_rejects_not_ready_from_collect() {
 
     assert!(script.contains("[goal-mode-negative] partial-step"));
     assert!(script.contains("[goal-mode-negative] checkpoint-from-collect-rejects"));
+    assert!(script.contains("[goal-mode-negative] show-no-checkpoint"));
+    assert!(script.contains("goal_pipeline_state\"] == \"step_pending\""));
+    assert!(script.contains("goal_checkpoint_ready\"] is False"));
+    assert!(script.contains("goal_next_command_reason\"] == \"dispatch manifest is present but reports are not yet ready to checkpoint\""));
     assert!(script.contains("goal_mode_negative_smoke_ok"));
     assert!(script.contains("CHUANG_GOAL_MODE_NEGATIVE_SMOKE_BIN"));
     assert!(script.contains("--max-runs 1"));

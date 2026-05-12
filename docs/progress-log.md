@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 goal negative show 锁住 not-ready 状态
+- 本轮继续补 M6 goal/subagent 负例状态面：`scripts/chuang-goal-mode-negative-smoke.sh` 的 `show-no-checkpoint` 阶段现在带同一个 `--subagent-queue-root`，并断言 `goal_pipeline_state=step_pending`、`goal_checkpoint_ready=false`、next command/reason、`goal_collect.ready_to_checkpoint=false`、1 个 missing run、无 blocked report、无 checkpoint suggestion。
+- `tests/goal_mode_negative_smoke_tests.rs` 同步锁住这些脚本断言，避免 not-ready show 面退化成只看 checkpoint log 为空。验证已通过 `sh scripts/chuang-goal-mode-negative-smoke.sh`、`cargo test -q --test goal_mode_negative_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778602598066990929`，count 到 123。
+
 # 2026-05-12 goal show 锁住 admission refs 细节
 - 本轮继续补 M6 goal/subagent 状态面边角：`scripts/chuang-goal-mode-smoke.sh` 的 `goal show --json` 阶段现在不只断言 handoff admission 计数和 reason-code 分布，还会遍历 `goal_operability.goal_collect.handoff_query_summary.report_admission_refs`，锁住 admission id、Accepted 状态、`report_validated` reason code 与 `report://` evidence ref。
 - 这样 goal collect 与 goal show 的 admission refs 查询面同口径，避免 show 面只保留总数而丢掉可追溯 receipt。验证已通过 `sh scripts/chuang-goal-mode-smoke.sh`、`cargo test -q --test goal_mode_smoke_tests`、`cargo fmt --all --check` 和 `git diff --check`；GoalRun checkpoint 写入 `checkpoint-1778602278468615034`，count 到 122。

@@ -130,6 +130,7 @@ show_output="$(
   goal_cmd goal show \
     --root "$goal_root" \
     --goal-id "$goal_id" \
+    --subagent-queue-root "$queue_root" \
     --json
 )"
 printf '%s' "$show_output" | python3 -c '
@@ -140,6 +141,15 @@ data = json.load(sys.stdin)
 assert data["goal_spec"]["goal_id"] == "goal-mode-negative-smoke"
 assert len(data["checkpoint_log"]) == 0
 assert data["goal_run_diagnostics"]["checkpoint_log_complete"] is False
+assert data["goal_operability"]["goal_pipeline_state"] == "step_pending"
+assert data["goal_operability"]["goal_checkpoint_ready"] is False
+assert data["goal_operability"]["goal_next_command"].startswith("cargo run -- goal step")
+assert data["goal_operability"]["goal_next_command_reason"] == "dispatch manifest is present but reports are not yet ready to checkpoint"
+assert data["goal_operability"]["goal_collect"]["ready_to_checkpoint"] is False
+assert len(data["goal_operability"]["goal_collect"]["missing_run_ids"]) == 1
+assert data["goal_operability"]["goal_collect"]["blocked_report_run_ids"] == []
+assert data["goal_operability"]["goal_collect"]["blocked_report_reasons"] == []
+assert data["goal_operability"]["goal_collect"].get("checkpoint_suggestion") is None
 '
 
 printf 'goal_mode_negative_smoke_ok work_dir=%s goal_root=%s queue_root=%s checkpoint_id=%s\n' \
