@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 M5/M6/M7 宽矩阵复验
+- 本轮在 `2f37e65` 后继续复验 M5/M6/M7 主链接线宽矩阵：runtime report、goal dispatch/CLI、live runner readiness view、channel simulate 和 app-server turn/health 相关回归全部通过，确认 11/26 runtime surface、GoalRun/report admission、live readiness channel surface、unified execution 和 app-server/channel 输出仍同口径。
+- 验证已通过 `cargo test -q --test runtime_report_tests --test goal_dispatch_tests --test cli_goal_tests --test live_runner_readiness_view_tests --test cli_channel_tests --test app_server_tests`；本轮只跑本地测试，不连接真实 provider/Feishu、不启动 worker、不触碰 Hermes。
+
 # 2026-05-12 third-test 静态锁住 unified execution 字段
 - 本轮继续沿 M4/M7 runtime observability 高层门禁补防退化：`tests/live_operator_scripts_tests.rs` 的 third-test wrapper 静态回归现在和脚本实际断言对齐，锁住 `tool_unified_execution_status`、`tool_unified_execution_failure_count` 与 `tool_unified_execution_failure_classes` 必须保留在 live runner readiness view 的 `runtime_report_surface.observability_fields` 中。
 - 这一步不改运行逻辑、不连接真实 provider/Feishu、不启动 worker；只防止第三测试 wrapper 未来退化成只检查 runtime trace 和协议错误而漏掉 unified execution 摘要。验证已通过 `cargo test -q --test live_operator_scripts_tests third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_summary` 和 `git diff --check`。
