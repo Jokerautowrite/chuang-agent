@@ -1,5 +1,10 @@
 # 协作进度日志
 
+# 2026-05-13 八小时 Chuang goal 模式进度归档
+- 本轮从干净工作树持续推进 M5/M6/M7 与 Codex+Claude 主链接线，累计形成 runtime event ledger、runtime_report artifacts/observability、channel/app-server turn 输出、status/doctor readiness、GoalRun checkpoint evidence、handoff/subagent 默认可观测字段等一组主链 checkpoint。
+- 当前最新提交为 `2e0a5fc docs: record full cargo test after handoff defaults`；工作树干净，`main` 相对 `origin/main` ahead 180。GoalRun checkpoint count 到 157，最新 checkpoint 为 `checkpoint-1778608503509953372`。
+- 最新验收状态：`cargo test -q` 已通过；candidate verify、third-test smoke、runtime_report/app_server/cli_channel/goal 相关回归均已在本轮链路中通过。剩余可继续推进的边角是把 handoff/subagent 默认字段进一步锁进 channel/app-server turn 回归，以及继续扫描 M5/M6/M7 文档和脚本旧口径漂移。
+
 # 2026-05-12 全量 cargo test 复验 handoff observability 默认值
 - 本轮在 runtime observability handoff/subagent 默认字段补强、candidate verify 和 third-test 复验后，跑通全量 `cargo test -q`，确认当前代码与测试全仓绿色。
 - 验证已通过 `cargo test -q`。GoalRun checkpoint 写入 `checkpoint-1778608503509953372`，count 到 157。
