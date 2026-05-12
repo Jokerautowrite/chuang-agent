@@ -1,6 +1,6 @@
 # Acceptance Next Matrix
 
-更新时间：2026-05-10
+更新时间：2026-05-12
 
 快速入口：见 [第三测试版候选一页入口](./third-test-candidate.md) 和 [Live Operator Test Runbook](./live-operator-test-runbook.md)。
 
@@ -32,6 +32,8 @@ final verify 本地闭环通过
 
 状态面单一入口：`status --json` 的 `live_readiness` 固定复述这些词，验收矩阵只引用同一组词。`ready` / `local-ready` 只表示本地合同、smoke、诊断面或只读预检已通过，不表示真实 live receipt 已完成。
 
+通道查询面已经同步引用同一份 workspace readiness：`channel simulate --json` 顶层返回 `live_readiness`，channel 文本面打印 `live_readiness_state` / `live_readiness_real_external_acceptance_pending` / `live_readiness_ready_does_not_mean_live`；app-server `turn/start` response 和 `turn/completed` event 顶层返回 `liveReadiness`；Feishu turn summary 只展示稳定短摘要 `live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live`。这些字段不进入 `runtimeObservability`，避免把 workspace readiness 和单轮 runtime report 混淆。
+
 固定状态词：
 
 | 状态词 | 当前值 | 含义 | 不能误报成 |
@@ -50,6 +52,7 @@ final verify 本地闭环通过
 | 项目 | 判定 | 验收方式 | 100% 前是否必须人工验证 | 边界 |
 | --- | --- | --- | --- | --- |
 | live/readiness 状态面 | `local_ready_live_pending` | `cargo run --quiet -- status --json` -> `live_readiness.overall_state=local_ready_live_pending`，并固定 `mapped_does_not_mean_live=true / gated_does_not_mean_ready=true / frozen_does_not_mean_ready=true / ready_does_not_mean_live=true` | 否，自动复验即可 | 状态面只收口术语；不连接真实服务、不启动 worker、不把 local-ready 当 live-ready |
+| live/readiness 通道面 | `local_ready_live_pending` | `channel simulate --json` 顶层 `live_readiness`，app-server `turn/start` / `turn/completed` 顶层 `liveReadiness`，Feishu turn summary 短摘要；candidate/third-test 打印 live readiness 摘要 | 否，自动复验即可 | 通道面只复述 workspace readiness；不塞入 `runtimeObservability`，不连接真实 provider/Feishu，不把 channel 可见当 live-ready |
 | live-runner-readiness-view | `read-only-view` | `scripts/chuang-live-runner-readiness-view.sh --json` 聚合 `subagent live-preflight` / `status --json` / `doctor --json` / `app-server health --diagnostic --json` | 否，自动复验即可 | 只读视图只汇总 runner gate、allowlist、capability route、admission 和 blocked reason；不启动 worker，不连接真实外部服务，不等于 live runner ready |
 | third-test candidate wrapper | ready | `sh scripts/chuang-third-test-smoke.sh` -> `third_test_candidate_smoke_ok` | 否，自动复验即可 | 只串本地门禁和只读摘要；operator env blocked 可见但不让本地合同失败 |
 | candidate verify wrapper | ready | `sh scripts/chuang-candidate-verify.sh` -> `chuang_candidate_verify_ok`，或明确报告 provider non-live block | 否，自动复验即可 | dirty-tree friendly；覆盖 live-gaps、operator checklist 和 goal run status 只读摘要；不连接真实 provider/Feishu；provider env 缺失只作为候选现场 blocker |
@@ -93,6 +96,7 @@ final verify 本地闭环通过
 | 证据面 | 最新状态 | 已验证命令 | 第三测试版含义 |
 | --- | --- | --- | --- |
 | live/readiness status surface | `local_ready_live_pending` | `cargo run --quiet -- status --json` -> `live_readiness` | 状态面固定区分 mapped/gated/frozen/ready/live，不把 local-ready 冒充 live-ready |
+| live/readiness channel surface | `local_ready_live_pending` | `cargo test -q --test cli_channel_tests --test app_server_tests`；`node scripts/chuang-feishu-turn-summary-smoke.js`；`sh scripts/chuang-candidate-verify.sh`；`sh scripts/chuang-third-test-smoke.sh` | channel/app-server/Feishu/candidate/third-test 都能看到同一份 readiness 边界；仍不表示真实外部验收完成 |
 | final verify | 已完成 | `sh scripts/chuang-final-verify.sh` -> `chuang_final_verify_ok` | 本地门禁可作为 live 前后对照 |
 | live-readiness preflight | local-preflight-ready | `sh scripts/chuang-live-readonly-preflight.sh` -> `live_readiness_preflight_ok` | live 前只读排查入口已收口，但不是 live-ready |
 | live-gaps matrix | 已完成 | `bash scripts/chuang-live-gaps-check.sh` -> `marker=live_gaps_check_ok` | 明确区分本地合同 ready、preflight ready-but-no-start、real live pending；不连接真实服务、不启动 worker |
