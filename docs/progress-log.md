@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 M6 goal/subagent admission 矩阵复验
+- 本轮在最新 app-server/channel 文本面收口后，复跑 M6 goal/subagent admission 宽矩阵：`cargo test -q --test goal_dispatch_tests --test cli_goal_tests --test subagent_tree_events_tests --test subagent_tree_ledger_tests` 全部通过。
+- 复验覆盖 goal collect/step/show 的 handoff query summary、report admission refs/reason codes、subagent children admission refs，以及 legacy JSON 兼容；`cargo fmt --all --check`、`git diff --check` 同步通过，工作树保持干净。
+
 # 2026-05-12 third-test 复验覆盖 policy/channel 文本面
 - 本轮在 `54c282e` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
 - 复验确认最新 M5/M7 文本面改动未破坏候选链路：candidate/third-test 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=87`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
