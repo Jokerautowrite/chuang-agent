@@ -333,6 +333,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
             "deletes_files".to_string(),
             "live_runner_rehearsal".to_string(),
             "modifies_repo".to_string(),
+            "policy_tool_status".to_string(),
             "prints_secret_values".to_string(),
             "readonly".to_string(),
             "reads_secret_values".to_string(),
@@ -371,6 +372,25 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         parsed["config_path"],
         manifest_dir().join("config.toml").display().to_string()
     );
+
+    let policy_tool_status = &parsed["policy_tool_status"];
+    assert_eq!(policy_tool_status["active_permission_profile"], "local_ga");
+    assert_eq!(policy_tool_status["ga_tool_descriptor_mapped_count"], 9);
+    assert_eq!(policy_tool_status["tool_descriptor_count"], 12);
+    let tool_descriptors = policy_tool_status["ga_tool_descriptors"]
+        .as_array()
+        .expect("policy tool descriptors should be array");
+    let file_write = tool_descriptors
+        .iter()
+        .find(|descriptor| descriptor["name"] == "file_write")
+        .expect("file_write descriptor should be surfaced");
+    assert_eq!(file_write["external_commit"], false);
+    assert_eq!(file_write["requires_approval"], false);
+    assert!(file_write["risk_tags"]
+        .as_array()
+        .expect("file_write risk tags should be array")
+        .iter()
+        .any(|tag| tag == "write"));
 
     let runtime_surface = &parsed["runtime_report_surface"];
     assert_eq!(runtime_surface["ok"], true);
@@ -497,6 +517,9 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     assert!(stdout.contains("runtime_report_surface.observability_field_count=26"));
     assert!(stdout.contains("runtime_report_surface.artifact_locators="));
     assert!(stdout.contains("runtime_report_surface.observability_fields="));
+    assert!(stdout.contains("policy_tool_status.active_permission_profile=local_ga"));
+    assert!(stdout.contains("policy_tool_status.ga_tool_descriptors=9/12"));
+    assert!(stdout.contains("policy_tool_status.missing=none"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
     assert!(stdout.contains("runtime_meta.goal_handoff_query_summary_json"));

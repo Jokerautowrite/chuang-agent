@@ -337,6 +337,21 @@ if not isinstance(runtime_report_surface, dict):
         "blocked_reason": "runtime_report_surface unavailable in readonly sources",
     }
 
+policy_tool_status = first_nonempty(
+    get_path(status_payload, "policy_tool_status", default=None),
+    get_path(doctor_payload, "status", "policy_tool_status", default=None),
+    get_path(health_payload, "policy_tool_status", default=None),
+)
+if not isinstance(policy_tool_status, dict):
+    policy_tool_status = {
+        "active_permission_profile": "unknown",
+        "tool_descriptor_count": 0,
+        "ga_tool_descriptor_mapped_count": 0,
+        "ga_tool_descriptor_missing": [],
+        "ga_tool_descriptors": [],
+        "blocked_reason": "policy_tool_status unavailable in readonly sources",
+    }
+
 status_layer = find_layer(status_subagent, "live_runner_rehearsal") if status_subagent else None
 doctor_layer = find_layer(doctor_subagent, "live_runner_rehearsal") if doctor_subagent else None
 health_layer = find_layer(health_subagent, "live_runner_rehearsal") if health_subagent else None
@@ -534,6 +549,7 @@ result = {
     "workspace_root": WORKSPACE_ROOT,
     "config_path": CONFIG_PATH or None,
     "runtime_report_surface": runtime_report_surface,
+    "policy_tool_status": policy_tool_status,
     "live_runner_rehearsal": live_runner_rehearsal,
     "source_evidence_refs": live_runner_rehearsal["source_evidence_refs"],
     "sources": sources,
@@ -555,6 +571,10 @@ else:
     print("runtime_report_surface.artifact_locators=" + format_text_list(runtime_report_surface.get("artifact_locators", [])))
     print("runtime_report_surface.observability_fields=" + format_text_list(runtime_report_surface.get("observability_fields", [])))
     print("runtime_report_surface.blocked_reason=" + str(runtime_report_surface.get("blocked_reason", "none")))
+    print("policy_tool_status.active_permission_profile=" + str(policy_tool_status.get("active_permission_profile", "unknown")))
+    print("policy_tool_status.ga_tool_descriptors=" + str(policy_tool_status.get("ga_tool_descriptor_mapped_count", 0)) + "/" + str(policy_tool_status.get("tool_descriptor_count", 0)))
+    print("policy_tool_status.missing=" + format_text_list(policy_tool_status.get("ga_tool_descriptor_missing", [])))
+    print("policy_tool_status.blocked_reason=" + str(policy_tool_status.get("blocked_reason", "none")))
     print("live_runner_rehearsal.state=" + str(live_runner_rehearsal["state"]))
     print("live_runner_rehearsal.ready_for_live=" + str(live_runner_rehearsal["ready_for_live"]).lower())
     print("live_runner_rehearsal.starts_external_worker=" + str(live_runner_rehearsal["starts_external_worker"]).lower())

@@ -32,12 +32,20 @@ import sys
 data = json.load(sys.stdin)
 rehearsal = data["live_runner_rehearsal"]
 runtime_surface = data["runtime_report_surface"]
+policy_tool_status = data["policy_tool_status"]
 assert data["readonly"] is True
 assert data["connects_real_provider"] is False
 assert data["connects_real_feishu"] is False
 assert runtime_surface["ok"] is True
 assert runtime_surface["artifact_count"] == 11
 assert runtime_surface["observability_field_count"] == 26
+assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
+assert policy_tool_status["tool_descriptor_count"] == 12
+file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
+assert file_write["external_commit"] is False
+assert file_write["requires_approval"] is False
+assert "write" in file_write["risk_tags"]
 assert "runtime_meta.tool_protocol_errors_json" in runtime_surface["artifact_locators"]
 assert "runtime_response.trace" in runtime_surface["artifact_locators"]
 assert "runtime_meta.goal_handoff_query_summary_json" in runtime_surface["artifact_locators"]
@@ -68,6 +76,7 @@ assert rehearsal["blocked_reason"]
 assert rehearsal["next_action"]
 print("candidate_runtime_report_surface_artifacts=" + str(runtime_surface["artifact_count"]))
 print("candidate_runtime_report_surface_observability_fields=" + str(runtime_surface["observability_field_count"]))
+print("candidate_policy_tool_status_ga_tool_descriptors=" + str(policy_tool_status["ga_tool_descriptor_mapped_count"]) + "/" + str(policy_tool_status["tool_descriptor_count"]))
 print("candidate_live_runner_readiness_view_state=" + str(rehearsal["state"]))
 print("candidate_live_runner_readiness_view_ready_for_live=" + str(rehearsal["ready_for_live"]).lower())
 print("candidate_live_runner_readiness_view_blocked_reason=" + str(rehearsal["blocked_reason"]))

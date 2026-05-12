@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 live runner readiness 并入 policy tool status
+- 本轮继续把 M5 governance/tool descriptor 状态面推进到只读 readiness 聚合：`scripts/chuang-live-runner-readiness-view.sh` 现在从 status、doctor、app-server health 中聚合 `policy_tool_status`，JSON 输出保留完整 GA descriptor 风险字段，文本面打印 active profile、descriptor 映射数和 missing 摘要。
+- `candidate verify` 与 `third-test smoke` 已在 live runner readiness 阶段断言 `policy_tool_status.active_permission_profile=local_ga`、`ga_tool_descriptor_mapped_count=9`、`tool_descriptor_count=12`，并抽样锁住 `file_write` 的 `external_commit=false`、`requires_approval=false` 和 `write` risk tag。验证已通过 `cargo test -q --test live_operator_scripts_tests --test live_runner_readiness_view_tests --test cli_smoke_tests`、`cargo fmt --all --check`、`git diff --check` 和 `sh scripts/chuang-candidate-verify.sh`。
+
 # 2026-05-12 app-server health 透出 policy tool status
 - 本轮继续把 M5 governance/tool descriptor 状态面推进到 app-server health：`app-server health --json` 现在随 `runtime_report_surface` 一起返回 `policy_tool_status`，让服务健康面也能查询 GA 工具 descriptor 的 `external_commit`、`requires_approval`、`risk_tags` 和本地治理决策。
 - 新增回归在 `app_server_health_reports_workspace_runtime` 中锁住 `file_write` descriptor 的 non-readonly、mutating、non-destructive、non-external、descriptor-level no approval、`allow_with_audit` 以及 `write/audit` tags。验证已通过 `cargo test -q --test app_server_tests app_server_health_reports_workspace_runtime`、`cargo test -q --test app_server_tests --test kernel_status_tests --test cli_status_tests --test cli_doctor_tests` 和 `cargo fmt --all --check`。
