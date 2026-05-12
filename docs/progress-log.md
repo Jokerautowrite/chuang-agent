@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate verify 复验覆盖 goal gates
+- 本轮跑通完整 `sh scripts/chuang-candidate-verify.sh`，确认 latest goal show admission refs gate 与 negative show not-ready gate 已进入 complete-local/candidate 链路，同时 live runner rehearsal、live gaps、readiness view、operator checklist/receipt、GoalRun status 和 provider readiness 只读检查仍通过。
+- 输出 `chuang_candidate_verify_ok`；candidate 日志确认 `candidate_runtime_report_surface=11/26`、`candidate_live_readiness_state=local_ready_live_pending`、`candidate_goal_run_status_interactive_state=session_present_no_tail`、project checkpoint count 127，provider readiness 只显示 `api_key_state=<set>` 且 `connects_real_provider=false`。GoalRun checkpoint 写入 `checkpoint-1778603130019958171`，count 到 128。
+
 # 2026-05-12 MVP smoke 复验覆盖近期状态门禁
 - 本轮在 runtime/status/readiness 矩阵后跑通完整 `sh scripts/chuang-mvp-smoke.sh`，确认 status/doctor/run、memory、knowledge、channel simulate、Feishu local smokes、app-server health、console snapshot、plugin/skill/subagent/control/experiment 本地门禁仍通过。
 - 输出 `mvp_smoke_ok`；GoalRun checkpoint 写入 `checkpoint-1778603038412061626`，count 到 127。本轮使用本地 smoke/fixture，不连接真实 Feishu/provider，不触碰 Hermes。
