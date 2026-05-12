@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test clean-tree 复验与 handoff 刷新
+- 刚提交 `8360ac3 feat(runtime): lock runtime report query surfaces` 后，已在干净工作树补跑 `sh scripts/chuang-third-test-smoke.sh`，完整串过 final verify、candidate verify、complete-local、live readonly preflight、live gaps、readiness view、operator checklist、receipt template 和 goal run status 只读摘要；第三测试入口确认 `runtime_report_surface` 仍为 10 个 artifact / 25 个 observability 字段。
+- 同步刷新 `docs/handoff-current.md` 顶部过期的 20/23 字段口径到当前 25 字段，避免交接文档和已提交门禁漂移。下一轮入口：继续回到 goal run / subagent tree admission locator 的更高层文本摘要，或补 final/candidate/third-test 对 goal 查询面的只读抽查。
+
 # 2026-05-12 final verify 继承 runtime surface 门禁锁定
 - 本轮继续沿 M5/M6/M7 主链接线补齐 admission 查询面：`runtime_observability_meta` / `runtime_meta.observability` / `runtime_report_surface` 现在不仅暴露 goal handoff 与 subagent children 的 admission 计数和 reason-code 分布，还直接暴露 `goal_handoff_report_admission_refs` 与 `subagent_children_report_admission_refs` 两组 locator 摘要，`runtime_report_surface.observability_field_count` 从 23 提到 25。这样 operator 在 status/doctor/app-server/live-runner readiness 面可以直接看到 report admission 指针，不必再手动解析 JSON blob。
 - 已同步 MVP smoke、complete-local、candidate verify、third-test smoke、live runner readiness 文本面和相关回归到 25 字段口径；验证通过 `cargo fmt --all --check`、`cargo test -q --test runtime_report_tests --test kernel_status_tests --test live_runner_readiness_view_tests --test live_operator_scripts_tests --test cli_smoke_tests --test cli_status_tests --test cli_doctor_tests --test app_server_tests`、`sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-candidate-verify.sh`、`cargo test -q`。`sh scripts/chuang-third-test-smoke.sh` 本轮按预期停在 clean-tree 门禁，因为当前工作树有本轮/既有未提交改动；下一轮在清洁工作树或最终 checkpoint 后复跑即可。
