@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 candidate 复验覆盖 live readiness 通道链
+- 本轮在 `c3194bb` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，完整覆盖 complete-local、channel simulate、Feishu turn summary、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 与 provider readiness 只读检查；最终输出 `chuang_candidate_verify_ok`。
+- 复验确认 `candidate_live_readiness_state=local_ready_live_pending`、`candidate_live_readiness_real_external_acceptance_pending=true`、`candidate_live_readiness_ready_does_not_mean_live=true` 已进入候选输出；provider readiness 继续只显示 `api_key_state=<set>`，未连接真实 provider、未打印 secret、未触碰 Hermes。
+
 # 2026-05-12 Feishu turn summary 展示 live readiness 边界
 - 本轮继续把 app-server 顶层 `liveReadiness` 接到 Feishu 正文面：`scripts/chuang-feishu-turn-summary.js` 的过程摘要现在会展示 `live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live`，让用户通道回复能直接看到本轮仍是 local-ready/live-pending，而不是误读为 real live ready。
 - 输出只使用稳定布尔和状态，不展示 `current`、`next_action`、terms 或 raw trace；回归确认不会输出 `api_key` 长度摘要、raw tool trace、raw current/next action。验证已通过 `node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
