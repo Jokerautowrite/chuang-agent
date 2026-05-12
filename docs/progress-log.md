@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 全量 cargo test 复验 runtime surface coverage
+- 本轮在 channel/app-server turn、status/readiness、app-server health 字段集合回归，GoalRun checkpoint，candidate verify 和 third-test 复验后，跑通全量 `cargo test -q`，确认当前 M5/M6/M7 runtime surface coverage 没有破坏全仓测试。
+- 验证已通过 `cargo test -q`。当前最新代码 checkpoint 为 `b4d2d77 docs: record third-test pass after runtime surface coverage` 后的全量复验；GoalRun 最新运行态 checkpoint 仍为 `checkpoint-1778614041510506082`，count 到 158。
+
 # 2026-05-13 third-test 复验 runtime surface coverage
 - 本轮在 candidate verify 后跑通完整 `sh scripts/chuang-third-test-smoke.sh`，确认 runtime surface turn/status/readiness/health 覆盖已经通过 final verify、live readonly preflight、live gaps、readiness view、operator checklist/receipt 与 GoalRun status 链路。
 - 输出 `third_test_candidate_smoke_ok`；third-test 日志确认 `live_runner_readiness_view_runtime_report_surface_artifacts=11`、`live_runner_readiness_view_runtime_report_surface_observability_fields=26`、GoalRun checkpoint count 到 158，最新 checkpoint 为 `checkpoint-1778614041510506082`，provider readiness 只显示 `api_key_state=<set>`。
