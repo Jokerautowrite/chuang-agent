@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 policy/channel 文本面
+- 本轮在 `54c282e` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、complete-local、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认最新 M5/M7 文本面改动未破坏候选链路：candidate/third-test 仍显示 `runtime_report_surface=11/26`、`policy_tool_status=9/12`、`project_goal_run_checkpoint_count=87`、`project_goal_run_checkpoint_log_complete=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret。
+
 # 2026-05-12 channel simulate 文本面透出 unified execution 摘要
 - 本轮继续沿 M7 channel 输出面补文本可观测性：`channel simulate` 非 JSON 输出现在除 `tool_call_count`、协议错误计数和稳定 error codes 外，也打印 `tool_unified_execution_status` 与 `tool_unified_execution_failure_count`，让本地通道演练文本面能直接看到统一工具执行状态。
 - JSON 面不变，仍保留完整 `runtime_observability`、`tool_events`、`tool_protocol_errors` 与结构化 provider meta；文本面继续不打印 raw `ACTION` payload。验证已通过 `cargo test -q --test cli_channel_tests`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check`、`git diff --check`。
