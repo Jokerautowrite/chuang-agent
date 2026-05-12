@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 静态锁住 unified execution 字段
+- 本轮继续沿 M4/M7 runtime observability 高层门禁补防退化：`tests/live_operator_scripts_tests.rs` 的 third-test wrapper 静态回归现在和脚本实际断言对齐，锁住 `tool_unified_execution_status`、`tool_unified_execution_failure_count` 与 `tool_unified_execution_failure_classes` 必须保留在 live runner readiness view 的 `runtime_report_surface.observability_fields` 中。
+- 这一步不改运行逻辑、不连接真实 provider/Feishu、不启动 worker；只防止第三测试 wrapper 未来退化成只检查 runtime trace 和协议错误而漏掉 unified execution 摘要。验证已通过 `cargo test -q --test live_operator_scripts_tests third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_summary` 和 `git diff --check`。
+
 # 2026-05-12 MVP smoke 锁住 channel live readiness 通道面
 - 本轮继续沿 M5/M6/M7 live readiness 通道主链补防退化门禁：`scripts/chuang-mvp-smoke.sh` 的 `channel simulate --json` 阶段现在直接断言顶层 `live_readiness.overall_state=local_ready_live_pending`、真实外部验收 pending、provider live request 未由 status 验证、ready 不等于 live，并确认 `runtime_observability` 不混入 workspace readiness。
 - `tests/cli_smoke_tests.rs` 同步锁住 MVP smoke 的 channel live readiness 断言、Feishu turn summary smoke 继续覆盖稳定短摘要与 raw current 不外泄、complete-local 继续运行 turn summary smoke。本轮仍只跑本地 stub/fixture，不连接真实 provider/Feishu、不触碰 Hermes。验证已通过 `cargo test -q --test cli_smoke_tests`、`node scripts/chuang-feishu-turn-summary-smoke.js`、`sh scripts/chuang-mvp-smoke.sh`、`cargo fmt --all --check` 和 `git diff --check`。

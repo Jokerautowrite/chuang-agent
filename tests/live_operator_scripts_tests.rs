@@ -990,6 +990,9 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("tool_protocol_error_count"));
     assert!(wrapper.contains("runtime_response.trace"));
     assert!(wrapper.contains("runtime_response_trace_chars"));
+    assert!(wrapper.contains("tool_unified_execution_status"));
+    assert!(wrapper.contains("tool_unified_execution_failure_count"));
+    assert!(wrapper.contains("tool_unified_execution_failure_classes"));
     assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
     assert!(wrapper.contains("goal_handoff_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
