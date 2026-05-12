@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-12 third-test 复验覆盖 live readiness 通道链
+- 本轮在 `e7e5f6a` 后从干净工作树跑通 `sh scripts/chuang-third-test-smoke.sh`，完整继承 final verify、candidate verify、live readonly preflight、live gaps、live runner readiness view、operator checklist/receipt 和 goal run status 摘要；最终输出 `third_test_candidate_smoke_ok`。
+- 复验确认 third-test 已打印 `live_runner_readiness_view_live_readiness_state=local_ready_live_pending`、`live_runner_readiness_view_live_readiness_real_external_acceptance_pending=true`、`live_runner_readiness_view_live_readiness_ready_does_not_mean_live=true`；provider readiness 继续只显示 `api_key_state=<set>`，未打印 secret，未触碰 Hermes。
+
 # 2026-05-12 candidate 复验覆盖 live readiness 通道链
 - 本轮在 `c3194bb` 后从干净工作树跑通 `sh scripts/chuang-candidate-verify.sh`，完整覆盖 complete-local、channel simulate、Feishu turn summary、live runner rehearsal、live gaps、live runner readiness view、operator checklist/receipt、goal run status 与 provider readiness 只读检查；最终输出 `chuang_candidate_verify_ok`。
 - 复验确认 `candidate_live_readiness_state=local_ready_live_pending`、`candidate_live_readiness_real_external_acceptance_pending=true`、`candidate_live_readiness_ready_does_not_mean_live=true` 已进入候选输出；provider readiness 继续只显示 `api_key_state=<set>`，未连接真实 provider、未打印 secret、未触碰 Hermes。
