@@ -909,7 +909,11 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(wrapper.contains("runtime_event_tool_started_count"));
+    assert!(wrapper.contains("runtime_event_tool_finished_count"));
     assert!(wrapper.contains("runtime_event_approval_requested_count"));
+    assert!(wrapper.contains("runtime_event_approval_resolved_count"));
     assert!(wrapper.contains("runtime_event_elicitation_requested_count"));
     assert!(wrapper.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(wrapper.contains("tool_protocol_error_count"));
@@ -928,6 +932,7 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("subagent_children_missing_report_count"));
     assert!(wrapper.contains("subagent_children_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_reason_codes"));
+    assert!(wrapper.contains("context_compaction_summary_json"));
     assert!(wrapper.contains("candidate_runtime_report_surface_artifacts="));
     assert!(wrapper.contains("candidate_runtime_report_surface_observability_fields="));
     assert!(wrapper.contains("candidate_policy_tool_status_ga_tool_descriptors="));
@@ -989,7 +994,11 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
     assert!(wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(wrapper.contains("runtime_meta.subagent_children_summary_json"));
+    assert!(wrapper.contains("runtime_meta.context_compaction_summary_json"));
+    assert!(wrapper.contains("runtime_event_tool_started_count"));
+    assert!(wrapper.contains("runtime_event_tool_finished_count"));
     assert!(wrapper.contains("runtime_event_approval_requested_count"));
+    assert!(wrapper.contains("runtime_event_approval_resolved_count"));
     assert!(wrapper.contains("runtime_event_elicitation_requested_count"));
     assert!(wrapper.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(wrapper.contains("tool_protocol_error_count"));
@@ -999,10 +1008,16 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("tool_unified_execution_failure_count"));
     assert!(wrapper.contains("tool_unified_execution_failure_classes"));
     assert!(wrapper.contains("goal_handoff_report_admission_reason_codes"));
+    assert!(wrapper.contains("goal_handoff_parent_context_handoff_count"));
+    assert!(wrapper.contains("goal_handoff_report_admission_ref_count"));
     assert!(wrapper.contains("goal_handoff_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_admission_ref_count"));
+    assert!(wrapper.contains("subagent_children_child_count"));
+    assert!(wrapper.contains("subagent_children_accepted_report_count"));
+    assert!(wrapper.contains("subagent_children_missing_report_count"));
     assert!(wrapper.contains("subagent_children_report_admission_refs"));
     assert!(wrapper.contains("subagent_children_report_reason_codes"));
+    assert!(wrapper.contains("context_compaction_summary_json"));
     assert!(wrapper.contains("live_runner_readiness_view_runtime_report_surface_artifacts="));
     assert!(
         wrapper.contains("live_runner_readiness_view_runtime_report_surface_observability_fields=")
