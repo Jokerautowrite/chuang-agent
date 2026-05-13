@@ -17,6 +17,10 @@ fn goal_mode_smoke_script_is_closed_loop_only_and_readonly() {
     assert!(script.contains("[goal-mode] collect"));
     assert!(script.contains("[goal-mode] checkpoint-from-collect"));
     assert!(script.contains("handoff_query_summary"));
+    assert!(script.contains("step_summary = data[\"collection\"][\"handoff_query_summary\"]"));
+    assert!(script.contains("step_summary[\"report_admission_ref_count\"] == 2"));
+    assert!(script.contains("step_summary[\"report_admission_reason_codes\"] == {\"report_validated\": 2}"));
+    assert!(script.contains("len(step_summary[\"report_admission_refs\"]) == 2"));
     assert!(script.contains("goal-report-admission://"));
     assert!(script.contains("goal_mode_smoke_ok"));
     assert!(script.contains("CHUANG_GOAL_MODE_SMOKE_BIN"));

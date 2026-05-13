@@ -1,5 +1,9 @@
 # 协作进度日志
 
+# 2026-05-13 goal step 补齐 handoff/admission 高层 gate
+- 本轮只针对 goal/status/readiness 主链接线补边角：`scripts/chuang-goal-mode-smoke.sh` 的 `[goal-mode] step` 阶段新增 `collection.handoff_query_summary` 断言，锁住 `parent_context_handoff_count=2`、`report_admission_ref_count=2`、`report_admission_reason_codes={"report_validated":2}`，以及每条 admission ref 的 `admission_id/admission_status/reason_code/evidence_ref`。
+- 同步 `tests/goal_mode_smoke_tests.rs` 静态防退化断言，确保上述 step 查询字段进入高层 smoke gate，而不是只在 collect/show 面被覆盖。验证已通过 `cargo test -q --test goal_mode_smoke_tests --test goal_mode_negative_smoke_tests`。
+
 # 2026-05-13 live docs 与 wrapper 静态矩阵复验
 - 本轮在 third-test、runbook、acceptance 文档同步后，复跑 wrapper 静态矩阵，确认 `cli_smoke_tests` 与 `live_operator_scripts_tests` 仍锁住 candidate、third-test、complete-local 的 runtime surface 字段集合。
 - 验证已通过 `cargo test -q --test cli_smoke_tests --test live_operator_scripts_tests` 和 `git diff --check` 文档检查。

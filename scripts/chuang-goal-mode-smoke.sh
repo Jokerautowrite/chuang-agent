@@ -87,6 +87,16 @@ assert data["goal_id"] == "goal-mode-smoke"
 assert data["manifest"]["dispatch_count"] == 2
 assert data["run_loop"]["ran_count"] == 2
 assert data["collection"]["ready_to_checkpoint"] is True
+step_summary = data["collection"]["handoff_query_summary"]
+assert step_summary["parent_context_handoff_count"] == 2
+assert step_summary["report_admission_ref_count"] == 2
+assert step_summary["report_admission_reason_codes"] == {"report_validated": 2}
+assert len(step_summary["report_admission_refs"]) == 2
+for admission_ref in step_summary["report_admission_refs"]:
+    assert admission_ref["admission_id"].startswith("goal-report-admission://")
+    assert admission_ref["admission_status"] == "Accepted"
+    assert admission_ref["reason_code"] == "report_validated"
+    assert admission_ref["evidence_ref"].startswith("report://")
 assert data["checkpoint_recorded"] is False
 assert data["writes_progress_log"] is False
 assert data["writes_handoff"] is False
