@@ -272,6 +272,10 @@ transport = "stub"
         "none"
     );
     assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["goal_handoff_query_summary_json"],
+        "none"
+    );
+    assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["subagent_children_child_count"],
         "0"
     );
@@ -298,6 +302,10 @@ transport = "stub"
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
             ["subagent_children_report_reason_codes"],
+        "none"
+    );
+    assert_eq!(
+        turn_response["result"]["turn"]["runtimeObservability"]["subagent_children_summary_json"],
         "none"
     );
     assert!(

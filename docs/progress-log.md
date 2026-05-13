@@ -2287,3 +2287,7 @@
 # 2026-05-12 protocol error surface 联合矩阵复验
 - 在 app-server/channel 非零 tool protocol error 高层回归补齐后，本轮重跑联合矩阵：`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests` 全部通过，覆盖 11/26 runtime surface、protocol error artifact、app-server/channel 非零错误输出、status surface。
 - 同步完整跑通 `sh scripts/chuang-mvp-smoke.sh`，确认 MVP/second-test 基础门禁仍接受 `runtime_meta.tool_protocol_errors_json` 与 `tool_protocol_error_count`。下一轮入口：继续扫 M5/M6/M7 的 goal/subagent 状态面，重点看 goal run/readiness 是否还缺本轮 protocol artifact 的只读摘要。
+
+# 2026-05-13 runtime_observability 默认 summary JSON 字段补齐
+- 本轮在 `runtime_report/status/channel/app-server` 范围内补一个真实小缺口：`runtime_observability_meta` 在无 handoff/subagent ledger 时，新增稳定默认 `goal_handoff_query_summary_json=none` 与 `subagent_children_summary_json=none`，避免调用方把“缺字段”和“当前无 summary”混淆。
+- 同步补回归到 `tests/runtime_report_tests.rs`、`tests/cli_channel_tests.rs`、`tests/app_server_tests.rs`，锁住 turn/default runtime observability 行为；验证通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_without_ledgers`、`cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`。

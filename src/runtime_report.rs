@@ -488,6 +488,8 @@ pub fn runtime_observability_meta(result: &RuntimeResult) -> BTreeMap<String, St
         "goal_handoff_report_admission_reason_codes",
         "subagent_children_report_admission_refs",
         "subagent_children_report_reason_codes",
+        "goal_handoff_query_summary_json",
+        "subagent_children_summary_json",
     ] {
         metadata
             .entry(key.to_string())

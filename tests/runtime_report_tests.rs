@@ -577,6 +577,8 @@ fn runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_w
         "goal_handoff_report_admission_reason_codes",
         "subagent_children_report_admission_refs",
         "subagent_children_report_reason_codes",
+        "goal_handoff_query_summary_json",
+        "subagent_children_summary_json",
     ] {
         assert_eq!(observability.get(key), Some(&"none".to_string()));
     }

@@ -211,6 +211,10 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         "none"
     );
     assert_eq!(
+        parsed["runtime_observability"]["goal_handoff_query_summary_json"],
+        "none"
+    );
+    assert_eq!(
         parsed["runtime_observability"]["subagent_children_child_count"],
         "0"
     );
@@ -232,6 +236,10 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     );
     assert_eq!(
         parsed["runtime_observability"]["subagent_children_report_reason_codes"],
+        "none"
+    );
+    assert_eq!(
+        parsed["runtime_observability"]["subagent_children_summary_json"],
         "none"
     );
     assert!(
