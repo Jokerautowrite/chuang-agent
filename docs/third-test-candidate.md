@@ -38,7 +38,7 @@
 
 ### 必须人工 live check
 
-- Chuang 专用 Feishu live 通道真实收发一次，并拿到可审计 receipt。
+- ✅ Chuang 专用 Feishu live 通道已连通（2026-05-16，老爸确认）；剩余：保存可审计 receipt（request_id + transcript ref）。
 - 在 Chuang 专用 Feishu 会话发 `/tools`，确认可见能力包含 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界。
 - Chuang provider env/readiness 对齐，输出只允许 `变量名=<set>`；真实 provider acceptance 还需要单独 live request receipt 或 runtime report id，不能由 `<set>` 代替。
 - desktop/browser 的只读观察回执单独跑一轮，确认 `observe` / `screenshot` 回执里有 `read_only=true` 和 `live_gate_required=false`，但不把它写成 click/input live ready。
