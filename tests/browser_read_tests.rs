@@ -1,5 +1,6 @@
 use chuang_agent::browser_read::{
-    BrowserPageRead, BrowserReadAdapter, FakeBrowserReadAdapter, UnavailableBrowserReadAdapter,
+    BrowserPageRead, BrowserReadAdapter, CdpBrowserReadAdapter, FakeBrowserReadAdapter,
+    UnavailableBrowserReadAdapter,
 };
 
 #[test]
@@ -50,4 +51,27 @@ fn unavailable_browser_read_adapter_never_claims_dom_url_or_title() {
     assert_eq!(error.adapter_kind, "unavailable");
     assert!(!error.retryable);
     assert!(error.message.contains("cannot read DOM, URL, or title"));
+}
+
+#[test]
+fn cdp_adapter_unreachable_port_returns_unavailable_status() {
+    // Port 1 is never open; adapter must not panic and must report not available.
+    let adapter = CdpBrowserReadAdapter::new(1);
+    let status = adapter.status();
+    assert!(!status.available);
+    assert_eq!(status.adapter_kind, "cdp");
+    assert_eq!(status.reason_code, "cdp_port_unreachable");
+    assert!(status.desktop_read_is_separate);
+    assert!(status.does_not_use_actuator_observe);
+}
+
+#[test]
+fn cdp_adapter_unreachable_port_read_returns_structured_error() {
+    let adapter = CdpBrowserReadAdapter::new(1);
+    let err = adapter
+        .read_current_page()
+        .expect_err("unreachable CDP port must return error");
+    assert_eq!(err.adapter_kind, "cdp");
+    assert!(err.retryable);
+    assert!(err.code.starts_with("cdp_"));
 }

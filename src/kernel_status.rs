@@ -1,6 +1,7 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
 use crate::browser_read::{
-    unavailable_browser_read_status, BrowserReadStatus, BROWSER_READ_CONTRACT_VERSION,
+    unavailable_browser_read_status, BrowserReadAdapter, BrowserReadStatus,
+    CdpBrowserReadAdapter, BROWSER_READ_CONTRACT_VERSION,
 };
 use crate::capability_primer::capability_primer_text;
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
@@ -1633,8 +1634,16 @@ fn live_readiness_term(
 }
 
 fn build_browser_readiness(atomic_tools: &AtomicToolSurfaceStatus) -> BrowserReadinessStatus {
-    let browser_read = unavailable_browser_read_status("real_adapter_missing");
+    let browser_read = cdp_port_from_env()
+        .map(|port| CdpBrowserReadAdapter::new(port).status())
+        .unwrap_or_else(|| unavailable_browser_read_status("real_adapter_missing"));
     browser_readiness_from_status(&browser_read, atomic_tools)
+}
+
+fn cdp_port_from_env() -> Option<u16> {
+    std::env::var("CHUANG_CDP_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
 }
 
 fn build_knowledge_readiness(config: &KnowledgeReadConfig) -> KnowledgeReadinessStatus {
