@@ -21,6 +21,15 @@ fn goal_mode_smoke_script_is_closed_loop_only_and_readonly() {
     assert!(script.contains("step_summary[\"report_admission_ref_count\"] == 2"));
     assert!(script.contains("step_summary[\"report_admission_reason_codes\"] == {\"report_validated\": 2}"));
     assert!(script.contains("len(step_summary[\"report_admission_refs\"]) == 2"));
+    // per-ref field assertions in [goal-mode] step
+    assert!(script.contains("for admission_ref in step_summary[\"report_admission_refs\"]"));
+    assert!(script.contains("admission_ref[\"admission_id\"].startswith(\"goal-report-admission://\")"));
+    assert!(script.contains("admission_ref[\"admission_status\"] == \"Accepted\""));
+    assert!(script.contains("admission_ref[\"reason_code\"] == \"report_validated\""));
+    assert!(script.contains("admission_ref[\"evidence_ref\"].startswith(\"report://\")"));
+    // [goal-mode] collect assertions
+    assert!(script.contains("len(summary[\"parent_context_handoff_refs\"]) == 2"));
+    assert!(script.contains("len(summary[\"report_admission_refs\"]) == 2"));
     assert!(script.contains("goal-report-admission://"));
     assert!(script.contains("goal_mode_smoke_ok"));
     assert!(script.contains("CHUANG_GOAL_MODE_SMOKE_BIN"));
@@ -28,6 +37,10 @@ fn goal_mode_smoke_script_is_closed_loop_only_and_readonly() {
     assert!(script.contains("--from-collect"));
     assert!(script.contains("--subagent-queue-root \"$queue_root\""));
     assert!(script.contains("goal_operability\"][\"goal_collect\"][\"handoff_query_summary\"]"));
+    // per-ref field assertions in [goal-mode] show
+    assert!(script.contains("goal_show_admission_refs = data[\"goal_operability\"][\"goal_collect\"][\"handoff_query_summary\"][\"report_admission_refs\"]"));
+    assert!(script.contains("len(goal_show_admission_refs) == 2"));
+    assert!(script.contains("for admission_ref in goal_show_admission_refs"));
     assert!(!script.contains("--validation-note"));
     assert!(!script.contains("--completed-worker-id"));
     assert!(!script.contains("systemctl"));
