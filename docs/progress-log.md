@@ -5,6 +5,7 @@
 - Feishu live receipt 线本轮只锁定 `/receipt` 文案边界：命令只显示模板，不执行脚本、不读取 secret、不进入 Agent 主链，不能因为生成模板就标记 live 完成；真实 Feishu 收发 evidence 仍未补齐。
 - Browser/Wiki/GBrain 线本轮只新增 `browser_read` 只读回执模板与回归，明确不执行浏览器动作、不写 core memory、不连接 provider/wiki/GBrain；真实 wiki/GBrain read-only adapter 仍未接线。
 - 验证已通过：`git diff --check`、`cargo test -q --test provider_live_receipt_tests --test provider_live_request_receipt_script_tests`、`cargo test -q --test cli_subagent_dispatch_tests cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start`、`cargo test -q --test browser_read_live_receipt_tests`、`node scripts/chuang-feishu-command-smoke.js`、`bash -n scripts/chuang-provider-live-request-receipt.sh && bash -n scripts/chuang-browser-read-live-receipt.sh`、`cargo test -q`。
+- 主控提交后复验已通过：`sh scripts/chuang-third-test-smoke.sh` 输出 `third_test_candidate_smoke_ok`；其中 live gaps 仍按预期报告 `real_live=pending`、`gap_count=4`，不能把本地第三阶段门禁通过误报成全局 real-live-ready。
 - `cargo fmt --all --check` 会命中一批本轮外的既有未格式化文件；本轮只对触碰的 Rust 测试文件运行了 `rustfmt`，避免扩大无关 diff。
 
 # 2026-05-30 Provider Live Receipt 命令最小补齐

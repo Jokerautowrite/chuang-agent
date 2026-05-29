@@ -12,7 +12,7 @@ Chuang has completed the first real receipt slice and is ready for the next impl
   - `git diff --check` passed
   - `cargo test -q` passed
   - `sh scripts/chuang-third-test-smoke.sh` passed with `third_test_candidate_smoke_ok`
-  - after the provider receipt slice, `cargo test -q` also passed; `third-test` should be rerun after the slice is committed and the tree is clean.
+  - after the provider receipt slice, `cargo test -q` also passed, and the committed tree was rerun through `sh scripts/chuang-third-test-smoke.sh` with `third_test_candidate_smoke_ok`.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
