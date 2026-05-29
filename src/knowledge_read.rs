@@ -114,8 +114,25 @@ impl ReadonlyHttpKnowledgeReadAdapter {
         token: impl Into<String>,
         timeout_ms: u64,
     ) -> Self {
+        Self::new_for_source("wiki", endpoint, token, timeout_ms)
+    }
+
+    pub fn new_gbrain(
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+        timeout_ms: u64,
+    ) -> Self {
+        Self::new_for_source("gbrain", endpoint, token, timeout_ms)
+    }
+
+    fn new_for_source(
+        source: &str,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+        timeout_ms: u64,
+    ) -> Self {
         Self {
-            source: "wiki".to_string(),
+            source: source.to_string(),
             endpoint: endpoint.into(),
             token: token.into(),
             timeout_ms: timeout_ms.max(1),
@@ -123,7 +140,7 @@ impl ReadonlyHttpKnowledgeReadAdapter {
     }
 
     fn is_configured(&self) -> bool {
-        self.source == "wiki" && !self.endpoint.trim().is_empty() && !self.token.trim().is_empty()
+        !self.endpoint.trim().is_empty() && !self.token.trim().is_empty()
     }
 
     fn query_http(
@@ -237,20 +254,23 @@ impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {
             adapter_kind: "readonly_http".to_string(),
             available: configured,
             state: if configured { "ready" } else { "unavailable" }.to_string(),
-            sources: vec!["wiki".to_string()],
+            sources: vec![self.source.clone()],
             boundary: KNOWLEDGE_READ_BOUNDARY.to_string(),
             reason_code: if configured {
-                "wiki_readonly_http_configured"
+                format!("{}_readonly_http_configured", self.source)
             } else {
-                "wiki_readonly_http_config_missing"
-            }
-            .to_string(),
+                format!("{}_readonly_http_config_missing", self.source)
+            },
             reason: if configured {
-                "wiki read-only HTTP adapter is configured; it only performs operator-configured read queries and never writes core memory"
-                    .to_string()
+                format!(
+                    "{} read-only HTTP adapter is configured; it only performs operator-configured read queries and never writes core memory",
+                    self.source
+                )
             } else {
-                "wiki read-only HTTP adapter requires endpoint and token before live read can be attempted"
-                    .to_string()
+                format!(
+                    "{} read-only HTTP adapter requires endpoint and token before live read can be attempted",
+                    self.source
+                )
             },
             local_preview_is_separate: true,
             connects_real_service: configured,
@@ -267,8 +287,8 @@ impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {
             return Err(knowledge_read_error(
                 "knowledge_read_source_unavailable",
                 format!(
-                    "{} read-only HTTP adapter is not wired; only wiki is available in this slice",
-                    request.source
+                    "{} read-only HTTP adapter is not wired; only {} is available in this slice",
+                    request.source, self.source
                 ),
                 false,
                 "readonly_http",
@@ -285,7 +305,10 @@ impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {
         if !self.is_configured() {
             return Err(knowledge_read_error(
                 "knowledge_read_unavailable",
-                "wiki read-only HTTP adapter is missing endpoint or token",
+                format!(
+                    "{} read-only HTTP adapter is missing endpoint or token",
+                    self.source
+                ),
                 false,
                 "readonly_http",
             ));
@@ -295,13 +318,16 @@ impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {
         if !(200..300).contains(&status_code) {
             return Err(knowledge_read_error(
                 "knowledge_read_http_status",
-                format!("wiki read-only HTTP adapter returned status_code={status_code}"),
+                format!(
+                    "{} read-only HTTP adapter returned status_code={status_code}",
+                    self.source
+                ),
                 status_code >= 500 || status_code == 429,
                 "readonly_http",
             ));
         }
 
-        let hits = parse_knowledge_read_hits(&body, &request.source)?;
+        let hits = parse_knowledge_read_hits(&body, &request.source, &self.source)?;
         let limited_hits = hits
             .into_iter()
             .take(request.limit.max(1))
@@ -547,11 +573,12 @@ fn knowledge_read_sources() -> Vec<String> {
 fn parse_knowledge_read_hits(
     body: &str,
     requested_source: &str,
+    adapter_source: &str,
 ) -> Result<Vec<KnowledgeReadHit>, KnowledgeReadError> {
     let value = serde_json::from_str::<serde_json::Value>(body).map_err(|_| {
         knowledge_read_error(
             "knowledge_read_response_decode",
-            "wiki read-only HTTP adapter returned invalid JSON",
+            format!("{adapter_source} read-only HTTP adapter returned invalid JSON"),
             false,
             "readonly_http",
         )
@@ -563,7 +590,9 @@ fn parse_knowledge_read_hits(
         .ok_or_else(|| {
             knowledge_read_error(
                 "knowledge_read_response_decode",
-                "wiki read-only HTTP adapter response must contain hits or results array",
+                format!(
+                    "{adapter_source} read-only HTTP adapter response must contain hits or results array"
+                ),
                 false,
                 "readonly_http",
             )
@@ -591,7 +620,10 @@ fn parse_knowledge_read_hits(
         let provenance = hit
             .get("provenance")
             .and_then(|value| value.as_str())
-            .unwrap_or("wiki_readonly_http")
+            .unwrap_or_else(|| match adapter_source {
+                "gbrain" => "gbrain_readonly_http",
+                _ => "wiki_readonly_http",
+            })
             .to_string();
         hits.push(KnowledgeReadHit {
             source: hit

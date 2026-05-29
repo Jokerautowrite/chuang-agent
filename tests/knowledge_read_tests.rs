@@ -260,6 +260,60 @@ fn readonly_http_wiki_adapter_queries_local_service_and_returns_receipt() {
 }
 
 #[test]
+fn readonly_http_gbrain_adapter_queries_local_service_and_returns_receipt() {
+    let (endpoint, request_rx) = spawn_knowledge_read_server(
+        200,
+        r#"{"hits":[{"source":"gbrain","title":"Ops Playbook","uri":"gbrain://ops/1","preview":"Readonly GBrain hit","provenance":"gbrain_fixture"},{"title":"Fallback Source","url":"gbrain://ops/2","snippet":"Fallback snippet"}]}"#,
+    );
+    let token = "test-gbrain-token-knowledge-read";
+    let adapter = ReadonlyHttpKnowledgeReadAdapter::new_gbrain(endpoint, token, 5_000);
+
+    let status = adapter.status();
+    assert!(status.available);
+    assert_eq!(status.adapter_kind, "readonly_http");
+    assert_eq!(status.state, "ready");
+    assert_eq!(status.sources, vec!["gbrain"]);
+    assert_eq!(status.reason_code, "gbrain_readonly_http_configured");
+    assert!(status
+        .reason
+        .contains("gbrain read-only HTTP adapter is configured"));
+    assert!(status.local_preview_is_separate);
+    assert!(status.connects_real_service);
+    assert!(!status.writes_automatically);
+
+    let result = adapter
+        .query(KnowledgeReadQuery {
+            source: "gbrain".to_string(),
+            query: "ops".to_string(),
+            limit: 2,
+        })
+        .expect("gbrain readonly HTTP adapter should return hits");
+    let request = request_rx
+        .recv()
+        .expect("test server should capture request");
+    let request_lower = request.to_ascii_lowercase();
+    assert!(request.contains("POST /query HTTP/1.1"));
+    assert!(request_lower.contains("authorization: bearer test-gbrain-token-knowledge-read"));
+    assert!(request.contains("\"source\":\"gbrain\""));
+    assert!(request.contains("\"read_only\":true"));
+    assert_eq!(result.source, "gbrain");
+    assert_eq!(result.query, "ops");
+    assert!(result.read_only);
+    assert_eq!(result.hits.len(), 2);
+    assert_eq!(result.hits[0].title, "Ops Playbook");
+    assert_eq!(result.hits[0].uri, "gbrain://ops/1");
+    assert_eq!(result.hits[0].provenance, "gbrain_fixture");
+    assert_eq!(result.hits[1].provenance, "gbrain_readonly_http");
+    assert!(result.receipt.contains("\"adapter\":\"readonly_http\""));
+    assert!(result.receipt.contains("\"source\":\"gbrain\""));
+    assert!(result.receipt.contains("\"read_only\":true"));
+    assert!(result.receipt.contains("\"writes_automatically\":false"));
+    assert!(result.receipt.contains("\"token\":\"<redacted>\""));
+    assert!(!result.receipt.contains(token));
+    assert!(!format!("{result:?}").contains(token));
+}
+
+#[test]
 fn readonly_http_wiki_adapter_returns_structured_non_2xx_without_leaking_body_or_token() {
     let token = "test-token-must-not-leak";
     let (endpoint, _request_rx) = spawn_knowledge_read_server(
@@ -282,6 +336,25 @@ fn readonly_http_wiki_adapter_returns_structured_non_2xx_without_leaking_body_or
     assert!(error.message.contains("status_code=500"));
     assert!(!error.message.contains(token));
     assert!(!format!("{error:?}").contains(token));
+}
+
+#[test]
+fn readonly_http_gbrain_adapter_keeps_wiki_unavailable_in_gbrain_only_slice() {
+    let adapter =
+        ReadonlyHttpKnowledgeReadAdapter::new_gbrain("http://127.0.0.1:9/query", "test-token", 10);
+
+    let error = adapter
+        .query(KnowledgeReadQuery {
+            source: "wiki".to_string(),
+            query: "runbook".to_string(),
+            limit: 3,
+        })
+        .expect_err("wiki must remain unavailable in gbrain-only slice");
+
+    assert_eq!(error.code, "knowledge_read_source_unavailable");
+    assert_eq!(error.adapter_kind, "readonly_http");
+    assert!(!error.retryable);
+    assert!(error.message.contains("only gbrain is available"));
 }
 
 #[test]

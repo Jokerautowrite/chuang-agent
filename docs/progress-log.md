@@ -1,3 +1,11 @@
+# 2026-05-30 非 Feishu 主线四路并行推进
+- 本轮按老爸要求跳过 Feishu 线，继续用多子代理并行推进其他主线；主控负责审核集成。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实浏览器/桌面动作，也没有删除或清理文件。
+- Gap 5B Wiki live receipt 脚本已补齐：新增 `scripts/chuang-wiki-live-receipt.sh` 和 `tests/wiki_live_receipt_tests.rs`。脚本默认无 `CHUANG_WIKI_LIVE_ENDPOINT` / `CHUANG_WIKI_LIVE_TOKEN` 时输出 `acceptance_status=blocked`，blockers 为 `missing_wiki_endpoint` / `missing_wiki_token`；配置后只向 endpoint 发起只读 `POST`，body 固定包含 `source/query/limit/read_only=true`，token 只显示 `<set>/<missing>`。
+- GBrain 只读 adapter 代码能力已补齐：`ReadonlyHttpKnowledgeReadAdapter` 新增 `new_gbrain`，并抽出 source-aware 构造与解析逻辑；wiki-only / gbrain-only 的 source 边界在网络前拒绝错误中保持明确，receipt 继续脱敏 token，并固定 `read_only=true` / `writes_automatically=false`。
+- 受控 CDP 只读 session receipt 已补齐：新增 `scripts/chuang-cdp-readonly-session-receipt.sh` 和 `tests/cdp_readonly_session_receipt_tests.rs`。脚本只读取 `CHUANG_CDP_PORT` 指向的本机 `/json` 元数据，输出 URL/title hash/ref、scheme/host 与 target count，不读 DOM WebSocket、不点击、不输入、不打开浏览器。
+- Skill proposal 手工固化路径已补齐 dry-run receipt：新增 `scripts/chuang-skill-manual-solidify-receipt.sh` 和 `tests/skill_manual_solidify_receipt_tests.rs`，输出 `manual_confirmation_checklist`、`evidence_refs`、`proposed_path`，并固定 `writes_automatically=false`、`requires_human_approval=true`、`writes_long_term_skills=false`、`global_real_live_ready=false`。
+- 定向验证已通过：`bash -n` 与默认 `--json` 运行三个新脚本、`cargo test -q --test knowledge_read_tests`、`cargo test -q --test wiki_live_receipt_tests --test cdp_readonly_session_receipt_tests --test skill_manual_solidify_receipt_tests`。当前这些仍是代码能力和只读/手工边界证据；没有真实 Wiki/GBrain endpoint、没有真实 CDP 端口、没有人工批准 skill 固化时，不能标记全局 real-live-ready。
+
 # 2026-05-30 Gap 4B desktop action rehearsal receipt 落地
 - 本轮继续按老爸要求推进 Chuang 主线，补齐 desktop action rehearsal 的最小可审计回执。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实桌面动作，也没有删除或清理文件。
 - 新增 `scripts/chuang-desktop-action-rehearsal-receipt.sh`：默认演练 `open_app Chrome`，显式通过 `env -u CHUANG_REAL_ACTUATOR_ENABLE` 关闭真实 actuator gate，然后调用 `scripts/chuang-real-actuator-adapter.py --json --allowlist config/actuator-allowlist.example.json`。回执记录 adapter、allowlist、audit label、required env、治理分类和 dry-run 边界。

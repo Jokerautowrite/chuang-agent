@@ -2,7 +2,7 @@
 
 ## Current State
 
-Chuang has completed the first two real receipt slices, implemented the Feishu readonly collector, implemented the browser_read readonly collector, added the first wiki read-only HTTP adapter slice, and completed the desktop action rehearsal receipt. It is ready for the next implementation decision after commit.
+Chuang has completed the provider and single-worker real receipt slices, implemented the Feishu readonly collector, implemented the browser_read readonly collector, completed the desktop action rehearsal receipt, added wiki and GBrain read-only HTTP adapter coverage, added a wiki readonly live receipt script, added a controlled CDP readonly session receipt, and added a manual skill solidify dry-run receipt. It is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
@@ -18,6 +18,7 @@ Chuang has completed the first two real receipt slices, implemented the Feishu r
   - after the Gap 4A browser_read readonly receipt collector slice, `bash -n scripts/chuang-browser-read-live-receipt.sh`, `bash scripts/chuang-browser-read-live-receipt.sh --json`, `cargo test -q --test browser_read_live_receipt_tests`, full `cargo test -q`, and `git diff --check` passed.
   - after the Gap 5A wiki read-only HTTP adapter slice, `rustfmt --edition 2021 src/knowledge_read.rs tests/knowledge_read_tests.rs`, `cargo test -q --test knowledge_read_tests`, and `git diff --check` passed.
   - after the Gap 4B desktop action rehearsal receipt slice, `bash -n scripts/chuang-desktop-action-rehearsal-receipt.sh`, `bash scripts/chuang-desktop-action-rehearsal-receipt.sh --json`, `rustfmt --edition 2021 tests/desktop_action_rehearsal_receipt_tests.rs`, `cargo test -q --test desktop_action_rehearsal_receipt_tests`, `git diff --check`, and full `cargo test -q` passed.
+  - after the non-Feishu parallel receipt slice, `bash -n` and default `--json` runs passed for `chuang-wiki-live-receipt.sh`, `chuang-cdp-readonly-session-receipt.sh`, and `chuang-skill-manual-solidify-receipt.sh`; `cargo test -q --test knowledge_read_tests` and `cargo test -q --test wiki_live_receipt_tests --test cdp_readonly_session_receipt_tests --test skill_manual_solidify_receipt_tests` passed.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
@@ -43,10 +44,15 @@ The project is still **local-gate-ready**, not **real-live-ready**.
 4. Readiness boundaries
    - `browser_read` can distinguish unavailable vs live-ready CDP read state.
    - `knowledge_read` can distinguish local preview, preflight-ready, and adapter missing.
-   - `ReadonlyHttpKnowledgeReadAdapter::new_wiki` now exists as the first audited read-only wiki adapter; it is not yet wired to a real endpoint receipt.
+   - `ReadonlyHttpKnowledgeReadAdapter::new_wiki` and `new_gbrain` now exist as audited read-only adapters; real endpoint evidence is still separate from adapter code.
+   - `scripts/chuang-wiki-live-receipt.sh` exists as the wiki endpoint receipt collector, defaulting to blocked without endpoint/token.
    - `subagent_live_worker.enabled=false` remains the default boundary.
 
-5. Feishu surface
+5. Skill evolution boundary
+   - `scripts/chuang-skill-manual-solidify-receipt.sh` documents the manual-only dry-run path for skill proposal solidification.
+   - Skill solidification remains non-automatic and requires human approval plus an explicit write step.
+
+6. Feishu surface
    - Feishu turn summary has readiness wording to avoid claiming live-ready from local gates.
    - Codex Feishu and Hermes must remain separate.
 
@@ -155,6 +161,14 @@ Recommended next action:
 
 Run a controlled Chrome/Chromium CDP readonly session if verified browser_read evidence is needed. Do not infer desktop action readiness from browser_read.
 
+Current controlled CDP session evidence:
+
+```bash
+bash scripts/chuang-cdp-readonly-session-receipt.sh --json
+```
+
+Observed current result: `acceptance_status=blocked`, blocker `missing_chuang_cdp_port`. The script only reads `http://127.0.0.1:$CHUANG_CDP_PORT/json` metadata when a port is set; it does not read DOM via WebSocket and does not perform browser or desktop actions.
+
 Current desktop action rehearsal evidence:
 
 ```bash
@@ -184,30 +198,59 @@ Acceptance evidence:
 Current evidence:
 
 - `ReadonlyHttpKnowledgeReadAdapter::new_wiki` can issue a read-only HTTP `POST` to a wiki endpoint.
+- `ReadonlyHttpKnowledgeReadAdapter::new_gbrain` can issue the same audited read-only HTTP `POST` to a GBrain endpoint.
 - Request body includes `source/query/limit/read_only=true`.
 - Response `hits` or `results` are parsed into `KnowledgeReadHit` with provenance.
 - Receipt redacts token and records `read_only=true` / `writes_automatically=false`.
-- GBrain remains explicitly unavailable in this slice.
+- Source boundaries are explicit: a wiki-only adapter rejects gbrain before network, and a gbrain-only adapter rejects wiki before network.
 - Non-2xx errors are structured and do not echo response body/token.
+
+Wiki receipt script:
+
+```bash
+bash scripts/chuang-wiki-live-receipt.sh --json
+```
+
+Observed current result without env: `acceptance_status=blocked`, blockers `missing_wiki_endpoint` and `missing_wiki_token`. With endpoint/token configured, it sends one read-only wiki POST and reports HTTP-level verification without printing token values.
 
 Validation:
 
 ```bash
 cargo test -q --test knowledge_read_tests
+cargo test -q --test wiki_live_receipt_tests
 ```
 
 Recommended next action:
 
-Either wire a real wiki endpoint/token env into a separate receipt script for live evidence, or keep Gap 5A as code-only and proceed to Gap 4B desktop action rehearsal. Do not claim real Wiki/GBrain live-ready until a real endpoint receipt exists.
+Wire real wiki/GBrain endpoint/token env only when the operator is ready to produce live external-knowledge evidence. Do not claim real Wiki/GBrain live-ready until a real endpoint receipt exists.
+
+### Gap 6 - Skill Proposal Manual Solidify Path - Code Receipt Completed 2026-05-30
+
+Goal: make the path from `SubagentReport.skill_proposals` to a human-approved skill write auditable without enabling automatic solidification.
+
+Current evidence:
+
+```bash
+bash scripts/chuang-skill-manual-solidify-receipt.sh --json
+```
+
+Observed current result: `acceptance_status=pending_human_approval`, blockers `manual_confirmation_required` and `manual_write_step_not_executed`; receipt includes `manual_confirmation_checklist`, `evidence_refs`, and `proposed_path`.
+
+Implemented behavior:
+
+- Does not run `skill solidify`.
+- Does not write skill files or long-term skills.
+- Requires human approval and an explicit manual write step.
+- Keeps `writes_automatically=false` and `global_real_live_ready=false`.
 
 ## Recommended Order
 
-1. Feishu live receipt evidence, if a recent Chuang event log becomes available
-2. Controlled CDP browser_read evidence, if a CDP port is intentionally started
-3. Wiki live receipt script or GBrain read-only adapter
-4. Skill proposal review -> manual solidify path
+1. Controlled CDP browser_read evidence, if a CDP port is intentionally started
+2. Real Wiki/GBrain endpoint receipt, if endpoint/token are available
+3. Skill proposal review -> manual approval -> explicit solidify write
+4. Feishu live receipt evidence, only when 老爸 redirects back to Feishu
 
-Provider live receipt, single-worker rehearsal, Feishu readonly collector code, browser_read readonly collector code, desktop action rehearsal receipt, and wiki read-only adapter code are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail or new live evidence is available.
+Provider live receipt, single-worker rehearsal, Feishu readonly collector code, browser_read readonly collector code, desktop action rehearsal receipt, wiki/GBrain read-only adapter code, wiki live receipt script, CDP readonly session receipt, and skill manual solidify dry-run receipt are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail or new live evidence is available.
 
 ## Do Not Do Yet
 
