@@ -25,8 +25,8 @@ use crate::runtime_config::{
     ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::{
-    EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver, RuntimeEvent, SkillEvolver,
-    SkillId, SkillProposal, ValidationReport,
+    DryRunProposalEvolver, EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver,
+    RuntimeEvent, SkillEvolver, SkillId, SkillProposal, ValidationReport,
 };
 use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueError};
 use crate::subagent_spawner::{
@@ -72,6 +72,7 @@ pub enum ActuatorSlot {
 #[derive(Debug, Clone)]
 pub enum EvolutionSlot {
     Noop(NoopEvolver),
+    DryRun(DryRunProposalEvolver),
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +218,7 @@ fn build_subagent(config: &RuntimeConfig) -> Result<SubagentRuntimeSlot, ConfigE
 fn build_evolution(config: &EvolutionConfig) -> Result<EvolutionSlot, ConfigError> {
     match config {
         EvolutionConfig::Noop => Ok(EvolutionSlot::Noop(NoopEvolver::new())),
+        EvolutionConfig::DryRun => Ok(EvolutionSlot::DryRun(DryRunProposalEvolver::new())),
     }
 }
 
@@ -593,24 +595,28 @@ impl SkillEvolver for EvolutionSlot {
     fn observe(&mut self, event: RuntimeEvent) -> Result<EvolutionReceipt, EvolutionError> {
         match self {
             Self::Noop(evolver) => evolver.observe(event),
+            Self::DryRun(evolver) => evolver.observe(event),
         }
     }
 
     fn propose(&self, scope: EvolutionScope) -> Result<Vec<SkillProposal>, EvolutionError> {
         match self {
             Self::Noop(evolver) => evolver.propose(scope),
+            Self::DryRun(evolver) => evolver.propose(scope),
         }
     }
 
     fn validate(&self, proposal: &SkillProposal) -> Result<ValidationReport, EvolutionError> {
         match self {
             Self::Noop(evolver) => evolver.validate(proposal),
+            Self::DryRun(evolver) => evolver.validate(proposal),
         }
     }
 
     fn solidify(&mut self, proposal: SkillProposal) -> Result<SkillId, EvolutionError> {
         match self {
             Self::Noop(evolver) => evolver.solidify(proposal),
+            Self::DryRun(evolver) => evolver.solidify(proposal),
         }
     }
 }

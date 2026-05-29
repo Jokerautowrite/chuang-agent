@@ -201,5 +201,6 @@ pub(crate) fn build_subagent_report(
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }

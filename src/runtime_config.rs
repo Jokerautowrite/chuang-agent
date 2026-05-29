@@ -142,6 +142,7 @@ pub struct SubagentLiveWorkerConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolutionConfig {
     Noop,
+    DryRun,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -886,6 +887,7 @@ impl EvolutionConfig {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Noop => "noop",
+            Self::DryRun => "dry_run",
         }
     }
 

@@ -4,6 +4,8 @@ use chuang_agent::subagent_report::{
     ReportBuilder, ReportRejectReason, ReportValidator, ResourceUsage, SubagentReport,
     SubagentReportBuilder, SubagentReportValidator,
 };
+use chuang_agent::skill_evolver::{RuntimeEventKind, SkillProposal, SkillProposalProvenance};
+use std::collections::BTreeMap;
 
 fn sample_report() -> SubagentReport {
     SubagentReport {
@@ -43,6 +45,7 @@ fn sample_report() -> SubagentReport {
         }),
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }
 
@@ -60,6 +63,30 @@ fn valid_report_json() -> serde_json::Value {
         "artifacts": [],
         "truncated": false
     })
+}
+
+fn sample_skill_proposal() -> SkillProposal {
+    SkillProposal {
+        proposal_id: "dry-run-agent-1-event-1".to_string(),
+        title: "Subagent report skill proposal contract".to_string(),
+        trigger: "subagent report contains repeated stable workflow".to_string(),
+        procedure: vec![
+            "Inspect report context and governance evidence".to_string(),
+            "Capture repeatable operator steps with boundaries".to_string(),
+            "Emit proposal for manual review only".to_string(),
+        ],
+        evidence_event_ids: vec!["event-1".to_string()],
+        dry_run: true,
+        writes_skills: false,
+        requires_approval: true,
+        provenance: vec![SkillProposalProvenance {
+            source_event_id: "event-1".to_string(),
+            source_task_id: "task-1".to_string(),
+            source_kind: RuntimeEventKind::TurnCompleted,
+            source_summary: "worker completed a bounded report task".to_string(),
+            source_metadata: BTreeMap::from([("source".to_string(), "test".to_string())]),
+        }],
+    }
 }
 
 fn admission_for_value(
@@ -201,6 +228,34 @@ fn subagent_report_can_roundtrip_as_json() {
 }
 
 #[test]
+fn report_skill_proposals_roundtrip_and_json_contract_stays_stable() {
+    let mut report = sample_report();
+    report.skill_proposals = vec![sample_skill_proposal()];
+
+    let encoded = serde_json::to_string(&report).expect("report should serialize");
+    let decoded: SubagentReport =
+        serde_json::from_str(&encoded).expect("report should deserialize");
+
+    assert_eq!(decoded, report);
+    assert!(encoded.contains("\"skill_proposals\":[{"));
+    assert!(encoded.contains("\"proposal_id\":\"dry-run-agent-1-event-1\""));
+}
+
+#[test]
+fn report_deserialize_defaults_missing_skill_proposals_to_empty() {
+    let mut value = serde_json::to_value(sample_report()).expect("sample report should encode");
+    value
+        .as_object_mut()
+        .expect("report should encode as object")
+        .remove("skill_proposals");
+    let raw = serde_json::to_vec(&value).expect("report json should encode");
+    let decoded: SubagentReport =
+        serde_json::from_slice(&raw).expect("report should deserialize without skill_proposals");
+
+    assert!(decoded.skill_proposals.is_empty());
+}
+
+#[test]
 fn report_admission_accepts_valid_report_without_mutating_report() {
     let validator = SubagentReportValidator::default();
     let raw = serde_json::to_vec(&sample_report()).expect("report should serialize");
@@ -335,6 +390,82 @@ fn report_admission_uses_stable_reason_codes_for_validator_rejects() {
         assert_eq!(admission.task_id.expect("task id").0, "task-1");
         assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
     }
+}
+
+#[test]
+fn validator_accepts_report_with_well_formed_skill_proposals() {
+    let validator = SubagentReportValidator::default();
+    let mut report = valid_report_json();
+    report["skill_proposals"] = serde_json::to_value(vec![sample_skill_proposal()])
+        .expect("skill proposals should encode");
+
+    let raw = serde_json::to_vec(&report).expect("report json should encode");
+    let result = validator.validate(&raw);
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn validator_rejects_report_with_non_array_skill_proposals() {
+    let validator = SubagentReportValidator::default();
+    let mut report = valid_report_json();
+    report["skill_proposals"] = serde_json::json!({"proposal_id": "bad-shape"});
+
+    let raw = serde_json::to_vec(&report).expect("report json should encode");
+    let result = validator.validate(&raw);
+
+    assert_eq!(
+        result,
+        Err(ReportRejectReason::InvalidFieldFormat {
+            field: "skill_proposals",
+            reason: "must be an array when present".to_string(),
+        })
+    );
+}
+
+#[test]
+fn validator_rejects_report_with_invalid_skill_proposal_payload() {
+    let validator = SubagentReportValidator::default();
+    let mut report = valid_report_json();
+    report["skill_proposals"] = serde_json::json!([
+        {
+            "proposal_id": "",
+            "title": "title",
+            "trigger": "trigger",
+            "procedure": ["step-1"],
+            "evidence_event_ids": ["event-1"],
+            "dry_run": true,
+            "writes_skills": false,
+            "requires_approval": true,
+            "provenance": []
+        }
+    ]);
+
+    let raw = serde_json::to_vec(&report).expect("report json should encode");
+    let result = validator.validate(&raw);
+
+    assert_eq!(
+        result,
+        Err(ReportRejectReason::InvalidFieldFormat {
+            field: "skill_proposals[].proposal_id",
+            reason: "must not be empty".to_string(),
+        })
+    );
+}
+
+#[test]
+fn report_admission_uses_stable_reason_code_for_invalid_skill_proposals() {
+    let validator = SubagentReportValidator::default();
+    let mut report = valid_report_json();
+    report["skill_proposals"] = serde_json::json!({"proposal_id": "bad-shape"});
+
+    let admission = admission_for_value(&validator, report);
+
+    assert_eq!(admission.status, ReportAdmissionStatus::Rejected);
+    assert_eq!(admission.reason_code, "invalid_field_format");
+    assert_eq!(admission.report_id.expect("report id").0, "report-1");
+    assert_eq!(admission.task_id.expect("task id").0, "task-1");
+    assert_eq!(admission.agent_id.expect("agent id").0, "agent-1");
 }
 
 #[test]

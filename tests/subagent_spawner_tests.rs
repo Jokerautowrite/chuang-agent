@@ -332,5 +332,6 @@ fn queued_report(agent_id: &AgentId) -> SubagentReport {
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }

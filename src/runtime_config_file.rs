@@ -181,6 +181,9 @@ pub fn parse_runtime_config_file_with_options(
     if let Some(value) = get_any(&values, &["context.engine", "context_engine"]) {
         config.context_engine = parse_context_engine(value)?;
     }
+    if let Some(value) = get_any(&values, &["evolution.kind", "evolution"]) {
+        config.evolution = parse_evolution(value)?;
+    }
     if let Some(value) = get_any(&values, &["context.max_tokens", "context_max_tokens"]) {
         config.context_budget.max_tokens = parse_u32("context.max_tokens", value)?;
     }
@@ -659,6 +662,17 @@ fn parse_external_knowledge_source(
             .map(|value| parse_u64(&timeout_key, value))
             .transpose()?,
     })
+}
+
+fn parse_evolution(raw: &str) -> Result<crate::runtime_config::EvolutionConfig, RuntimeConfigFileError> {
+    match raw {
+        "noop" => Ok(crate::runtime_config::EvolutionConfig::Noop),
+        "dry_run" => Ok(crate::runtime_config::EvolutionConfig::DryRun),
+        other => Err(RuntimeConfigFileError::InvalidValue {
+            key: "evolution.kind".to_string(),
+            value: other.to_string(),
+        }),
+    }
 }
 
 fn parse_context_engine(raw: &str) -> Result<ContextEngineConfig, RuntimeConfigFileError> {

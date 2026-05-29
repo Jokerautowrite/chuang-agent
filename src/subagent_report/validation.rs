@@ -4,6 +4,7 @@ use super::schema::{
 };
 use super::size_limit::DEFAULT_REPORT_SIZE_LIMIT_BYTES;
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
+use crate::skill_evolver::SkillProposal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReportRejectReason {
@@ -30,6 +31,10 @@ pub enum ReportRejectReason {
     InvalidTimestampOrder {
         started_at: String,
         finished_at: String,
+    },
+    InvalidFieldFormat {
+        field: &'static str,
+        reason: String,
     },
     SizeLimitExceeded {
         limit_bytes: usize,
@@ -160,6 +165,102 @@ impl SubagentReportValidator {
         })
     }
 
+    fn validate_skill_proposals(value: &serde_json::Value) -> Result<(), ReportRejectReason> {
+        let Some(skill_proposals_value) = value.get("skill_proposals") else {
+            return Ok(());
+        };
+
+        if !skill_proposals_value.is_array() {
+            return Err(ReportRejectReason::InvalidFieldFormat {
+                field: "skill_proposals",
+                reason: "must be an array when present".to_string(),
+            });
+        }
+
+        let proposals: Vec<SkillProposal> = serde_json::from_value(skill_proposals_value.clone())
+            .map_err(|error| ReportRejectReason::InvalidFieldFormat {
+                field: "skill_proposals",
+                reason: format!("failed to decode SkillProposal entries: {error}"),
+            })?;
+
+        for proposal in &proposals {
+            if proposal.proposal_id.trim().is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].proposal_id",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if proposal.title.trim().is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].title",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if proposal.trigger.trim().is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].trigger",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if proposal.procedure.is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].procedure",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if proposal.procedure.iter().any(|step| step.trim().is_empty()) {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].procedure[]",
+                    reason: "steps must not be empty".to_string(),
+                });
+            }
+            if proposal.evidence_event_ids.is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].evidence_event_ids",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            if proposal
+                .evidence_event_ids
+                .iter()
+                .any(|event_id| event_id.trim().is_empty())
+            {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].evidence_event_ids[]",
+                    reason: "ids must not be empty".to_string(),
+                });
+            }
+            if proposal.provenance.is_empty() {
+                return Err(ReportRejectReason::InvalidFieldFormat {
+                    field: "skill_proposals[].provenance",
+                    reason: "must not be empty".to_string(),
+                });
+            }
+            for provenance in &proposal.provenance {
+                if provenance.source_event_id.trim().is_empty() {
+                    return Err(ReportRejectReason::InvalidFieldFormat {
+                        field: "skill_proposals[].provenance[].source_event_id",
+                        reason: "must not be empty".to_string(),
+                    });
+                }
+                if provenance.source_task_id.trim().is_empty() {
+                    return Err(ReportRejectReason::InvalidFieldFormat {
+                        field: "skill_proposals[].provenance[].source_task_id",
+                        reason: "must not be empty".to_string(),
+                    });
+                }
+                if provenance.source_summary.trim().is_empty() {
+                    return Err(ReportRejectReason::InvalidFieldFormat {
+                        field: "skill_proposals[].provenance[].source_summary",
+                        reason: "must not be empty".to_string(),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn admit_raw(
         &self,
         raw: &[u8],
@@ -212,6 +313,7 @@ fn reject_reason_code(reason: &ReportRejectReason) -> &'static str {
         ReportRejectReason::InvalidEnumFormat { .. } => "invalid_enum_format",
         ReportRejectReason::InvalidTimestampFormat { .. } => "invalid_timestamp_format",
         ReportRejectReason::InvalidTimestampOrder { .. } => "invalid_timestamp_order",
+        ReportRejectReason::InvalidFieldFormat { .. } => "invalid_field_format",
         ReportRejectReason::SizeLimitExceeded { .. } => "size_limit_exceeded",
         ReportRejectReason::TruncationFailed { .. } => "truncation_failed",
     }
@@ -280,6 +382,7 @@ impl ReportValidator for SubagentReportValidator {
         Self::contains_object(&value, "resource_usage")?;
         Self::contains_array(&value, "artifacts")?;
         Self::contains_bool(&value, "truncated")?;
+        Self::validate_skill_proposals(&value)?;
 
         Ok(())
     }
@@ -335,6 +438,7 @@ impl SubagentReportBuilder {
                 }),
                 governance_decision: None,
                 truncated: false,
+                skill_proposals: vec![],
             },
         }
     }

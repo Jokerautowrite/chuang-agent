@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod canonical;
 mod dry_run;
@@ -14,7 +14,7 @@ pub use canonical::{
 pub use dry_run::DryRunProposalEvolver;
 pub use noop::NoopEvolver;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeEvent {
     pub event_id: String,
     pub task_id: String,
@@ -23,7 +23,7 @@ pub struct RuntimeEvent {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEventKind {
     TurnCompleted,
@@ -40,7 +40,7 @@ pub struct EvolutionScope {
     pub max_proposals: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillProposal {
     pub proposal_id: String,
     pub title: String,
@@ -53,7 +53,7 @@ pub struct SkillProposal {
     pub provenance: Vec<SkillProposalProvenance>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillProposalProvenance {
     pub source_event_id: String,
     pub source_task_id: String,

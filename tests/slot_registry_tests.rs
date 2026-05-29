@@ -10,10 +10,10 @@ use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecis
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::responder::{Responder, ResponderRequest};
 use chuang_agent::runtime_config::{
-    OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
-    SubagentQueueConfig,
+    EvolutionConfig, OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy,
+    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
 };
-use chuang_agent::skill_evolver::{EvolutionScope, SkillEvolver};
+use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
 use chuang_agent::slot_registry::{
     build_genesis_actuator, build_provider_responder, build_runtime_slots, summarize_runtime_slots,
     SubagentRuntimeSlot,
@@ -173,6 +173,42 @@ fn slot_registry_summary_matches_runtime_config_slot_kinds() {
     assert_eq!(summary.subagent, "fake");
     assert_eq!(summary.evolution, "noop");
     assert_eq!(summary.control_plane, "fake_local");
+}
+
+#[test]
+fn slot_registry_builds_dry_run_evolution_slot_from_runtime_config() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.evolution = EvolutionConfig::DryRun;
+
+    let mut slots = build_runtime_slots(&config).expect("dry_run evolution slots should build");
+    let summary = summarize_runtime_slots(&config);
+    assert_eq!(summary.evolution, "dry_run");
+
+    let receipt = slots
+        .evolution
+        .observe(RuntimeEvent {
+            event_id: "event-1".to_string(),
+            task_id: "task-1".to_string(),
+            kind: RuntimeEventKind::TurnCompleted,
+            summary: "completed slot evolution dry run".to_string(),
+            metadata: Default::default(),
+        })
+        .expect("dry-run evolver should accept observed event");
+    assert!(receipt.accepted);
+
+    let proposals = slots
+        .evolution
+        .propose(EvolutionScope {
+            agent_id: "xiaoce".to_string(),
+            task_kind: None,
+            max_proposals: 1,
+        })
+        .expect("dry-run evolver should propose after observe");
+
+    assert_eq!(proposals.len(), 1);
+    assert!(proposals[0].dry_run);
+    assert!(!proposals[0].writes_skills);
+    assert!(proposals[0].requires_approval);
 }
 
 #[test]
@@ -677,5 +713,6 @@ fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }

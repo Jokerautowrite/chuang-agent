@@ -6,7 +6,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
+use chuang_agent::runtime_config::EvolutionConfig;
+use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::live_adapter_gate::{require_live_adapter_enabled, LiveAdapterSlot};
+use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
 use chuang_agent::live_subagent_rehearsal::{
     rehearse_live_subagent_adapter, LiveSubagentRehearsalInput,
 };
@@ -27,6 +30,21 @@ use crate::cli_types::*;
 
 const COMMAND_RUNNER_OUTPUT_CAPTURE_LIMIT_BYTES: usize = 64 * 1024;
 const COMMAND_RUNNER_PREVIEW_CHARS: usize = 1200;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubagentEvolutionSource {
+    RuntimeConfig,
+    DefaultDryRunPromotion,
+}
+
+impl SubagentEvolutionSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::RuntimeConfig => "runtime_config",
+            Self::DefaultDryRunPromotion => "default_dry_run_promotion",
+        }
+    }
+}
 
 pub(crate) fn subagent_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -312,8 +330,10 @@ fn subagent_run_once_command(args: &[String]) -> Result<(), String> {
         ControlOutputFormat::Text => {
             if output.ran {
                 println!(
-                    "subagent_run_once runner={} capabilities={} run_id={} report_path={} admission={}",
+                    "subagent_run_once runner={} evolution_kind={} evolution_source={} capabilities={} run_id={} report_path={} admission={}",
                     output.runner,
+                    output.evolution_kind,
+                    output.evolution_source,
                     output.worker_capabilities.join(","),
                     output.run_id.as_deref().unwrap_or("none"),
                     output.report_path.as_deref().unwrap_or("none"),
@@ -325,8 +345,10 @@ fn subagent_run_once_command(args: &[String]) -> Result<(), String> {
                 );
             } else {
                 println!(
-                    "subagent_run_once idle runner={} capabilities={}",
+                    "subagent_run_once idle runner={} evolution_kind={} evolution_source={} capabilities={}",
                     output.runner,
+                    output.evolution_kind,
+                    output.evolution_source,
                     output.worker_capabilities.join(",")
                 );
             }
@@ -362,8 +384,10 @@ fn subagent_run_loop_command(args: &[String]) -> Result<(), String> {
     match request.output {
         ControlOutputFormat::Text => {
             println!(
-                "subagent_run_loop runner={} capabilities={} ran_count={} max_runs={} max_concurrency={} idle={} admissions={}",
+                "subagent_run_loop runner={} evolution_kind={} evolution_source={} capabilities={} ran_count={} max_runs={} max_concurrency={} idle={} admissions={}",
                 output.runner,
+                output.evolution_kind,
+                output.evolution_source,
                 output.worker_capabilities.join(","),
                 output.ran_count,
                 output.max_runs,
@@ -469,8 +493,12 @@ pub(crate) fn run_subagent_run_loop(
         }
     }
 
+    let (_, evolution_kind, evolution_source) = resolve_subagent_evolution_runtime(request);
+
     Ok(SubagentRunLoopCliOutput {
         runner: request.runner.clone(),
+        evolution_kind: evolution_kind.to_string(),
+        evolution_source: evolution_source.to_string(),
         worker_capabilities: request.worker_capabilities.clone(),
         max_runs,
         max_concurrency,
@@ -533,6 +561,7 @@ fn run_one_pending_subagent_with_allowlist(
     request: &SubagentRunOnceCliRequest,
     allowed_run_ids: Option<&BTreeSet<String>>,
 ) -> Result<SubagentRunOnceCliOutput, String> {
+    let (mut evolution, evolution_kind, evolution_source) = build_subagent_evolution_slot(request)?;
     let owner = unique_worker_owner()?;
     let dispatches = queue
         .list_dispatches()
@@ -581,12 +610,14 @@ fn run_one_pending_subagent_with_allowlist(
             report_path: None,
             report_admission: None,
             summary,
+            evolution_kind: evolution_kind.to_string(),
+            evolution_source: evolution_source.to_string(),
         });
     };
 
     let report = match request.runner.as_str() {
-        "fake" => build_fake_runner_report(&dispatch)?,
-        "command" => build_command_runner_report(&dispatch, request)?,
+        "fake" => build_fake_runner_report(&dispatch, &mut evolution)?,
+        "command" => build_command_runner_report(&dispatch, request, &mut evolution)?,
         runner => return Err(format!("unsupported subagent runner: {runner}")),
     };
     let report_admission = build_report_admission(&report)?;
@@ -601,6 +632,8 @@ fn run_one_pending_subagent_with_allowlist(
         report_path: Some(report_path.display().to_string()),
         report_admission: Some(report_admission),
         summary: report.summary,
+        evolution_kind: evolution_kind.to_string(),
+        evolution_source: evolution_source.to_string(),
     })
 }
 
@@ -908,8 +941,16 @@ fn parent_context_handoff_state(
 
 fn build_fake_runner_report(
     dispatch: &chuang_agent::subagent_spawner::SubagentDispatch,
+    evolution: &mut impl SkillEvolver,
 ) -> Result<SubagentReport, String> {
     let timestamp = current_rfc3339_timestamp()?;
+    let skill_proposals = collect_dry_run_proposals(
+        evolution,
+        &dispatch.agent_id.0,
+        &dispatch.task_id.0,
+        &format!("fake_runner_turn_completed:{}", dispatch.run_id.0),
+        &format!("fake runner completed task {}", dispatch.task_id.0),
+    );
     Ok(SubagentReport {
         schema_version: "1.0".to_string(),
         report_id: ReportId(format!("report-{}", dispatch.run_id.0)),
@@ -932,12 +973,14 @@ fn build_fake_runner_report(
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals,
     })
 }
 
 fn build_command_runner_report(
     dispatch: &chuang_agent::subagent_spawner::SubagentDispatch,
     request: &SubagentRunOnceCliRequest,
+    evolution: &mut impl SkillEvolver,
 ) -> Result<SubagentReport, String> {
     let command = request
         .runner_command
@@ -1013,6 +1056,17 @@ fn build_command_runner_report(
         return protocol_report;
     }
 
+    let skill_proposals = collect_dry_run_proposals(
+        evolution,
+        &dispatch.agent_id.0,
+        &dispatch.task_id.0,
+        &format!("command_runner_turn_completed:{}", dispatch.run_id.0),
+        &format!(
+            "command runner completed task {} stdout_bytes={}",
+            dispatch.task_id.0,
+            stdout.len()
+        ),
+    );
     Ok(SubagentReport {
         schema_version: "1.0".to_string(),
         report_id: ReportId(format!("report-{}", dispatch.run_id.0)),
@@ -1046,6 +1100,7 @@ fn build_command_runner_report(
             || output.stderr_truncated
             || stdout.chars().count() > COMMAND_RUNNER_PREVIEW_CHARS
             || stderr.chars().count() > COMMAND_RUNNER_PREVIEW_CHARS,
+        skill_proposals,
     })
 }
 
@@ -1312,6 +1367,7 @@ fn build_command_runner_protocol_reject_report(
         context_debug: None,
         governance_decision: Some(command_runner_governance_decision(dispatch)),
         truncated: stderr_preview.chars().count() > COMMAND_RUNNER_PREVIEW_CHARS,
+        skill_proposals: vec![],
     }
 }
 
@@ -1567,4 +1623,56 @@ mod tests {
             metadata: BTreeMap::new(),
         }
     }
+}
+
+fn resolve_subagent_evolution_runtime(
+    request: &SubagentRunOnceCliRequest,
+) -> (chuang_agent::runtime_config::RuntimeConfig, &'static str, &'static str) {
+    let mut runtime = request.options.runtime.clone();
+    let source = if matches!(runtime.evolution, EvolutionConfig::Noop) {
+        runtime.evolution = EvolutionConfig::DryRun;
+        SubagentEvolutionSource::DefaultDryRunPromotion
+    } else {
+        SubagentEvolutionSource::RuntimeConfig
+    };
+    let evolution_kind = runtime.evolution.kind();
+    (runtime, evolution_kind, source.as_str())
+}
+
+fn build_subagent_evolution_slot(
+    request: &SubagentRunOnceCliRequest,
+) -> Result<(impl SkillEvolver, &'static str, &'static str), String> {
+    let (runtime, evolution_kind, evolution_source) =
+        resolve_subagent_evolution_runtime(request);
+    let slots = build_runtime_slots(&runtime)
+        .map_err(|e| format!("subagent_evolution_slot_invalid: {}: {}", e.field, e.message))?;
+    Ok((slots.evolution, evolution_kind, evolution_source))
+}
+
+/// Observe a `TurnCompleted` event through the configured evolution slot and
+/// return at most one dry-run skill candidate. The slot remains readonly here;
+/// no skill is written or solidified by `subagent run-once`.
+fn collect_dry_run_proposals(
+    evolution: &mut impl SkillEvolver,
+    agent_id: &str,
+    task_id: &str,
+    event_id: &str,
+    summary: &str,
+) -> Vec<chuang_agent::skill_evolver::SkillProposal> {
+    let event = RuntimeEvent {
+        event_id: event_id.to_string(),
+        task_id: task_id.to_string(),
+        kind: RuntimeEventKind::TurnCompleted,
+        summary: summary.to_string(),
+        metadata: std::collections::BTreeMap::new(),
+    };
+    if evolution.observe(event).is_err() {
+        return vec![];
+    }
+    let scope = EvolutionScope {
+        agent_id: agent_id.to_string(),
+        task_kind: None,
+        max_proposals: 1,
+    };
+    evolution.propose(scope).unwrap_or_default()
 }

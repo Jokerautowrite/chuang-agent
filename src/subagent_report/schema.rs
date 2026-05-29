@@ -1,4 +1,5 @@
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
+use crate::skill_evolver::SkillProposal;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +97,14 @@ pub struct SubagentReport {
     pub context_debug: Option<ContextDebugSummary>,
     pub governance_decision: Option<GovernanceDecisionSummary>,
     pub truncated: bool,
+    /// Dry-run skill proposals emitted by the evolver for post-run review.
+    ///
+    /// Contract:
+    /// - Omitted field must deserialize to an empty list.
+    /// - Non-empty list must contain fully structured [`SkillProposal`] entries.
+    /// - Field is report-local evidence only and does not grant write permission.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_proposals: Vec<SkillProposal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

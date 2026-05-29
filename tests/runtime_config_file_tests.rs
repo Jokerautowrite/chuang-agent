@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::runtime_config::{
-    ActuatorConfig, ContextEngineConfig, ControlPlaneConfig, ProviderConfig, SubagentConfig,
+    ActuatorConfig, ContextEngineConfig, ControlPlaneConfig, EvolutionConfig, ProviderConfig, SubagentConfig,
 };
 use chuang_agent::runtime_config_file::{
     parse_runtime_config_file, parse_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -388,6 +388,33 @@ apply_args = "{}"
         &config.control_plane,
         ControlPlaneConfig::Command(control) if control.timeout_ms == 30_000
     ));
+}
+
+#[test]
+fn config_file_parses_dry_run_evolution_kind() {
+    let config = parse_runtime_config_file(
+        r#"
+evolution = "dry_run"
+"#,
+    )
+    .expect("dry_run evolution config should parse");
+
+    assert_eq!(config.evolution, EvolutionConfig::DryRun);
+    assert_eq!(config.summary().evolution_kind, "dry_run");
+}
+
+#[test]
+fn config_file_rejects_unknown_evolution_kind() {
+    let err = parse_runtime_config_file(r#"evolution = "unknown_mode""#)
+        .expect_err("unknown evolution kind should fail");
+
+    assert_eq!(
+        err,
+        RuntimeConfigFileError::InvalidValue {
+            key: "evolution.kind".to_string(),
+            value: "unknown_mode".to_string()
+        }
+    );
 }
 
 #[test]

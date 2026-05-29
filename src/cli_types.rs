@@ -203,6 +203,8 @@ pub(crate) struct SubagentLivePreflightCliOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SubagentRunOnceCliOutput {
     pub(crate) runner: String,
+    pub(crate) evolution_kind: String,
+    pub(crate) evolution_source: String,
     pub(crate) worker_capabilities: Vec<String>,
     pub(crate) ran: bool,
     pub(crate) run_id: Option<String>,
@@ -214,6 +216,8 @@ pub(crate) struct SubagentRunOnceCliOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SubagentRunLoopCliOutput {
     pub(crate) runner: String,
+    pub(crate) evolution_kind: String,
+    pub(crate) evolution_source: String,
     pub(crate) worker_capabilities: Vec<String>,
     pub(crate) max_runs: usize,
     pub(crate) max_concurrency: usize,

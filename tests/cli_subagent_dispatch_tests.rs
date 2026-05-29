@@ -669,12 +669,29 @@ fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() 
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
 
     assert_eq!(parsed["runner"], "fake");
+    assert_eq!(parsed["evolution_kind"], "dry_run");
+    assert_eq!(parsed["evolution_source"], "default_dry_run_promotion");
     assert_eq!(parsed["ran"], true);
     assert_eq!(parsed["run_id"], first_run);
-    assert!(queue_root
-        .join("reports")
-        .join(format!("{first_run}.json"))
-        .exists());
+    let report_path = queue_root.join("reports").join(format!("{first_run}.json"));
+    assert!(report_path.exists());
+    let report: Value = serde_json::from_str(
+        &std::fs::read_to_string(&report_path).expect("report file should exist"),
+    )
+    .expect("report should be json");
+    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0]["dry_run"], true);
+    assert_eq!(proposals[0]["writes_skills"], false);
+    assert_eq!(proposals[0]["requires_approval"], true);
+    assert_eq!(
+        proposals[0]["evidence_event_ids"][0],
+        format!("fake_runner_turn_completed:{first_run}")
+    );
+    assert!(proposals[0]["proposal_id"]
+        .as_str()
+        .expect("proposal id string")
+        .contains(first_run));
     assert!(!queue_root
         .join("reports")
         .join(format!("{second_run}.json"))
@@ -707,6 +724,8 @@ fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
 
     assert_eq!(parsed["runner"], "fake");
+    assert_eq!(parsed["evolution_kind"], "dry_run");
+    assert_eq!(parsed["evolution_source"], "default_dry_run_promotion");
     assert_eq!(parsed["ran"], false);
     assert_eq!(parsed["summary"], "no pending dispatch");
 }
@@ -752,6 +771,8 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
         serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
 
     assert_eq!(parsed["runner"], "fake");
+    assert_eq!(parsed["evolution_kind"], "dry_run");
+    assert_eq!(parsed["evolution_source"], "default_dry_run_promotion");
     assert_eq!(parsed["max_runs"], 2);
     assert_eq!(parsed["max_concurrency"], 1);
     assert_eq!(parsed["ran_count"], 2);
@@ -789,6 +810,24 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
         .join("reports")
         .join(format!("{second_run}.json"))
         .exists());
+    let first_report: Value = serde_json::from_str(
+        &std::fs::read_to_string(queue_root.join("reports").join(format!("{first_run}.json")))
+            .expect("first report should exist"),
+    )
+    .expect("first report should be json");
+    let second_report: Value = serde_json::from_str(
+        &std::fs::read_to_string(queue_root.join("reports").join(format!("{second_run}.json")))
+            .expect("second report should exist"),
+    )
+    .expect("second report should be json");
+    assert_ne!(
+        first_report["skill_proposals"][0]["proposal_id"],
+        second_report["skill_proposals"][0]["proposal_id"]
+    );
+    assert_eq!(
+        first_report["skill_proposals"][0]["evidence_event_ids"][0],
+        format!("fake_runner_turn_completed:{first_run}")
+    );
     assert!(!queue_root
         .join("reports")
         .join(format!("{third_run}.json"))
@@ -1005,6 +1044,55 @@ fn cli_subagent_run_loop_live_gate_rejects_command_outside_allowlist_first() {
 }
 
 #[test]
+fn cli_subagent_run_once_uses_runtime_dry_run_slot_from_config_file() {
+    let queue_root = temp_queue_root("run-once-config-dry-run");
+    let dispatch = dispatch_task(&queue_root, "task-cli-config-dry-run", "配置 dry_run 演化槽");
+    let run_id = dispatch["run_id"].as_str().expect("run id");
+    let config_path = queue_root.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nsubagent_queue_root = \"{}\"\nevolution = \"dry_run\"\n",
+            queue_root.join("memory.db").display(),
+            queue_root.display()
+        ),
+    )
+    .expect("config should write");
+
+    let output = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+    assert_eq!(parsed["evolution_kind"], "dry_run");
+    assert_eq!(parsed["evolution_source"], "runtime_config");
+    let report_path = queue_root.join("reports").join(format!("{run_id}.json"));
+    let report: Value = serde_json::from_str(
+        &std::fs::read_to_string(report_path).expect("report file should exist"),
+    )
+    .expect("report should be json");
+    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0]["dry_run"], true);
+}
+
+#[test]
 fn cli_subagent_run_once_command_runner_requires_explicit_approval() {
     let queue_root = temp_queue_root("command-runner-approval");
     let _dispatch = dispatch_task(&queue_root, "task-cli-command-approval", "命令 runner 审批");
@@ -1095,6 +1183,15 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
     assert_eq!(
         report["governance_decision"]["reason"],
         "approved_by_cli_flag: --approve-exec"
+    );
+    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0]["dry_run"], true);
+    assert_eq!(proposals[0]["writes_skills"], false);
+    assert_eq!(proposals[0]["requires_approval"], true);
+    assert_eq!(
+        proposals[0]["evidence_event_ids"][0],
+        format!("command_runner_turn_completed:{run_id}")
     );
 }
 
@@ -1237,6 +1334,7 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
         .as_str()
         .expect("stderr preview")
         .contains("agent_id_mismatch"));
+    assert!(report["skill_proposals"].is_null());
     assert_eq!(
         report["governance_decision"]["action_id"],
         format!("subagent-command-runner:{run_id}")

@@ -2443,6 +2443,7 @@ fn build_cli_goal_report(
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }
 

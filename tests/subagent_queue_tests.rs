@@ -359,5 +359,6 @@ fn sample_report() -> SubagentReport {
         context_debug: None,
         governance_decision: None,
         truncated: false,
+        skill_proposals: vec![],
     }
 }

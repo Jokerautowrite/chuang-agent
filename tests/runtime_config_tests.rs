@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::runtime_config::{
-    ContextEngineConfig, ControlPlaneCommandConfig, ControlPlaneConfig, IdentityMemoryConfig,
-    OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
+    ContextEngineConfig, ControlPlaneCommandConfig, ControlPlaneConfig, EvolutionConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RuntimeConfig, SubagentConfig,
     SubagentLiveWorkerConfig, SubagentQueueConfig,
 };
 
@@ -253,6 +253,17 @@ fn runtime_config_summary_exposes_all_slot_kinds_for_control_plane() {
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
+}
+
+#[test]
+fn runtime_config_summary_exposes_dry_run_evolution_kind() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.evolution = EvolutionConfig::DryRun;
+
+    config.validate().expect("dry_run evolution config is valid");
+    let summary = config.summary();
+
+    assert_eq!(summary.evolution_kind, "dry_run");
 }
 
 #[test]
