@@ -1,3 +1,10 @@
+# 2026-05-30 Chuang Git 同步后推进计划与交接刷新
+- 已确认 Chuang 仓库远端为 `https://github.com/Jokerautowrite/chuang-agent.git`，本地 `main` 已推送到 `origin/main`，当前 `git status --short --branch` 为 `## main...origin/main`，工作树干净。
+- 当前最新提交 `09f5d57 docs(ops): archive sub2 operation artifacts` 已在远端；前一轮整理出的 provider Responses API、subagent dry-run skill proposals、readiness boundary、Feishu summary 和 Sub2 ops 文档提交均已推送。本轮没有删除文件、没有触碰 Hermes、没有触碰 Sub2 线上环境。
+- 已重读当前 handoff、progress、总蓝图、可插拔架构、来源项目审计、`spec-v3`、context engine 设计和实现准备材料。当前结论保持不变：项目处于 local-gate-ready，不是 real-live-ready。
+- 已新增 `docs/chuang-next-plan-2026-05-30.md`，并更新 `docs/handoff-current.md` 顶部交接。下一步优先级调整为真实 receipt 主线：provider live receipt -> single live worker rehearsal -> Feishu live receipt -> browser/desktop boundary -> wiki/GBrain read-only adapter -> skill proposal manual solidify path。
+- 当前 provider 已配置为 `openai_compatible` / `cliproxy-local` / `gpt-5.5` 且 `api_key_state=<set>`，但 `status` 只证明前置配置，不发送真实请求。下一轮如果继续推进，建议先做一个最小、非敏感、可审计的 `/v1/responses` provider live receipt。
+
 # 2026-05-29 Chuang 续工整理与推进计划
 - 本轮按老爸要求回到 Chuang 项目做续工盘点，没有删除文件、没有提交 git、没有触碰 Sub2 线上环境。已重读项目规则、`docs/handoff-current.md`、总蓝图、可插拔架构、来源项目审计、`spec-v3`、context engine 设计和实现准备材料。
 - 当前代码健康度通过本地全量验证：`cargo test -q` 全量通过；`cargo run -q -- status --json` 显示 `project_readiness.overall_state=ready`、`release_readiness.overall_state=second_test_version_ready`，同时明确 `third_test_candidate.real_live_ready=false`，不能把本地门禁当作真实 live-ready。
