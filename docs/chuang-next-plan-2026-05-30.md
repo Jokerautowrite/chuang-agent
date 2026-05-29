@@ -2,7 +2,7 @@
 
 ## Current State
 
-Chuang has completed the first two real receipt slices, implemented the Feishu readonly collector, and implemented the browser_read readonly collector. It is ready for the next implementation decision after commit.
+Chuang has completed the first two real receipt slices, implemented the Feishu readonly collector, implemented the browser_read readonly collector, and added the first wiki read-only HTTP adapter slice. It is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
@@ -16,6 +16,7 @@ Chuang has completed the first two real receipt slices, implemented the Feishu r
   - after the Gap 2 single-worker rehearsal slice, targeted receipt tests, mismatch regression, live runner smoke, full `cargo test -q`, `git diff --check`, and post-commit `sh scripts/chuang-third-test-smoke.sh` passed.
   - after the Gap 3 Feishu readonly receipt collector slice, `bash -n scripts/chuang-feishu-live-receipt.sh`, `bash scripts/chuang-feishu-live-receipt.sh --json`, `cargo test -q --test feishu_live_receipt_tests`, `node scripts/chuang-feishu-command-smoke.js`, full `cargo test -q`, and `git diff --check` passed.
   - after the Gap 4A browser_read readonly receipt collector slice, `bash -n scripts/chuang-browser-read-live-receipt.sh`, `bash scripts/chuang-browser-read-live-receipt.sh --json`, `cargo test -q --test browser_read_live_receipt_tests`, full `cargo test -q`, and `git diff --check` passed.
+  - after the Gap 5A wiki read-only HTTP adapter slice, `rustfmt --edition 2021 src/knowledge_read.rs tests/knowledge_read_tests.rs`, `cargo test -q --test knowledge_read_tests`, and `git diff --check` passed.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
@@ -41,6 +42,7 @@ The project is still **local-gate-ready**, not **real-live-ready**.
 4. Readiness boundaries
    - `browser_read` can distinguish unavailable vs live-ready CDP read state.
    - `knowledge_read` can distinguish local preview, preflight-ready, and adapter missing.
+   - `ReadonlyHttpKnowledgeReadAdapter::new_wiki` now exists as the first audited read-only wiki adapter; it is not yet wired to a real endpoint receipt.
    - `subagent_live_worker.enabled=false` remains the default boundary.
 
 5. Feishu surface
@@ -152,7 +154,7 @@ Recommended next action:
 
 Either run a controlled Chrome/Chromium CDP readonly session and capture verified browser_read evidence, or proceed to Gap 4B: one explicit low-risk desktop action rehearsal through actuator/governance. Do not infer desktop action readiness from browser_read.
 
-### Gap 5 - Wiki/GBrain Read-Only Adapter
+### Gap 5 - Wiki/GBrain Read-Only Adapter - Partially Completed 2026-05-30
 
 Goal: connect external knowledge as audited read-only adapters.
 
@@ -163,19 +165,34 @@ Acceptance evidence:
 - Reads do not write core memory automatically.
 - Status says read-only live adapter is available only after real receipt.
 
+Current evidence:
+
+- `ReadonlyHttpKnowledgeReadAdapter::new_wiki` can issue a read-only HTTP `POST` to a wiki endpoint.
+- Request body includes `source/query/limit/read_only=true`.
+- Response `hits` or `results` are parsed into `KnowledgeReadHit` with provenance.
+- Receipt redacts token and records `read_only=true` / `writes_automatically=false`.
+- GBrain remains explicitly unavailable in this slice.
+- Non-2xx errors are structured and do not echo response body/token.
+
+Validation:
+
+```bash
+cargo test -q --test knowledge_read_tests
+```
+
 Recommended next action:
 
-Pick one source first, preferably wiki, and wire a read-only adapter behind the existing `knowledge_read` contract.
+Either wire a real wiki endpoint/token env into a separate receipt script for live evidence, or keep Gap 5A as code-only and proceed to Gap 4B desktop action rehearsal. Do not claim real Wiki/GBrain live-ready until a real endpoint receipt exists.
 
 ## Recommended Order
 
 1. Feishu live receipt evidence, if a recent Chuang event log becomes available
 2. Controlled CDP browser_read evidence, if a CDP port is intentionally started
 3. Desktop action rehearsal
-4. Wiki/GBrain read-only adapter
+4. Wiki live receipt script or GBrain read-only adapter
 5. Skill proposal review -> manual solidify path
 
-Provider live receipt, single-worker rehearsal, Feishu readonly collector code, and browser_read readonly collector code are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail or new live evidence is available.
+Provider live receipt, single-worker rehearsal, Feishu readonly collector code, browser_read readonly collector code, and wiki read-only adapter code are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail or new live evidence is available.
 
 ## Do Not Do Yet
 

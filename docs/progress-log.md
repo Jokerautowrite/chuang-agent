@@ -1,3 +1,10 @@
+# 2026-05-30 Gap 5A wiki read-only HTTP adapter 最小落地
+- 本轮继续按老爸要求少花时间在 Feishu，主线推进 `knowledge_read` 的外脑只读 adapter。中途额外修正了 Feishu bridge stale-turn watchdog：只提醒一次，不再因超时提醒删除飞书端运行状态；该 bridge 改动未混入 Chuang 提交，且未重启服务以避免打断当前会话。
+- `src/knowledge_read.rs` 新增 `ReadonlyHttpKnowledgeReadAdapter::new_wiki`：只支持 wiki 源，使用 operator 配置的 endpoint/token 发起只读 `POST`，请求体包含 `source/query/limit/read_only=true`，响应解析 `hits`/`results` 为带 provenance 的 `KnowledgeReadHit`。该 adapter 不写 core memory，不支持 GBrain，未知 source 在网络前拒绝。
+- receipt 采用脱敏 JSON，记录 `adapter/source/status_code/hit_count/read_only/writes_automatically`，token 固定为 `<redacted>`；HTTP 非 2xx、超时、请求/响应错误都返回结构化 `KnowledgeReadError`，不回显响应 body，避免错误体或 token 泄漏。
+- `tests/knowledge_read_tests.rs` 新增本地 `TcpListener` HTTP 测试：覆盖 wiki 成功查询和 receipt、非 2xx 结构化错误且不泄漏 body/token、GBrain 在本切片保持 unavailable、未知 source 网络前拒绝。
+- 定向验证已通过：`rustfmt --edition 2021 src/knowledge_read.rs tests/knowledge_read_tests.rs`、`cargo test -q --test knowledge_read_tests`、`git diff --check`。当前这只是 wiki adapter 代码能力，不代表真实 Wiki endpoint 已现场验收，也不改变全局 real-live-ready 结论。
+
 # 2026-05-30 Gap 4A browser_read readonly receipt 采证器落地
 - 本轮按老爸要求暂停深挖 Feishu，继续推进其他主线；先由终端可见的 `gpt-5.3-codex` 子代理写 Gap 4A，主控审核后接管修正测试竞态。没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes，没有执行浏览器动作或桌面动作。
 - `scripts/chuang-browser-read-live-receipt.sh` 已从填空模板改为真实只读采证器：默认读取 `cargo run --quiet -- status --json` 的 browser_readiness 状态；如果设置 `CHUANG_CDP_PORT`，只读取本机 CDP `/json` 元数据并脱敏输出 target/url/title 的 hash/ref、scheme/host 和长度，不读取 DOM、不走 WebSocket、不执行点击/输入。

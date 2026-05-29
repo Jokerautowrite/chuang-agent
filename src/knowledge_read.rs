@@ -1,4 +1,14 @@
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::{Method, Request};
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::time::Duration;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::time::timeout;
 
 pub const KNOWLEDGE_READ_CONTRACT_VERSION: u16 = 1;
 pub const KNOWLEDGE_READ_SOURCES: &[&str] = &["wiki", "gbrain"];
@@ -88,6 +98,233 @@ pub trait KnowledgeReadAdapter {
     fn status(&self) -> KnowledgeReadStatus;
     fn query(&self, request: KnowledgeReadQuery)
         -> Result<KnowledgeReadResult, KnowledgeReadError>;
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReadonlyHttpKnowledgeReadAdapter {
+    source: String,
+    endpoint: String,
+    token: String,
+    timeout_ms: u64,
+}
+
+impl ReadonlyHttpKnowledgeReadAdapter {
+    pub fn new_wiki(
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            source: "wiki".to_string(),
+            endpoint: endpoint.into(),
+            token: token.into(),
+            timeout_ms: timeout_ms.max(1),
+        }
+    }
+
+    fn is_configured(&self) -> bool {
+        self.source == "wiki" && !self.endpoint.trim().is_empty() && !self.token.trim().is_empty()
+    }
+
+    fn query_http(
+        &self,
+        request: &KnowledgeReadQuery,
+    ) -> Result<(u16, String), KnowledgeReadError> {
+        let endpoint = self.endpoint.clone();
+        let token = self.token.clone();
+        let timeout_ms = self.timeout_ms;
+        let body_json = json!({
+            "source": request.source,
+            "query": request.query,
+            "limit": request.limit.max(1),
+            "read_only": true,
+        })
+        .to_string();
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| {
+                knowledge_read_error(
+                    "knowledge_read_http_runtime",
+                    "cannot initialize knowledge_read HTTP runtime",
+                    true,
+                    "readonly_http",
+                )
+            })?;
+
+        runtime.block_on(async move {
+            let connector = HttpsConnectorBuilder::new()
+                .with_native_roots()
+                .map_err(|_| {
+                    knowledge_read_error(
+                        "knowledge_read_http_tls",
+                        "cannot initialize knowledge_read TLS roots",
+                        true,
+                        "readonly_http",
+                    )
+                })?
+                .https_or_http()
+                .enable_http1()
+                .build();
+            let client: Client<_, Full<Bytes>> =
+                Client::builder(TokioExecutor::new()).build(connector);
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri(&endpoint)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body(Full::new(Bytes::from(body_json)))
+                .map_err(|_| {
+                    knowledge_read_error(
+                        "knowledge_read_http_request",
+                        "cannot build knowledge_read HTTP request",
+                        false,
+                        "readonly_http",
+                    )
+                })?;
+            let response = timeout(Duration::from_millis(timeout_ms), client.request(req))
+                .await
+                .map_err(|_| {
+                    knowledge_read_error(
+                        "knowledge_read_http_timeout",
+                        "knowledge_read HTTP request timed out",
+                        true,
+                        "readonly_http",
+                    )
+                })?
+                .map_err(|_| {
+                    knowledge_read_error(
+                        "knowledge_read_http_send",
+                        "knowledge_read HTTP request failed",
+                        true,
+                        "readonly_http",
+                    )
+                })?;
+            let status_code = response.status().as_u16();
+            let body = timeout(
+                Duration::from_millis(timeout_ms),
+                response.into_body().collect(),
+            )
+            .await
+            .map_err(|_| {
+                knowledge_read_error(
+                    "knowledge_read_http_timeout",
+                    "knowledge_read HTTP response timed out",
+                    true,
+                    "readonly_http",
+                )
+            })?
+            .map_err(|_| {
+                knowledge_read_error(
+                    "knowledge_read_http_body",
+                    "knowledge_read HTTP response body failed",
+                    true,
+                    "readonly_http",
+                )
+            })?
+            .to_bytes();
+
+            Ok((status_code, String::from_utf8_lossy(&body).to_string()))
+        })
+    }
+}
+
+impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {
+    fn status(&self) -> KnowledgeReadStatus {
+        let configured = self.is_configured();
+        KnowledgeReadStatus {
+            contract_version: KNOWLEDGE_READ_CONTRACT_VERSION,
+            adapter_kind: "readonly_http".to_string(),
+            available: configured,
+            state: if configured { "ready" } else { "unavailable" }.to_string(),
+            sources: vec!["wiki".to_string()],
+            boundary: KNOWLEDGE_READ_BOUNDARY.to_string(),
+            reason_code: if configured {
+                "wiki_readonly_http_configured"
+            } else {
+                "wiki_readonly_http_config_missing"
+            }
+            .to_string(),
+            reason: if configured {
+                "wiki read-only HTTP adapter is configured; it only performs operator-configured read queries and never writes core memory"
+                    .to_string()
+            } else {
+                "wiki read-only HTTP adapter requires endpoint and token before live read can be attempted"
+                    .to_string()
+            },
+            local_preview_is_separate: true,
+            connects_real_service: configured,
+            writes_automatically: false,
+        }
+    }
+
+    fn query(
+        &self,
+        request: KnowledgeReadQuery,
+    ) -> Result<KnowledgeReadResult, KnowledgeReadError> {
+        validate_knowledge_read_source(&request.source, "readonly_http")?;
+        if request.source != self.source {
+            return Err(knowledge_read_error(
+                "knowledge_read_source_unavailable",
+                format!(
+                    "{} read-only HTTP adapter is not wired; only wiki is available in this slice",
+                    request.source
+                ),
+                false,
+                "readonly_http",
+            ));
+        }
+        if request.query.trim().is_empty() {
+            return Err(knowledge_read_error(
+                "knowledge_read_empty_query",
+                "knowledge_read query must not be empty",
+                false,
+                "readonly_http",
+            ));
+        }
+        if !self.is_configured() {
+            return Err(knowledge_read_error(
+                "knowledge_read_unavailable",
+                "wiki read-only HTTP adapter is missing endpoint or token",
+                false,
+                "readonly_http",
+            ));
+        }
+
+        let (status_code, body) = self.query_http(&request)?;
+        if !(200..300).contains(&status_code) {
+            return Err(knowledge_read_error(
+                "knowledge_read_http_status",
+                format!("wiki read-only HTTP adapter returned status_code={status_code}"),
+                status_code >= 500 || status_code == 429,
+                "readonly_http",
+            ));
+        }
+
+        let hits = parse_knowledge_read_hits(&body, &request.source)?;
+        let limited_hits = hits
+            .into_iter()
+            .take(request.limit.max(1))
+            .collect::<Vec<_>>();
+        let receipt = json!({
+            "adapter": "readonly_http",
+            "source": request.source,
+            "status_code": status_code,
+            "hit_count": limited_hits.len(),
+            "read_only": true,
+            "writes_automatically": false,
+            "token": "<redacted>",
+        })
+        .to_string();
+
+        Ok(KnowledgeReadResult {
+            source: request.source,
+            query: request.query,
+            hits: limited_hits,
+            read_only: true,
+            receipt,
+        })
+    }
 }
 
 pub fn preflight_knowledge_read_status(
@@ -305,4 +542,83 @@ fn knowledge_read_sources() -> Vec<String> {
         .iter()
         .map(|source| source.to_string())
         .collect()
+}
+
+fn parse_knowledge_read_hits(
+    body: &str,
+    requested_source: &str,
+) -> Result<Vec<KnowledgeReadHit>, KnowledgeReadError> {
+    let value = serde_json::from_str::<serde_json::Value>(body).map_err(|_| {
+        knowledge_read_error(
+            "knowledge_read_response_decode",
+            "wiki read-only HTTP adapter returned invalid JSON",
+            false,
+            "readonly_http",
+        )
+    })?;
+    let hits_value = value
+        .get("hits")
+        .or_else(|| value.get("results"))
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            knowledge_read_error(
+                "knowledge_read_response_decode",
+                "wiki read-only HTTP adapter response must contain hits or results array",
+                false,
+                "readonly_http",
+            )
+        })?;
+
+    let mut hits = Vec::with_capacity(hits_value.len());
+    for hit in hits_value {
+        let title = hit
+            .get("title")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let uri = hit
+            .get("uri")
+            .or_else(|| hit.get("url"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let preview = hit
+            .get("preview")
+            .or_else(|| hit.get("snippet"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let provenance = hit
+            .get("provenance")
+            .and_then(|value| value.as_str())
+            .unwrap_or("wiki_readonly_http")
+            .to_string();
+        hits.push(KnowledgeReadHit {
+            source: hit
+                .get("source")
+                .and_then(|value| value.as_str())
+                .unwrap_or(requested_source)
+                .to_string(),
+            title,
+            uri,
+            preview,
+            provenance,
+        });
+    }
+
+    Ok(hits)
+}
+
+fn knowledge_read_error(
+    code: impl Into<String>,
+    message: impl Into<String>,
+    retryable: bool,
+    adapter_kind: impl Into<String>,
+) -> KnowledgeReadError {
+    KnowledgeReadError {
+        code: code.into(),
+        message: message.into(),
+        adapter_kind: adapter_kind.into(),
+        retryable,
+    }
 }
