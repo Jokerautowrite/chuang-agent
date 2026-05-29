@@ -1,3 +1,10 @@
+# 2026-05-30 Gap 4B desktop action rehearsal receipt 落地
+- 本轮继续按老爸要求推进 Chuang 主线，补齐 desktop action rehearsal 的最小可审计回执。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实桌面动作，也没有删除或清理文件。
+- 新增 `scripts/chuang-desktop-action-rehearsal-receipt.sh`：默认演练 `open_app Chrome`，显式通过 `env -u CHUANG_REAL_ACTUATOR_ENABLE` 关闭真实 actuator gate，然后调用 `scripts/chuang-real-actuator-adapter.py --json --allowlist config/actuator-allowlist.example.json`。回执记录 adapter、allowlist、audit label、required env、治理分类和 dry-run 边界。
+- receipt 输出 `receipt_kind=desktop_action_rehearsal_receipt`、`action=open_app`、`app_name=Chrome`、`dry_run=true`、`real_execution=false`、`performs_desktop_action=false`、`audit_label=actuator.operation.live`、`required_env=CHUANG_REAL_ACTUATOR_ENABLE`，并固定 `can_mark_real_live_ready=false` / `global_real_live_ready=false`。
+- 新增 `tests/desktop_action_rehearsal_receipt_tests.rs`：覆盖脚本静态安全 guard、动态 receipt JSON 字段，以及 `ToolCall::OpenApp` 通过 `StaticRuleGovernance` + command actuator + allowlist 执行到 dry-run adapter，并产生 `tool.open_app` audit record。
+- 验证已通过：`bash -n scripts/chuang-desktop-action-rehearsal-receipt.sh`、`bash scripts/chuang-desktop-action-rehearsal-receipt.sh --json`、`rustfmt --edition 2021 tests/desktop_action_rehearsal_receipt_tests.rs`、`cargo test -q --test desktop_action_rehearsal_receipt_tests`、`git diff --check`、`cargo test -q`。
+
 # 2026-05-30 Gap 5A wiki read-only HTTP adapter 最小落地
 - 本轮继续按老爸要求少花时间在 Feishu，主线推进 `knowledge_read` 的外脑只读 adapter。中途额外修正了 Feishu bridge stale-turn watchdog：只提醒一次，不再因超时提醒删除飞书端运行状态；该 bridge 改动未混入 Chuang 提交，且未重启服务以避免打断当前会话。
 - `src/knowledge_read.rs` 新增 `ReadonlyHttpKnowledgeReadAdapter::new_wiki`：只支持 wiki 源，使用 operator 配置的 endpoint/token 发起只读 `POST`，请求体包含 `source/query/limit/read_only=true`，响应解析 `hits`/`results` 为带 provenance 的 `KnowledgeReadHit`。该 adapter 不写 core memory，不支持 GBrain，未知 source 在网络前拒绝。
