@@ -48,6 +48,7 @@ const receipt = parseBridgeCommand("/receipt");
 assert(receipt, "/receipt should be handled as a bridge command");
 assert.strictEqual(receipt.commandName, "receipt");
 assert(receipt.replyText.includes("chuang-live-operator-receipt.sh --json"));
+assert(receipt.replyText.includes("不执行脚本、不读取 secret、不进入 Agent 主链"));
 assert(receipt.replyText.includes("schema_version"));
 assert(receipt.replyText.includes("tested_at"));
 assert(receipt.replyText.includes("request_id"));
@@ -67,6 +68,7 @@ assert(receipt.replyText.includes("CHUANG_LIVE_OPERATOR_ENV_FILE"));
 assert(receipt.replyText.includes("CHUANG_FEISHU_ENV_FILE"));
 assert(receipt.replyText.includes("CHUANG_LIVE_REQUEST_ID"));
 assert(receipt.replyText.includes("不要把 secret"));
+assert(receipt.replyText.includes("不能因为生成模板就标记 live 完成"));
 assert.strictEqual(buildReceiptCommandReply().commandName, "receipt");
 
 const liveReceipt = parseBridgeCommand("/live-receipt");

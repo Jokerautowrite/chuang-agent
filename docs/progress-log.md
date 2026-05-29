@@ -1,3 +1,17 @@
+# 2026-05-30 四路子代理并行推进后的主控审核
+- 本轮按老爸要求通过终端/tool-side 子代理并行推进 4 条线，主控负责审核集成；没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes。
+- Provider Live Receipt 线已补齐并由主控复验：`bash scripts/chuang-provider-live-request-receipt.sh --json --input 'provider live receipt probe: reply with ok only'` 返回 `ok=true`、`request_path=/v1/responses`、`status_code=200`、`provider_response_ok=true`、`provider_fallback_used=false`、`runtime_report_id=report-turn-1`、`api_key_state=<set>`。回执只保留 `response_summary=chars=2 redacted=true`，不输出密钥或模型正文。
+- Single live worker 线本轮只补了一个安全回归：能力不匹配时必须在 worker start 前拒绝，`ran_count=0`，不产生 claim/report；真实 single worker rehearsal 仍未完成。
+- Feishu live receipt 线本轮只锁定 `/receipt` 文案边界：命令只显示模板，不执行脚本、不读取 secret、不进入 Agent 主链，不能因为生成模板就标记 live 完成；真实 Feishu 收发 evidence 仍未补齐。
+- Browser/Wiki/GBrain 线本轮只新增 `browser_read` 只读回执模板与回归，明确不执行浏览器动作、不写 core memory、不连接 provider/wiki/GBrain；真实 wiki/GBrain read-only adapter 仍未接线。
+- 验证已通过：`git diff --check`、`cargo test -q --test provider_live_receipt_tests --test provider_live_request_receipt_script_tests`、`cargo test -q --test cli_subagent_dispatch_tests cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start`、`cargo test -q --test browser_read_live_receipt_tests`、`node scripts/chuang-feishu-command-smoke.js`、`bash -n scripts/chuang-provider-live-request-receipt.sh && bash -n scripts/chuang-browser-read-live-receipt.sh`、`cargo test -q`。
+- `cargo fmt --all --check` 会命中一批本轮外的既有未格式化文件；本轮只对触碰的 Rust 测试文件运行了 `rustfmt`，避免扩大无关 diff。
+
+# 2026-05-30 Provider Live Receipt 命令最小补齐
+- 新增 `scripts/chuang-provider-live-request-receipt.sh`：执行一次受限 `cargo run --quiet -- run`，通过真实 provider 路径发起请求并输出结构化 receipt，明确 `connects_real_provider=true`、`does_not_call_provider=false`，不再把 readiness/status 当作 live receipt。
+- receipt 会校验请求路径必须是 `/v1/responses`，并记录 `provider_id/model/transport_mode/request_url/status_code/runtime_report_id` 与 redacted `response_summary`；`api_key_state` 只输出 `<set>/<missing>`，不打印密钥。
+- 新增 `tests/provider_live_request_receipt_script_tests.rs`：本地临时 HTTP server 回归锁定脚本真实发起 `POST /v1/responses`，并验证 JSON receipt 字段、`provider_response_ok=true`、`runtime_report_id` 存在及 secret 不外泄。
+
 # 2026-05-30 Chuang Git 同步后推进计划与交接刷新
 - 已确认 Chuang 仓库远端为 `https://github.com/Jokerautowrite/chuang-agent.git`，本地 `main` 已推送到 `origin/main`，当前 `git status --short --branch` 为 `## main...origin/main`，工作树干净。
 - 当前最新提交 `09f5d57 docs(ops): archive sub2 operation artifacts` 已在远端；前一轮整理出的 provider Responses API、subagent dry-run skill proposals、readiness boundary、Feishu summary 和 Sub2 ops 文档提交均已推送。本轮没有删除文件、没有触碰 Hermes、没有触碰 Sub2 线上环境。

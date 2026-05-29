@@ -1044,6 +1044,72 @@ fn cli_subagent_run_loop_live_gate_rejects_command_outside_allowlist_first() {
 }
 
 #[test]
+fn cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start() {
+    let queue_root = temp_queue_root("run-loop-live-gate-capability-mismatch");
+    let dispatch = dispatch_task_with_capabilities(
+        &queue_root,
+        "task-cli-live-capability-mismatch",
+        "run-loop capability mismatch should stay pre-start",
+        &["rust"],
+    );
+    let run_id = dispatch["run_id"].as_str().expect("run id");
+
+    let output = cargo_command()
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-loop",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "scripts/chuang-subagent-runner-example.sh",
+            "--allow-runner-command",
+            "scripts/chuang-subagent-runner-example.sh",
+            "--approve-exec",
+            "--require-live-gate",
+            "--capability",
+            "filesystem",
+            "--max-runs",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("stdout json");
+
+    assert_eq!(parsed["runner"], "command");
+    assert_eq!(parsed["ran_count"], 0);
+    assert_eq!(parsed["idle"], true);
+    assert_eq!(parsed["run_ids"], serde_json::json!([]));
+    assert_eq!(parsed["report_paths"], serde_json::json!([]));
+    assert_eq!(parsed["report_admissions"], serde_json::json!([]));
+    assert!(queue_root
+        .join("dispatch")
+        .join(format!("{run_id}.json"))
+        .exists());
+    assert!(!queue_root
+        .join("claims")
+        .join(format!("{run_id}.json"))
+        .exists());
+    assert!(!queue_root
+        .join("reports")
+        .join(format!("{run_id}.json"))
+        .exists());
+}
+
+#[test]
 fn cli_subagent_run_once_uses_runtime_dry_run_slot_from_config_file() {
     let queue_root = temp_queue_root("run-once-config-dry-run");
     let dispatch = dispatch_task(&queue_root, "task-cli-config-dry-run", "配置 dry_run 演化槽");

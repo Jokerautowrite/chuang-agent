@@ -2,20 +2,21 @@
 
 ## Current State
 
-Chuang is clean, pushed, and ready for the next implementation decision.
+Chuang has completed the first real receipt slice and is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
-- Current head: `09f5d57 docs(ops): archive sub2 operation artifacts`
-- Git state: local `main` is synced with `origin/main`
+- Current head before local receipt slice: `09f5d57 docs(ops): archive sub2 operation artifacts`
+- Git state before this slice: local `main` was synced with `origin/main`; after this slice it should be committed locally before any push.
 - Latest known validation after repo整理:
   - `git diff --check` passed
   - `cargo test -q` passed
   - `sh scripts/chuang-third-test-smoke.sh` passed with `third_test_candidate_smoke_ok`
+  - after the provider receipt slice, `cargo test -q` also passed; `third-test` should be rerun after the slice is committed and the tree is clean.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
-`cargo run -q -- status --json` currently reports the configured provider as `openai_compatible` / `cliproxy-local`, model `gpt-5.5`, and `api_key_state=<set>`. This only proves readiness for a live-request attempt; status does not send a real provider request.
+`cargo run -q -- status --json` reports the configured provider as `openai_compatible` / `cliproxy-local`, model `gpt-5.5`, and `api_key_state=<set>`. Status alone only proves readiness, but this slice added and ran a real provider receipt command.
 
 ## What Is Already Solid
 
@@ -45,7 +46,7 @@ The project is still **local-gate-ready**, not **real-live-ready**.
 
 ## Main Gaps
 
-### Gap 1 - Provider Live Receipt
+### Gap 1 - Provider Live Receipt - Completed 2026-05-30
 
 Goal: prove the configured `cliproxy-local` provider can make one minimal, non-sensitive `/v1/responses` request through the Chuang provider path.
 
@@ -57,14 +58,13 @@ Acceptance evidence:
 - Receipt records timestamp, provider kind, model, request path, status, and redacted response summary.
 - Failure mode is structured and does not silently fall back to fake/stub.
 
-Recommended next action:
+Current evidence:
 
 ```bash
-cargo run -q -- status --json
-sh scripts/chuang-provider-readiness-check.sh
+bash scripts/chuang-provider-live-request-receipt.sh --json --input 'provider live receipt probe: reply with ok only'
 ```
 
-Then run or add a deliberately bounded provider receipt command if the existing scripts still only do readiness checks.
+Observed result: `ok=true`, `request_path=/v1/responses`, `status_code=200`, `provider_response_ok=true`, `provider_fallback_used=false`, `runtime_report_id=report-turn-1`, `api_key_state=<set>`, and `response_summary=chars=2 redacted=true`.
 
 ### Gap 2 - Single Live Worker Rehearsal
 
@@ -84,7 +84,7 @@ Recommended next action:
 sh scripts/chuang-live-runner-readiness-view.sh
 ```
 
-Then implement the smallest missing command or fixture that turns readiness evidence into a real single-worker rehearsal receipt.
+Then implement the smallest missing command or fixture that turns readiness evidence into a real single-worker rehearsal receipt. A new regression already locks one safety condition: capability mismatch must reject before worker start and produce no claim/report files.
 
 ### Gap 3 - Feishu Live Receipt
 
@@ -132,15 +132,14 @@ Pick one source first, preferably wiki, and wire a read-only adapter behind the 
 
 ## Recommended Order
 
-1. Provider live receipt
-2. Single live worker rehearsal
-3. Feishu live receipt
-4. Browser read-only receipt
-5. Desktop action rehearsal
-6. Wiki/GBrain read-only adapter
-7. Skill proposal review -> manual solidify path
+1. Single live worker rehearsal
+2. Feishu live receipt
+3. Browser read-only receipt
+4. Desktop action rehearsal
+5. Wiki/GBrain read-only adapter
+6. Skill proposal review -> manual solidify path
 
-Provider first is the cleanest next step because the code has already moved to `/v1/responses`, and one real provider receipt will quickly prove whether the runtime path is actually usable.
+Provider live receipt is now done; keep it as a regression surface, but do not spend the next slice there unless it fails.
 
 ## Do Not Do Yet
 
@@ -162,4 +161,4 @@ cargo run -q -- status --json
 sh scripts/chuang-third-test-smoke.sh
 ```
 
-If the tree is clean and third-test still passes, continue with **Gap 1 - Provider Live Receipt**. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.
+If the tree is clean and third-test still passes, continue with **Gap 2 - Single Live Worker Rehearsal**. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.
