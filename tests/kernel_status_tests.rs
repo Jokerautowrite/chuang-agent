@@ -1,4 +1,8 @@
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
 
 use chuang_agent::chuang_kernel::{
     ChuangKernelConfig, IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
@@ -11,8 +15,18 @@ use chuang_agent::goal_run::{
 use chuang_agent::kernel_status::{build_chuang_mvp_status, summarize_goal_run_readiness};
 use chuang_agent::runtime_config::{IdentityBootstrapConfig, IdentityMemoryConfig, RuntimeConfig};
 
+fn cdp_env_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("cdp env guard should lock")
+}
+
 #[test]
 fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
+    let _guard = cdp_env_guard();
+    std::env::remove_var("CHUANG_CDP_PORT");
     let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     let kernel = ChuangKernelConfig {
         agent_id: "chuang-cli".to_string(),
@@ -844,6 +858,130 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(!status.goal_mode.adds_core_slot);
     assert_eq!(status.goal_run.goal_id, "mainline-mvp");
     assert!(status.goal_run.ok);
+}
+
+#[test]
+fn kernel_status_marks_knowledge_read_preflight_ready_when_env_and_endpoints_are_set() {
+    let _guard = cdp_env_guard();
+    std::env::remove_var("CHUANG_CDP_PORT");
+    std::env::set_var("CHUANG_TEST_WIKI_TOKEN", "wiki-token");
+
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.external_knowledge.wiki.endpoint = Some("https://wiki.example.invalid/query".to_string());
+    config.external_knowledge.wiki.token_env = Some("CHUANG_TEST_WIKI_TOKEN".to_string());
+
+    let kernel = ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: config.recall_limit,
+        metadata: config.metadata.clone(),
+        context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
+    };
+
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    assert!(status.knowledge_readiness.ok);
+    assert_eq!(
+        status.knowledge_readiness.overall_state,
+        "local_preview_ready_knowledge_read_preflight_ready_adapter_missing"
+    );
+    assert!(!status.knowledge_readiness.live_adapter_available);
+    assert_eq!(
+        status.knowledge_readiness.live_adapter_state,
+        "preflight_ready_adapter_missing"
+    );
+    assert_eq!(
+        status.knowledge_readiness.live_adapter_kind,
+        "preflight_only"
+    );
+    assert_eq!(
+        status.knowledge_readiness.live_reason_code,
+        "real_adapter_missing"
+    );
+    assert!(status
+        .knowledge_readiness
+        .live_reason
+        .contains("no audited live adapter is wired"));
+    assert!(status
+        .knowledge_readiness
+        .current
+        .contains("endpoint and token env are configured"));
+    assert!(status
+        .knowledge_readiness
+        .next_action
+        .contains("wire the audited read-only wiki/GBrain adapter"));
+
+    std::env::remove_var("CHUANG_TEST_WIKI_TOKEN");
+}
+
+fn spawn_cdp_status_server() -> (SocketAddr, JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("connection should be accepted");
+        let mut buffer = [0u8; 4096];
+        let _ = stream.read(&mut buffer).expect("request should be readable");
+        let body = "[]";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("response should be writable");
+    });
+    (address, server)
+}
+
+#[test]
+fn kernel_status_surfaces_live_ready_browser_read_adapter_when_cdp_port_is_reachable() {
+    let _guard = cdp_env_guard();
+    let (address, server) = spawn_cdp_status_server();
+    std::env::set_var("CHUANG_CDP_PORT", address.port().to_string());
+
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let kernel = ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: config.recall_limit,
+        metadata: config.metadata.clone(),
+        context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
+    };
+
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    std::env::remove_var("CHUANG_CDP_PORT");
+    server.join().expect("server thread should finish");
+
+    assert!(status.browser_readiness.ok);
+    assert_eq!(
+        status.browser_readiness.overall_state,
+        "desktop_read_ready_browser_read_live_ready"
+    );
+    assert!(status.browser_readiness.browser_read_adapter_available);
+    assert_eq!(status.browser_readiness.browser_read_state, "cdp_connected");
+    assert_eq!(status.browser_readiness.browser_read_adapter_kind, "cdp");
+    assert_eq!(
+        status.browser_readiness.browser_read_reason_code,
+        "cdp_port_reachable"
+    );
+    assert!(status
+        .browser_readiness
+        .current
+        .contains("browser_read live adapter is available via cdp"));
+    assert!(status
+        .browser_readiness
+        .next_action
+        .contains("continue separate live receipts for browser actions"));
 }
 
 #[test]

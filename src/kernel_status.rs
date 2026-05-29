@@ -1647,9 +1647,44 @@ fn cdp_port_from_env() -> Option<u16> {
 }
 
 fn build_knowledge_readiness(config: &KnowledgeReadConfig) -> KnowledgeReadinessStatus {
-    let wiki = preflight_knowledge_read_status(config, "wiki", "<missing>");
-    let gbrain = preflight_knowledge_read_status(config, "gbrain", "<missing>");
+    let wiki = preflight_knowledge_read_status(
+        config,
+        "wiki",
+        knowledge_token_state(config.wiki.token_env.as_deref()),
+    );
+    let gbrain = preflight_knowledge_read_status(
+        config,
+        "gbrain",
+        knowledge_token_state(config.gbrain.token_env.as_deref()),
+    );
     knowledge_readiness_from_status(&wiki, &gbrain)
+}
+
+fn knowledge_token_state(token_env: Option<&str>) -> &'static str {
+    let Some(token_env) = token_env.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "<missing>";
+    };
+
+    match std::env::var(token_env) {
+        Ok(value) if !value.trim().is_empty() => "<set>",
+        _ => "<missing>",
+    }
+}
+
+fn prioritized_knowledge_status<'a>(
+    wiki: &'a KnowledgeReadStatus,
+    gbrain: &'a KnowledgeReadStatus,
+) -> &'a KnowledgeReadStatus {
+    [wiki, gbrain]
+        .into_iter()
+        .min_by_key(|status| match status.state.as_str() {
+            "preflight_ready_adapter_missing" => 0,
+            _ if status.reason_code == "token_missing" => 1,
+            _ if status.reason_code == "token_env_missing" => 2,
+            _ if status.reason_code == "endpoint_missing" => 3,
+            _ => 4,
+        })
+        .expect("knowledge status priority should always have at least one source")
 }
 
 fn knowledge_readiness_from_status(
@@ -1658,8 +1693,21 @@ fn knowledge_readiness_from_status(
 ) -> KnowledgeReadinessStatus {
     let local_preview_ready = true;
     let live_adapter_available = wiki.available || gbrain.available;
+    let terms_consistent = wiki.local_preview_is_separate
+        && gbrain.local_preview_is_separate
+        && !wiki.connects_real_service
+        && !gbrain.connects_real_service
+        && !wiki.writes_automatically
+        && !gbrain.writes_automatically;
+    let live_preflight_ready = !live_adapter_available
+        && [wiki, gbrain]
+            .into_iter()
+            .any(|status| status.state == "preflight_ready_adapter_missing")
+        && terms_consistent;
+    let live_unavailable = !live_adapter_available && !live_preflight_ready && terms_consistent;
+    let primary_status = prioritized_knowledge_status(wiki, gbrain);
     let ok = local_preview_ready
-        && !live_adapter_available
+        && (live_adapter_available || live_preflight_ready || live_unavailable)
         && wiki.local_preview_is_separate
         && gbrain.local_preview_is_separate
         && !wiki.connects_real_service
@@ -1669,7 +1717,9 @@ fn knowledge_readiness_from_status(
 
     KnowledgeReadinessStatus {
         ok,
-        overall_state: if ok {
+        overall_state: if live_preflight_ready {
+            "local_preview_ready_knowledge_read_preflight_ready_adapter_missing"
+        } else if live_unavailable {
             "local_preview_ready_knowledge_read_unavailable"
         } else {
             "knowledge_read_terms_inconsistent"
@@ -1683,6 +1733,8 @@ fn knowledge_readiness_from_status(
         live_adapter_available,
         live_adapter_state: if live_adapter_available {
             "ready".to_string()
+        } else if live_preflight_ready {
+            "preflight_ready_adapter_missing".to_string()
         } else {
             "unavailable".to_string()
         },
@@ -1692,27 +1744,31 @@ fn knowledge_readiness_from_status(
             } else {
                 gbrain.adapter_kind.clone()
             }
+        } else if live_preflight_ready {
+            primary_status.adapter_kind.clone()
         } else {
             "unavailable".to_string()
         },
         live_sources: vec!["wiki".to_string(), "gbrain".to_string()],
-        live_reason_code: if !wiki.available {
-            wiki.reason_code.clone()
-        } else {
-            gbrain.reason_code.clone()
-        },
-        live_reason: if !wiki.available {
-            wiki.reason.clone()
-        } else {
-            gbrain.reason.clone()
-        },
+        live_reason_code: primary_status.reason_code.clone(),
+        live_reason: primary_status.reason.clone(),
         live_boundary: "knowledge_read_wiki_gbrain_live_contract".to_string(),
         local_preview_is_separate: true,
         connects_real_service: false,
         writes_automatically: false,
         real_adapter_required: true,
-        current: "local preview/source-contract is ready; real wiki/GBrain live read adapter is unavailable or not yet wired".to_string(),
-        next_action: "add audited read-only wiki/GBrain adapter with endpoint, credential loading, provenance, and receipts; until then return structured unavailable instead of claiming live reads".to_string(),
+        current: if live_preflight_ready {
+            "local preview/source-contract is ready; wiki/GBrain endpoint and token env are configured, but the audited live read adapter is still missing"
+                .to_string()
+        } else {
+            "local preview/source-contract is ready; real wiki/GBrain live read adapter is unavailable or not yet wired".to_string()
+        },
+        next_action: if live_preflight_ready {
+            "wire the audited read-only wiki/GBrain adapter with provenance and receipts; do not claim live reads until the real adapter is attached"
+                .to_string()
+        } else {
+            "add audited read-only wiki/GBrain adapter with endpoint, credential loading, provenance, and receipts; until then return structured unavailable instead of claiming live reads".to_string()
+        },
     }
 }
 
@@ -1727,19 +1783,39 @@ fn browser_readiness_from_status(
         .cloned()
         .collect::<Vec<_>>();
     let desktop_read_observation_ready = !desktop_read_tools.is_empty();
-    let ok = desktop_read_observation_ready
-        && !browser_read.available
-        && browser_read.desktop_read_is_separate
+    let browser_read_terms_consistent = browser_read.desktop_read_is_separate
         && browser_read.does_not_use_actuator_observe;
+    let browser_read_adapter_ready = browser_read.available && browser_read_terms_consistent;
+    let browser_read_unavailable = !browser_read.available && browser_read_terms_consistent;
+    let ok = desktop_read_observation_ready && (browser_read_adapter_ready || browser_read_unavailable);
+
+    let overall_state = if browser_read_adapter_ready {
+        "desktop_read_ready_browser_read_live_ready"
+    } else if ok {
+        "desktop_read_ready_browser_read_unavailable"
+    } else {
+        "browser_read_terms_inconsistent"
+    };
+    let current = if browser_read_adapter_ready {
+        format!(
+            "desktop_read observation tools are mapped; browser_read live adapter is available via {}",
+            browser_read.adapter_kind
+        )
+    } else {
+        "desktop_read observation tools are mapped; browser_read URL/title/DOM live adapter is unavailable"
+            .to_string()
+    };
+    let next_action = if browser_read_adapter_ready {
+        "keep browser_read scoped to audited URL/title/DOM reads and continue separate live receipts for browser actions"
+            .to_string()
+    } else {
+        "add an audited CDP/Playwright/browser adapter later; until then return structured unavailable instead of claiming DOM, URL, or title reads"
+            .to_string()
+    };
 
     BrowserReadinessStatus {
         ok,
-        overall_state: if ok {
-            "desktop_read_ready_browser_read_unavailable"
-        } else {
-            "browser_read_terms_inconsistent"
-        }
-        .to_string(),
+        overall_state: overall_state.to_string(),
         contract_version: BROWSER_READ_CONTRACT_VERSION,
         browser_read_adapter_available: browser_read.available,
         browser_read_state: browser_read.state.clone(),
@@ -1753,8 +1829,8 @@ fn browser_readiness_from_status(
         browser_read_boundary: browser_read.boundary.clone(),
         browser_read_does_not_use_desktop_read: browser_read.does_not_use_actuator_observe,
         real_adapter_required: true,
-        current: "desktop_read observation tools are mapped; browser_read URL/title/DOM live adapter is unavailable".to_string(),
-        next_action: "add an audited CDP/Playwright/browser adapter later; until then return structured unavailable instead of claiming DOM, URL, or title reads".to_string(),
+        current,
+        next_action,
     }
 }
 

@@ -46,6 +46,34 @@ fn write_openai_status_config(root: &std::path::Path, env_name: &str) -> PathBuf
     config_path
 }
 
+fn write_knowledge_preflight_status_config(root: &std::path::Path, token_env: &str) -> PathBuf {
+    fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            concat!(
+                "db_path = \"{}\"\n",
+                "identity_memory_root = \"{}\"\n",
+                "identity_root = \"{}\"\n",
+                "provider = \"fake\"\n",
+                "provider_id = \"fake-runtime\"\n",
+                "model = \"stub-responder\"\n",
+                "\n",
+                "[external_knowledge.wiki]\n",
+                "endpoint = \"https://wiki.example.invalid/query\"\n",
+                "token_env = \"{}\"\n"
+            ),
+            root.join("memory.db").display(),
+            root.join("identity").display(),
+            root.join("identity-bootstrap").display(),
+            token_env,
+        ),
+    )
+    .expect("config should be written");
+    config_path
+}
+
 #[test]
 fn cli_status_prints_mvp_health_summary() {
     let root = temp_identity_root("status-text");
@@ -996,6 +1024,63 @@ fn cli_status_can_render_json_without_secret_leak() {
                 .contains("local-ready, mapped, gated, frozen")
     }));
     assert!(!stdout.contains("test-secret-key"));
+}
+
+#[test]
+fn cli_status_reports_knowledge_preflight_ready_when_env_and_endpoint_are_set() {
+    let root = temp_identity_root("status-knowledge-preflight");
+    let token_env = "CHUANG_TEST_STATUS_WIKI_TOKEN";
+    std::env::set_var(token_env, "wiki-token");
+    let config_path = write_knowledge_preflight_status_config(&root, token_env);
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "status",
+            "--json",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
+
+    assert_eq!(
+        parsed["knowledge_readiness"]["overall_state"],
+        "local_preview_ready_knowledge_read_preflight_ready_adapter_missing"
+    );
+    assert_eq!(parsed["knowledge_readiness"]["ok"], true);
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_adapter_available"],
+        false
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_adapter_state"],
+        "preflight_ready_adapter_missing"
+    );
+    assert_eq!(
+        parsed["knowledge_readiness"]["live_reason_code"],
+        "real_adapter_missing"
+    );
+    assert!(parsed["knowledge_readiness"]["live_reason"]
+        .as_str()
+        .expect("knowledge read reason")
+        .contains("no audited live adapter is wired"));
+    assert!(parsed["knowledge_readiness"]["current"]
+        .as_str()
+        .expect("knowledge read current")
+        .contains("endpoint and token env are configured"));
+
+    std::env::remove_var(token_env);
 }
 
 #[test]
