@@ -1,3 +1,80 @@
+# 2026-05-29 Chuang 续工整理与推进计划
+- 本轮按老爸要求回到 Chuang 项目做续工盘点，没有删除文件、没有提交 git、没有触碰 Sub2 线上环境。已重读项目规则、`docs/handoff-current.md`、总蓝图、可插拔架构、来源项目审计、`spec-v3`、context engine 设计和实现准备材料。
+- 当前代码健康度通过本地全量验证：`cargo test -q` 全量通过；`cargo run -q -- status --json` 显示 `project_readiness.overall_state=ready`、`release_readiness.overall_state=second_test_version_ready`，同时明确 `third_test_candidate.real_live_ready=false`，不能把本地门禁当作真实 live-ready。
+- 已把当前未提交工作树按主题整理为五类：`provider/responses-api`、`subagent/evolver dry-run + skill_proposals/report validation`、`status/readiness live boundary`、`feishu bridge summary`、以及 Sub2/生成图片/cliproxy 备份这类非 Chuang 主线运维杂项。后续应按主题拆分处理，不要混成一个大提交。
+- 本轮整理后的验证：`git diff --check` 通过；`sh scripts/chuang-third-test-smoke.sh` 按脚本设计拒绝在脏工作树上运行，提示 `working tree must be clean before third test smoke`。因此 third-test 复验的前置步骤是先把当前脏工作树拆分处理，而不是继续叠加新功能。
+- 已新增下一阶段推进计划文档：`docs/chuang-next-plan-2026-05-29.md`。优先顺序为：复验 third-test 本地候选链 -> 拆分当前脏工作树 -> provider live receipt -> single-worker rehearsal -> Feishu/browser live receipt -> wiki/GBrain read-only adapter。
+
+# 2026-05-28 OpenAI-compatible provider 切换到 Responses API
+- 本轮按用户要求将 `src/provider_openai_compatible.rs` 的 OpenAI-compatible 适配器从 `POST /v1/chat/completions` 迁移到 `POST /v1/responses`，请求体改为 Responses 形状的 `instructions + input + store=false`，不再发送 chat messages。
+- stub 响应同步改为 Responses 风格对象，`object=response`、`status=completed`、`output_text` 可提取；响应解析已补对 `status=incomplete` / `status=failed` 的 finish reason 兼容，继续保留旧 chat-completions 输出作为兜底。
+- 相关测试已更新并回归通过：provider request/preview/stub、HTTP/native/curl transport、CLI 侧 stub/http metadata、provider adapter entry、runtime report 与 app server / cli channel 观测链未见回归。
+
+# 2026-05-28 Sub2 更新前备份
+- 按老爸要求，在准备更新 Sub2 前只做备份和只读确认，未改服务器配置、未重启容器、未写数据库、未做删除清理。
+- 本地最小用户余额账本已导出并校验：`/home/user/backups/sub2api/chuang-google-cloud/daily/2026-05-28-004621-pre-sub2-update-minimal`，记录数 223，`SHA256SUMS` 校验通过。该备份只含用户/余额最小字段，不含 API key、密码、token、请求日志或完整数据库。
+- 服务器本机回滚资料已生成并校验：`/opt/sub2api/backups/pre-sub2-update-2026-05-27-164656`，包含 `docker-compose.yml`、`config.yaml`、容器状态、镜像列表、`sub2api` inspect、当前镜像、健康检查、磁盘与内存快照，`SHA256SUMS` 校验通过。敏感 `config.yaml` 仅保存在服务器备份目录，未输出到聊天或本地仓库。
+- 当前线上主容器镜像为 `sub2api-local:github-main-2f70d965-20260525-181210`，内网 `/health` 返回 `{"status":"ok"}`。本轮没有做全量数据库 dump；如升级风险扩大，需要老爸明确要求后再在低峰期补做。
+
+# 2026-05-24 Sub2 v0.1.130 升级执行前准备
+- 本轮按 `docs/sub2-upgrade-handoff-2026-05-24.md` 直接续接 Sub2API 从 `v0.1.125` 升级到 `v0.1.130` 的执行前准备，没有重写方案。已读取既有执行单与 Sub2 运维手册，按红线只做只读检查和备份准备，不做升级、不改用户数据。
+- 已确认当前线上运行体不是官方 tag，而是自定义镜像 `sub2api-local:native-display-20260523-193053`；服务器使用 `docker-compose 1.29.2`，所以实际命令必须用 `docker-compose` 而不是 `docker compose`。当前服务健康，`sub2api` 仍是 `0.1.125`，后台更新检查最新为 `0.1.130`。
+- 已生成本地异地最终快照：`/home/user/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-050922-pre-version-upgrade-final`。快照包含 compose、脱敏配置、配置 SHA、容器状态、镜像 inspect、groups、payment plans、active subscriptions、用户最小账本和 API key 绑定抽样脱敏文件，`SHA256SUMS` 校验通过。关键计数：groups 19、plans 5、active subscriptions 13、users minimal 216、API key binding sample 24。
+- 已生成服务器本机明文回滚备份：`/opt/sub2api/backups/pre-version-upgrade-2026-05-23-211203`，包含 `docker-compose.yml`、`config.yaml`、`docker-compose-ps.txt`、`docker-images.txt`、`sub2api-current-image-inspect.json` 和 `SHA256SUMS`，远端 SHA 校验通过。明文配置只保存在服务器本机备份目录，未输出到聊天。
+- 上游 `v0.1.130` tag 已 fetch 到本地 Sub2 副本，Docker Hub / GHCR 的 `0.1.130` manifest 均可用且支持 `linux/amd64` / `linux/arm64`。本地 Sub2 副本仍是 `v0.1.126-1-g62ccd0ff-dirty`，并有两个无关前端脏改动，不能作为直接上线构建源。
+- 下一步可进入真正升级动作：在服务器 `/opt/sub2api/docker-compose.yml` 只替换 `sub2api` 的 image 行为官方 `weishaw/sub2api:0.1.130`（或等价 GHCR 镜像），保留 `./data`、`./pgdata`、`./redisdata` 卷，然后执行 `docker-compose -f /opt/sub2api/docker-compose.yml pull sub2api && docker-compose -f /opt/sub2api/docker-compose.yml up -d sub2api`。这一步是状态变更，应在明确执行窗口再做；升级后立即验 `/health`、后台 version/check-updates、订阅页和老用户抽样。
+
+# 2026-05-24 Sub2 v0.1.130 应用升级落地
+- 已按执行前准备进入应用层升级：服务器 `/opt/sub2api/docker-compose.yml` 只改 `sub2api` 的 image 行，从 `sub2api-local:native-display-20260523-193053` 切到 `weishaw/sub2api:0.1.130`；保留 `./data`、`./pgdata`、`./redisdata`，未改数据库用户数据，Postgres/Redis 未重建。
+- 服务器使用 `docker-compose 1.29.2`，实际执行为 `docker-compose -f /opt/sub2api/docker-compose.yml pull sub2api` 与 `docker-compose -f /opt/sub2api/docker-compose.yml up -d sub2api`。升级后容器状态为 `sub2api Up (healthy)`、`sub2api-db Up (healthy)`、`sub2api-redis Up`，`/health` 返回 ok。
+- 后台版本接口已确认 `version=0.1.130`；更新检查返回 `current_version=0.1.130`、`latest_version=0.1.130`、`has_update=false`。当前运行容器镜像为 `weishaw/sub2api:0.1.130`。
+- 订阅数据复查通过：groups 19、payment plans 5、active subscriptions 13，和升级前最终快照一致。五个 1x 档位仍存在：group 30/31/32/33/34，plan 1/2/3/4/5 分别对应 2/5/35/99/149 元，价格、有效期、限额、for_sale 与迁移后预期一致。活跃订阅分布为 `{30:1, 31:5, 32:7, 33:0, 34:0}`。
+- 升级后只读快照已生成并校验：`/home/user/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-052202-post-version-upgrade-v0.1.130`。
+- 购买流程未做真实下单验证：后台设置当前显示 `payment_enabled=false`、`purchase_subscription_enabled=false`、payment providers count 为 0。当前只能确认订阅 plan/group 数据保留，不能声称购买链路已通过。
+- 新版启动日志出现配置风险：`TOTP_ENCRYPTION_KEY` 未显式配置，支付 resume token 和 channel monitor 加密能力不可用；同时 channel monitor 1/4 报 `CHANNEL_MONITOR_KEY_DECRYPT_FAILED`，提示需重新编辑监控 fresh key。该问题不影响当前版本、健康、订阅数据与正在发生的 API 代理请求，但会影响渠道监控任务；本轮未擅自生成/写入新加密密钥，因为这会改变安全配置且不能自动恢复旧监控密文。
+
+# 2026-05-24 Sub2 v0.1.130 native-display 订阅显示修复
+- 老爸反馈升级到官方 `weishaw/sub2api:0.1.130` 后订阅仍显示旧 `M` 配额样式；根因是升级时从先前自定义 `native-display` 镜像切回官方镜像，丢掉了本地显示修复。为避免污染已有脏改动源码，本轮在干净 worktree `/home/user/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 上基于 tag `v0.1.130` 修复并构建。
+- 后端补丁：`/api/v1/payment/plans` 不再只补 `group_platform`，而是和 `checkout-info` 一样返回 `group_name`、`rate_multiplier`、`daily_limit_usd`、`weekly_limit_usd`、`monthly_limit_usd`、`supported_model_scopes`，避免旧路径/兼容路径拿不到组限额后回退到旧配额展示。前端补丁：购买套餐卡片和选中套餐确认卡的限额统一用美元格式显示，如 `$33`，不再走旧 `M` 配额标签。
+- 验证通过：`go test ./internal/handler/... ./internal/service/...`；`pnpm exec vitest run src/components/payment/__tests__/SubscriptionPlanCard.spec.ts`。一次误跑的前端全量 Vitest 暴露 13 个既有失败，但目标文件 `SubscriptionPlanCard.spec.ts` 的 3 个用例通过，本轮未扩大范围修复无关失败。
+- 已构建并部署镜像 `sub2api-local:v0.1.130-native-display-20260524-054147`，镜像内版本为 `Sub2API 0.1.130 (commit: 0cfabaa8-native-display)`。服务器 compose 已备份到 `/opt/sub2api/backups/docker-compose.pre-native-display-20260524-054619.yml`，随后只替换 `sub2api` image 行并重建 `sub2api` 容器；`sub2api-db` 和 `sub2api-redis` 均保持 up-to-date，未重建。
+- 部署后验证：`/health` 返回 ok，`sub2api`/DB/Redis 均健康；线上容器镜像为 `sub2api-local:v0.1.130-native-display-20260524-054147`。接口抽样确认 `/payment/plans` 对 group 30/31/32/33/34 均返回美元限额字段：日卡 `$33`/`$83`，周卡 `$83` daily + `$583` weekly，月卡 `$55` + `$1650`、`$90` + `$2709`；样本用户 `/subscriptions/active` 也返回 `group.daily_limit_usd=83`、`group.weekly_limit_usd=583`。活跃订阅分布仍为 group 30=1、31=5、32=7，总 active subscriptions 为 31。
+- 前端缓存检查：入口 HTML 为 `Cache-Control: no-cache`，未发现 service worker 引用；当前入口 JS 为 `assets/index-Bb3Go6WR.js`，支付页相关 chunk 中未发现 `1.0M` 旧配额字样。如果浏览器仍显示旧 `M`，优先做强制刷新或清站点缓存再复看。
+
+# 2026-05-24 Sub2 KeyUsageView 与倒计时 m/M 二次修复
+- 老爸复看后仍看到 `m/M`，继续排查发现上一轮只覆盖购买套餐卡片和 `/payment/plans` 元数据，API Key 用量查询页 `KeyUsageView` 仍把订阅月窗口英文标签写成 `Used Quota (M)`。同时订阅/Key 相关页面的重置倒计时还会显示裸 `20m` 这类分钟缩写，容易和旧月度 `M` 配额混淆。
+- 本轮在干净 worktree `/home/user/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 追加修复：`KeyUsageView` 的订阅窗口标签改为中文 `日/周/月`、英文 `Day/Week/Month`；`KeyUsageView`、用户 `SubscriptionsView`、用户 `KeysView` 的倒计时单位改为中文 `天/小时/分钟`，英文 `d/hr/min`，避免用户可见订阅入口再出现裸 `M/m`。
+- 新增回归覆盖 API Key 查询页：订阅月度用量出现 `Used Quota (Month)` 且不出现 `Used Quota (M)`；限额重置倒计时出现 `20min` 且不出现独立 `20m`。验证通过：`pnpm exec vitest run src/views/__tests__/KeyUsageView.spec.ts src/components/payment/__tests__/SubscriptionPlanCard.spec.ts`，共 2 个文件 6 个用例通过。
+- 已重新构建并部署镜像 `sub2api-local:v0.1.130-native-display-20260524-061400`，镜像 ID `sha256:8fdd49baf2d8ec5c3a6926e852f731e484a2b904eaddc90d0a3a73af40efeb9f`，镜像内版本为 `Sub2API 0.1.130 (commit: 0cfabaa8-native-display-duration)`。服务器 compose 已备份到 `/opt/sub2api/backups/docker-compose.pre-native-display-duration-20260524-061720.yml`，只替换 `sub2api` image 并重建 `sub2api` 容器；DB/Redis 未重建。
+- 部署后验证：`sub2api` healthy，`/health` ok，线上入口 JS 为 `assets/index-CjTY_To_.js`；线上 `KeyUsageView-DNEUSOUc.js`、`KeysView-DopaAcT3.js`、`SubscriptionsView-BPz7CpB1.js` 已更新，检查结果 `contains_used_quota_m=false`、`contains_20m_literal=false`、`contains_hr_min=true`、KeyUsage 中 `contains_month=true`。
+
+# 2026-05-24 Sub2 订阅显示裸 m 全入口复查修复
+- 老爸继续反馈页面仍显示 `m` 后，本轮不再只查购买页/API Key 用量页，而是按所有订阅相关入口重扫：用户订阅页、用户 Key 列表、API Key 用量查询页、支付页、订阅进度小组件、后台订阅管理页、英文/中文 i18n 文案。
+- 明确漏点是后台订阅管理页走英文 i18n：`admin.subscriptions.resetInMinutes = Resets in {minutes}m`、`quotaEndsInMinutes = Quota ends in {minutes}m`，上一轮只改了用户页函数，没有改后台订阅管理页的文案路径。同时用户页函数里原先的英文 `hr/min` 也进一步改成完整 `hours/minutes`，避免再出现任何裸 `m` 观感。
+- 本轮修复：`KeyUsageView`、用户 `KeysView`、用户 `SubscriptionsView` 的英文倒计时输出统一为 `days/hours/minutes` 完整词；后台订阅管理页英文 i18n 改为 `Resets in {minutes} minutes` / `Quota ends in {minutes} minutes` 等完整词。中文继续使用 `天/小时/分钟`。
+- 验证通过：`pnpm exec vitest run src/views/__tests__/KeyUsageView.spec.ts src/components/payment/__tests__/SubscriptionPlanCard.spec.ts`，共 2 个文件 6 个用例通过；`git diff --check` 通过。
+- 已重新构建并部署镜像 `sub2api-local:v0.1.130-native-display-20260524-064500`，镜像 ID `sha256:1181848d532978b628cb51992cb70f4ff70f32633d5b7d8f19dbde311e7ff652`，镜像内版本为 `Sub2API 0.1.130 (commit: 0cfabaa8-native-display-admin-duration2)`。服务器 compose 已备份到 `/opt/sub2api/backups/docker-compose.pre-native-display-admin-duration2-20260524-064700.yml`，只重建 `sub2api` 容器；DB/Redis 未重建。
+- 部署后线上验证：`sub2api` healthy，`/health` ok，compose 当前 image 为 `sub2api-local:v0.1.130-native-display-20260524-064500`。线上入口 JS `assets/index-C_JdAmdY.js` 下所有相关 chunk 已复查：`KeyUsageView-2XY9TdO7.js`、`KeysView-Cf-AHUKm.js`、`PaymentView-bUyyZYnY.js`、两个 `SubscriptionsView-*` chunk 均未命中 `Used Quota (M)`、`Resets in {minutes}m`、`Quota ends in {minutes}m`、`hr/min` 等旧显示片段。
+
+# 2026-05-20 knowledge_read preflight-ready 状态面收口一段
+- 本轮先沿 `docs/handoff-current.md` 指的真实 live 主线补一个和前面 `browser_read` 同类型的小切片：`knowledge_read` 之前只有 `local_preview_ready_knowledge_read_unavailable` 这一条状态面，哪怕 wiki/GBrain 的 endpoint、token env 和实际 token 都已经到位，也仍只会报 `unavailable`，无法把“本地 preview 已好、live 前置条件已齐、但 audited adapter 仍未接线”单独说明出来。
+- 现在 `src/kernel_status.rs` 的 `build_knowledge_readiness()` 会读取 `external_knowledge.*.token_env` 对应环境变量状态，`knowledge_readiness_from_status()` 也新增了 `local_preview_ready_knowledge_read_preflight_ready_adapter_missing` 分支。也就是说，当至少一个 source 已达到 `preflight_ready_adapter_missing`，状态面会明确报告 `live_adapter_state=preflight_ready_adapter_missing`、`live_reason_code=real_adapter_missing`，并把 `current/next_action` 切到“endpoint/token env 已配置，但 audited read-only adapter 仍缺”。同时补了 source 优先级选择，避免一个 source 已 preflight-ready、另一个 source 缺 endpoint 时仍错误落到 `endpoint_missing`。
+- 对应回归已补到 `tests/kernel_status_tests.rs` 和 `tests/cli_status_tests.rs`：新增带 `CHUANG_TEST_WIKI_TOKEN` 的配置场景，验证 `status --json` 与内核状态都能暴露 `overall_state=local_preview_ready_knowledge_read_preflight_ready_adapter_missing`、`live_adapter_state=preflight_ready_adapter_missing`、`live_reason_code=real_adapter_missing`，并保持 `connects_real_service=false` / `writes_automatically=false`。同时现有 `tests/knowledge_read_tests.rs` 继续锁住 preflight contract 本身。定向验证已通过 `cargo test -q --test knowledge_read_tests --test kernel_status_tests --test cli_status_tests`。
+- 当前结论：`knowledge_read` 这条 live-read 状态面已经从“只有 unavailable”推进到“能分辨 preflight-ready 但 adapter missing”，和 `browser_read` 的状态口径更一致。下一轮优先继续 `provider/single-worker rehearsal` 这条真实 live receipt 线，不再回退到纯本地 fake-first 兜圈。
+
+# 2026-05-19 browser_read live adapter status 面收口一段
+- 本轮先不继续在飞书入口里硬派子代理，而是回到主控本地直接收一个最小真实实现点：`browser_read` 线之前已经有 `CdpBrowserReadAdapter`，但 `kernel_status` 仍把“adapter 已可用”视为 `browser_read_terms_inconsistent`。这会让 status/readiness 面无法正确反映现有 live-read 接线状态。
+- 现在 `src/kernel_status.rs` 的 `browser_readiness_from_status()` 已改成接受两种一致状态：一是原来的 `desktop_read_ready_browser_read_unavailable`，二是新增的 `desktop_read_ready_browser_read_live_ready`。当 `browser_read.available=true` 且仍保持 `desktop_read_is_separate` / `does_not_use_actuator_observe` 合同时，状态面会直接暴露 live adapter 已就绪，并把 `current/next_action` 切到“保持 browser_read 只负责审计过的 URL/title/DOM 读取，browser action receipt 继续单独走 live receipt”。
+- 对应回归已补到 `tests/kernel_status_tests.rs`：新增本地 TCP mock CDP 端口，用 `CHUANG_CDP_PORT` 覆盖验证 `browser_readiness.overall_state=desktop_read_ready_browser_read_live_ready`、`browser_read_adapter_kind=cdp`、`browser_read_reason_code=cdp_port_reachable`。同文件额外加了 env guard，避免并发测试互相污染 `CHUANG_CDP_PORT`。定向验证已通过 `cargo test -q --test kernel_status_tests` 与 `cargo test -q --test cli_status_tests`。
+
+# 2026-05-17 subagent report/evolver dry-run slice 收口
+- 本轮没有推进 M5/M6/M7 的真实 live receipt 主线，而是继续把昨天 Cloud Code 停在工作树里的 `subagent/evolver` 未提交 slice 收到更完整的位置：`SubagentReport` 的 `skill_proposals` 已经是正式合同字段，serde 缺省回落为空列表，validator/admission 会显式检查 proposal_id/title/trigger/procedure/evidence_event_ids/provenance 这些关键结构。
+- `cli_subagent` 这轮不再是本地直接 new evolver 了，`subagent run-once/run-loop` 现在会从 `request.options.runtime` 构建 runtime slots，并走 `slots.evolution` 产出 dry-run proposals；如果 runtime 里还是 `EvolutionConfig::Noop`，CLI 子代理会在本地 runner 路径上提升为 `DryRun`，保持现有只读 proposal 合同。与此同时，fake/command runner 的 dry-run event id 继续使用带 `run_id` 的唯一值，避免 proposal_id 碰撞。
+- 配置文件入口也已经补齐：`runtime_config_file` 现在支持 `evolution = "dry_run"` / `evolution.kind = "dry_run"`，并有未知值拒绝测试。这样 config file -> runtime config -> slot registry -> cli_subagent runner 这条 dry-run 接线已经贯通。
+- `subagent run-once` / `subagent run-loop` 的 CLI 输出现在也显式带 `evolution_kind` 和 `evolution_source`，可以直接区分“显式 runtime config 的 dry_run”与“为了维持 runner 合同发生的默认 `Noop -> DryRun` 提升”；对应回归已覆盖 `runtime_config` 和 `default_dry_run_promotion` 两条路径。
+- 本轮已通过定向验证：`cargo test -q --test cli_subagent_dispatch_tests --test runtime_config_file_tests --test slot_registry_tests --test runtime_config_tests`，以及上一轮已通过的 `cargo test -q --test subagent_report_tests --test subagent_spawner_tests --test subagent_queue_tests --test cli_goal_tests --test goal_dispatch_tests`。当前结论：这批未提交 evolver/subagent slice 已从“report 合同 + runner 产物”推进到“runtime slot 接线 + config file 入口 + 主测试面”都收住。
+- 当前这条线的现状已经明确：CLI 子代理为了维持既有 runner 合同，在 runtime 配置为 `Noop` 时会本地提升成 `DryRun`，然后通过 runtime `evolution` slot 产出只读 proposal。这个默认提升现在已经被现有 `cli_subagent_dispatch_tests` 路径实际覆盖，可以视为当前阶段的明确合同，而不是待定口。后续若要收紧到只有显式 `evolution=dry_run` 才产出 proposal，应作为单独行为变更处理。
+
 # 协作进度日志
 
 # 2026-05-13 runtime/report 与高层 gate 补三处剩余缺口
