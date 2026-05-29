@@ -8,21 +8,6 @@ fn run_receipt_script(script_path: &PathBuf) -> Value {
     let output = Command::new("bash")
         .arg(script_path)
         .arg("--json")
-        .env("CHUANG_LIVE_REHEARSAL_DISPATCH_ID", "dispatch-123")
-        .env("CHUANG_LIVE_REHEARSAL_WORKER_ID", "worker-7")
-        .env("CHUANG_LIVE_REHEARSAL_GATE_RECEIPT_REF", "gate-ref-1")
-        .env(
-            "CHUANG_LIVE_REHEARSAL_ALLOWLIST_RECEIPT_REF",
-            "allowlist-ref-2",
-        )
-        .env(
-            "CHUANG_LIVE_REHEARSAL_CAPABILITY_ROUTING_REF",
-            "cap-route-3",
-        )
-        .env(
-            "CHUANG_LIVE_REHEARSAL_REPORT_ADMISSION_REF",
-            "report-admit-4",
-        )
         .output()
         .expect("receipt script should execute");
 
@@ -36,115 +21,138 @@ fn run_receipt_script(script_path: &PathBuf) -> Value {
 }
 
 #[test]
-fn live_runner_rehearsal_receipt_script_is_readonly_template() {
+fn live_runner_rehearsal_receipt_script_uses_bounded_command_runner_protocol() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-receipt.sh");
     let script = fs::read_to_string(&script_path).expect("receipt script should be readable");
 
-    assert!(script.contains("Readonly single worker rehearsal receipt skeleton."));
-    assert!(script.contains("CHUANG_LIVE_REHEARSAL_DISPATCH_ID"));
-    assert!(script.contains("CHUANG_LIVE_REHEARSAL_WORKER_ID"));
-    assert!(script.contains("\"starts_external_worker\": False"));
-    assert!(script.contains("\"enables_live_gate\": False"));
-    assert!(script.contains("\"dispatches_tasks\": False"));
-    assert!(script.contains("\"modifies_repo\": False"));
-    assert!(script.contains("single worker rehearsal is read-only and is not runner pool ready"));
-    assert!(!script.contains("subagent dispatch"));
-    assert!(!script.contains("subagent run-once"));
-    assert!(!script.contains("subagent run-loop"));
-    assert!(!script.contains("CHUANG_CODEX_RUNNER_ENABLE"));
-    assert!(!script.contains("CHUANG_REAL_CONTROL_ENABLE"));
-    assert!(!script.contains("CHUANG_REAL_ACTUATOR_ENABLE"));
+    assert!(script.contains("subagent live-preflight"));
+    assert!(script.contains("--runner-command scripts/chuang-subagent-runner-example.sh"));
+    assert!(script.contains("--allow-runner-command scripts/chuang-subagent-runner-example.sh"));
+    assert!(script.contains("--requires-capability rehearsal"));
+    assert!(script.contains("subagent dispatch"));
+    assert!(script.contains("--requires-capability rehearsal"));
+    assert!(script.contains("subagent run-loop"));
+    assert!(script.contains("--runner command"));
+    assert!(script.contains("--approve-exec"));
+    assert!(script.contains("--require-live-gate"));
+    assert!(script.contains("--max-runs 1"));
+    assert!(script.contains("--max-concurrency 1"));
+    assert!(script.contains("subagent report"));
+    assert!(script.contains("subagent collect"));
+    assert!(script.contains("approved_by_cli_flag: --approve-exec"));
+    assert!(script.contains("single_worker_rehearsal_live_receipt"));
+
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("git reset"));
     assert!(!script.contains("git checkout"));
     assert!(!script.contains("rm "));
+    assert!(!script.contains("hermes-gateway"));
+    assert!(!script.contains("FEISHU_"));
 }
 
 #[test]
-fn live_runner_rehearsal_receipt_script_outputs_readonly_json_template() {
+fn live_runner_rehearsal_receipt_script_outputs_positive_rehearsal_receipt() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-runner-rehearsal-receipt.sh");
     let data = run_receipt_script(&script_path);
 
     assert_eq!(data["schema_version"], 1);
-    assert_eq!(
-        data["receipt_kind"],
-        "single_worker_rehearsal_live_receipt_skeleton"
-    );
+    assert_eq!(data["receipt_kind"], "single_worker_rehearsal_live_receipt");
     assert!(data["tested_at"].as_str().is_some());
-    assert_eq!(data["dispatch_id"], "dispatch-123");
-    assert_eq!(data["worker_id"], "worker-7");
-    assert_eq!(data["gate_receipt_ref"], "gate-ref-1");
-    assert_eq!(data["allowlist_receipt_ref"], "allowlist-ref-2");
-    assert_eq!(data["capability_routing_ref"], "cap-route-3");
-    assert_eq!(data["report_admission_ref"], "report-admit-4");
 
     let boundaries = &data["readonly_boundaries"];
-    assert_eq!(boundaries["readonly"], true);
-    assert_eq!(boundaries["connects_real_feishu"], false);
-    assert_eq!(boundaries["sends_feishu_messages"], false);
+    assert_eq!(boundaries["readonly"], false);
+    assert_eq!(boundaries["starts_external_worker"], true);
+    assert_eq!(boundaries["enables_live_gate"], true);
+    assert_eq!(boundaries["starts_workers"], true);
+    assert_eq!(boundaries["dispatches_tasks"], true);
     assert_eq!(boundaries["connects_real_provider"], false);
-    assert_eq!(boundaries["starts_external_worker"], false);
-    assert_eq!(boundaries["enables_live_gate"], false);
-    assert_eq!(boundaries["starts_workers"], false);
-    assert_eq!(boundaries["dispatches_tasks"], false);
-    assert_eq!(boundaries["restarts_worker"], false);
-    assert_eq!(boundaries["performs_desktop_actions"], false);
-    assert_eq!(boundaries["performs_browser_actions"], false);
-    assert_eq!(boundaries["connects_real_wiki"], false);
-    assert_eq!(boundaries["connects_real_gbrain"], false);
-    assert_eq!(boundaries["reads_secret_values"], false);
-    assert_eq!(boundaries["prints_secret_values"], false);
-    assert_eq!(boundaries["starts_services"], false);
-    assert_eq!(boundaries["stops_services"], false);
-    assert_eq!(boundaries["touches_services"], false);
+    assert_eq!(boundaries["connects_real_feishu"], false);
     assert_eq!(boundaries["modifies_repo"], false);
     assert_eq!(boundaries["deletes_files"], false);
-    assert_eq!(boundaries["reuses_codex_or_hermes_credentials"], false);
 
-    let prerequisites = &data["approval_audit_prerequisites"];
-    assert_eq!(prerequisites["ok"], false);
-    assert_eq!(prerequisites["explicit_operator_approval_required"], true);
-    assert_eq!(prerequisites["governance_approval_required"], true);
-    assert_eq!(prerequisites["audit_receipt_required"], true);
-    assert_eq!(prerequisites["dispatch_evidence_required"], true);
+    let preflight = &data["preflight"];
+    assert_eq!(preflight["ok"], true);
+    assert_eq!(preflight["ready_for_live"], true);
+    assert_eq!(preflight["readonly"], true);
+    assert_eq!(preflight["starts_external_worker"], false);
+    assert_eq!(preflight["gate_enabled"], true);
+    assert_eq!(preflight["runner_allowlist_ok"], true);
+    assert_eq!(preflight["capability_routing_ok"], true);
+    assert_eq!(preflight["report_admission_ok"], true);
+    assert_eq!(preflight["required_env"], "CHUANG_CODEX_RUNNER_ENABLE");
+    assert_eq!(preflight["audit_label"], "subagent.runner.live");
+
+    let dispatch = &data["dispatch"];
+    assert!(dispatch["run_id"].as_str().is_some());
+    assert!(dispatch["task_id"].as_str().is_some());
+    assert!(dispatch["agent_id"].as_str().is_some());
     assert_eq!(
-        prerequisites["audit_label"],
-        "subagent.runner.single-worker-rehearsal.live"
+        dispatch["required_capabilities"],
+        serde_json::json!(["rehearsal"])
     );
+
+    let execution = &data["worker_execution"];
+    assert_eq!(execution["runner"], "command");
+    assert_eq!(execution["max_runs"], 1);
+    assert_eq!(execution["max_concurrency"], 1);
+    assert_eq!(execution["ran_count"], 1);
+    assert_eq!(execution["idle"], false);
+    assert_eq!(execution["run_ids"].as_array().expect("run ids").len(), 1);
+    let execution_admission = &execution["report_admissions"][0];
+    assert_eq!(execution_admission["status"], "Accepted");
+    assert_eq!(execution_admission["reason_code"], "report_validated");
     assert_eq!(
-        prerequisites["prerequisites"],
+        execution_admission["controller_agent_id"],
+        "cli-subagent-controller"
+    );
+
+    let report = &data["report"];
+    assert_eq!(report["available"], true);
+    assert_eq!(report["status"], "Success");
+    assert_eq!(report["exit_code"], 0);
+    assert!(report["report_id"].as_str().is_some());
+    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(
+        report["governance_decision"]["reason"],
+        "approved_by_cli_flag: --approve-exec"
+    );
+    assert_eq!(report["report_admission"]["status"], "Accepted");
+    assert_eq!(
+        report["report_admission"]["reason_code"],
+        "report_validated"
+    );
+
+    let collect = &data["collect"];
+    assert_eq!(collect["dispatch_available"], true);
+    assert_eq!(collect["report_available"], true);
+    assert_eq!(collect["admission_status"], "Accepted");
+    assert_eq!(collect["admission_reason_code"], "report_validated");
+    let admission_refs = collect["admission_refs"]
+        .as_array()
+        .expect("admission refs");
+    assert_eq!(admission_refs.len(), 1);
+    assert_eq!(admission_refs[0]["admission_status"], "Accepted");
+    assert_eq!(admission_refs[0]["reason_code"], "report_validated");
+    assert!(admission_refs[0]["evidence_ref"]
+        .as_str()
+        .expect("evidence ref")
+        .starts_with("report://"));
+
+    let acceptance = &data["real_live_acceptance"];
+    assert_eq!(acceptance["single_worker_rehearsal_complete"], true);
+    assert_eq!(acceptance["status"], "single_worker_rehearsal_completed");
+    assert_eq!(acceptance["global_real_live_ready"], false);
+    assert_eq!(acceptance["remaining_gap_count"], 3);
+    assert_eq!(
+        acceptance["next_gaps"],
         serde_json::json!([
-            "operator approval for the exact single worker rehearsal dispatch",
-            "governance approval for the exact gate, allowlist, capability routing, and report admission refs",
-            "dispatch evidence must exist before runner pool readiness can be claimed"
+            "feishu_live_receipt",
+            "browser_desktop_boundary_receipt",
+            "wiki_gbrain_readonly_adapter_receipt"
         ])
     );
-    assert!(prerequisites["reason"]
-        .as_str()
-        .expect("prerequisites reason")
-        .contains("read-only receipt skeleton"));
-
-    let real_live = &data["real_live_acceptance"];
-    assert_eq!(real_live["complete"], false);
-    assert_eq!(real_live["status"], "not_runner_pool_ready");
-    assert_eq!(real_live["runner_pool_ready"], false);
-    assert_eq!(
-        real_live["single_worker_rehearsal_is_runner_pool_ready"],
-        false
-    );
-    assert_eq!(real_live["cannot_mark_complete_from_template"], true);
-    assert_eq!(
-        real_live["cannot_mark_runner_pool_ready_from_template"],
-        true
-    );
-    assert_eq!(real_live["requires_operator_evidence"], true);
-    assert_eq!(real_live["gap_count"], 1);
-    assert!(real_live["reason"]
-        .as_str()
-        .expect("real live reason")
-        .contains("not runner pool ready"));
 
     assert_eq!(data["notes"], serde_json::json!([]));
     assert_eq!(data["blockers"], serde_json::json!([]));

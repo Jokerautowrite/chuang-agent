@@ -1,3 +1,9 @@
+# 2026-05-30 Gap 2 单 worker live rehearsal receipt 落地
+- 本轮把 `scripts/chuang-live-runner-rehearsal-receipt.sh` 从只读模板改为最小真实、受边界约束的单 worker rehearsal：`live-preflight -> dispatch -> run-loop(command runner) -> report -> collect`，全程走既有 subagent 队列协议与 `ReportAdmission`，不新增第二套 runner 协议。
+- receipt 现在输出 `single_worker_rehearsal_live_receipt`，包含 `preflight/dispatch/worker_execution/report/collect/admission_refs`，并保留治理证据 `governance_decision.reason=approved_by_cli_flag: --approve-exec`。结论字段明确 `single_worker_rehearsal_complete=true` 且 `global_real_live_ready=false`，不越界宣称全局 live-ready。
+- `tests/live_runner_rehearsal_receipt_tests.rs` 已改为真实正向回归：静态锁定 bounded command-runner 参数；动态执行脚本并断言 Accepted admission、Success report、collect admission refs。此前 capability mismatch 安全回归保持通过。
+- 本轮验证通过：`cargo test -q --test live_runner_rehearsal_receipt_tests`、`cargo test -q --test cli_subagent_dispatch_tests cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start`、`bash scripts/chuang-live-runner-rehearsal-smoke.sh`、`cargo test -q`、`git diff --check`；提交后复验 `sh scripts/chuang-third-test-smoke.sh` 通过，输出 `third_test_candidate_smoke_ok`。
+
 # 2026-05-30 四路子代理并行推进后的主控审核
 - 本轮按老爸要求通过终端/tool-side 子代理并行推进 4 条线，主控负责审核集成；没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes。
 - Provider Live Receipt 线已补齐并由主控复验：`bash scripts/chuang-provider-live-request-receipt.sh --json --input 'provider live receipt probe: reply with ok only'` 返回 `ok=true`、`request_path=/v1/responses`、`status_code=200`、`provider_response_ok=true`、`provider_fallback_used=false`、`runtime_report_id=report-turn-1`、`api_key_state=<set>`。回执只保留 `response_summary=chars=2 redacted=true`，不输出密钥或模型正文。

@@ -2,7 +2,7 @@
 
 ## Current State
 
-Chuang has completed the first real receipt slice and is ready for the next implementation decision after commit.
+Chuang has completed the first two real receipt slices and is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
@@ -13,6 +13,7 @@ Chuang has completed the first real receipt slice and is ready for the next impl
   - `cargo test -q` passed
   - `sh scripts/chuang-third-test-smoke.sh` passed with `third_test_candidate_smoke_ok`
   - after the provider receipt slice, `cargo test -q` also passed, and the committed tree was rerun through `sh scripts/chuang-third-test-smoke.sh` with `third_test_candidate_smoke_ok`.
+  - after the Gap 2 single-worker rehearsal slice, targeted receipt tests, mismatch regression, live runner smoke, full `cargo test -q`, `git diff --check`, and post-commit `sh scripts/chuang-third-test-smoke.sh` passed.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
@@ -66,7 +67,7 @@ bash scripts/chuang-provider-live-request-receipt.sh --json --input 'provider li
 
 Observed result: `ok=true`, `request_path=/v1/responses`, `status_code=200`, `provider_response_ok=true`, `provider_fallback_used=false`, `runtime_report_id=report-turn-1`, `api_key_state=<set>`, and `response_summary=chars=2 redacted=true`.
 
-### Gap 2 - Single Live Worker Rehearsal
+### Gap 2 - Single Live Worker Rehearsal - Completed 2026-05-30
 
 Goal: prove one bounded live worker can go through spawn -> report -> collect -> admission refs without bypassing governance.
 
@@ -78,13 +79,19 @@ Acceptance evidence:
 - `goal collect` shows accepted report refs.
 - No recursive spawn unless separately approved.
 
-Recommended next action:
+Current evidence:
 
 ```bash
-sh scripts/chuang-live-runner-readiness-view.sh
+bash scripts/chuang-live-runner-rehearsal-receipt.sh --json
 ```
 
-Then implement the smallest missing command or fixture that turns readiness evidence into a real single-worker rehearsal receipt. A new regression already locks one safety condition: capability mismatch must reject before worker start and produce no claim/report files.
+Observed result: `receipt_kind=single_worker_rehearsal_live_receipt`, `ran_count=1`, `max_runs=1`, `max_concurrency=1`, `report.status=Success`, `collect.admission_status=Accepted`, `collect.admission_reason_code=report_validated`, and `real_live_acceptance.global_real_live_ready=false`.
+
+Safety regression remains in place:
+
+```bash
+cargo test -q --test cli_subagent_dispatch_tests cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start
+```
 
 ### Gap 3 - Feishu Live Receipt
 
@@ -132,14 +139,13 @@ Pick one source first, preferably wiki, and wire a read-only adapter behind the 
 
 ## Recommended Order
 
-1. Single live worker rehearsal
-2. Feishu live receipt
-3. Browser read-only receipt
-4. Desktop action rehearsal
-5. Wiki/GBrain read-only adapter
-6. Skill proposal review -> manual solidify path
+1. Feishu live receipt
+2. Browser read-only receipt
+3. Desktop action rehearsal
+4. Wiki/GBrain read-only adapter
+5. Skill proposal review -> manual solidify path
 
-Provider live receipt is now done; keep it as a regression surface, but do not spend the next slice there unless it fails.
+Provider live receipt and single-worker rehearsal are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail.
 
 ## Do Not Do Yet
 
@@ -161,4 +167,4 @@ cargo run -q -- status --json
 sh scripts/chuang-third-test-smoke.sh
 ```
 
-If the tree is clean and third-test still passes, continue with **Gap 2 - Single Live Worker Rehearsal**. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.
+If the tree is clean and third-test still passes, continue with **Gap 3 - Feishu Live Receipt**. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.
