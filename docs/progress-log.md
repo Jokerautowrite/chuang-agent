@@ -1,3 +1,11 @@
+# 2026-05-30 Gap 3 Feishu live readonly receipt 采证器落地
+- 本轮按老爸要求继续用终端可见的 `gpt-5.3-codex` 子代理推进，主控负责审核；没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes，也没有发送 Feishu 消息或重启服务。
+- `scripts/chuang-feishu-live-receipt.sh` 已从填空模板改为真实只读采证器：读取既有 Chuang Feishu 事件日志、`context/feishu-session-state.json`、环境变量 `<set>/<missing>` 状态和 `chuang-feishu-live-preflight.js --json` 摘要，只输出脱敏元数据，不打印 token/secret/chat 原文。
+- receipt 验收口径明确：近期日志中同时存在 `inbound` 与 `outbound`/`command`/`outbound_format` 事件时，`acceptance_status=verified`；缺少日志或缺少收发配对时，`acceptance_status=blocked`。无论是否 verified，仍固定 `connects_real_feishu=false`、`can_mark_real_live_ready=false`、`global_real_live_ready=false`，只证明已有日志证据，不主动连活体或外发。
+- 当前真实环境运行 `bash scripts/chuang-feishu-live-receipt.sh --json` 返回 `acceptance_status=blocked`，blocker 为 `missing_bridge_event_log`；preflight 摘要为 ok 且 warning，session state 可解析且有 1 个 binding。也就是说代码能力已补齐，但还没有可用于 Gap 3 完成验收的近期 Chuang Feishu 收发事件日志。
+- 新增/更新 `tests/feishu_live_receipt_tests.rs`：覆盖缺失事件日志 blocked、伪造近期 inbound+outbound_format 日志 verified、以及静态安全检查，锁住不使用 `systemctl restart`、`curl`、`rm`、`git reset`。
+- 主控复验已通过：`bash -n scripts/chuang-feishu-live-receipt.sh`、`bash scripts/chuang-feishu-live-receipt.sh --json`、`cargo test -q --test feishu_live_receipt_tests`、`node scripts/chuang-feishu-command-smoke.js`、`cargo test -q`、`git diff --check`。
+
 # 2026-05-30 Gap 2 单 worker live rehearsal receipt 落地
 - 本轮把 `scripts/chuang-live-runner-rehearsal-receipt.sh` 从只读模板改为最小真实、受边界约束的单 worker rehearsal：`live-preflight -> dispatch -> run-loop(command runner) -> report -> collect`，全程走既有 subagent 队列协议与 `ReportAdmission`，不新增第二套 runner 协议。
 - receipt 现在输出 `single_worker_rehearsal_live_receipt`，包含 `preflight/dispatch/worker_execution/report/collect/admission_refs`，并保留治理证据 `governance_decision.reason=approved_by_cli_flag: --approve-exec`。结论字段明确 `single_worker_rehearsal_complete=true` 且 `global_real_live_ready=false`，不越界宣称全局 live-ready。

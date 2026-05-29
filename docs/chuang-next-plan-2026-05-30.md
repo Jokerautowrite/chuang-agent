@@ -14,6 +14,7 @@ Chuang has completed the first two real receipt slices and is ready for the next
   - `sh scripts/chuang-third-test-smoke.sh` passed with `third_test_candidate_smoke_ok`
   - after the provider receipt slice, `cargo test -q` also passed, and the committed tree was rerun through `sh scripts/chuang-third-test-smoke.sh` with `third_test_candidate_smoke_ok`.
   - after the Gap 2 single-worker rehearsal slice, targeted receipt tests, mismatch regression, live runner smoke, full `cargo test -q`, `git diff --check`, and post-commit `sh scripts/chuang-third-test-smoke.sh` passed.
+  - after the Gap 3 Feishu readonly receipt collector slice, `bash -n scripts/chuang-feishu-live-receipt.sh`, `bash scripts/chuang-feishu-live-receipt.sh --json`, `cargo test -q --test feishu_live_receipt_tests`, `node scripts/chuang-feishu-command-smoke.js`, full `cargo test -q`, and `git diff --check` passed.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
@@ -104,9 +105,23 @@ Acceptance evidence:
 - No Feishu tokens are printed.
 - Hermes remains untouched.
 
+Current evidence:
+
+```bash
+bash scripts/chuang-feishu-live-receipt.sh --json
+```
+
+Observed current result: `acceptance_status=blocked`, blocker `missing_bridge_event_log`. The collector is implemented and tested, but current runtime evidence is still missing a recent Chuang Feishu inbound/outbound event pair. It records only sanitized event refs, counts, env var states, session state summary, and preflight summary.
+
+Implemented behavior:
+
+- If recent event log evidence has both `inbound` and `outbound`/`command`/`outbound_format`, the receipt reports `acceptance_status=verified`.
+- If event log evidence is missing or does not contain an inbound/outbound pair, the receipt reports structured blockers.
+- The receipt keeps `connects_real_feishu=false`, `can_mark_real_live_ready=false`, and `global_real_live_ready=false`; it is a readonly evidence collector, not an active sender.
+
 Recommended next action:
 
-Read the existing Feishu receipt scripts and decide whether current live identity is ready. If not ready, document the missing env/config as a blocker instead of wiring around it.
+Produce or locate a recent Chuang Feishu bridge event log containing one inbound message and one outbound/command formatting event, then rerun the receipt. Do not wire around this with Hermes, Codex Feishu credentials, or active sends unless explicitly approved.
 
 ### Gap 4 - Browser/Desktop Boundary
 
