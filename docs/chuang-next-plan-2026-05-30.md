@@ -2,7 +2,7 @@
 
 ## Current State
 
-Chuang has completed the first two real receipt slices and is ready for the next implementation decision after commit.
+Chuang has completed the first two real receipt slices, implemented the Feishu readonly collector, and implemented the browser_read readonly collector. It is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
@@ -15,6 +15,7 @@ Chuang has completed the first two real receipt slices and is ready for the next
   - after the provider receipt slice, `cargo test -q` also passed, and the committed tree was rerun through `sh scripts/chuang-third-test-smoke.sh` with `third_test_candidate_smoke_ok`.
   - after the Gap 2 single-worker rehearsal slice, targeted receipt tests, mismatch regression, live runner smoke, full `cargo test -q`, `git diff --check`, and post-commit `sh scripts/chuang-third-test-smoke.sh` passed.
   - after the Gap 3 Feishu readonly receipt collector slice, `bash -n scripts/chuang-feishu-live-receipt.sh`, `bash scripts/chuang-feishu-live-receipt.sh --json`, `cargo test -q --test feishu_live_receipt_tests`, `node scripts/chuang-feishu-command-smoke.js`, full `cargo test -q`, and `git diff --check` passed.
+  - after the Gap 4A browser_read readonly receipt collector slice, `bash -n scripts/chuang-browser-read-live-receipt.sh`, `bash scripts/chuang-browser-read-live-receipt.sh --json`, `cargo test -q --test browser_read_live_receipt_tests`, full `cargo test -q`, and `git diff --check` passed.
 
 The project is still **local-gate-ready**, not **real-live-ready**.
 
@@ -123,7 +124,7 @@ Recommended next action:
 
 Produce or locate a recent Chuang Feishu bridge event log containing one inbound message and one outbound/command formatting event, then rerun the receipt. Do not wire around this with Hermes, Codex Feishu credentials, or active sends unless explicitly approved.
 
-### Gap 4 - Browser/Desktop Boundary
+### Gap 4 - Browser/Desktop Boundary - Partially Completed 2026-05-30
 
 Goal: keep browser read and desktop action separate.
 
@@ -133,9 +134,23 @@ Acceptance evidence:
 - Desktop action receipt is separate and goes through actuator/governance.
 - No action is inferred from read readiness.
 
+Current browser_read evidence:
+
+```bash
+bash scripts/chuang-browser-read-live-receipt.sh --json
+```
+
+Observed current result: `acceptance_status=blocked`, blockers `browser_read_adapter_unavailable` and `missing_chuang_cdp_port`. The collector is implemented and tested, but current runtime evidence is still missing a configured reachable CDP port. If `CHUANG_CDP_PORT` is set, the collector reads only CDP `/json` metadata and emits sanitized refs, host/scheme, target counts, and title length.
+
+Implemented behavior:
+
+- Browser read receipt never performs browser actions, desktop actions, provider calls, wiki/GBrain calls, or core memory writes.
+- It never reads DOM via WebSocket in the receipt path; DOM reading remains a separate adapter capability and should need its own evidence before being treated as live.
+- It keeps `can_mark_real_live_ready=false` and `global_real_live_ready=false`.
+
 Recommended next action:
 
-First close CDP read-only receipt, then add one explicit low-risk desktop action rehearsal.
+Either run a controlled Chrome/Chromium CDP readonly session and capture verified browser_read evidence, or proceed to Gap 4B: one explicit low-risk desktop action rehearsal through actuator/governance. Do not infer desktop action readiness from browser_read.
 
 ### Gap 5 - Wiki/GBrain Read-Only Adapter
 
@@ -154,13 +169,13 @@ Pick one source first, preferably wiki, and wire a read-only adapter behind the 
 
 ## Recommended Order
 
-1. Feishu live receipt
-2. Browser read-only receipt
+1. Feishu live receipt evidence, if a recent Chuang event log becomes available
+2. Controlled CDP browser_read evidence, if a CDP port is intentionally started
 3. Desktop action rehearsal
 4. Wiki/GBrain read-only adapter
 5. Skill proposal review -> manual solidify path
 
-Provider live receipt and single-worker rehearsal are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail.
+Provider live receipt, single-worker rehearsal, Feishu readonly collector code, and browser_read readonly collector code are now done; keep them as regression surfaces, but do not spend the next slice there unless they fail or new live evidence is available.
 
 ## Do Not Do Yet
 
@@ -182,4 +197,4 @@ cargo run -q -- status --json
 sh scripts/chuang-third-test-smoke.sh
 ```
 
-If the tree is clean and third-test still passes, continue with **Gap 3 - Feishu Live Receipt**. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.
+If the tree is clean and third-test still passes, continue with **Gap 4B - Desktop Action Rehearsal** or **Gap 5 - Wiki/GBrain Read-Only Adapter** unless 老爸 explicitly wants to return to Feishu/CDP evidence. If any command fails, stop and record the exact failing command and output in `docs/progress-log.md` before changing code.

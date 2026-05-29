@@ -1,3 +1,10 @@
+# 2026-05-30 Gap 4A browser_read readonly receipt 采证器落地
+- 本轮按老爸要求暂停深挖 Feishu，继续推进其他主线；先由终端可见的 `gpt-5.3-codex` 子代理写 Gap 4A，主控审核后接管修正测试竞态。没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes，没有执行浏览器动作或桌面动作。
+- `scripts/chuang-browser-read-live-receipt.sh` 已从填空模板改为真实只读采证器：默认读取 `cargo run --quiet -- status --json` 的 browser_readiness 状态；如果设置 `CHUANG_CDP_PORT`，只读取本机 CDP `/json` 元数据并脱敏输出 target/url/title 的 hash/ref、scheme/host 和长度，不读取 DOM、不走 WebSocket、不执行点击/输入。
+- receipt 结论口径明确：只有 status 显示 `browser_read_adapter_available=true` 且 CDP `/json` 元数据可读取时，才输出 `acceptance_status=verified`；默认本机未设置 `CHUANG_CDP_PORT` 时输出 `acceptance_status=blocked`，blockers 为 `browser_read_adapter_unavailable` 与 `missing_chuang_cdp_port`。无论 verified 与否，仍固定 `can_mark_real_live_ready=false` 和 `global_real_live_ready=false`。
+- 新增/更新 `tests/browser_read_live_receipt_tests.rs`：覆盖缺 status/CDP 时 blocked、注入 status JSON 加临时本地 CDP `/json` 元数据时 verified、以及静态安全检查，锁住不使用 `systemctl restart`、`curl`、`xdotool`、`git reset`、`rm`。
+- 主控复验已通过：`bash -n scripts/chuang-browser-read-live-receipt.sh`、`bash scripts/chuang-browser-read-live-receipt.sh --json`、`cargo test -q --test browser_read_live_receipt_tests`、`git diff --check`、`cargo test -q`。当前 Gap 4A 代码能力已补齐；真实环境仍需启动/指定可审计的 CDP 端口后才能得到 verified 证据。
+
 # 2026-05-30 Gap 3 Feishu live readonly receipt 采证器落地
 - 本轮按老爸要求继续用终端可见的 `gpt-5.3-codex` 子代理推进，主控负责审核；没有走 Feishu 派工路径，没有删除文件，没有触碰 Hermes，也没有发送 Feishu 消息或重启服务。
 - `scripts/chuang-feishu-live-receipt.sh` 已从填空模板改为真实只读采证器：读取既有 Chuang Feishu 事件日志、`context/feishu-session-state.json`、环境变量 `<set>/<missing>` 状态和 `chuang-feishu-live-preflight.js --json` 摘要，只输出脱敏元数据，不打印 token/secret/chat 原文。
