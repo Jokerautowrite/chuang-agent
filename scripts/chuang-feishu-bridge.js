@@ -332,6 +332,7 @@ class ChuangFeishuBridge {
   startLongConnection() {
     const dispatcher = new EventDispatcher({}).register({
       "im.message.receive_v1": (data) => {
+        appendEventLog("ws_event", probeFeishuInboundEnvelope(data));
         this.enqueue(() => this.handleInboundEvent(data)).catch((error) => {
           console.error(`[chuang-feishu] failed to handle message: ${error.message}`);
         });
@@ -349,6 +350,7 @@ class ChuangFeishuBridge {
   async handleInboundEvent(data) {
     const inbound = normalizeFeishuInboundEvent(data);
     if (!inbound) {
+      appendEventLog("inbound_dropped", probeFeishuInboundEnvelope(data));
       return;
     }
     const effectiveThreadId = this.sessionStore.getThreadId(inbound.chatId) || inbound.threadId;
@@ -646,12 +648,16 @@ function normalizeFeishuInboundEvent(data) {
   const message = event?.message || {};
   const sender = event?.sender || {};
   const messageType = normalizeText(message.message_type);
-  if (messageType !== "text" && messageType !== "image") {
+  if (messageType !== "text" && messageType !== "image" && messageType !== "post") {
     return null;
   }
-  const text = messageType === "text" ? parseFeishuTextContent(message.content) : "";
+  const text = messageType === "text"
+    ? parseFeishuTextContent(message.content)
+    : messageType === "post"
+      ? parseFeishuPostContent(message.content)
+      : "";
   const { imageKey } = messageType === "image" ? parseFeishuImageContent(message.content) : { imageKey: "" };
-  if (messageType === "text" && !text) {
+  if ((messageType === "text" || messageType === "post") && !text) {
     return null;
   }
   if (messageType === "image" && !imageKey) {
@@ -659,7 +665,9 @@ function normalizeFeishuInboundEvent(data) {
   }
   const chatId = normalizeText(message.chat_id);
   const messageId = normalizeText(message.message_id);
-  const senderId = normalizeText(sender?.sender_id?.open_id || sender?.sender_id?.user_id);
+  const senderId = normalizeText(
+    sender?.sender_id?.open_id || sender?.sender_id?.user_id || sender?.sender_id?.union_id
+  );
   const threadId = normalizeText(message.root_id || message.thread_id || message.message_id);
   if (!chatId || !messageId || !senderId) {
     return null;
@@ -684,6 +692,63 @@ function parseFeishuTextContent(rawContent) {
   } catch {
     return "";
   }
+}
+
+function parseFeishuPostContent(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent || "{}");
+    return extractFeishuPostText(parsed).trim();
+  } catch {
+    return "";
+  }
+}
+
+function extractFeishuPostText(value, fragments = []) {
+  if (!value) {
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      extractFeishuPostText(item, fragments);
+    }
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+  if (typeof value !== "object") {
+    return fragments.join("").replace(/\n{3,}/g, "\n\n");
+  }
+
+  const tag = normalizeText(value.tag).toLowerCase();
+  if ((tag === "text" || tag === "a" || tag === "at") && typeof value.text === "string") {
+    fragments.push(value.text);
+  } else if (tag === "br") {
+    fragments.push("\n");
+  }
+
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      extractFeishuPostText(child, fragments);
+    }
+  }
+  return fragments.join("").replace(/\n{3,}/g, "\n\n");
+}
+
+function probeFeishuInboundEnvelope(data) {
+  const event = data?.event || data || {};
+  const message = event?.message || {};
+  const sender = event?.sender || {};
+  return {
+    eventId: normalizeText(data?.header?.event_id || data?.event_id),
+    eventType: normalizeText(data?.header?.event_type || data?.event_type || data?.type),
+    messageType: normalizeText(message.message_type),
+    chatId: normalizeText(message.chat_id),
+    messageId: normalizeText(message.message_id),
+    rootId: normalizeText(message.root_id),
+    threadId: normalizeText(message.thread_id),
+    senderOpenId: normalizeText(sender?.sender_id?.open_id),
+    senderUserId: normalizeText(sender?.sender_id?.user_id),
+    senderUnionId: normalizeText(sender?.sender_id?.union_id),
+    hasContent: Boolean(normalizeText(message.content)),
+  };
 }
 
 function normalizeText(value) {

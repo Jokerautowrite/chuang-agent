@@ -41,7 +41,7 @@ assert(!compactedFooter.includes("会话记忆错误"));
 const process = buildProcessSection({
   status: "completed",
   providerMeta: {
-    response_kind: "chat.completion",
+    response_kind: "response",
     response_finish_reason: "stop",
     tool_call_count: 0,
     tool_trace: "trace transport=openai-compatible provider=local-openai-compatible model=gpt-5.5 base_url=https://api.pptoken.org/v1 api_key=len:67",
@@ -64,7 +64,7 @@ assert(process.startsWith("过程摘要"));
 assert(process.includes("当前轮未触发工具调用"));
 assert(process.includes("工具执行 ok / 失败 0"));
 assert(process.includes("live readiness local_ready_live_pending / 真实验收待完成 / ready不等于live"));
-assert(process.includes("provider chat.completion / finish stop"));
+assert(process.includes("provider response / finish stop"));
 assert(!process.includes("工具协议错误"));
 assert(!process.includes("raw current text"));
 assert(!process.includes("raw next action"));
@@ -74,7 +74,7 @@ assert(!process.includes("api_key=len:67"));
 const noLiveReadinessProcess = buildProcessSection({
   status: "completed",
   providerMeta: {
-    response_kind: "chat.completion",
+    response_kind: "response",
     response_finish_reason: "stop",
     tool_call_count: "0",
   },
@@ -85,7 +85,7 @@ assert(!noLiveReadinessProcess.includes("live readiness"));
 const toolTraceProcess = buildProcessSection({
   status: "completed",
   providerMeta: {
-    response_kind: "chat.completion",
+    response_kind: "response",
     response_finish_reason: "stop",
     tool_call_count: "1",
     tool_trace: "trace transport=openai-compatible base_url=https://api.pptoken.org/v1 api_key=len:67",
@@ -103,7 +103,7 @@ assert(!toolTraceProcess.includes("api_key=len:67"));
 const toolProblemProcess = buildProcessSection({
   status: "completed",
   providerMeta: {
-    response_kind: "chat.completion",
+    response_kind: "response",
     response_finish_reason: "stop",
     tool_trace: "ACTION: {bad json}",
   },
@@ -122,7 +122,7 @@ assert(!toolProblemProcess.includes("ACTION: {bad json}"));
 const providerFallbackProcess = buildProcessSection({
   status: "completed",
   providerMeta: {
-    response_kind: "chat.completion",
+    response_kind: "response",
     response_finish_reason: "stop",
     tool_call_count: "1",
     tool_trace: "ACTION: {provider meta raw payload}",
@@ -134,7 +134,7 @@ const providerFallbackProcess = buildProcessSection({
 assert(providerFallbackProcess.includes("工具调用 1 次"));
 assert(providerFallbackProcess.includes("工具执行 ok / 失败 0"));
 assert(providerFallbackProcess.includes("工具协议错误 2 次"));
-assert(providerFallbackProcess.includes("provider chat.completion / finish stop"));
+assert(providerFallbackProcess.includes("provider response / finish stop"));
 assert(!providerFallbackProcess.includes("ACTION: {provider meta raw payload}"));
 
 console.log("chuang_feishu_turn_summary_smoke_ok");
