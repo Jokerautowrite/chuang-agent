@@ -76,11 +76,11 @@ fn cli_run_with_provider_and_curl_transport_executes_local_post() {
             .read(&mut buffer)
             .expect("request should be readable");
         let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
-        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_text.contains("Authorization: Bearer test-key"));
         assert!(request_text.contains("cli curl transport"));
 
-        let body = r#"{"id":"chatcmpl-cli-curl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_cli_curl_ok"},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-cli-curl-1","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"real_cli_curl_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
@@ -143,11 +143,11 @@ fn cli_run_with_provider_and_native_transport_executes_local_post() {
             .expect("request should be readable");
         let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
         let request_lower = request_text.to_lowercase();
-        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_lower.contains("authorization: bearer test-key"));
         assert!(request_text.contains("cli native transport"));
 
-        let body = r#"{"id":"chatcmpl-cli-native-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_cli_native_ok"},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-cli-native-1","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"real_cli_native_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),

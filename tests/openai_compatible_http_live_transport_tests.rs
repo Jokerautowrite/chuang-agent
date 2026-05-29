@@ -261,7 +261,7 @@ fn openai_compatible_http_transport_returns_structured_error_when_server_unreach
             .map(String::as_str),
         Some("http_connect")
     );
-    let expected_url = format!("http://{address}/v1/chat/completions");
+    let expected_url = format!("http://{address}/v1/responses");
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
         Some(expected_url.as_str())
@@ -546,9 +546,9 @@ fn openai_compatible_http_transport_surfaces_success_metadata_when_server_reacha
             .read(&mut buffer)
             .expect("request should be readable");
         let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
-        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
 
-        let body = r#"{"id":"chatcmpl-local-2","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"http_live_ok"},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-local-2","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"http_live_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
@@ -589,7 +589,7 @@ fn openai_compatible_http_transport_surfaces_success_metadata_when_server_reacha
             .map(String::as_str),
         Some("POST")
     );
-    let expected_url = format!("http://{address}/v1/chat/completions");
+    let expected_url = format!("http://{address}/v1/responses");
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
         Some(expected_url.as_str())
@@ -817,7 +817,7 @@ fn openai_compatible_http_transport_marks_200_missing_content_as_structured_prov
             .read(&mut buffer)
             .expect("request should be readable");
 
-        let body = r#"{"id":"chatcmpl-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-empty","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
@@ -934,12 +934,12 @@ fn openai_compatible_native_transport_accepts_https_scheme_and_attempts_tls() {
         let request_text = String::from_utf8_lossy(&request_bytes).to_string();
         let request_lower = request_text.to_lowercase();
 
-        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_lower.contains("authorization: bearer test-key"));
         assert!(request_lower.contains("content-type: application/json"));
         assert!(request_text.contains("https tls attempt"));
 
-        let body = r#"{"id":"chatcmpl-local-tls-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_https_ok"},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-local-tls-1","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"real_https_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
@@ -981,7 +981,7 @@ fn openai_compatible_native_transport_accepts_https_scheme_and_attempts_tls() {
         response.extra_meta.get("status_code").map(String::as_str),
         Some("200")
     );
-    let expected_url = format!("https://{address}/v1/chat/completions");
+    let expected_url = format!("https://{address}/v1/responses");
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
         Some(expected_url.as_str())

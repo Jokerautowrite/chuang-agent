@@ -21,12 +21,12 @@ fn openai_compatible_curl_transport_executes_post_against_local_server() {
             .expect("request should be readable");
         let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
 
-        assert!(request_text.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_text.contains("Authorization: Bearer test-key"));
         assert!(request_text.contains("Content-Type: application/json"));
         assert!(request_text.contains("curl真实通道"));
 
-        let body = r#"{"id":"chatcmpl-curl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"real_curl_ok"},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-curl-1","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"real_curl_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),

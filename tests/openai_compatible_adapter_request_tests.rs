@@ -51,13 +51,9 @@ fn openai_compatible_adapter_emits_structured_request_envelope() {
     assert_eq!(envelope.provider_id, "custom-openai");
     assert_eq!(envelope.model, "gpt-4.1-mini");
     assert_eq!(envelope.base_url, "https://api.example.com/v1");
-    assert_eq!(envelope.messages.len(), 2);
-    assert_eq!(envelope.messages[0].role, "system");
-    assert_eq!(envelope.messages[1].role, "user");
-    assert!(envelope.messages[0]
-        .content
-        .contains("system+context prompt"));
-    assert!(envelope.messages[1].content.contains("继续推进创项目"));
+    assert_eq!(envelope.instructions, "system+context prompt");
+    assert_eq!(envelope.input, "继续推进创项目");
+    assert!(!envelope.store);
 }
 
 #[test]

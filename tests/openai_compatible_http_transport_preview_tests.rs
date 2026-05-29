@@ -22,7 +22,7 @@ fn openai_compatible_http_transport_reports_config_error_for_https_until_tls_cli
     assert_eq!(response.finish_reason.as_deref(), Some("invalid-config"));
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
-        Some("https://api.example.com/v1/chat/completions")
+        Some("https://api.example.com/v1/responses")
     );
     assert_eq!(
         response
@@ -88,9 +88,9 @@ fn openai_compatible_http_transport_reports_connect_error_for_invalid_port_shape
     );
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
-        Some("http://127.0.0.1:notaport/v1/chat/completions")
+        Some("http://127.0.0.1:notaport/v1/responses")
     );
     assert!(response
         .body
-        .contains("invalid_port:http://127.0.0.1:notaport/v1/chat/completions"));
+        .contains("invalid_port:http://127.0.0.1:notaport/v1/responses"));
 }

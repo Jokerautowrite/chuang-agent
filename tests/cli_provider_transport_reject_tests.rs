@@ -75,7 +75,7 @@ fn cli_run_http_transport_surfaces_preview_metadata() {
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("unsupported_http_scheme:https://api.example.com/v1/chat/completions"),
+        stdout.contains("unsupported_http_scheme:https://api.example.com/v1/responses"),
         "stdout={stdout}"
     );
     assert!(stdout.contains("request_method: POST"), "stdout={stdout}");
@@ -133,11 +133,11 @@ fn cli_run_http_transport_surfaces_invalid_port_preview_metadata() {
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("invalid_port:http://127.0.0.1:notaport/v1/chat/completions"),
+        stdout.contains("invalid_port:http://127.0.0.1:notaport/v1/responses"),
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("request_url: http://127.0.0.1:notaport/v1/chat/completions"),
+        stdout.contains("request_url: http://127.0.0.1:notaport/v1/responses"),
         "stdout={stdout}"
     );
 }

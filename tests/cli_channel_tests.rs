@@ -376,7 +376,7 @@ fn cli_channel_simulate_surfaces_nonzero_tool_protocol_errors() {
             let _ = read_http_request(&mut stream);
             let body = serde_json::json!({
                 "id": "chatcmpl-channel-tool-protocol",
-                "object": "chat.completion",
+                "object": "response",
                 "choices": [{
                     "index": 0,
                     "message": {"role": "assistant", "content": content},
@@ -508,7 +508,7 @@ fn cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload()
             let _ = read_http_request(&mut stream);
             let body = serde_json::json!({
                 "id": "chatcmpl-channel-text-tool-protocol",
-                "object": "chat.completion",
+                "object": "response",
                 "choices": [{
                     "index": 0,
                     "message": {"role": "assistant", "content": content},

@@ -758,7 +758,7 @@ fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
     extra.insert("transport_mode".to_string(), "http".to_string());
     extra.insert(
         "request_url".to_string(),
-        "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+        "http://127.0.0.1:8080/v1/responses".to_string(),
     );
     extra.insert("request_method".to_string(), "POST".to_string());
     extra.insert("request_message_count".to_string(), "2".to_string());
@@ -822,7 +822,7 @@ fn runtime_report_observability_meta_promotes_provider_failure_diagnostics() {
     let observability = runtime_observability_meta(&result);
     assert_eq!(
         observability.get("request_url"),
-        Some(&"http://127.0.0.1:8080/v1/chat/completions".to_string())
+        Some(&"http://127.0.0.1:8080/v1/responses".to_string())
     );
     assert_eq!(
         observability.get("request_method"),
@@ -910,7 +910,7 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     );
     extra.insert(
         "provider_fallback_primary_request_url".to_string(),
-        "http://127.0.0.1:8080/v1/chat/completions".to_string(),
+        "http://127.0.0.1:8080/v1/responses".to_string(),
     );
     extra.insert(
         "provider_fallback_primary_request_method".to_string(),
@@ -1007,7 +1007,7 @@ fn runtime_report_observability_meta_promotes_provider_fallback_diagnostics() {
     );
     assert_eq!(
         observability.get("provider_fallback_primary_request_url"),
-        Some(&"http://127.0.0.1:8080/v1/chat/completions".to_string())
+        Some(&"http://127.0.0.1:8080/v1/responses".to_string())
     );
     assert_eq!(
         observability.get("provider_fallback_primary_request_method"),

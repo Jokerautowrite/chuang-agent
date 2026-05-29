@@ -146,7 +146,7 @@ fn openai_compatible_adapter_exposes_minimal_config_shape() {
     assert_eq!(output.meta.provider.as_deref(), Some("custom-openai"));
     assert_eq!(
         output.meta.extra.get("request_url"),
-        Some(&"https://api.example.com/v1/chat/completions".to_string())
+        Some(&"https://api.example.com/v1/responses".to_string())
     );
     assert_eq!(
         output.meta.extra.get("transport"),

@@ -19,7 +19,7 @@ fn openai_compatible_adapter_builds_http_request_preview() {
         .expect("preview should build");
 
     assert_eq!(preview.method, "POST");
-    assert_eq!(preview.url, "https://api.example.com/v1/chat/completions");
+    assert_eq!(preview.url, "https://api.example.com/v1/responses");
     assert_eq!(
         preview.headers.get("authorization").map(String::as_str),
         Some("Bearer test-key")
@@ -29,8 +29,11 @@ fn openai_compatible_adapter_builds_http_request_preview() {
         Some("application/json")
     );
     assert!(preview.body_json.contains("\"model\":\"gpt-4.1-mini\""));
-    assert!(preview.body_json.contains("\"role\":\"system\""));
-    assert!(preview.body_json.contains("\"role\":\"user\""));
+    assert!(preview
+        .body_json
+        .contains("\"instructions\":\"system+context prompt\""));
+    assert!(preview.body_json.contains("\"input\":\"继续推进创项目\""));
+    assert!(preview.body_json.contains("\"store\":false"));
 }
 
 #[test]
@@ -51,7 +54,7 @@ fn openai_compatible_adapter_respond_exposes_http_request_preview_fields() {
     assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     assert_eq!(
         response.extra_meta.get("request_url").map(String::as_str),
-        Some("https://api.example.com/v1/chat/completions")
+        Some("https://api.example.com/v1/responses")
     );
     assert_eq!(
         response
@@ -69,5 +72,5 @@ fn openai_compatible_adapter_respond_exposes_http_request_preview_fields() {
     );
     assert!(response
         .trace
-        .contains("request_url=https://api.example.com/v1/chat/completions"));
+        .contains("request_url=https://api.example.com/v1/responses"));
 }

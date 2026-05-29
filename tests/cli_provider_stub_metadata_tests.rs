@@ -60,7 +60,7 @@ fn cli_run_with_provider_surfaces_stub_post_metadata() {
         "stdout should expose stub status metadata, got: {stdout}"
     );
     assert!(
-        stdout.contains("stub_response_kind: chat.completion"),
+        stdout.contains("stub_response_kind: response"),
         "stdout should expose stub response kind metadata, got: {stdout}"
     );
 }

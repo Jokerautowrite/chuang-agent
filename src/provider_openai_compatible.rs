@@ -33,17 +33,13 @@ pub struct ProviderConfigError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenAICompatibleMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAICompatibleRequestEnvelope {
     pub provider_id: String,
     pub base_url: String,
     pub model: String,
-    pub messages: Vec<OpenAICompatibleMessage>,
+    pub instructions: String,
+    pub input: String,
+    pub store: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,16 +180,9 @@ impl OpenAICompatibleProviderAdapter {
             provider_id: self.identity.provider_id.clone(),
             base_url: self.base_url.clone(),
             model: self.identity.model_name.clone(),
-            messages: vec![
-                OpenAICompatibleMessage {
-                    role: "system".to_string(),
-                    content: request.prompt.clone(),
-                },
-                OpenAICompatibleMessage {
-                    role: "user".to_string(),
-                    content: request.user_input.clone(),
-                },
-            ],
+            instructions: request.prompt.clone(),
+            input: request.user_input.clone(),
+            store: false,
         })
     }
 
@@ -202,20 +191,12 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpRequestPreview, ProviderConfigError> {
         let envelope = self.build_request_envelope(request)?;
-        let url = format!(
-            "{}/chat/completions",
-            envelope.base_url.trim_end_matches('/'),
-        );
+        let url = format!("{}/responses", envelope.base_url.trim_end_matches('/'),);
         let body_json = json!({
             "model": envelope.model,
-            "messages": envelope
-                .messages
-                .iter()
-                .map(|message| json!({
-                    "role": message.role,
-                    "content": message.content,
-                }))
-                .collect::<Vec<_>>(),
+            "instructions": envelope.instructions,
+            "input": envelope.input,
+            "store": envelope.store,
         })
         .to_string();
 
@@ -239,26 +220,46 @@ impl OpenAICompatibleProviderAdapter {
     ) -> Result<StubHttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
         let response_body_json = json!({
-            "id": "stub-chatcmpl-001",
-            "object": "chat.completion",
+            "id": "resp-stub-001",
+            "object": "response",
+            "status": "completed",
+            "completed_at": 0,
             "provider_id": self.identity.provider_id,
             "model": self.identity.model_name,
             "stubbed": true,
-            "choices": [
+            "instructions": request.prompt,
+            "output": [
                 {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": format!(
-                            "stubbed_post_ok: provider={} model={} user_input=《{}》",
-                            self.identity.provider_id,
-                            self.identity.model_name,
-                            request.user_input
-                        )
-                    },
-                    "finish_reason": "stop"
+                    "id": "msg-stub-001",
+                    "type": "message",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": format!(
+                                "stubbed_post_ok: provider={} model={} user_input=《{}》",
+                                self.identity.provider_id,
+                                self.identity.model_name,
+                                request.user_input
+                            ),
+                            "annotations": []
+                        }
+                    ]
                 }
-            ]
+            ],
+            "output_text": format!(
+                "stubbed_post_ok: provider={} model={} user_input=《{}》",
+                self.identity.provider_id,
+                self.identity.model_name,
+                request.user_input
+            ),
+            "store": false,
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0
+            }
         })
         .to_string();
 
@@ -1154,15 +1155,26 @@ fn wait_with_timeout(
 }
 
 fn request_message_count(body_json: &str) -> usize {
-    serde_json::from_str::<serde_json::Value>(body_json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("messages")
-                .and_then(|messages| messages.as_array().cloned())
-        })
-        .map(|messages| messages.len())
-        .unwrap_or(0)
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body_json) else {
+        return 0;
+    };
+
+    if let Some(messages) = value
+        .get("messages")
+        .and_then(|messages| messages.as_array())
+    {
+        return messages.len();
+    }
+
+    count_request_item(value.get("instructions")) + count_request_item(value.get("input"))
+}
+
+fn count_request_item(value: Option<&serde_json::Value>) -> usize {
+    match value {
+        Some(serde_json::Value::Array(items)) => items.len(),
+        Some(serde_json::Value::Null) | None => 0,
+        Some(_) => 1,
+    }
 }
 
 fn extract_assistant_content(response_body_json: &str) -> Option<String> {
@@ -1296,10 +1308,39 @@ fn extract_text_like_value(value: &serde_json::Value) -> Option<String> {
 }
 
 fn extract_finish_reason(response_body_json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(response_body_json)
-        .ok()
-        .and_then(|value| value.get("choices")?.as_array()?.first().cloned())
-        .and_then(|choice| choice.get("finish_reason")?.as_str().map(str::to_string))
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(response_body_json) else {
+        return None;
+    };
+
+    if let Some(reason) = value
+        .get("choices")
+        .and_then(|choices| choices.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(|finish_reason| finish_reason.as_str())
+    {
+        return Some(reason.to_string());
+    }
+
+    if let Some(status) = value.get("status").and_then(|status| status.as_str()) {
+        match status {
+            "completed" => return Some("stop".to_string()),
+            "incomplete" => {
+                if let Some(reason) = value
+                    .get("incomplete_details")
+                    .and_then(|details| details.get("reason"))
+                    .and_then(|reason| reason.as_str())
+                {
+                    return Some(reason.to_string());
+                }
+                return Some("incomplete".to_string());
+            }
+            "failed" => return Some("failed".to_string()),
+            other => return Some(other.to_string()),
+        }
+    }
+
+    None
 }
 
 fn extract_provider_error_message(response_body_json: &str) -> Option<String> {
@@ -1370,6 +1411,7 @@ fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static
 #[cfg(test)]
 mod tests {
     use super::extract_assistant_content_from_value;
+    use super::extract_finish_reason;
     use serde_json::json;
 
     #[test]
@@ -1425,6 +1467,37 @@ mod tests {
         assert_eq!(
             extract_assistant_content_from_value(&value).as_deref(),
             Some("创项目")
+        );
+    }
+
+    #[test]
+    fn extracts_responses_finish_reason_from_completed_status() {
+        let value = json!({
+            "id": "resp-1",
+            "object": "response",
+            "status": "completed",
+            "output": []
+        });
+
+        assert_eq!(
+            extract_finish_reason(&value.to_string()).as_deref(),
+            Some("stop")
+        );
+    }
+
+    #[test]
+    fn extracts_responses_finish_reason_from_incomplete_details() {
+        let value = json!({
+            "id": "resp-2",
+            "object": "response",
+            "status": "incomplete",
+            "incomplete_details": { "reason": "max_output_tokens" },
+            "output": []
+        });
+
+        assert_eq!(
+            extract_finish_reason(&value.to_string()).as_deref(),
+            Some("max_output_tokens")
         );
     }
 }

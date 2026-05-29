@@ -725,7 +725,7 @@ fn app_server_turn_surfaces_nonzero_tool_protocol_errors() {
             let _ = read_http_request(&mut stream);
             let body = serde_json::json!({
                 "id": "chatcmpl-tool-protocol",
-                "object": "chat.completion",
+                "object": "response",
                 "choices": [{
                     "index": 0,
                     "message": {"role": "assistant", "content": content},
@@ -1268,7 +1268,7 @@ fallback_model = "gpt-app-server-fallback"
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
             ["provider_fallback_primary_request_url"],
-        format!("http://{address}/v1/chat/completions")
+        format!("http://{address}/v1/responses")
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
@@ -1282,7 +1282,7 @@ fallback_model = "gpt-app-server-fallback"
     );
     assert_eq!(
         turn_response["result"]["turn"]["providerMeta"]["provider_fallback_primary_request_url"],
-        format!("http://{address}/v1/chat/completions")
+        format!("http://{address}/v1/responses")
     );
     assert_eq!(
         turn_response["result"]["turn"]["providerMeta"]["provider_fallback_primary_request_method"],
@@ -1392,7 +1392,7 @@ fallback_error_classes = "config"
     );
     assert_eq!(
         turn_response["result"]["turn"]["providerMeta"]["provider_fallback_primary_request_url"],
-        "ftp://api.example.com/v1/chat/completions"
+        "ftp://api.example.com/v1/responses"
     );
     assert_eq!(
         turn_response["result"]["turn"]["providerMeta"]["provider_fallback_primary_request_method"],
@@ -1411,7 +1411,7 @@ fallback_error_classes = "config"
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
             ["provider_fallback_primary_request_url"],
-        "ftp://api.example.com/v1/chat/completions"
+        "ftp://api.example.com/v1/responses"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]
@@ -1575,7 +1575,7 @@ fn app_server_turn_marks_200_missing_content_as_provider_error() {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
         let _ = read_http_request(&mut stream);
 
-        let body = r#"{"id":"chatcmpl-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
+        let body = r#"{"id":"chatcmpl-empty","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
@@ -1800,7 +1800,7 @@ transport = "curl"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["request_url"],
-        format!("http://{address}/v1/chat/completions")
+        format!("http://{address}/v1/responses")
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["request_method"],
