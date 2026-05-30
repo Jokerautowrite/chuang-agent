@@ -1,3 +1,10 @@
+# 2026-05-30 非 Feishu 主线第二轮并行收口
+- 本轮继续按老爸要求跳过 Feishu，主控派 3 个 `gpt-5.3-codex` 子代理并行推进非 Feishu 主线；主控审核后收紧默认行为。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实浏览器/桌面动作，没有删除或清理文件。
+- GBrain live receipt 脚本补齐：新增 `scripts/chuang-gbrain-live-receipt.sh` 和 `tests/gbrain_live_receipt_tests.rs`。默认缺 `CHUANG_GBRAIN_LIVE_ENDPOINT` / `CHUANG_GBRAIN_LIVE_TOKEN` 时 structured blocked；配置后只发只读 `POST`，payload 固定包含 `source=gbrain`、`query`、`limit`、`read_only=true`，token/endpoint 只输出 `<set>/<missing>` 状态。
+- 非 Feishu 回执套件补齐：新增 `scripts/chuang-non-feishu-receipt-suite.sh` 和 `tests/non_feishu_receipt_suite_tests.rs`，一次性汇总 provider readiness、desktop dry-run rehearsal、CDP/Wiki/GBrain/skill proposal 只读回执。主控审核时把真实 provider live request 改为显式 opt-in：只有设置 `CHUANG_NON_FEISHU_SUITE_INCLUDE_PROVIDER_LIVE=1` 才会调用真实模型请求；默认套件不会产生真实 provider 请求。
+- Skill proposal 只读校验回执补齐：新增 `scripts/chuang-skill-proposal-verify-receipt.sh` 和 `tests/skill_proposal_verify_receipt_tests.rs`。未设置 `CHUANG_SKILL_PROPOSAL_FILE` 时 blocked；设置后只读 JSON，校验 `id`、`title/name`、正文摘要字段和可选 `evidence_refs` 类型，只输出摘要，不写技能目录、不执行 solidify。
+- 主控复验已通过：`bash -n` 与默认 `--json` 运行三个新脚本；`cargo test -q --test gbrain_live_receipt_tests --test non_feishu_receipt_suite_tests --test skill_proposal_verify_receipt_tests` 通过。当前仍不是全局 real-live-ready：GBrain/Wiki/CDP/skill proposal 默认 blocked 是预期，真实外部证据仍需要 operator 配置 endpoint/token/端口或提供 proposal 文件。
+
 # 2026-05-30 非 Feishu 主线四路并行推进
 - 本轮按老爸要求跳过 Feishu 线，继续用多子代理并行推进其他主线；主控负责审核集成。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实浏览器/桌面动作，也没有删除或清理文件。
 - Gap 5B Wiki live receipt 脚本已补齐：新增 `scripts/chuang-wiki-live-receipt.sh` 和 `tests/wiki_live_receipt_tests.rs`。脚本默认无 `CHUANG_WIKI_LIVE_ENDPOINT` / `CHUANG_WIKI_LIVE_TOKEN` 时输出 `acceptance_status=blocked`，blockers 为 `missing_wiki_endpoint` / `missing_wiki_token`；配置后只向 endpoint 发起只读 `POST`，body 固定包含 `source/query/limit/read_only=true`，token 只显示 `<set>/<missing>`。
