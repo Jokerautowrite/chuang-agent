@@ -3,6 +3,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::chuang_kernel::{
     ChuangKernelConfig, IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
@@ -21,6 +22,45 @@ fn cdp_env_guard() -> std::sync::MutexGuard<'static, ()> {
         .get_or_init(|| Mutex::new(()))
         .lock()
         .expect("cdp env guard should lock")
+}
+
+fn kernel_test_config_and_snapshot() -> (RuntimeConfig, ChuangKernelConfig) {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let kernel = ChuangKernelConfig {
+        agent_id: "chuang-cli".to_string(),
+        parent_agent_id: None,
+        recall_limit: config.recall_limit,
+        metadata: config.metadata.clone(),
+        context_budget: Some(config.context_budget.clone()),
+        context_engine_kind: None,
+        memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
+        identity_snapshot: None,
+        identity_bootstrap_snapshot: None,
+    };
+    (config, kernel)
+}
+
+struct EnvVarRestore {
+    key: &'static str,
+    old_value: Option<std::ffi::OsString>,
+}
+
+impl EnvVarRestore {
+    fn capture(key: &'static str) -> Self {
+        Self {
+            key,
+            old_value: std::env::var_os(key),
+        }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        match &self.old_value {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
 }
 
 #[test]
@@ -861,13 +901,252 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
 }
 
 #[test]
+fn kernel_status_marks_global_ready_with_verified_real_live_receipt_file() {
+    let _guard = cdp_env_guard();
+    std::env::remove_var("CHUANG_CDP_PORT");
+    let _global_env = EnvVarRestore::capture("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE");
+    let _alias_env = EnvVarRestore::capture("CHUANG_REAL_LIVE_RECEIPT_FILE");
+    std::env::remove_var("CHUANG_REAL_LIVE_RECEIPT_FILE");
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "chuang-global-real-live-receipt-{nanos}-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir should be created");
+    let receipt_path = dir.join("global-real-live-receipt.json");
+    let service_ids = [
+        "feishu",
+        "provider",
+        "subagent_live_rehearsal",
+        "desktop",
+        "browser",
+        "wiki",
+        "gbrain",
+    ];
+    let evidence = serde_json::json!({
+        "feishu": {
+            "health_transcript_ref": "receipt://feishu/health",
+            "session_transcript_ref": "receipt://feishu/session",
+            "tools_or_capabilities_transcript_ref": "receipt://feishu/tools",
+            "normal_message_transcript_ref": "receipt://feishu/message",
+            "runtime_report_id": "runtime-report-feishu"
+        },
+        "provider": {
+            "provider_kind": "openai_compatible",
+            "transport": "cliproxy-local",
+            "api_key_state": "<set>",
+            "provider_live_request_receipt_ref": "receipt://provider/live-request",
+            "runtime_report_id": "runtime-report-provider",
+            "does_not_call_provider": false,
+            "does_not_read_provider_readiness": false
+        },
+        "subagent_live_rehearsal": {
+            "dispatch_id": "dispatch-verified",
+            "worker_id": "worker-verified",
+            "gate_receipt_ref": "receipt://subagent/gate",
+            "allowlist_receipt_ref": "receipt://subagent/allowlist",
+            "capability_routing_ref": "receipt://subagent/capability-routing",
+            "report_admission_ref": "receipt://subagent/report-admission"
+        },
+        "desktop": {
+            "audit_label": "actuator.operation.live",
+            "action_receipt_ref": "receipt://desktop/action",
+            "governance_receipt_ref": "receipt://desktop/governance",
+            "real_execution": "true"
+        },
+        "browser": {
+            "adapter_manifest_ref": "receipt://browser/adapter-manifest",
+            "session_scope_ref": "receipt://browser/session-scope",
+            "browser_snapshot_or_transcript_ref": "receipt://browser/snapshot",
+            "report_admission_ref": "receipt://browser/report-admission"
+        },
+        "wiki": {
+            "source_contract_ref": "receipt://wiki/source-contract",
+            "query_receipt_ref": "receipt://wiki/query",
+            "provenance_ref": "receipt://wiki/provenance",
+            "writes_core_memory": false
+        },
+        "gbrain": {
+            "source_contract_ref": "receipt://gbrain/source-contract",
+            "query_receipt_ref": "receipt://gbrain/query",
+            "provenance_ref": "receipt://gbrain/provenance",
+            "writes_core_memory": false
+        }
+    });
+    let receipt = serde_json::json!({
+        "acceptance_status": "verified",
+        "can_mark_real_live_ready": true,
+        "service_evidence": evidence,
+        "service_receipts": service_ids.iter().map(|service_id| {
+            serde_json::json!({
+                "id": service_id,
+                "status": "verified",
+                "evidence": evidence[*service_id].clone()
+            })
+        }).collect::<Vec<_>>(),
+        "real_live_acceptance": {
+            "complete": true,
+            "status": "verified",
+            "services": service_ids.iter().map(|service_id| {
+                serde_json::json!({
+                    "id": service_id,
+                    "completion_state": "verified",
+                    "manual_live_required": false,
+                    "must_not_count_as_complete": false
+                })
+            }).collect::<Vec<_>>()
+        },
+        "blockers": []
+    });
+    std::fs::write(
+        &receipt_path,
+        serde_json::to_string_pretty(&receipt).expect("receipt should serialize"),
+    )
+    .expect("receipt should write");
+    std::env::set_var("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE", &receipt_path);
+
+    let (config, kernel) = kernel_test_config_and_snapshot();
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    assert_eq!(
+        status.third_test_candidate.overall_state,
+        "global_real_live_ready"
+    );
+    assert!(status.third_test_candidate.real_live_ready);
+    assert!(status.third_test_candidate.connects_real_external_services);
+    assert!(status.third_test_candidate.verifies_real_external_services);
+    assert!(!status.third_test_candidate.requires_manual_live_check);
+    assert!(!status.third_test_candidate.operator_env_blocks_100_percent);
+    assert_eq!(status.third_test_candidate.live_receipt_state, "verified");
+    assert_eq!(
+        status
+            .third_test_candidate
+            .live_receipt_verified_service_count,
+        7
+    );
+    assert!(status.third_test_candidate.live_receipt_blockers.is_empty());
+    assert!(status.release_readiness.connects_real_external_services);
+    assert!(status.release_readiness.verifies_real_external_services);
+    assert!(!status.release_readiness.uses_stub_or_local_fixtures);
+    assert!(status
+        .release_readiness
+        .acceptance
+        .iter()
+        .any(|item| item.name == "real_external_services"
+            && item.state == "ready"
+            && item.connects_real_service));
+}
+
+#[test]
+fn kernel_status_blocks_global_ready_when_receipt_evidence_is_not_canonical() {
+    let _guard = cdp_env_guard();
+    std::env::remove_var("CHUANG_CDP_PORT");
+    let _global_env = EnvVarRestore::capture("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE");
+    let _alias_env = EnvVarRestore::capture("CHUANG_REAL_LIVE_RECEIPT_FILE");
+    std::env::remove_var("CHUANG_REAL_LIVE_RECEIPT_FILE");
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "chuang-global-real-live-receipt-invalid-{nanos}-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir should be created");
+    let receipt_path = dir.join("global-real-live-receipt-invalid.json");
+    let service_ids = [
+        "feishu",
+        "provider",
+        "subagent_live_rehearsal",
+        "desktop",
+        "browser",
+        "wiki",
+        "gbrain",
+    ];
+    let evidence = serde_json::json!({
+        "feishu": {"non_canonical": "receipt://feishu"},
+        "provider": {"non_canonical": "receipt://provider"},
+        "subagent_live_rehearsal": {"non_canonical": "receipt://subagent"},
+        "desktop": {"non_canonical": "receipt://desktop"},
+        "browser": {"non_canonical": "receipt://browser"},
+        "wiki": {"non_canonical": "receipt://wiki"},
+        "gbrain": {"non_canonical": "receipt://gbrain"}
+    });
+    let receipt = serde_json::json!({
+        "acceptance_status": "verified",
+        "can_mark_real_live_ready": true,
+        "service_evidence": evidence,
+        "service_receipts": service_ids.iter().map(|service_id| {
+            serde_json::json!({
+                "id": service_id,
+                "status": "verified",
+                "evidence": evidence[*service_id].clone()
+            })
+        }).collect::<Vec<_>>(),
+        "real_live_acceptance": {
+            "complete": true,
+            "status": "verified",
+            "services": service_ids.iter().map(|service_id| {
+                serde_json::json!({
+                    "id": service_id,
+                    "completion_state": "verified",
+                    "manual_live_required": false,
+                    "must_not_count_as_complete": false
+                })
+            }).collect::<Vec<_>>()
+        },
+        "blockers": []
+    });
+    std::fs::write(
+        &receipt_path,
+        serde_json::to_string_pretty(&receipt).expect("receipt should serialize"),
+    )
+    .expect("receipt should write");
+    std::env::set_var("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE", &receipt_path);
+
+    let (config, kernel) = kernel_test_config_and_snapshot();
+    let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
+
+    assert_eq!(
+        status.third_test_candidate.overall_state,
+        "local_gate_ready_requires_manual_live_check"
+    );
+    assert!(!status.third_test_candidate.real_live_ready);
+    assert_eq!(status.third_test_candidate.live_receipt_state, "blocked");
+    assert_eq!(
+        status
+            .third_test_candidate
+            .live_receipt_verified_service_count,
+        0
+    );
+    assert!(status
+        .third_test_candidate
+        .live_receipt_blockers
+        .iter()
+        .any(|blocker| blocker == "feishu: health_transcript_ref_missing_or_not_string"));
+    assert!(status
+        .third_test_candidate
+        .live_receipt_blockers
+        .iter()
+        .any(|blocker| blocker == "provider: api_key_state_not_<set>"));
+    assert!(!status.release_readiness.connects_real_external_services);
+    assert!(!status.release_readiness.verifies_real_external_services);
+}
+
+#[test]
 fn kernel_status_marks_knowledge_read_preflight_ready_when_env_and_endpoints_are_set() {
     let _guard = cdp_env_guard();
     std::env::remove_var("CHUANG_CDP_PORT");
     std::env::set_var("CHUANG_TEST_WIKI_TOKEN", "wiki-token");
 
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    config.external_knowledge.wiki.endpoint = Some("https://wiki.example.invalid/query".to_string());
+    config.external_knowledge.wiki.endpoint =
+        Some("https://wiki.example.invalid/query".to_string());
     config.external_knowledge.wiki.token_env = Some("CHUANG_TEST_WIKI_TOKEN".to_string());
 
     let kernel = ChuangKernelConfig {
@@ -924,7 +1203,9 @@ fn spawn_cdp_status_server() -> (SocketAddr, JoinHandle<()>) {
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
         let mut buffer = [0u8; 4096];
-        let _ = stream.read(&mut buffer).expect("request should be readable");
+        let _ = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
         let body = "[]";
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

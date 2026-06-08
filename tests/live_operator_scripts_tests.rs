@@ -32,6 +32,93 @@ fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, Path
     (root, config_path)
 }
 
+fn complete_global_real_live_receipt() -> serde_json::Value {
+    let service_ids = [
+        "feishu",
+        "provider",
+        "subagent_live_rehearsal",
+        "desktop",
+        "browser",
+        "wiki",
+        "gbrain",
+    ];
+    let evidence = serde_json::json!({
+        "feishu": {
+            "health_transcript_ref": "receipt://feishu/health",
+            "session_transcript_ref": "receipt://feishu/session",
+            "tools_or_capabilities_transcript_ref": "receipt://feishu/tools",
+            "normal_message_transcript_ref": "receipt://feishu/message",
+            "runtime_report_id": "runtime-report-feishu"
+        },
+        "provider": {
+            "provider_kind": "openai_compatible",
+            "transport": "cliproxy-local",
+            "api_key_state": "<set>",
+            "provider_live_request_receipt_ref": "receipt://provider/live-request",
+            "runtime_report_id": "runtime-report-provider",
+            "does_not_call_provider": false,
+            "does_not_read_provider_readiness": false
+        },
+        "subagent_live_rehearsal": {
+            "dispatch_id": "dispatch-verified",
+            "worker_id": "worker-verified",
+            "gate_receipt_ref": "receipt://subagent/gate",
+            "allowlist_receipt_ref": "receipt://subagent/allowlist",
+            "capability_routing_ref": "receipt://subagent/capability-routing",
+            "report_admission_ref": "receipt://subagent/report-admission"
+        },
+        "desktop": {
+            "audit_label": "actuator.operation.live",
+            "action_receipt_ref": "receipt://desktop/action",
+            "governance_receipt_ref": "receipt://desktop/governance",
+            "real_execution": "true"
+        },
+        "browser": {
+            "adapter_manifest_ref": "receipt://browser/adapter-manifest",
+            "session_scope_ref": "receipt://browser/session-scope",
+            "browser_snapshot_or_transcript_ref": "receipt://browser/snapshot",
+            "report_admission_ref": "receipt://browser/report-admission"
+        },
+        "wiki": {
+            "source_contract_ref": "receipt://wiki/source-contract",
+            "query_receipt_ref": "receipt://wiki/query",
+            "provenance_ref": "receipt://wiki/provenance",
+            "writes_core_memory": false
+        },
+        "gbrain": {
+            "source_contract_ref": "receipt://gbrain/source-contract",
+            "query_receipt_ref": "receipt://gbrain/query",
+            "provenance_ref": "receipt://gbrain/provenance",
+            "writes_core_memory": false
+        }
+    });
+    serde_json::json!({
+        "acceptance_status": "verified",
+        "can_mark_real_live_ready": true,
+        "service_evidence": evidence,
+        "service_receipts": service_ids.iter().map(|service_id| {
+            serde_json::json!({
+                "id": service_id,
+                "status": "verified",
+                "evidence": evidence[*service_id].clone()
+            })
+        }).collect::<Vec<_>>(),
+        "real_live_acceptance": {
+            "complete": true,
+            "status": "verified",
+            "services": service_ids.iter().map(|service_id| {
+                serde_json::json!({
+                    "id": service_id,
+                    "completion_state": "verified",
+                    "manual_live_required": false,
+                    "must_not_count_as_complete": false
+                })
+            }).collect::<Vec<_>>()
+        },
+        "blockers": []
+    })
+}
+
 #[test]
 fn live_operator_receipt_script_is_readonly_and_template_only() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -477,7 +564,81 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
     assert_eq!(data["provider_readiness"]["overall_state"], "ready");
     assert_eq!(data["provider_readiness"]["api_key_state"], "<set>");
     assert_eq!(data["provider_readiness"]["uses_redacted_state_only"], true);
+    assert_eq!(real_live["real_live_ready"], false);
+    assert_eq!(real_live["requires_manual_live_check"], true);
     assert!(!stdout.contains("provider-secret-value"));
+}
+
+#[test]
+fn live_gaps_check_reports_ready_with_verified_global_receipt_file() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("scripts/chuang-live-gaps-check.sh");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-live-gaps-check-ready-{nanos}-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let receipt_path = temp_dir.join("global-real-live-receipt.json");
+    fs::write(
+        &receipt_path,
+        serde_json::to_string_pretty(&complete_global_real_live_receipt())
+            .expect("receipt should serialize"),
+    )
+    .expect("receipt should write");
+
+    let output = Command::new("bash")
+        .arg(&script_path)
+        .arg("--json")
+        .env("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE", &receipt_path)
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("live gaps check should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {} stdout: {}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: serde_json::Value =
+        serde_json::from_str(&stdout).expect("live gaps output should be json");
+
+    assert_eq!(data["ok"], true);
+    assert_eq!(
+        data["summary"],
+        "local_contract=ready preflight=ready_but_no_start real_live=ready"
+    );
+    let matrix = data["matrix"]
+        .as_array()
+        .expect("live gaps matrix should be an array");
+    let real_live = matrix
+        .iter()
+        .find(|item| item["name"] == "real_live")
+        .expect("real live matrix entry should exist");
+    assert_eq!(real_live["state"], "ready");
+    assert_eq!(real_live["ready"], true);
+    assert_eq!(real_live["requires_manual_live_check"], false);
+    assert_eq!(real_live["connects_real_external_services"], true);
+    assert_eq!(real_live["verifies_real_external_services"], true);
+    assert_eq!(real_live["real_live_ready"], true);
+    assert_eq!(
+        data["gaps"]
+            .as_array()
+            .expect("gaps should be an array")
+            .len(),
+        0
+    );
+    assert_eq!(
+        data["next_action"],
+        "global real-live receipt verified; keep receipt path configured"
+    );
 }
 
 #[test]
@@ -529,6 +690,7 @@ fn candidate_verify_wrapper_only_treats_expected_provider_blocks_as_non_fatal() 
     assert!(wrapper.contains("[candidate-verify] live gaps check"));
     assert!(wrapper.contains("[candidate-verify] live runner readiness view"));
     assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
+    assert!(wrapper.contains("\"global_real_live_ready\""));
     assert!(wrapper.contains("scripts/chuang-live-operator-checklist.sh --json"));
     assert!(wrapper.contains("scripts/chuang-goal-run-status.sh --json"));
     assert!(wrapper.contains("provider_status=$?"));
@@ -587,6 +749,7 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("working tree must be clean before third test smoke"));
     assert!(wrapper.contains("[third-test] live runner readiness view"));
     assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
+    assert!(wrapper.contains("\"global_real_live_ready\""));
     assert!(wrapper.contains("live_runner_readiness_view_state="));
     assert!(wrapper.contains("live_runner_readiness_view_ready_for_live="));
     assert!(wrapper.contains("live_runner_readiness_view_blocked_reason="));
@@ -904,9 +1067,14 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
     assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 12"));
-    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
-    assert!(wrapper.contains("live_readiness[\"real_external_acceptance_pending\"] is True"));
-    assert!(wrapper.contains("live_readiness[\"provider_live_request_verified_by_status\"] is False"));
+    assert!(wrapper
+        .contains("live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"));
+    assert!(wrapper.contains(
+        "live_readiness[\"real_external_acceptance_pending\"] is (not global_real_live_ready)"
+    ));
+    assert!(wrapper.contains(
+        "live_readiness[\"provider_live_request_verified_by_status\"] is global_real_live_ready"
+    ));
     assert!(wrapper.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
     assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
@@ -993,9 +1161,14 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
     assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 12"));
-    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
-    assert!(wrapper.contains("live_readiness[\"real_external_acceptance_pending\"] is True"));
-    assert!(wrapper.contains("live_readiness[\"provider_live_request_verified_by_status\"] is False"));
+    assert!(wrapper
+        .contains("live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"));
+    assert!(wrapper.contains(
+        "live_readiness[\"real_external_acceptance_pending\"] is (not global_real_live_ready)"
+    ));
+    assert!(wrapper.contains(
+        "live_readiness[\"provider_live_request_verified_by_status\"] is global_real_live_ready"
+    ));
     assert!(wrapper.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
     assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));

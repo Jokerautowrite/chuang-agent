@@ -47,13 +47,17 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(mvp_smoke.contains("def assert_live_readiness(live_readiness):"));
     assert!(mvp_smoke.contains("assert_live_readiness(data[\"live_readiness\"])"));
     assert!(mvp_smoke.contains("assert_live_readiness(status[\"live_readiness\"])"));
-    assert!(mvp_smoke.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(mvp_smoke.contains(
+        "live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"
+    ));
     assert!(mvp_smoke.contains("[smoke] channel simulate"));
     assert!(mvp_smoke.contains("live_readiness = data[\"live_readiness\"]"));
-    assert!(mvp_smoke.contains("live_readiness[\"real_external_acceptance_pending\"] is True"));
-    assert!(
-        mvp_smoke.contains("live_readiness[\"provider_live_request_verified_by_status\"] is False")
-    );
+    assert!(mvp_smoke.contains(
+        "live_readiness[\"real_external_acceptance_pending\"] is (not global_real_live_ready)"
+    ));
+    assert!(mvp_smoke.contains(
+        "live_readiness[\"provider_live_request_verified_by_status\"] is global_real_live_ready"
+    ));
     assert!(mvp_smoke.contains("live_readiness[\"ready_does_not_mean_live\"] is True"));
     assert!(mvp_smoke.contains("assert \"live_readiness\" not in data[\"runtime_observability\"]"));
     assert!(mvp_smoke.contains("chuang-feishu-turn-summary-smoke.js"));
@@ -144,7 +148,9 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("assert_live_readiness(data[\"live_readiness\"])"));
     assert!(wrapper.contains("assert_live_readiness(data[\"status\"][\"live_readiness\"])"));
     assert!(wrapper.contains("assert_live_readiness(status[\"live_readiness\"])"));
-    assert!(wrapper.contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(wrapper.contains(
+        "live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"
+    ));
     assert!(wrapper.contains("checks_by_name[\"goal_run_readiness\"]"));
     assert!(wrapper.contains("provider_readiness"));
     assert!(wrapper.contains("provider_id\"] == \"complete-local-openai\""));
@@ -440,8 +446,9 @@ fn final_verify_wrapper_requires_clean_tree_and_candidate_verify() {
     assert!(candidate_wrapper.contains("tool_unified_execution_status"));
     assert!(candidate_wrapper.contains("tool_unified_execution_failure_count"));
     assert!(candidate_wrapper.contains("tool_unified_execution_failure_classes"));
-    assert!(candidate_wrapper
-        .contains("live_readiness[\"overall_state\"] == \"local_ready_live_pending\""));
+    assert!(candidate_wrapper.contains(
+        "live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"
+    ));
     assert!(candidate_wrapper.contains("candidate_live_readiness_state="));
     assert!(candidate_wrapper.contains("runtime_meta.goal_handoff_query_summary_json"));
     assert!(candidate_wrapper.contains("runtime_meta.subagent_children_summary_json"));
@@ -586,12 +593,13 @@ fn live_gaps_check_reports_local_preflight_and_real_live_pending_without_live_si
     assert!(preflight < matrix);
     assert!(script.contains("check_name\": \"live-gaps\""));
     assert!(script.contains("marker\": \"live_gaps_check_ok\""));
-    assert!(script.contains("local_contract=ready preflight=ready_but_no_start real_live=pending"));
+    assert!(script
+        .contains("\"summary\": \"local_contract=ready preflight=ready_but_no_start real_live=\""));
     assert!(script.contains("\"name\": \"local_contract\""));
     assert!(script.contains("\"name\": \"preflight_ready_but_no_start\""));
     assert!(script.contains("\"name\": \"real_live\""));
     assert!(script.contains("\"state\": \"ready_but_no_start\""));
-    assert!(script.contains("\"state\": \"pending\" if real_live_pending else \"ready\""));
+    assert!(script.contains("\"state\": \"ready\" if real_live_ready else \"pending\""));
     assert!(script.contains("ready_for_live\"] is False"));
     assert!(script.contains("starts_external_worker\"] is False"));
     assert!(script.contains("live_worker_available\"] is False"));
@@ -669,13 +677,17 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
     assert!(wrapper.contains("[third-test] live runner readiness view"));
     assert!(wrapper.contains("scripts/chuang-live-runner-readiness-view.sh --json"));
     assert!(wrapper.contains("data[\"check_name\"] == \"live-gaps\""));
-    assert!(wrapper.contains(
-        "data[\"summary\"] == \"local_contract=ready preflight=ready_but_no_start real_live=pending\""
-    ));
+    assert!(wrapper.contains("data[\"summary\"] in ("));
+    assert!(
+        wrapper.contains("\"local_contract=ready preflight=ready_but_no_start real_live=pending\"")
+    );
+    assert!(
+        wrapper.contains("\"local_contract=ready preflight=ready_but_no_start real_live=ready\"")
+    );
     assert!(wrapper.contains("matrix[\"local_contract\"][\"state\"] == \"ready\""));
     assert!(wrapper
         .contains("matrix[\"preflight_ready_but_no_start\"][\"state\"] == \"ready_but_no_start\""));
-    assert!(wrapper.contains("matrix[\"real_live\"][\"state\"] == \"pending\""));
+    assert!(wrapper.contains("matrix[\"real_live\"][\"state\"] in (\"pending\", \"ready\")"));
     assert!(wrapper.contains("\"live_worker_adapter_pending\" in gap_ids"));
     assert!(wrapper.contains("\"live_runner_gate_disabled\" in gap_ids"));
     assert!(wrapper.contains("\"manual_operator_live_receipt_missing\" in gap_ids"));

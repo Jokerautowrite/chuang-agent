@@ -6,13 +6,13 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
-use chuang_agent::runtime_config::EvolutionConfig;
-use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::live_adapter_gate::{require_live_adapter_enabled, LiveAdapterSlot};
-use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
 use chuang_agent::live_subagent_rehearsal::{
     rehearse_live_subagent_adapter, LiveSubagentRehearsalInput,
 };
+use chuang_agent::runtime_config::EvolutionConfig;
+use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
+use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueue;
 use chuang_agent::subagent_report::{
     build_parent_context_handoff, ExecutionStatus, GovernanceDecisionSummary,
@@ -1627,7 +1627,11 @@ mod tests {
 
 fn resolve_subagent_evolution_runtime(
     request: &SubagentRunOnceCliRequest,
-) -> (chuang_agent::runtime_config::RuntimeConfig, &'static str, &'static str) {
+) -> (
+    chuang_agent::runtime_config::RuntimeConfig,
+    &'static str,
+    &'static str,
+) {
     let mut runtime = request.options.runtime.clone();
     let source = if matches!(runtime.evolution, EvolutionConfig::Noop) {
         runtime.evolution = EvolutionConfig::DryRun;
@@ -1642,10 +1646,13 @@ fn resolve_subagent_evolution_runtime(
 fn build_subagent_evolution_slot(
     request: &SubagentRunOnceCliRequest,
 ) -> Result<(impl SkillEvolver, &'static str, &'static str), String> {
-    let (runtime, evolution_kind, evolution_source) =
-        resolve_subagent_evolution_runtime(request);
-    let slots = build_runtime_slots(&runtime)
-        .map_err(|e| format!("subagent_evolution_slot_invalid: {}: {}", e.field, e.message))?;
+    let (runtime, evolution_kind, evolution_source) = resolve_subagent_evolution_runtime(request);
+    let slots = build_runtime_slots(&runtime).map_err(|e| {
+        format!(
+            "subagent_evolution_slot_invalid: {}: {}",
+            e.field, e.message
+        )
+    })?;
     Ok((slots.evolution, evolution_kind, evolution_source))
 }
 

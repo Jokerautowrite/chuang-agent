@@ -27,7 +27,7 @@ Boundaries:
   touches_services=false
   modifies_repo=false
   deletes_files=false
-  can_mark_real_live_ready=false
+  can_mark_real_live_ready=derived_from_complete_canonical_evidence
 EOF
 }
 
@@ -281,6 +281,7 @@ TOP_LEVEL_OVERRIDE_KEYS = [
     "provider_status",
 ]
 _MISSING = object()
+ALLOWED_REDACTED_VALUES = {"<set>"}
 
 
 def deep_merge(base, overlay):
@@ -487,8 +488,6 @@ def normalize_service_bundle(result):
         if service_id in acceptance_services_by_id:
             service_entry = deep_merge(service_entry, acceptance_services_by_id[service_id])
         service_entry["required"] = list(SERVICE_REQUIRED_BY_ID[service_id])
-        service_entry["manual_live_required"] = True
-        service_entry["must_not_count_as_complete"] = True
 
         canonical_receipts.append(receipt)
         canonical_evidence[service_id] = copy.deepcopy(receipt["evidence"])
@@ -497,11 +496,162 @@ def normalize_service_bundle(result):
     result["service_receipts"] = canonical_receipts
     result["service_evidence"] = canonical_evidence
     acceptance["services"] = canonical_services
-    acceptance["gap_count"] = len(CANONICAL_SERVICE_IDS)
-    acceptance["complete"] = False
-    acceptance["status"] = "not_verified"
-    acceptance["cannot_mark_complete_from_template"] = True
-    acceptance["requires_operator_evidence"] = True
+    result["real_live_acceptance"] = acceptance
+    return result
+
+
+def is_placeholder_value(value):
+    if isinstance(value, str):
+        if value in ALLOWED_REDACTED_VALUES:
+            return False
+        stripped = value.strip()
+        return (
+            "<fill" in stripped
+            or stripped in {"<not_verified|verified|blocked>", "<true|false|not_attempted>"}
+            or (stripped.startswith("<") and stripped.endswith(">"))
+        )
+    if isinstance(value, dict):
+        return any(is_placeholder_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(is_placeholder_value(item) for item in value)
+    return False
+
+
+def has_non_placeholder_string(value):
+    return isinstance(value, str) and value.strip() and not is_placeholder_value(value)
+
+
+def evidence_schema_blockers(service_id, evidence):
+    if not isinstance(evidence, dict):
+        return ["evidence_not_object"]
+
+    blockers = []
+
+    def require_string(key):
+        if not has_non_placeholder_string(evidence.get(key)):
+            blockers.append(f"{key}_missing_or_placeholder")
+
+    def require_exact(key, expected):
+        if evidence.get(key) != expected:
+            blockers.append(f"{key}_not_{expected}")
+
+    def require_bool(key, expected):
+        if evidence.get(key) is not expected:
+            blockers.append(f"{key}_not_{str(expected).lower()}")
+
+    def require_true(key):
+        value = evidence.get(key)
+        if value is not True and value != "true":
+            blockers.append(f"{key}_not_true")
+
+    if service_id == "feishu":
+        for key in [
+            "health_transcript_ref",
+            "session_transcript_ref",
+            "tools_or_capabilities_transcript_ref",
+            "normal_message_transcript_ref",
+            "runtime_report_id",
+        ]:
+            require_string(key)
+    elif service_id == "provider":
+        for key in [
+            "provider_kind",
+            "transport",
+            "provider_live_request_receipt_ref",
+            "runtime_report_id",
+        ]:
+            require_string(key)
+        require_exact("api_key_state", "<set>")
+        require_bool("does_not_call_provider", False)
+        require_bool("does_not_read_provider_readiness", False)
+    elif service_id == "subagent_live_rehearsal":
+        for key in [
+            "dispatch_id",
+            "worker_id",
+            "gate_receipt_ref",
+            "allowlist_receipt_ref",
+            "capability_routing_ref",
+            "report_admission_ref",
+        ]:
+            require_string(key)
+    elif service_id == "desktop":
+        for key in ["audit_label", "action_receipt_ref", "governance_receipt_ref"]:
+            require_string(key)
+        require_true("real_execution")
+    elif service_id == "browser":
+        for key in [
+            "adapter_manifest_ref",
+            "session_scope_ref",
+            "browser_snapshot_or_transcript_ref",
+            "report_admission_ref",
+        ]:
+            require_string(key)
+    elif service_id in {"wiki", "gbrain"}:
+        for key in ["source_contract_ref", "query_receipt_ref", "provenance_ref"]:
+            require_string(key)
+        require_bool("writes_core_memory", False)
+    else:
+        blockers.append("unknown_canonical_service")
+
+    return blockers
+
+
+def evaluate_real_live_acceptance(result):
+    blockers = []
+    verified_service_count = 0
+    acceptance = result["real_live_acceptance"]
+    acceptance_services = {
+        item["id"]: item for item in acceptance.get("services", []) if isinstance(item, dict)
+    }
+
+    for receipt in result["service_receipts"]:
+        service_id = receipt["id"]
+        service_blocked = False
+        if receipt.get("status") != "verified":
+            blockers.append(f"{service_id}: service_receipt_not_verified")
+            service_blocked = True
+        if is_placeholder_value(receipt.get("evidence", {})):
+            blockers.append(f"{service_id}: evidence_has_template_placeholders")
+            service_blocked = True
+        schema_blockers = evidence_schema_blockers(service_id, receipt.get("evidence", {}))
+        if schema_blockers:
+            blockers.extend(f"{service_id}: {blocker}" for blocker in schema_blockers)
+            service_blocked = True
+        service_entry = acceptance_services.get(service_id, {})
+        if service_entry.get("completion_state") != "verified":
+            blockers.append(f"{service_id}: acceptance_not_verified")
+            service_blocked = True
+        if service_entry.get("manual_live_required") is True:
+            blockers.append(f"{service_id}: manual_live_required")
+            service_blocked = True
+        if service_entry.get("must_not_count_as_complete") is True:
+            blockers.append(f"{service_id}: must_not_count_as_complete")
+            service_blocked = True
+        if not service_blocked:
+            verified_service_count += 1
+
+    existing_blockers = result.get("blockers", [])
+    if isinstance(existing_blockers, list):
+        blockers.extend(str(item) for item in existing_blockers if str(item).strip())
+    elif existing_blockers:
+        blockers.append("top_level_blockers_not_array")
+
+    unique_blockers = list(dict.fromkeys(blockers))
+    complete = verified_service_count == len(CANONICAL_SERVICE_IDS) and not unique_blockers
+
+    acceptance["gap_count"] = len(CANONICAL_SERVICE_IDS) - verified_service_count
+    acceptance["complete"] = complete
+    acceptance["status"] = "verified" if complete else "not_verified"
+    acceptance["cannot_mark_complete_from_template"] = not complete
+    acceptance["requires_operator_evidence"] = not complete
+    for service in acceptance["services"]:
+        service["manual_live_required"] = not complete
+        service["must_not_count_as_complete"] = not complete
+
+    result["acceptance_status"] = "verified" if complete else "not_verified"
+    result["can_mark_real_live_ready"] = complete
+    result["cannot_mark_complete_without_operator_evidence"] = not complete
+    result["blockers"] = unique_blockers
     result["real_live_acceptance"] = acceptance
     return result
 
@@ -524,17 +674,9 @@ def normalize(result):
 
     normalized = normalize_service_bundle(result)
     normalized["schema_version"] = 1
-    normalized["acceptance_status"] = "not_verified"
-    normalized["can_mark_real_live_ready"] = False
-    normalized["cannot_mark_complete_without_operator_evidence"] = True
     normalized["readonly_boundaries"] = copy.deepcopy(BOUNDARIES)
     normalized["boundaries"] = copy.deepcopy(BOUNDARIES)
-    normalized["real_live_acceptance"]["complete"] = False
-    normalized["real_live_acceptance"]["status"] = "not_verified"
-    normalized["real_live_acceptance"]["cannot_mark_complete_from_template"] = True
-    normalized["real_live_acceptance"]["requires_operator_evidence"] = True
-    normalized["real_live_acceptance"]["gap_count"] = len(CANONICAL_SERVICE_IDS)
-    return normalized
+    return evaluate_real_live_acceptance(normalized)
 
 
 def merge_sources():

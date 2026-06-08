@@ -44,13 +44,14 @@ assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 assert live_readiness["ok"] is True
-assert live_readiness["overall_state"] == "local_ready_live_pending"
+global_real_live_ready = live_readiness["overall_state"] == "global_real_live_ready"
+assert live_readiness["overall_state"] in ("local_ready_live_pending", "global_real_live_ready")
 assert live_readiness["ga_local_mapped_only"] is True
 assert live_readiness["desktop_browser_live_gated"] is True
 assert live_readiness["browser_worker_frozen"] is True
 assert live_readiness["live_worker_available"] is False
-assert live_readiness["real_external_acceptance_pending"] is True
-assert live_readiness["provider_live_request_verified_by_status"] is False
+assert live_readiness["real_external_acceptance_pending"] is (not global_real_live_ready)
+assert live_readiness["provider_live_request_verified_by_status"] is global_real_live_ready
 assert live_readiness["ready_does_not_mean_live"] is True
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False

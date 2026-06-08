@@ -92,6 +92,12 @@ real_live_pending = (
     and release["connects_real_external_services"] is False
     and subagent["live_worker_available"] is False
 )
+real_live_ready = (
+    third_test["real_live_ready"] is True
+    and third_test["connects_real_external_services"] is True
+    and release["connects_real_external_services"] is True
+    and release["verifies_real_external_services"] is True
+)
 
 provider_state = provider.get("overall_state", "unknown")
 provider_api_key_state_raw = str(provider.get("api_key_state", "<unknown>"))
@@ -108,29 +114,33 @@ def sanitize_env_state(value):
 provider_api_key_state = sanitize_env_state(provider_api_key_state_raw)
 provider_env_gap = provider_api_key_state == "<missing>"
 
-gaps = [
-    {
-        "id": "live_worker_adapter_pending",
-        "state": "pending",
-        "reason": subagent["worker_runtime_blocked_reason"],
-    },
-    {
-        "id": "live_runner_gate_disabled",
-        "state": "pending",
-        "reason": preflight["gate"]["reason"],
-    },
-    {
-        "id": "manual_operator_live_receipt_missing",
-        "state": "pending",
-        "reason": third_test["next_action"],
-    },
-    {
-        "id": "real_external_services_not_verified",
-        "state": "pending",
-        "reason": "status/release readiness explicitly does not verify real external services",
-    },
-]
-if provider_env_gap:
+gaps = []
+if not real_live_ready:
+    gaps.extend(
+        [
+            {
+                "id": "live_worker_adapter_pending",
+                "state": "pending",
+                "reason": subagent["worker_runtime_blocked_reason"],
+            },
+            {
+                "id": "live_runner_gate_disabled",
+                "state": "pending",
+                "reason": preflight["gate"]["reason"],
+            },
+            {
+                "id": "manual_operator_live_receipt_missing",
+                "state": "pending",
+                "reason": third_test["next_action"],
+            },
+            {
+                "id": "real_external_services_not_verified",
+                "state": "pending",
+                "reason": "status/release readiness explicitly does not verify real external services",
+            },
+        ]
+    )
+if provider_env_gap and not real_live_ready:
     gaps.append(
         {
             "id": "provider_env_pending",
@@ -143,10 +153,13 @@ if provider_env_gap:
     )
 
 result = {
-    "ok": local_contract_ready and preflight_ready_but_no_start and real_live_pending,
+    "ok": local_contract_ready
+    and preflight_ready_but_no_start
+    and (real_live_pending or real_live_ready),
     "check_name": "live-gaps",
     "marker": "live_gaps_check_ok",
-    "summary": "local_contract=ready preflight=ready_but_no_start real_live=pending",
+    "summary": "local_contract=ready preflight=ready_but_no_start real_live="
+    + ("ready" if real_live_ready else "pending"),
     "work_dir": sys.argv[1].rsplit("/", 1)[0],
     "boundaries": {
         "readonly": True,
@@ -182,11 +195,14 @@ result = {
         },
         {
             "name": "real_live",
-            "state": "pending" if real_live_pending else "ready",
-            "ready": not real_live_pending,
+            "state": "ready" if real_live_ready else "pending",
+            "ready": real_live_ready,
             "requires_manual_live_check": third_test["requires_manual_live_check"],
             "connects_real_external_services": third_test[
                 "connects_real_external_services"
+            ],
+            "verifies_real_external_services": third_test[
+                "verifies_real_external_services"
             ],
             "real_live_ready": third_test["real_live_ready"],
             "gap_count": len(gaps),
@@ -198,7 +214,9 @@ result = {
         "uses_redacted_state_only": True,
     },
     "gaps": gaps,
-    "next_action": "keep candidate/third-test as local gates; collect operator-approved live receipt before claiming real live readiness",
+    "next_action": "global real-live receipt verified; keep receipt path configured"
+    if real_live_ready
+    else "keep candidate/third-test as local gates; collect operator-approved live receipt before claiming real live readiness",
 }
 
 if not result["ok"]:

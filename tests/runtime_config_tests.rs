@@ -260,7 +260,9 @@ fn runtime_config_summary_exposes_dry_run_evolution_kind() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.evolution = EvolutionConfig::DryRun;
 
-    config.validate().expect("dry_run evolution config is valid");
+    config
+        .validate()
+        .expect("dry_run evolution config is valid");
     let summary = config.summary();
 
     assert_eq!(summary.evolution_kind, "dry_run");

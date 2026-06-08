@@ -1,10 +1,10 @@
 use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
+use chuang_agent::skill_evolver::{RuntimeEventKind, SkillProposal, SkillProposalProvenance};
 use chuang_agent::subagent_report::{
     ArtifactKind, ArtifactRef, ExecutionStatus, ReportAdmission, ReportAdmissionStatus,
     ReportBuilder, ReportRejectReason, ReportValidator, ResourceUsage, SubagentReport,
     SubagentReportBuilder, SubagentReportValidator,
 };
-use chuang_agent::skill_evolver::{RuntimeEventKind, SkillProposal, SkillProposalProvenance};
 use std::collections::BTreeMap;
 
 fn sample_report() -> SubagentReport {
@@ -396,8 +396,8 @@ fn report_admission_uses_stable_reason_codes_for_validator_rejects() {
 fn validator_accepts_report_with_well_formed_skill_proposals() {
     let validator = SubagentReportValidator::default();
     let mut report = valid_report_json();
-    report["skill_proposals"] = serde_json::to_value(vec![sample_skill_proposal()])
-        .expect("skill proposals should encode");
+    report["skill_proposals"] =
+        serde_json::to_value(vec![sample_skill_proposal()]).expect("skill proposals should encode");
 
     let raw = serde_json::to_vec(&report).expect("report json should encode");
     let result = validator.validate(&raw);

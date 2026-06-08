@@ -2,7 +2,7 @@
 
 ## Current State
 
-Chuang has completed the provider and single-worker real receipt slices, implemented the Feishu readonly collector, implemented the browser_read readonly collector, completed the desktop action rehearsal receipt, added wiki and GBrain read-only HTTP adapter coverage, added wiki and GBrain readonly live receipt scripts, added a controlled CDP readonly session receipt, added a manual skill solidify dry-run receipt, added a skill proposal readonly verifier, and added a non-Feishu receipt suite for operator checks. It is ready for the next implementation decision after commit.
+Chuang has completed the provider and single-worker real receipt slices, implemented the Feishu readonly collector, implemented the browser_read readonly collector, completed the desktop action rehearsal receipt, added wiki and GBrain read-only HTTP adapter coverage, added wiki and GBrain readonly live receipt scripts, added a controlled CDP readonly session receipt, added a manual skill solidify dry-run receipt, added a skill proposal readonly verifier, added a non-Feishu receipt suite for operator checks, and added the global real-live receipt gate. It is ready for the next implementation decision after commit.
 
 - Branch: `main`
 - Remote: `origin/main`
@@ -21,7 +21,7 @@ Chuang has completed the provider and single-worker real receipt slices, impleme
   - after the non-Feishu parallel receipt slice, `bash -n` and default `--json` runs passed for `chuang-wiki-live-receipt.sh`, `chuang-cdp-readonly-session-receipt.sh`, and `chuang-skill-manual-solidify-receipt.sh`; `cargo test -q --test knowledge_read_tests` and `cargo test -q --test wiki_live_receipt_tests --test cdp_readonly_session_receipt_tests --test skill_manual_solidify_receipt_tests` passed.
   - after the second non-Feishu parallel receipt slice, `bash -n` and default `--json` runs passed for `chuang-gbrain-live-receipt.sh`, `chuang-non-feishu-receipt-suite.sh`, and `chuang-skill-proposal-verify-receipt.sh`; `cargo test -q --test gbrain_live_receipt_tests --test non_feishu_receipt_suite_tests --test skill_proposal_verify_receipt_tests` passed.
 
-The project is still **local-gate-ready**, not **real-live-ready**.
+The project now has a legal **global_real_live_ready** path, but the current default environment is still **local-gate-ready**, not **real-live-ready**. Without `CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE` pointing at a complete canonical verified receipt, status must remain local/pending.
 
 `cargo run -q -- status --json` reports the configured provider as `openai_compatible` / `cliproxy-local`, model `gpt-5.5`, and `api_key_state=<set>`. Status alone only proves readiness, but this slice added and ran a real provider receipt command.
 
@@ -49,6 +49,7 @@ The project is still **local-gate-ready**, not **real-live-ready**.
    - `scripts/chuang-wiki-live-receipt.sh` exists as the wiki endpoint receipt collector, defaulting to blocked without endpoint/token.
    - `scripts/chuang-gbrain-live-receipt.sh` exists as the GBrain endpoint receipt collector, defaulting to blocked without endpoint/token.
    - `scripts/chuang-non-feishu-receipt-suite.sh` aggregates non-Feishu low-risk receipt checks; provider live request is opt-in via `CHUANG_NON_FEISHU_SUITE_INCLUDE_PROVIDER_LIVE=1`.
+   - `CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE` is now the only status-side path to `global_real_live_ready`; the receipt must be complete, canonical, verified, and blocker-free.
    - `subagent_live_worker.enabled=false` remains the default boundary.
 
 5. Skill evolution boundary

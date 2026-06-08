@@ -105,8 +105,7 @@ fn feishu_live_receipt_is_verified_with_recent_inbound_and_outbound_evidence() {
         1
     );
     assert_eq!(
-        data["feishu_live_evidence"]["event_counts"]
-            ["recent_outbound_command_or_outbound_format"],
+        data["feishu_live_evidence"]["event_counts"]["recent_outbound_command_or_outbound_format"],
         1
     );
     assert!(data["blockers"]

@@ -664,7 +664,9 @@ fn parse_external_knowledge_source(
     })
 }
 
-fn parse_evolution(raw: &str) -> Result<crate::runtime_config::EvolutionConfig, RuntimeConfigFileError> {
+fn parse_evolution(
+    raw: &str,
+) -> Result<crate::runtime_config::EvolutionConfig, RuntimeConfigFileError> {
     match raw {
         "noop" => Ok(crate::runtime_config::EvolutionConfig::Noop),
         "dry_run" => Ok(crate::runtime_config::EvolutionConfig::DryRun),

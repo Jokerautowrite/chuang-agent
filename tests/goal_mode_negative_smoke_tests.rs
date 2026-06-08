@@ -28,8 +28,12 @@ fn goal_mode_negative_smoke_script_rejects_not_ready_from_collect() {
     assert!(script.contains("data[\"blocked_report_run_ids\"] == []"));
     assert!(script.contains("data[\"blocked_report_reasons\"] == []"));
     // show-no-checkpoint also asserts blocked_report_run_ids/reasons via goal_operability
-    assert!(script.contains("goal_operability\"][\"goal_collect\"][\"blocked_report_run_ids\"] == []"));
-    assert!(script.contains("goal_operability\"][\"goal_collect\"][\"blocked_report_reasons\"] == []"));
+    assert!(
+        script.contains("goal_operability\"][\"goal_collect\"][\"blocked_report_run_ids\"] == []")
+    );
+    assert!(
+        script.contains("goal_operability\"][\"goal_collect\"][\"blocked_report_reasons\"] == []")
+    );
     assert!(!script.contains("systemctl"));
     assert!(!script.contains("rm "));
     assert!(!script.contains("git reset"));

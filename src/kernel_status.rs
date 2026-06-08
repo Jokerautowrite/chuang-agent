@@ -1,7 +1,7 @@
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
 use crate::browser_read::{
-    unavailable_browser_read_status, BrowserReadAdapter, BrowserReadStatus,
-    CdpBrowserReadAdapter, BROWSER_READ_CONTRACT_VERSION,
+    unavailable_browser_read_status, BrowserReadAdapter, BrowserReadStatus, CdpBrowserReadAdapter,
+    BROWSER_READ_CONTRACT_VERSION,
 };
 use crate::capability_primer::capability_primer_text;
 use crate::chuang_kernel::{ChuangKernelConfig, ChuangKernelSnapshot};
@@ -26,6 +26,7 @@ use crate::tool_registry_slot::default_tool_registry_slot;
 use crate::tool_runtime::{ToolActionEnvelope, ToolLoopReport};
 use serde::Serialize;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -190,8 +191,23 @@ pub struct ThirdTestCandidateReadinessStatus {
     pub verifies_real_external_services: bool,
     pub real_live_ready: bool,
     pub operator_env_blocks_100_percent: bool,
+    pub live_receipt_state: String,
+    pub live_receipt_path: Option<String>,
+    pub live_receipt_required_service_count: usize,
+    pub live_receipt_verified_service_count: usize,
+    pub live_receipt_blockers: Vec<String>,
     pub current: String,
     pub next_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GlobalRealLiveReceiptGate {
+    state: String,
+    path: Option<String>,
+    required_service_count: usize,
+    verified_service_count: usize,
+    verified: bool,
+    blockers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -628,6 +644,7 @@ pub fn build_chuang_mvp_status(
     let external_ai_readiness = build_external_ai_readiness();
     let browser_readiness = build_browser_readiness(&atomic_tools);
     let live_adapter_gates = build_live_adapter_gate_status();
+    let global_real_live_receipt = build_global_real_live_receipt_gate();
     let live_readiness = build_live_readiness(
         &atomic_tools,
         &subagent_readiness,
@@ -636,6 +653,7 @@ pub fn build_chuang_mvp_status(
         &knowledge_readiness,
         &provider_readiness,
         &live_adapter_gates,
+        &global_real_live_receipt,
     );
     let release_readiness = build_release_readiness(
         &project_readiness,
@@ -647,8 +665,9 @@ pub fn build_chuang_mvp_status(
         &governance,
         &goal_mode,
         &goal_run,
+        &global_real_live_receipt,
     );
-    let third_test_candidate = build_third_test_candidate_readiness();
+    let third_test_candidate = build_third_test_candidate_readiness(&global_real_live_receipt);
 
     Ok(ChuangMvpStatus {
         config: config_summary,
@@ -896,6 +915,359 @@ fn build_runtime_report_surface_status() -> RuntimeReportSurfaceStatus {
     }
 }
 
+const GLOBAL_REAL_LIVE_SERVICE_IDS: [&str; 7] = [
+    "feishu",
+    "provider",
+    "subagent_live_rehearsal",
+    "desktop",
+    "browser",
+    "wiki",
+    "gbrain",
+];
+
+fn build_global_real_live_receipt_gate() -> GlobalRealLiveReceiptGate {
+    let path = env::var("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("CHUANG_REAL_LIVE_RECEIPT_FILE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        });
+    let Some(path) = path else {
+        return GlobalRealLiveReceiptGate {
+            state: "not_configured".to_string(),
+            path: None,
+            required_service_count: GLOBAL_REAL_LIVE_SERVICE_IDS.len(),
+            verified_service_count: 0,
+            verified: false,
+            blockers: vec!["global_real_live_receipt_file_not_configured".to_string()],
+        };
+    };
+
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            return GlobalRealLiveReceiptGate {
+                state: "unreadable".to_string(),
+                path: Some(path),
+                required_service_count: GLOBAL_REAL_LIVE_SERVICE_IDS.len(),
+                verified_service_count: 0,
+                verified: false,
+                blockers: vec![format!("global_real_live_receipt_unreadable: {error}")],
+            };
+        }
+    };
+    let value = match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(value) => value,
+        Err(error) => {
+            return GlobalRealLiveReceiptGate {
+                state: "invalid_json".to_string(),
+                path: Some(path),
+                required_service_count: GLOBAL_REAL_LIVE_SERVICE_IDS.len(),
+                verified_service_count: 0,
+                verified: false,
+                blockers: vec![format!("global_real_live_receipt_invalid_json: {error}")],
+            };
+        }
+    };
+
+    evaluate_global_real_live_receipt(path, &value)
+}
+
+fn evaluate_global_real_live_receipt(
+    path: String,
+    value: &serde_json::Value,
+) -> GlobalRealLiveReceiptGate {
+    let mut blockers = Vec::new();
+    if value
+        .get("acceptance_status")
+        .and_then(|item| item.as_str())
+        != Some("verified")
+    {
+        blockers.push("acceptance_status_not_verified".to_string());
+    }
+    if value
+        .get("can_mark_real_live_ready")
+        .and_then(|item| item.as_bool())
+        != Some(true)
+    {
+        blockers.push("can_mark_real_live_ready_not_true".to_string());
+    }
+
+    let acceptance = value
+        .get("real_live_acceptance")
+        .and_then(|item| item.as_object());
+    if acceptance
+        .and_then(|item| item.get("complete"))
+        .and_then(|item| item.as_bool())
+        != Some(true)
+    {
+        blockers.push("real_live_acceptance_not_complete".to_string());
+    }
+    if acceptance
+        .and_then(|item| item.get("status"))
+        .and_then(|item| item.as_str())
+        != Some("verified")
+    {
+        blockers.push("real_live_acceptance_status_not_verified".to_string());
+    }
+
+    match value.get("blockers") {
+        Some(existing_blockers)
+            if existing_blockers
+                .as_array()
+                .is_some_and(|items| !items.is_empty()) =>
+        {
+            blockers.push("global_real_live_receipt_has_blockers".to_string());
+        }
+        Some(existing_blockers) if !existing_blockers.is_array() => {
+            blockers.push("global_real_live_receipt_blockers_not_array".to_string());
+        }
+        _ => {}
+    }
+
+    let service_receipts = value
+        .get("service_receipts")
+        .and_then(|item| item.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let acceptance_services = acceptance
+        .and_then(|item| item.get("services"))
+        .and_then(|item| item.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let service_evidence = value
+        .get("service_evidence")
+        .and_then(|item| item.as_object());
+
+    let mut verified_service_count = 0;
+    for service_id in GLOBAL_REAL_LIVE_SERVICE_IDS {
+        let receipt = service_receipts
+            .iter()
+            .find(|item| item.get("id").and_then(|value| value.as_str()) == Some(service_id));
+        let acceptance_service = acceptance_services
+            .iter()
+            .find(|item| item.get("id").and_then(|value| value.as_str()) == Some(service_id));
+        let evidence = service_evidence.and_then(|items| items.get(service_id));
+
+        let mut service_verified = true;
+        if receipt
+            .and_then(|item| item.get("status"))
+            .and_then(|item| item.as_str())
+            != Some("verified")
+        {
+            blockers.push(format!("{service_id}: service_receipt_not_verified"));
+            service_verified = false;
+        }
+        if acceptance_service
+            .and_then(|item| item.get("completion_state"))
+            .and_then(|item| item.as_str())
+            != Some("verified")
+        {
+            blockers.push(format!("{service_id}: acceptance_not_verified"));
+            service_verified = false;
+        }
+        if acceptance_service
+            .and_then(|item| item.get("manual_live_required"))
+            .and_then(|item| item.as_bool())
+            == Some(true)
+        {
+            blockers.push(format!("{service_id}: manual_live_required"));
+            service_verified = false;
+        }
+        if acceptance_service
+            .and_then(|item| item.get("must_not_count_as_complete"))
+            .and_then(|item| item.as_bool())
+            == Some(true)
+        {
+            blockers.push(format!("{service_id}: must_not_count_as_complete"));
+            service_verified = false;
+        }
+        match evidence {
+            Some(evidence) if !json_has_template_placeholder(evidence) => {
+                let evidence_blockers =
+                    canonical_global_real_live_evidence_blockers(service_id, evidence);
+                if !evidence_blockers.is_empty() {
+                    blockers.extend(
+                        evidence_blockers
+                            .into_iter()
+                            .map(|blocker| format!("{service_id}: {blocker}")),
+                    );
+                    service_verified = false;
+                }
+            }
+            Some(_) => {
+                blockers.push(format!("{service_id}: evidence_has_template_placeholders"));
+                service_verified = false;
+            }
+            None => {
+                blockers.push(format!("{service_id}: evidence_missing"));
+                service_verified = false;
+            }
+        }
+        if service_verified {
+            verified_service_count += 1;
+        }
+    }
+
+    blockers.sort();
+    blockers.dedup();
+    let verified =
+        verified_service_count == GLOBAL_REAL_LIVE_SERVICE_IDS.len() && blockers.is_empty();
+    GlobalRealLiveReceiptGate {
+        state: if verified { "verified" } else { "blocked" }.to_string(),
+        path: Some(path),
+        required_service_count: GLOBAL_REAL_LIVE_SERVICE_IDS.len(),
+        verified_service_count,
+        verified,
+        blockers,
+    }
+}
+
+fn canonical_global_real_live_evidence_blockers(
+    service_id: &str,
+    evidence: &serde_json::Value,
+) -> Vec<String> {
+    let Some(object) = evidence.as_object() else {
+        return vec!["evidence_not_object".to_string()];
+    };
+    let mut blockers = Vec::new();
+    match service_id {
+        "feishu" => {
+            require_non_placeholder_string(object, "health_transcript_ref", &mut blockers);
+            require_non_placeholder_string(object, "session_transcript_ref", &mut blockers);
+            require_non_placeholder_string(
+                object,
+                "tools_or_capabilities_transcript_ref",
+                &mut blockers,
+            );
+            require_non_placeholder_string(object, "normal_message_transcript_ref", &mut blockers);
+            require_non_placeholder_string(object, "runtime_report_id", &mut blockers);
+        }
+        "provider" => {
+            require_non_placeholder_string(object, "provider_kind", &mut blockers);
+            require_non_placeholder_string(object, "transport", &mut blockers);
+            require_exact_string(object, "api_key_state", "<set>", &mut blockers);
+            require_non_placeholder_string(
+                object,
+                "provider_live_request_receipt_ref",
+                &mut blockers,
+            );
+            require_non_placeholder_string(object, "runtime_report_id", &mut blockers);
+            require_bool(object, "does_not_call_provider", false, &mut blockers);
+            require_bool(
+                object,
+                "does_not_read_provider_readiness",
+                false,
+                &mut blockers,
+            );
+        }
+        "subagent_live_rehearsal" => {
+            require_non_placeholder_string(object, "dispatch_id", &mut blockers);
+            require_non_placeholder_string(object, "worker_id", &mut blockers);
+            require_non_placeholder_string(object, "gate_receipt_ref", &mut blockers);
+            require_non_placeholder_string(object, "allowlist_receipt_ref", &mut blockers);
+            require_non_placeholder_string(object, "capability_routing_ref", &mut blockers);
+            require_non_placeholder_string(object, "report_admission_ref", &mut blockers);
+        }
+        "desktop" => {
+            require_non_placeholder_string(object, "audit_label", &mut blockers);
+            require_non_placeholder_string(object, "action_receipt_ref", &mut blockers);
+            require_non_placeholder_string(object, "governance_receipt_ref", &mut blockers);
+            require_true_value(object, "real_execution", &mut blockers);
+        }
+        "browser" => {
+            require_non_placeholder_string(object, "adapter_manifest_ref", &mut blockers);
+            require_non_placeholder_string(object, "session_scope_ref", &mut blockers);
+            require_non_placeholder_string(
+                object,
+                "browser_snapshot_or_transcript_ref",
+                &mut blockers,
+            );
+            require_non_placeholder_string(object, "report_admission_ref", &mut blockers);
+        }
+        "wiki" | "gbrain" => {
+            require_non_placeholder_string(object, "source_contract_ref", &mut blockers);
+            require_non_placeholder_string(object, "query_receipt_ref", &mut blockers);
+            require_non_placeholder_string(object, "provenance_ref", &mut blockers);
+            require_bool(object, "writes_core_memory", false, &mut blockers);
+        }
+        _ => blockers.push("unknown_canonical_service".to_string()),
+    }
+    blockers
+}
+
+fn require_non_placeholder_string(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    blockers: &mut Vec<String>,
+) {
+    let Some(value) = object.get(key).and_then(|value| value.as_str()) else {
+        blockers.push(format!("{key}_missing_or_not_string"));
+        return;
+    };
+    if value.trim().is_empty()
+        || json_has_template_placeholder(&serde_json::Value::String(value.to_string()))
+    {
+        blockers.push(format!("{key}_missing_or_placeholder"));
+    }
+}
+
+fn require_exact_string(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expected: &str,
+    blockers: &mut Vec<String>,
+) {
+    if object.get(key).and_then(|value| value.as_str()) != Some(expected) {
+        blockers.push(format!("{key}_not_{expected}"));
+    }
+}
+
+fn require_bool(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expected: bool,
+    blockers: &mut Vec<String>,
+) {
+    if object.get(key).and_then(|value| value.as_bool()) != Some(expected) {
+        blockers.push(format!("{key}_not_{expected}"));
+    }
+}
+
+fn require_true_value(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    blockers: &mut Vec<String>,
+) {
+    let Some(value) = object.get(key) else {
+        blockers.push(format!("{key}_not_true"));
+        return;
+    };
+    let is_true =
+        value.as_bool() == Some(true) || value.as_str().map(|text| text == "true") == Some(true);
+    if !is_true {
+        blockers.push(format!("{key}_not_true"));
+    }
+}
+
+fn json_has_template_placeholder(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            text != "<set>"
+                && (text.contains("<fill")
+                    || text == "<not_verified|verified|blocked>"
+                    || text == "<true|false|not_attempted>"
+                    || (text.starts_with('<') && text.ends_with('>')))
+        }
+        serde_json::Value::Array(items) => items.iter().any(json_has_template_placeholder),
+        serde_json::Value::Object(items) => items.values().any(json_has_template_placeholder),
+        _ => false,
+    }
+}
+
 fn build_release_readiness(
     project_readiness: &ProjectReadinessStatus,
     memory_readiness: &MemoryReadinessStatus,
@@ -906,6 +1278,7 @@ fn build_release_readiness(
     governance: &GovernanceReadinessStatus,
     goal_mode: &GoalModeStatus,
     goal_run: &GoalRunReadinessStatus,
+    global_real_live_receipt: &GlobalRealLiveReceiptGate,
 ) -> ReleaseReadinessStatus {
     let acceptance = vec![
         release_acceptance(
@@ -987,11 +1360,23 @@ fn build_release_readiness(
         ),
         release_acceptance(
             "real_external_services",
-            "deferred",
-            "status/doctor/smoke do not connect real provider, Feishu, desktop, browser, wiki, GBrain, or Hermes services",
-            "live_service_boundary",
+            if global_real_live_receipt.verified {
+                "ready"
+            } else {
+                "deferred"
+            },
+            if global_real_live_receipt.verified {
+                "operator-approved global real-live receipt verifies Feishu, provider, subagent, desktop, browser, wiki, and GBrain evidence"
+            } else {
+                "status/doctor/smoke do not connect real provider, Feishu, desktop, browser, wiki, GBrain, or Hermes services"
+            },
+            if global_real_live_receipt.verified {
+                "global_real_live_receipt"
+            } else {
+                "live_service_boundary"
+            },
             true,
-            false,
+            global_real_live_receipt.verified,
             false,
         ),
     ];
@@ -1051,8 +1436,11 @@ fn build_release_readiness(
         ok: blocked_count == 0 && acceptance_blocked_count == 0,
         release_name: "second_test_version".to_string(),
         overall_state: overall_state.to_string(),
-        readiness_scope:
-            "readiness_and_smoke_acceptance_only_no_live_external_service_connection".to_string(),
+        readiness_scope: if global_real_live_receipt.verified {
+            "readiness_and_smoke_acceptance_with_global_real_live_receipt".to_string()
+        } else {
+            "readiness_and_smoke_acceptance_only_no_live_external_service_connection".to_string()
+        },
         ready_count,
         partial_count,
         deferred_count,
@@ -1061,9 +1449,9 @@ fn build_release_readiness(
         acceptance_ready_count,
         acceptance_partial_count,
         acceptance_deferred_count,
-        connects_real_external_services: false,
-        verifies_real_external_services: false,
-        uses_stub_or_local_fixtures: true,
+        connects_real_external_services: global_real_live_receipt.verified,
+        verifies_real_external_services: global_real_live_receipt.verified,
+        uses_stub_or_local_fixtures: !global_real_live_receipt.verified,
         writes_repo_files: false,
         current: "second test version is checkpoint-continuable: readiness, smoke, goal/run, and subagent protocol surfaces are visible while partial modules remain adapter/plugin boundaries".to_string(),
         next_action: "keep readiness/smoke/goal-run/subagent protocol green while hardening real adapters without reopening core".to_string(),
@@ -1388,21 +1776,42 @@ fn release_acceptance(
     }
 }
 
-fn build_third_test_candidate_readiness() -> ThirdTestCandidateReadinessStatus {
+fn build_third_test_candidate_readiness(
+    global_real_live_receipt: &GlobalRealLiveReceiptGate,
+) -> ThirdTestCandidateReadinessStatus {
+    let real_live_ready = global_real_live_receipt.verified;
     ThirdTestCandidateReadinessStatus {
         ok: true,
         candidate_name: "third_test_candidate".to_string(),
-        overall_state: "local_gate_ready_requires_manual_live_check".to_string(),
+        overall_state: if real_live_ready {
+            "global_real_live_ready"
+        } else {
+            "local_gate_ready_requires_manual_live_check"
+        }
+        .to_string(),
         local_gate_ready: true,
         smoke_script: "scripts/chuang-third-test-smoke.sh".to_string(),
         marker: "third_test_candidate_smoke_ok".to_string(),
-        requires_manual_live_check: true,
-        connects_real_external_services: false,
-        verifies_real_external_services: false,
-        real_live_ready: false,
-        operator_env_blocks_100_percent: true,
-        current: "third test candidate local gates are represented by the readonly smoke wrapper and status surfaces; real live service verification is still manual and not marked ready".to_string(),
-        next_action: "run scripts/chuang-third-test-smoke.sh for local gate evidence, then collect an operator live receipt before claiming live readiness".to_string(),
+        requires_manual_live_check: !real_live_ready,
+        connects_real_external_services: real_live_ready,
+        verifies_real_external_services: real_live_ready,
+        real_live_ready,
+        operator_env_blocks_100_percent: !real_live_ready,
+        live_receipt_state: global_real_live_receipt.state.clone(),
+        live_receipt_path: global_real_live_receipt.path.clone(),
+        live_receipt_required_service_count: global_real_live_receipt.required_service_count,
+        live_receipt_verified_service_count: global_real_live_receipt.verified_service_count,
+        live_receipt_blockers: global_real_live_receipt.blockers.clone(),
+        current: if real_live_ready {
+            "third test candidate has local gates plus a verified operator global real-live receipt for all canonical services".to_string()
+        } else {
+            "third test candidate local gates are represented by the readonly smoke wrapper and status surfaces; real live service verification is still manual and not marked ready".to_string()
+        },
+        next_action: if real_live_ready {
+            "keep the verified global real-live receipt path configured and rerun status/gaps before claiming readiness in handoff".to_string()
+        } else {
+            "run scripts/chuang-third-test-smoke.sh for local gate evidence, then collect an operator live receipt before claiming live readiness".to_string()
+        },
     }
 }
 
@@ -1505,6 +1914,7 @@ fn build_live_readiness(
     knowledge_readiness: &KnowledgeReadinessStatus,
     provider_readiness: &ProviderReadinessStatus,
     live_adapter_gates: &LiveAdapterGateStatus,
+    global_real_live_receipt: &GlobalRealLiveReceiptGate,
 ) -> LiveReadinessStatus {
     let ga_local_mapped_only = atomic_tools.ok
         && atomic_tools.mapped_count == atomic_tools.total_count
@@ -1521,22 +1931,32 @@ fn build_live_readiness(
         .iter()
         .any(|layer| layer.name == "browser_worker_frozen" && layer.state == "ready");
     let live_worker_available = subagent_readiness.live_worker_available;
-    let provider_live_request_verified_by_status = false;
-    let real_external_acceptance_pending = !live_worker_available
-        || desktop_browser_live_gated
-        || !browser_readiness.browser_read_adapter_available
-        || !knowledge_readiness.live_adapter_available
-        || !provider_live_request_verified_by_status
-        || live_adapter_gates.enabled_count == 0;
-    let ok = ga_local_mapped_only
-        && desktop_browser_live_gated
-        && browser_worker_frozen
-        && !live_worker_available
-        && real_external_acceptance_pending;
+    let provider_live_request_verified_by_status = global_real_live_receipt.verified;
+    let real_external_acceptance_pending = if global_real_live_receipt.verified {
+        false
+    } else {
+        !live_worker_available
+            || desktop_browser_live_gated
+            || !browser_readiness.browser_read_adapter_available
+            || !knowledge_readiness.live_adapter_available
+            || !provider_live_request_verified_by_status
+            || live_adapter_gates.enabled_count == 0
+    };
+    let ok = if global_real_live_receipt.verified {
+        ga_local_mapped_only && browser_worker_frozen
+    } else {
+        ga_local_mapped_only
+            && desktop_browser_live_gated
+            && browser_worker_frozen
+            && !live_worker_available
+            && real_external_acceptance_pending
+    };
 
     LiveReadinessStatus {
         ok,
-        overall_state: if ok {
+        overall_state: if global_real_live_receipt.verified {
+            "global_real_live_ready"
+        } else if ok {
             "local_ready_live_pending"
         } else {
             "live_readiness_terms_inconsistent"
@@ -1555,14 +1975,18 @@ fn build_live_readiness(
         frozen_does_not_mean_ready: true,
         ready_does_not_mean_live: true,
         current: format!(
-            "local status is {}; provider status is {}; subagent worker is {}; real external acceptance remains pending",
+            "local status is {}; provider status is {}; subagent worker is {}; global real-live receipt state is {}",
             "ready",
             provider_readiness.overall_state,
-            subagent_readiness.worker_runtime_state
+            subagent_readiness.worker_runtime_state,
+            global_real_live_receipt.state
         ),
-        next_action:
+        next_action: if global_real_live_receipt.verified {
+            "keep the verified global real-live receipt path configured and rerun readiness checks after any adapter change".to_string()
+        } else {
             "keep mapped/gated/frozen/ready terms scoped separately; require live receipts before marking provider, Feishu, desktop/browser, wiki/GBrain, or runner pools live-ready"
-                .to_string(),
+                .to_string()
+        },
         terms: vec![
             live_readiness_term(
                 "ga_local_mapped_only",
@@ -1783,11 +2207,12 @@ fn browser_readiness_from_status(
         .cloned()
         .collect::<Vec<_>>();
     let desktop_read_observation_ready = !desktop_read_tools.is_empty();
-    let browser_read_terms_consistent = browser_read.desktop_read_is_separate
-        && browser_read.does_not_use_actuator_observe;
+    let browser_read_terms_consistent =
+        browser_read.desktop_read_is_separate && browser_read.does_not_use_actuator_observe;
     let browser_read_adapter_ready = browser_read.available && browser_read_terms_consistent;
     let browser_read_unavailable = !browser_read.available && browser_read_terms_consistent;
-    let ok = desktop_read_observation_ready && (browser_read_adapter_ready || browser_read_unavailable);
+    let ok =
+        desktop_read_observation_ready && (browser_read_adapter_ready || browser_read_unavailable);
 
     let overall_state = if browser_read_adapter_ready {
         "desktop_read_ready_browser_read_live_ready"

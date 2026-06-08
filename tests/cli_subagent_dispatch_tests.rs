@@ -679,7 +679,9 @@ fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() 
         &std::fs::read_to_string(&report_path).expect("report file should exist"),
     )
     .expect("report should be json");
-    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    let proposals = report["skill_proposals"]
+        .as_array()
+        .expect("skill proposals array");
     assert_eq!(proposals.len(), 1);
     assert_eq!(proposals[0]["dry_run"], true);
     assert_eq!(proposals[0]["writes_skills"], false);
@@ -816,8 +818,12 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
     )
     .expect("first report should be json");
     let second_report: Value = serde_json::from_str(
-        &std::fs::read_to_string(queue_root.join("reports").join(format!("{second_run}.json")))
-            .expect("second report should exist"),
+        &std::fs::read_to_string(
+            queue_root
+                .join("reports")
+                .join(format!("{second_run}.json")),
+        )
+        .expect("second report should exist"),
     )
     .expect("second report should be json");
     assert_ne!(
@@ -1112,7 +1118,11 @@ fn cli_subagent_run_loop_rejects_capability_mismatch_before_worker_start() {
 #[test]
 fn cli_subagent_run_once_uses_runtime_dry_run_slot_from_config_file() {
     let queue_root = temp_queue_root("run-once-config-dry-run");
-    let dispatch = dispatch_task(&queue_root, "task-cli-config-dry-run", "配置 dry_run 演化槽");
+    let dispatch = dispatch_task(
+        &queue_root,
+        "task-cli-config-dry-run",
+        "配置 dry_run 演化槽",
+    );
     let run_id = dispatch["run_id"].as_str().expect("run id");
     let config_path = queue_root.join("config.toml");
     std::fs::write(
@@ -1153,7 +1163,9 @@ fn cli_subagent_run_once_uses_runtime_dry_run_slot_from_config_file() {
         &std::fs::read_to_string(report_path).expect("report file should exist"),
     )
     .expect("report should be json");
-    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    let proposals = report["skill_proposals"]
+        .as_array()
+        .expect("skill proposals array");
     assert_eq!(proposals.len(), 1);
     assert_eq!(proposals[0]["dry_run"], true);
 }
@@ -1250,7 +1262,9 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
         report["governance_decision"]["reason"],
         "approved_by_cli_flag: --approve-exec"
     );
-    let proposals = report["skill_proposals"].as_array().expect("skill proposals array");
+    let proposals = report["skill_proposals"]
+        .as_array()
+        .expect("skill proposals array");
     assert_eq!(proposals.len(), 1);
     assert_eq!(proposals[0]["dry_run"], true);
     assert_eq!(proposals[0]["writes_skills"], false);

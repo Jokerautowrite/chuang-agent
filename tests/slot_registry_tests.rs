@@ -10,8 +10,8 @@ use chuang_agent::governance::{ActionKind, Governance, ProposedAction, RiskDecis
 use chuang_agent::provider_openai_compatible::ProviderTransport;
 use chuang_agent::responder::{Responder, ResponderRequest};
 use chuang_agent::runtime_config::{
-    EvolutionConfig, OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy,
-    RuntimeConfig, SubagentConfig, SubagentQueueConfig,
+    EvolutionConfig, OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy, RuntimeConfig,
+    SubagentConfig, SubagentQueueConfig,
 };
 use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
 use chuang_agent::slot_registry::{

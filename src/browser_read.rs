@@ -208,9 +208,8 @@ impl CdpBrowserReadAdapter {
             "/"
         };
 
-        let mut stream = TcpStream::connect(host_port).map_err(|e| {
-            Self::cdp_error("cdp_ws_connect_failed", format!("{}", e))
-        })?;
+        let mut stream = TcpStream::connect(host_port)
+            .map_err(|e| Self::cdp_error("cdp_ws_connect_failed", format!("{}", e)))?;
         stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
         stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 

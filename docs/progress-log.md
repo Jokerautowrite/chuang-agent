@@ -1,3 +1,15 @@
+# 2026-05-30 Global real-live receipt 聚合器落地
+- 本轮继续收口 Chuang 的真实全局 ready 路径，新增 `scripts/chuang-global-real-live-receipt.sh`。它会消费或采集 Feishu、provider、subagent_live_rehearsal、desktop、browser、wiki、GBrain 7 条 source receipt，映射成 canonical overlay，再交给 `scripts/chuang-live-operator-receipt-collect.sh` 做最终校验和 `can_mark_real_live_ready` 推导。
+- 默认边界保持保守：provider live request 默认不执行，只有传 `--include-provider-live` 或设置 `CHUANG_GLOBAL_RECEIPT_INCLUDE_PROVIDER_LIVE=1` 才会真实调用 provider；desktop dry-run rehearsal 不会被提升成 `real_execution=true`；脚本不重启服务、不改 repo、不删除文件、不碰 Hermes。
+- 新增 `tests/global_real_live_receipt_tests.rs`，锁住三条关键合同：脚本是 bounded aggregator；缺 provider source receipt 且未 opt-in 时必须 blocked；只有 7 份 verified source receipts 全部满足 canonical 映射后，collector 才输出 `acceptance_status=verified` / `can_mark_real_live_ready=true` / `gap_count=0`。
+- 本轮已通过：`bash -n scripts/chuang-global-real-live-receipt.sh`、默认 `bash scripts/chuang-global-real-live-receipt.sh --json`（按预期 1 verified + 6 blocked，不误提权）、`cargo test -q --test global_real_live_receipt_tests`。当前真实环境仍不是全局 real-live-ready：默认缺 Feishu event log、provider live opt-in、真实 desktop execution、CDP/browser、Wiki/GBrain endpoint receipts。
+
+# 2026-05-30 Global real-live receipt gate 落地
+- 本轮把 Chuang 从只有 `local_gate_ready` 推进为“有真实全局 ready 入口，但默认仍不伪造 ready”。`status --json` 现在读取 `CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE`（兼容 `CHUANG_REAL_LIVE_RECEIPT_FILE`）；未配置时继续报告 `local_ready_live_pending`、`local_gate_ready_requires_manual_live_check` 和 `global_real_live_receipt_file_not_configured`。
+- 新增/收紧 global receipt 校验：Feishu、provider、subagent_live_rehearsal、desktop、browser、wiki、GBrain 7 项必须全部 `verified`，`service_receipts`、`service_evidence`、`real_live_acceptance.services` 结构一致；evidence 必须使用 canonical 字段、无 placeholder、无 blockers，provider 必须证明真实请求而不是 readiness，desktop 必须 `real_execution=true`，wiki/GBrain 必须 `writes_core_memory=false`。
+- `scripts/chuang-live-operator-receipt-collect.sh` 从“模板固定 false”改为由完整 canonical evidence 推导 `can_mark_real_live_ready`；模板、partial overlay、non-canonical evidence 仍保持 blocked/not_verified。`scripts/chuang-live-gaps-check.sh`、candidate verify 和 third-test wrapper 已允许默认 pending 与 verified ready 两条路径。
+- 当前真实环境仍不能宣称全局 real-live-ready：没有真实 Wiki/GBrain endpoint receipt、受控 CDP/browser evidence、skill proposal/operator receipt 等完整现场证据时，默认 blocked/local 是正确状态。本轮目标是补齐合法提权路径和防伪校验，不是制造 ready 结论。
+
 # 2026-05-30 非 Feishu 主线第二轮并行收口
 - 本轮继续按老爸要求跳过 Feishu，主控派 3 个 `gpt-5.3-codex` 子代理并行推进非 Feishu 主线；主控审核后收紧默认行为。没有触碰 Hermes，没有发送 Feishu 消息，没有执行真实浏览器/桌面动作，没有删除或清理文件。
 - GBrain live receipt 脚本补齐：新增 `scripts/chuang-gbrain-live-receipt.sh` 和 `tests/gbrain_live_receipt_tests.rs`。默认缺 `CHUANG_GBRAIN_LIVE_ENDPOINT` / `CHUANG_GBRAIN_LIVE_TOKEN` 时 structured blocked；配置后只发只读 `POST`，payload 固定包含 `source=gbrain`、`query`、`limit`、`read_only=true`，token/endpoint 只输出 `<set>/<missing>` 状态。
@@ -2434,3 +2446,18 @@
 # 2026-05-13 runtime_observability 默认 summary JSON 字段补齐
 - 本轮在 `runtime_report/status/channel/app-server` 范围内补一个真实小缺口：`runtime_observability_meta` 在无 handoff/subagent ledger 时，新增稳定默认 `goal_handoff_query_summary_json=none` 与 `subagent_children_summary_json=none`，避免调用方把“缺字段”和“当前无 summary”混淆。
 - 同步补回归到 `tests/runtime_report_tests.rs`、`tests/cli_channel_tests.rs`、`tests/app_server_tests.rs`，锁住 turn/default runtime observability 行为；验证通过 `cargo test -q --test runtime_report_tests runtime_report_observability_meta_defaults_runtime_event_and_handoff_counts_without_ledgers`、`cargo test -q --test cli_channel_tests cli_channel_simulate_runs_workspace_config_without_fake_responder`、`cargo test -q --test app_server_tests app_server_turn_uses_workspace_provider_config`。
+
+# 2026-06-09 Chuang 候选状态整理收口
+- 本轮按只读优先整理当前 `chuang-agent` 状态，没有删除、reset、cleanup 或触碰 Hermes/Codex Feishu 运行配置。Required reading 已重新对齐 `docs/blueprint-v1.md`、`docs/pluggable-architecture-v1.md`、`docs/source-project-audit-v1.md` 与滚动 handoff/progress 口径。
+- 当前主结论保持不变：Chuang 已处于第三测试版候选/本地闭环 ready 口径；`status --json` 的 `live_readiness.overall_state` 仍是 `local_ready_live_pending`，默认不能声明 `global_real_live_ready`。必须等 Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 7 项 canonical real-live receipt 全部 verified 且 blocker-free，才能提权。
+- 本轮确认状态面仍稳定：`runtime_report_surface` 为 11 个 artifact / 26 个 observability field；`GoalRun mainline-mvp` 当前 checkpoint_count=159；`plugin_registry` 可用且 5 个插件默认 disabled；live runner readiness view 为本地合同 ready，但 `ready_for_live=false`、`live_worker_available=false`，真实 runner gate 仍关闭。
+- 本轮工作区整理：5 个本地外部参考/工具目录 `ai-sdk-codex-oauth/`、`gbrain-http-wrapper/`、`gpt-token-tools/`、`oc-codex-multi-auth/`、`opencode-multi-auth-codex/` 已作为 local external reference worktrees 写入 `.gitignore`，避免继续污染主仓 `git status`；目录未删除、未移动、未纳入 Chuang 主仓。
+- 本轮已验证：
+  - `cargo fmt --all --check`
+  - `git diff --check`
+  - `bash -n scripts/chuang-global-real-live-receipt.sh scripts/chuang-live-operator-receipt-collect.sh scripts/chuang-live-gaps-check.sh scripts/chuang-candidate-verify.sh scripts/chuang-third-test-smoke.sh scripts/chuang-mvp-smoke.sh scripts/chuang-complete-local-smoke.sh`
+  - `cargo test -q --test global_real_live_receipt_tests --test live_operator_receipt_collect_tests --test live_operator_scripts_tests --test kernel_status_tests --test cli_smoke_tests`
+  - `cargo test -q --test runtime_config_tests --test runtime_config_file_tests --test cli_subagent_dispatch_tests --test subagent_report_tests --test feishu_live_receipt_tests`
+  - `sh scripts/chuang-mvp-smoke.sh`
+  - `sh scripts/chuang-candidate-verify.sh`
+- 下一步入口：先把当前 live receipt/status/readiness 这一批改动复查并提交；提交前建议再跑 `sh scripts/chuang-third-test-smoke.sh` 和必要时全量 `cargo test -q`。提交后再推进真实 operator receipt 收口，不要把 local-ready、mapped、gated、frozen 或 provider env `<set>` 写成 live-ready。

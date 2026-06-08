@@ -27,7 +27,10 @@ import sys
 data = json.load(sys.stdin)
 assert data["ok"] is True
 assert data["check_name"] == "live-gaps"
-assert data["summary"] == "local_contract=ready preflight=ready_but_no_start real_live=pending"
+assert data["summary"] in (
+    "local_contract=ready preflight=ready_but_no_start real_live=pending",
+    "local_contract=ready preflight=ready_but_no_start real_live=ready",
+)
 boundaries = data["boundaries"]
 assert boundaries["readonly"] is True
 assert boundaries["connects_real_feishu"] is False
@@ -43,14 +46,18 @@ assert matrix["preflight_ready_but_no_start"]["state"] == "ready_but_no_start"
 assert matrix["preflight_ready_but_no_start"]["ready_for_live"] is False
 assert matrix["preflight_ready_but_no_start"]["starts_external_worker"] is False
 assert matrix["preflight_ready_but_no_start"]["live_worker_available"] is False
-assert matrix["real_live"]["state"] == "pending"
-assert matrix["real_live"]["real_live_ready"] is False
-assert matrix["real_live"]["connects_real_external_services"] is False
+real_live_ready = matrix["real_live"]["state"] == "ready"
+assert matrix["real_live"]["state"] in ("pending", "ready")
+assert matrix["real_live"]["real_live_ready"] is real_live_ready
+assert matrix["real_live"]["connects_real_external_services"] is real_live_ready
 gap_ids = [item["id"] for item in data["gaps"]]
-assert "live_worker_adapter_pending" in gap_ids
-assert "live_runner_gate_disabled" in gap_ids
-assert "manual_operator_live_receipt_missing" in gap_ids
-assert "real_external_services_not_verified" in gap_ids
+if real_live_ready:
+    assert gap_ids == []
+else:
+    assert "live_worker_adapter_pending" in gap_ids
+    assert "live_runner_gate_disabled" in gap_ids
+    assert "manual_operator_live_receipt_missing" in gap_ids
+    assert "real_external_services_not_verified" in gap_ids
 print("live_gaps_summary=" + data["summary"])
 print("live_gaps_gap_count=" + str(len(data["gaps"])))
 print("live_gaps_marker=" + data["marker"])
@@ -77,13 +84,14 @@ assert policy_tool_status["active_permission_profile"] == "local_ga"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 assert live_readiness["ok"] is True
-assert live_readiness["overall_state"] == "local_ready_live_pending"
+global_real_live_ready = live_readiness["overall_state"] == "global_real_live_ready"
+assert live_readiness["overall_state"] in ("local_ready_live_pending", "global_real_live_ready")
 assert live_readiness["ga_local_mapped_only"] is True
 assert live_readiness["desktop_browser_live_gated"] is True
 assert live_readiness["browser_worker_frozen"] is True
 assert live_readiness["live_worker_available"] is False
-assert live_readiness["real_external_acceptance_pending"] is True
-assert live_readiness["provider_live_request_verified_by_status"] is False
+assert live_readiness["real_external_acceptance_pending"] is (not global_real_live_ready)
+assert live_readiness["provider_live_request_verified_by_status"] is global_real_live_ready
 assert live_readiness["ready_does_not_mean_live"] is True
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False

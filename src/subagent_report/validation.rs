@@ -178,10 +178,12 @@ impl SubagentReportValidator {
         }
 
         let proposals: Vec<SkillProposal> = serde_json::from_value(skill_proposals_value.clone())
-            .map_err(|error| ReportRejectReason::InvalidFieldFormat {
+            .map_err(|error| {
+            ReportRejectReason::InvalidFieldFormat {
                 field: "skill_proposals",
                 reason: format!("failed to decode SkillProposal entries: {error}"),
-            })?;
+            }
+        })?;
 
         for proposal in &proposals {
             if proposal.proposal_id.trim().is_empty() {
