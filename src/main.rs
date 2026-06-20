@@ -1,5 +1,10 @@
 use std::env;
-use std::io::{self, BufRead, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::PathBuf;
+use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod app_server;
 mod cli_args;
@@ -21,6 +26,7 @@ mod cli_subagent;
 mod cli_types;
 
 use chuang_agent::kernel_status::build_chuang_mvp_status;
+use chuang_agent::tool_loop_meta::ToolLoopMeta;
 use cli_args::*;
 use cli_channel::channel_command;
 use cli_config::config_command;
@@ -105,11 +111,32 @@ fn repl_command(args: &[String]) -> Result<(), String> {
     let (options, verbose) = parse_repl_options(args)?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let interactive = stdin.is_terminal() && stdout.is_terminal();
+    let show_trace = true;
 
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|e| format!("stdin_read_failed: {e}"))?;
+    if interactive {
+        print_repl_banner(&mut stdout, &options)?;
+        return repl_interactive_loop(options, verbose, show_trace, &mut stdout);
+    }
+
+    let mut stdin_lock = stdin.lock();
+    loop {
+        let mut line = String::new();
+        let bytes = stdin_lock
+            .read_line(&mut line)
+            .map_err(|e| format!("stdin_read_failed: {e}"))?;
+        if bytes == 0 {
+            break;
+        }
         let input = line.trim();
-        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+        if input.eq_ignore_ascii_case("exit")
+            || input.eq_ignore_ascii_case("quit")
+            || input.eq_ignore_ascii_case("/exit")
+            || input.eq_ignore_ascii_case("/quit")
+        {
+            if interactive {
+                writeln!(stdout, "bye.").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            }
             break;
         }
         if input.is_empty() {
@@ -129,6 +156,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         })?;
         if verbose {
             print_runtime_result(&result);
@@ -142,6 +170,570 @@ fn repl_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn repl_interactive_loop(
+    options: CliOptions,
+    mut verbose: bool,
+    mut show_trace: bool,
+    stdout: &mut io::Stdout,
+) -> Result<(), String> {
+    let summary = options.runtime.summary();
+    let mut turn_count = 0usize;
+    let mut pending_guidance: Vec<String> = Vec::new();
+    let mut running: Option<RunningTurn> = None;
+    let (input_sender, input_receiver) = mpsc::channel::<Option<String>>();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(line) => {
+                    if input_sender.send(Some(line)).is_err() {
+                        return;
+                    }
+                }
+                Err(_) => {
+                    let _ = input_sender.send(None);
+                    return;
+                }
+            }
+        }
+        let _ = input_sender.send(None);
+    });
+    print_repl_prompt(stdout, false, pending_guidance.len())?;
+
+    loop {
+        if poll_running_turn(
+            stdout,
+            &mut running,
+            &mut turn_count,
+            show_trace,
+            verbose,
+            &mut pending_guidance,
+        )? {
+            print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
+        }
+
+        let input = match input_receiver.recv_timeout(Duration::from_millis(200)) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        match process_repl_input(
+            &input,
+            &options,
+            &summary,
+            &mut verbose,
+            &mut show_trace,
+            &mut running,
+            &mut pending_guidance,
+            stdout,
+        )? {
+            InputAction::Continue => {
+                print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
+            }
+            InputAction::Exit => break,
+        }
+    }
+
+    Ok(())
+}
+
+enum InputAction {
+    Continue,
+    Exit,
+}
+
+fn process_repl_input(
+    raw_input: &str,
+    options: &CliOptions,
+    summary: &chuang_agent::runtime_config::ConfigSummary,
+    verbose: &mut bool,
+    show_trace: &mut bool,
+    running: &mut Option<RunningTurn>,
+    pending_guidance: &mut Vec<String>,
+    stdout: &mut io::Stdout,
+) -> Result<InputAction, String> {
+    let input = raw_input.trim();
+    if input.eq_ignore_ascii_case("exit")
+        || input.eq_ignore_ascii_case("quit")
+        || input.eq_ignore_ascii_case("/exit")
+        || input.eq_ignore_ascii_case("/quit")
+    {
+        if running.is_some() {
+            writeln!(
+                stdout,
+                "task still running; close the terminal to force quit, or wait for completion."
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            return Ok(InputAction::Continue);
+        }
+        writeln!(stdout, "bye.").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        return Ok(InputAction::Exit);
+    }
+    if input.is_empty() {
+        return Ok(InputAction::Continue);
+    }
+
+    if input.starts_with('/') {
+        handle_repl_command(input, verbose, show_trace, options, stdout)?;
+        return Ok(InputAction::Continue);
+    }
+
+    if let Some(note) = input.strip_prefix('!') {
+        let note = note.trim();
+        if note.is_empty() {
+            writeln!(stdout, "guidance ignored: empty note")
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        } else if let Some(turn) = running.as_ref() {
+            append_live_guidance(&turn.guidance_path, note)?;
+            writeln!(stdout, "guidance injected into current turn")
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        } else {
+            pending_guidance.push(note.to_string());
+            writeln!(stdout, "guidance queued: {}", pending_guidance.len())
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        return Ok(InputAction::Continue);
+    }
+
+    if running.is_some() {
+        if let Some(turn) = running.as_ref() {
+            append_live_guidance(&turn.guidance_path, input)?;
+        }
+        writeln!(
+            stdout,
+            "guidance injected into current turn. Prefix with ! next time to make this explicit."
+        )
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        return Ok(InputAction::Continue);
+    }
+
+    let user_input = merge_repl_guidance(input, pending_guidance);
+    pending_guidance.clear();
+    writeln!(
+        stdout,
+        "╭─ running  provider={} model={} workspace={}",
+        summary.provider_id,
+        summary.model_name,
+        env::current_dir()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|_| "unknown".to_string())
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(
+        stdout,
+        "│  type !<your note> while running to inject guidance at the next safe point"
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))?;
+    *running = Some(spawn_repl_turn(options.clone(), user_input));
+    Ok(InputAction::Continue)
+}
+
+fn poll_running_turn(
+    stdout: &mut io::Stdout,
+    running: &mut Option<RunningTurn>,
+    turn_count: &mut usize,
+    show_trace: bool,
+    verbose: bool,
+    pending_guidance: &mut Vec<String>,
+) -> Result<bool, String> {
+    if let Some(mut turn) = running.take() {
+        match turn.receiver.try_recv() {
+            Ok(result) => {
+                turn.result = Some(result);
+                finish_running_turn(
+                    stdout,
+                    turn,
+                    turn_count,
+                    show_trace,
+                    verbose,
+                    pending_guidance,
+                )?;
+                return Ok(true);
+            }
+            Err(TryRecvError::Empty) => {
+                *running = Some(turn);
+            }
+            Err(TryRecvError::Disconnected) => {
+                turn.result = Some(Err("repl_turn_disconnected".to_string()));
+                finish_running_turn(
+                    stdout,
+                    turn,
+                    turn_count,
+                    show_trace,
+                    verbose,
+                    pending_guidance,
+                )?;
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+struct RunningTurn {
+    started_at: Instant,
+    input_preview: String,
+    receiver: mpsc::Receiver<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
+    handle: thread::JoinHandle<()>,
+    result: Option<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
+    guidance_path: PathBuf,
+}
+
+fn spawn_repl_turn(options: CliOptions, user_input: String) -> RunningTurn {
+    let started_at = Instant::now();
+    let input_preview = compact_preview(&user_input, 80);
+    let guidance_path = env::temp_dir().join(format!(
+        "chuang-repl-guidance-{}-{}.txt",
+        std::process::id(),
+        started_at.elapsed().as_nanos()
+    ));
+    let (sender, receiver) = mpsc::channel();
+    let request_guidance_path = guidance_path.clone();
+    let handle = thread::spawn(move || {
+        let result = run_with_options(&RunCliRequest {
+            options,
+            user_input,
+            workspace_root: None,
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: Some(request_guidance_path),
+        })
+        .map(|(result, _)| result);
+        let _ = sender.send(result);
+    });
+    RunningTurn {
+        started_at,
+        input_preview,
+        receiver,
+        handle,
+        result: None,
+        guidance_path,
+    }
+}
+
+fn finish_running_turn(
+    stdout: &mut io::Stdout,
+    turn: RunningTurn,
+    turn_count: &mut usize,
+    show_trace: bool,
+    verbose: bool,
+    pending_guidance: &mut [String],
+) -> Result<(), String> {
+    let elapsed_ms = turn.started_at.elapsed().as_millis();
+    let result = match turn.result {
+        Some(result) => result,
+        None => turn
+            .receiver
+            .recv()
+            .map_err(|e| format!("repl_turn_receive_failed: {e}"))?,
+    };
+    let _ = turn.handle.join();
+    match result {
+        Ok(result) => {
+            *turn_count += 1;
+            print_repl_result(
+                stdout,
+                &result,
+                elapsed_ms,
+                *turn_count,
+                show_trace,
+                &turn.input_preview,
+                pending_guidance.len(),
+            )?;
+            if verbose {
+                print_runtime_result(&result);
+            }
+        }
+        Err(error) => {
+            writeln!(
+                stdout,
+                "╰─ failed elapsed={}ms input={}",
+                elapsed_ms, turn.input_preview
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(stdout, "{error}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+    }
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn print_repl_prompt(
+    stdout: &mut io::Stdout,
+    running: bool,
+    guidance_count: usize,
+) -> Result<(), String> {
+    if running {
+        write!(stdout, "\nchuang running").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    } else {
+        write!(stdout, "\nchuang").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    if guidance_count > 0 {
+        write!(stdout, " +{guidance_count}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    write!(stdout, "> ").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
+    if guidance.is_empty() {
+        return input.to_string();
+    }
+    let mut merged = String::new();
+    merged.push_str(input);
+    merged.push_str("\n\n[operator-guidance]\n");
+    for (index, note) in guidance.iter().enumerate() {
+        merged.push_str(&format!("{}. {}\n", index + 1, note));
+    }
+    merged
+        .push_str("Treat operator-guidance as the creator's latest requirements for this turn.\n");
+    merged
+}
+
+fn compact_preview(input: &str, max_chars: usize) -> String {
+    let text = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+    let mut preview = text
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    preview.push('…');
+    preview
+}
+
+fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("guidance_dir_create_failed: {e}"))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("guidance_open_failed: {e}"))?;
+    writeln!(file, "{}", note.trim()).map_err(|e| format!("guidance_write_failed: {e}"))
+}
+
+fn print_repl_banner(stdout: &mut io::Stdout, options: &CliOptions) -> Result<(), String> {
+    let summary = options.runtime.summary();
+    writeln!(
+        stdout,
+        "\n       _                                \n  ___ | |__   _   _   __ _  _ __    __ _ \n / __|| '_ \\ | | | | / _` || '_ \\  / _` |\n| (__ | | | || |_| || (_| || | | || (_| |\n \\___||_| |_| \\__,_| \\__, ||_| |_| \\__, |\n                     |___/         |___/ \n\n  agent: chuang-cli\n  provider: {}  model: {}\n  commands: /help /status /trace /notrace /verbose /quiet /clear /exit\n  while running: type !text to inject guidance at the next safe point\n",
+        summary.provider_id, summary.model_name
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn handle_repl_command(
+    input: &str,
+    verbose: &mut bool,
+    show_trace: &mut bool,
+    options: &CliOptions,
+    stdout: &mut io::Stdout,
+) -> Result<(), String> {
+    match input {
+        "/help" | "/?" => {
+            writeln!(
+                stdout,
+                "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /trace     show visible execution trace\n  /notrace   hide visible execution trace\n  /verbose   print full runtime metadata after each turn\n  /quiet     show concise answers only\n  /clear     clear the screen\n  /exit      leave the terminal\n\nMid-task guidance\n  !text      inject creator guidance into the current task at the next safe point\n  plain text while running is also injected into the current task\n  !text while idle is queued for the next submitted task\n\nTips\n  Chuang shows visible execution trace, tool calls, elapsed time and report id. Hidden model reasoning is not printed.\n"
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/status" => {
+            let kernel = kernel_config_from_runtime(&options.runtime)?;
+            let status = build_chuang_mvp_status(&options.runtime, &kernel)
+                .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+            writeln!(
+                stdout,
+                "\nStatus\n  provider: {} / {}\n  readiness: {}\n  tools: mapped={} executable={}\n  subagent: {}\n  memory: {}\n",
+                status.config.provider_id,
+                status.config.model_name,
+                status.provider_readiness.overall_state,
+                status.atomic_tools.mapped_count,
+                status.atomic_tools.governed_executable_atomic_tool_names.len(),
+                status.slots.subagent,
+                status.config.identity_memory_root
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/verbose" => {
+            *verbose = true;
+            writeln!(stdout, "verbose: on").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/trace" => {
+            *show_trace = true;
+            writeln!(stdout, "trace: on").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/notrace" => {
+            *show_trace = false;
+            writeln!(stdout, "trace: off").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/quiet" => {
+            *verbose = false;
+            writeln!(stdout, "verbose: off").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/clear" => {
+            write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        "/exit" | "/quit" => {}
+        _ => {
+            writeln!(stdout, "unknown command: {input}. Try /help.")
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+    }
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn print_repl_result(
+    stdout: &mut io::Stdout,
+    result: &chuang_agent::agent_runtime::RuntimeResult,
+    elapsed_ms: u128,
+    turn_count: usize,
+    show_trace: bool,
+    input_preview: &str,
+    pending_guidance_count: usize,
+) -> Result<(), String> {
+    let meta = &result.response.meta.extra;
+    let tool_meta = ToolLoopMeta::from_extra(meta)?;
+    let tool_status = meta
+        .get("tool_loop_status")
+        .map(String::as_str)
+        .unwrap_or("none");
+    writeln!(
+        stdout,
+        "╰─ done turn={} elapsed={}ms tools={} protocol_errors={} status={}",
+        turn_count,
+        elapsed_ms,
+        tool_meta.tool_call_count,
+        tool_meta.tool_protocol_error_count,
+        tool_status
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(stdout, "   input: {input_preview}")
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    if pending_guidance_count > 0 {
+        writeln!(
+            stdout,
+            "   queued idle guidance: {pending_guidance_count} note(s) will apply to the next submitted task"
+        )
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    if show_trace {
+        print_visible_trace(stdout, result, elapsed_ms, &tool_meta, tool_status)?;
+    }
+    for event in &tool_meta.tool_events {
+        if let Some(line) = format_tool_event(event) {
+            writeln!(stdout, "   {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+    }
+    writeln!(stdout, "\n{}", result.response.body.trim())
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    if let Some(report_id) = meta.get("runtime_report_id") {
+        writeln!(stdout, "\nreport: {report_id}")
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn print_visible_trace(
+    stdout: &mut io::Stdout,
+    result: &chuang_agent::agent_runtime::RuntimeResult,
+    elapsed_ms: u128,
+    tool_meta: &ToolLoopMeta,
+    tool_status: &str,
+) -> Result<(), String> {
+    writeln!(stdout, "\ntrace").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(
+        stdout,
+        "  context: engine={} tokens={} recall_hits={} dropped={}",
+        result.context_engine_kind,
+        result.packed_token_count,
+        result.recall_hit_count,
+        result.dropped_segment_ids.len()
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(
+        stdout,
+        "  model: {} finish={}",
+        result.response.model_name,
+        result
+            .response
+            .meta
+            .finish_reason
+            .as_deref()
+            .unwrap_or("none")
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(
+        stdout,
+        "  execution: elapsed={}ms tools={} protocol_errors={} status={}",
+        elapsed_ms, tool_meta.tool_call_count, tool_meta.tool_protocol_error_count, tool_status
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    for event in &tool_meta.tool_events {
+        if let Some(line) = format_tool_event(event) {
+            writeln!(stdout, "  {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn format_tool_event(event: &serde_json::Value) -> Option<String> {
+    let kind = event.get("kind").and_then(|value| value.as_str())?;
+    match kind {
+        "tool_call" => {
+            let tool = event
+                .get("tool_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool");
+            let decision = event
+                .get("decision")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown");
+            let ok = event
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .map(|value| if value { "ok" } else { "failed" })
+                .unwrap_or("unknown");
+            let summary = event
+                .get("summary")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            Some(format!("tool {tool}: {ok} decision={decision} {summary}"))
+        }
+        "protocol_error" => {
+            let code = event
+                .get("protocol_error_code")
+                .and_then(|value| value.as_str())
+                .unwrap_or("protocol_error");
+            Some(format!("protocol: {code}"))
+        }
+        _ => Some(format!("event: {kind}")),
+    }
 }
 
 fn parse_repl_options(args: &[String]) -> Result<(CliOptions, bool), String> {

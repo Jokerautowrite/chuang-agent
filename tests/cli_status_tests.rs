@@ -477,6 +477,9 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert!(runtime_capability_primer.contains("goal/subagent 派活"));
     assert!(runtime_capability_primer.contains("locate/screenshot=只读观察"));
     assert!(runtime_capability_primer.contains("open_app/mouse/keyboard=桌面交互"));
+    assert!(runtime_capability_primer.contains("不伪造完成"));
+    assert!(runtime_capability_primer.contains("授权业务/授权网安任务"));
+    assert!(runtime_capability_primer.contains("Feishu/终端/HTTP/桌面只是入口"));
     assert_eq!(parsed["atomic_tools"]["ok"], true);
     assert_eq!(parsed["atomic_tools"]["total_count"], 9);
     assert_eq!(parsed["atomic_tools"]["mapped_count"], 9);

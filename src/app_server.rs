@@ -946,6 +946,7 @@ fn run_turn_with_tools(
         dispatch_subagent: false,
         goal_spec,
         knowledge_context: None,
+        live_guidance_path: None,
     };
 
     let (result, records) = run_with_options(&request)?;

@@ -222,6 +222,9 @@ fn agent_runtime_surfaces_readonly_desktop_browser_and_knowledge_guidance_in_pro
     assert!(result.prompt.contains("locate/screenshot=只读观察"));
     assert!(result.prompt.contains("open_app/mouse/keyboard=桌面交互"));
     assert!(result.prompt.contains("memory/session=回溯"));
+    assert!(result.prompt.contains("不伪造完成"));
+    assert!(result.prompt.contains("授权业务/授权网安任务"));
+    assert!(result.prompt.contains("Feishu/终端/HTTP/桌面只是入口"));
     assert!(result
         .packed_context_preview
         .contains("system-capabilities"));

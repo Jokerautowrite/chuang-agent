@@ -663,9 +663,9 @@ printf '%s\n' "[smoke] repl launcher"
 bash -n scripts/launch-chuang-agent-repl.sh
 printf 'exit\n' | CHUANG_REPL_STUB=1 scripts/launch-chuang-agent-repl.sh >/dev/null
 provider_env_path="$work_dir/provider.env"
-printf '%s\n' 'CODEX_PPTOKEN_API_KEY=test-key' >"$provider_env_path"
-env -u CODEX_PPTOKEN_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/chuang-app-server-health.sh >/dev/null
-printf 'exit\n' | env -u CODEX_PPTOKEN_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/launch-chuang-agent-repl.sh >/dev/null
+printf '%s\n' 'CHUANG_PROXY_API_KEY=test-key' >"$provider_env_path"
+env -u CHUANG_PROXY_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/chuang-app-server-health.sh >/dev/null
+printf 'exit\n' | env -u CHUANG_PROXY_API_KEY CHUANG_PROVIDER_ENV_FILE="$provider_env_path" scripts/launch-chuang-agent-repl.sh >/dev/null
 
 printf '%s\n' "[smoke] console snapshot"
 cargo run --quiet -- console snapshot --config "$config_path" --json >/dev/null

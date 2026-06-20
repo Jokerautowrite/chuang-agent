@@ -14,11 +14,17 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 
 ## 当前状态
 
+- `chuang`：首选终端入口，直接启动本地交互 REPL；交互终端会显示启动横幅、`chuang>` 输入提示、运行中状态、可见执行 trace、工具摘要、耗时和 `/help`、`/status`、`/trace`、`/notrace`、`/verbose`、`/quiet`、`/clear`、`/exit` 等内置命令。任务运行中可输入 `!你的补充`，Chuang 会把它注入当前任务，并在同一轮的下一个安全点传给模型；运行中直接输入普通文本也会作为当前任务补充。空闲时输入 `!你的补充` 才会排队到下一次提交。
+- `chuang ask "TEXT"`：用终端主线跑一次真实本地 runtime。
+- `chuang status --config config.toml --json`：查看当前终端主线状态。
+- `chuang mainchain-accept`：运行真实标准主链总验收，屏幕只显示阶段 OK/FAIL，详细日志写入 `/tmp/chuang-mainchain-acceptance-*`；会先跑 20 项矩阵和基础合同，再调用真实 provider 完成终端端到端验收和自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。
+- `chuang natural-accept`：单独运行真实自然语言任务验收，会让 Chuang 自己看 git、读日志、修测试失败、生成报告，成功时输出 `chuang_real_natural_acceptance_ok`。
+- `chuang accept`：运行终端版完整验收，覆盖入口、真实 provider 工具循环、记忆、子任务和 goal 流，成功时输出 `chuang_terminal_acceptance_ok`。
 - `cargo run -- doctor`：安全健康检查，校验配置、身份记忆、slot 装配和隔离 runtime smoke。
 - `cargo run -- status`：查看核心状态。
 - `cargo run -- run --config config.toml --input TEXT`：按项目配置跑一轮本地 runtime。
 - `cargo run -- run --input TEXT --remember`：跑完后写回 SQLite turn summary。
-- `./scripts/launch-chuang-agent-repl.sh`：启动本地交互 REPL；默认只显示对话正文。真实对话会优先读取仓库外 `CHUANG_PROVIDER_ENV_FILE`（默认 `~/.config/chuang-agent/provider.env`）里的 `CODEX_PPTOKEN_API_KEY`，需要调试诊断时可直接加 `--verbose`；只验证链路可用可用 `CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh`。
+- `./scripts/launch-chuang-agent-repl.sh`：底层本地交互 REPL 启动脚本；真实 TTY 会显示增强终端外壳，管道模式仍保持简洁输出。真实对话会优先读取仓库外 `CHUANG_PROVIDER_ENV_FILE`（默认 `~/.config/chuang-agent/provider.env`）里的 `CHUANG_PROXY_API_KEY`，只验证链路可用可用 `CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh` 或 `chuang stub`。
 - `cargo run -- memory identity show|append|write-user|write-memory`：管理 Hermes 风格 `USER.md / MEMORY.md`，覆盖写入必须显式 `--approve-overwrite`。
 - `--provider-transport stub|http|native|curl`：OpenAI-compatible provider 的四种接入形态。
 - `fallback_provider = "openai_compatible"`：可在配置里显式启用备用 provider；未配置时不会 silent fallback。
@@ -44,11 +50,14 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `sh scripts/chuang-mvp-smoke.sh`：安全端到端验收脚本，使用临时目录和 stub provider，不触碰真实服务。
 - `sh scripts/chuang-second-test-smoke.sh`：第二测试版本验收入口，复用同一安全 smoke，但输出 `second_test_smoke_ok`。
 - `sh scripts/chuang-complete-local-smoke.sh`：完整本地可用闭环验收入口，串起第二测试 smoke、watchdog 一次性只读检查、本地诊断读面和飞书本地命令 smoke，最终输出 `complete_local_smoke_ok`。
+- `sh scripts/chuang-mainchain-acceptance.sh`：真实标准主链总验收入口，包含 20 项矩阵、tool runtime 合同、CLI smoke、真实 provider 终端验收和真实自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。
+- `sh scripts/chuang-real-natural-acceptance.sh`：真实自然语言任务验收入口，使用临时 git/python 工作区和真实 provider，成功时输出 `chuang_real_natural_acceptance_ok`。
+- `sh scripts/chuang-terminal-acceptance.sh`：终端版主线验收入口；使用临时隔离目录，真实 provider 只用于工具循环，成功时输出 `chuang_terminal_acceptance_ok`。
 - `sh scripts/chuang-live-readonly-preflight.sh`：只读 live preflight 主入口，`scripts/chuang-live-readiness-preflight.sh` 仅作兼容别名/旧入口提示；串起 chmod/syntax check、provider fallback smoke、Feishu live preflight smoke、subagent live preflight、watchdog once、console snapshot 和 complete-local smoke，最终输出 `live_readiness_preflight_ok`。
 - `GenesisActuator`：新版网页 AI 查询插件线，旧 `BrowserWorker` 暂停推进。
 - `cargo test`：全量回归。
 
-当前 MVP 边界见 `docs/mvp-scope.md`，就绪状态见 `docs/mvp-readiness-2026-05-02.md`，核心边界见 `docs/core-boundary.md`，provider fallback 诊断见 `docs/provider-fallback-diagnostics.md`，app-server 服务说明见 `docs/app-server-service.md`，channel adapter 协议见 `docs/channel-adapter-protocol.md`，子代理 runner 协议见 `docs/subagent-runner-protocol.md`，新飞书通道检查清单见 `docs/feishu-dedicated-channel-checklist.md`，command 控制面协议见 `docs/control-command-protocol.md`，command 操作面协议见 `docs/actuator-command-protocol.md`，真实控制适配器安全计划见 `docs/real-control-adapter-safety-plan.md`，长期进度见 `docs/progress-log.md`。
+当前终端版主线以 `chuang` 为入口；Feishu 只作为后续插件/通道入口，不再作为终端可用性的阻塞项。当前 MVP 边界见 `docs/mvp-scope.md`，就绪状态见 `docs/mvp-readiness-2026-05-02.md`，核心边界见 `docs/core-boundary.md`，provider fallback 诊断见 `docs/provider-fallback-diagnostics.md`，app-server 服务说明见 `docs/app-server-service.md`，channel adapter 协议见 `docs/channel-adapter-protocol.md`，子代理 runner 协议见 `docs/subagent-runner-protocol.md`，新飞书通道检查清单见 `docs/feishu-dedicated-channel-checklist.md`，command 控制面协议见 `docs/control-command-protocol.md`，command 操作面协议见 `docs/actuator-command-protocol.md`，真实控制适配器安全计划见 `docs/real-control-adapter-safety-plan.md`，长期进度见 `docs/progress-log.md`。
 
 ## 目录约定
 

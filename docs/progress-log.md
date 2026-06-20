@@ -1,3 +1,80 @@
+# 2026-06-20 提交前盘点与收口
+- 本轮按老爸要求盘点工作树并准备提交。当前应纳入 Chuang 开发提交的是终端 REPL 工作台、当前任务 live guidance 安全点注入、主链工具调用纠偏、真实验收脚本、prompt doctrine、能力 primer、README、progress 与 handoff。
+- 明确不纳入本轮提交的脏数据：`docs/vultr-migration-status-2026-06-08.md` 属于 Vultr/cliproxy 运维记录，和本轮 Chuang 终端主链开发不是同一主题；`notes/` 是临时/未归档输出；`subscription_*.png` 是订阅图素材/产物，不属于 Chuang 代码提交。
+- 提交前有效验证口径：`cargo fmt --check`、`cargo check -q`、`cargo test -q run_governed_turn_injects_live_guidance_before_next_model_round`、`cargo test -q run_with_options_covers_mainchain_terminal_task_matrix`、REPL smoke、tool runtime tests、`git diff --check`，以及 PTY stub 现场确认运行中输入会注入 `[live-operator-guidance]`。
+
+# 2026-06-20 终端工作台与中途插话
+- 本轮按老爸“完全参考 opencode，我喜欢他的方式”和“需要 Codex 桌面版中途插话引导”的要求继续优化 `chuang` 终端 REPL。没有引入重型 TUI 依赖，先把现有 REPL 改成更像工作台的交互方式：启动横幅、运行区、完成区、trace 区、工具事件和 report id 分区展示。
+- REPL 现在在真实 TTY 下把任务放到后台线程执行，主线程继续接收输入并自动刷新结果；任务完成不再需要用户额外敲回车才显示结果。
+- 新增当前任务中途插话机制：任务运行时输入 `!补充要求` 会写入本轮 live guidance 文件；runtime 在同一轮每次模型调用前读取新增内容，并以 `[live-operator-guidance]` 注入当前任务。运行中直接输入普通文本也会作为当前任务补充；只有空闲时输入 `!补充要求` 才会排队到下一次提交。
+- 这个机制是“当前任务安全点注入”，不是强制打断：它不能立刻中止已经发出的 provider HTTP 请求，也不能杀掉正在执行的 shell/tool 命令；但只要当前任务进入下一次模型请求，就会读到你的纠偏。
+- 已补回归 `run_governed_turn_injects_live_guidance_before_next_model_round`：第一轮工具调用写入 live guidance，runtime 在下一次模型调用前读取，并按纠偏写出目标文件，证明不是等下一轮用户输入才生效。
+- 旧的 PTY stub 只适合验证终端可输入和不锁死；真实同轮注入以 runtime 回归为准，因为 stub 响应太快，不稳定覆盖中途安全点。第一版 `try_recv` 消费结果导致 `repl_turn_receive_failed`、stdin lock 导致结果不能自动刷新的问题仍已修复。
+
+# 2026-06-20 主链验收输出与自然语言真实验收
+- 本轮继续按老爸要求补完两项：第一，把 `chuang mainchain-accept` 的输出从长 cargo 日志收敛为阶段 OK/FAIL，详细日志保留在 `/tmp/chuang-mainchain-acceptance-*`；失败时自动打印失败阶段最后 80 行，方便定位。
+- 第二，新增 `scripts/chuang-real-natural-acceptance.sh` 和 `chuang natural-accept`，用真实 provider 跑自然语言任务验收。它会创建临时 git/python 工作区，让 Chuang 用自然语言完成：看 git 状态和文件列表、读取日志并提取 ERROR、运行 unittest 发现失败后修复代码并复跑、综合生成 final report。
+- `scripts/chuang-mainchain-acceptance.sh` 已把自然语言验收纳入总门禁：20 项矩阵、tool runtime 合同、CLI smoke、真实终端 provider 验收、真实自然语言任务验收全部通过后，才输出 `chuang_mainchain_acceptance_ok`。
+- 现场验证：`chuang natural-accept` 通过，输出 `chuang_real_natural_acceptance_ok`，work_dir `/tmp/chuang-real-natural-acceptance-257141`；`chuang mainchain-accept` 通过，输出 `chuang_mainchain_acceptance_ok`，work_dir `/tmp/chuang-mainchain-acceptance-259299`。
+
+# 2026-06-20 真实标准主链验收入口
+- 本轮按老爸“全部按照真实标准验收，调用模型”的要求收紧验收口径：`scripts/chuang-mainchain-acceptance.sh` 不再只是 deterministic 矩阵入口，而是先跑 20 项主链矩阵、tool runtime 合同和 CLI smoke，再调用 `scripts/chuang-terminal-acceptance.sh` 做真实 provider 终端端到端验收。
+- `/home/user/.local/bin/chuang` 的 `chuang mainchain-accept` / `chuang mainchain` / `chuang accept-mainchain` 现在是主链总验收入口，成功标志为 `chuang_mainchain_acceptance_ok`；其中真实 provider 子验收成功标志仍是 `chuang_terminal_acceptance_ok`。
+- 本轮已先复跑现有真实验收 `chuang accept`，确认通过并输出 `chuang_terminal_acceptance_ok`，work_dir `/tmp/chuang-terminal-acceptance-181622`。
+- 收紧后已复跑主链总验收 `chuang mainchain-accept`，确认真实 provider 子验收通过并输出 `chuang_terminal_acceptance_ok`，最终输出 `chuang_mainchain_acceptance_ok`，work_dir `/tmp/chuang-terminal-acceptance-199411`。
+
+# 2026-06-20 终端主链 20 项矩阵验收
+- 本轮按老爸“先把主链跑到 100%，不要追大而全”的新口径收缩目标：外部 Codex/Claude Code/OpenCode 等 agent 调度先作为后续优化方向，当前只验证 Chuang 自己的终端主链是否能完成基础任务闭环。
+- 新增 `run_with_options_covers_mainchain_terminal_task_matrix` 回归，把 20 类真实终端任务拆成可重复验收矩阵：git status、git diff、git log、列目录、读文件、搜索函数、新建文件、修改文件、cat 验证、测试命令、测试失败后继续修、读日志、看进程、端口检查、docker 状态口径、改配置、启动本地服务口径、bug 修复、生成报告、危险删除转人工确认。
+- 每个矩阵项都强制验证：至少一次工具调用、工具结果进入 `tool_calls_json` / `tool_events_json` / `tool_trace` 证据、需要写文件的项确认真实文件内容、危险删除项走 `human_suspend` 并返回 `tool_loop_status=human_input_required`。这不是只测提示词，而是测 runtime 工具循环。
+- 现有真实 provider 端到端验收继续保留在 `scripts/chuang-terminal-acceptance.sh`，本轮已复跑通过，覆盖 `chuang` 入口、status gates、真实工具循环、caller cwd、session memory、subagent queue、goal plan/dispatch/step/collect。
+- 验证已通过：`cargo test -q run_with_options_covers_mainchain_terminal_task_matrix`、`bash scripts/chuang-terminal-acceptance.sh`（输出 `chuang_terminal_acceptance_ok`，work_dir `/tmp/chuang-terminal-acceptance-29163`）、`cargo test -q --test cli_smoke_tests --test tool_runtime_tests`、`cargo check -q`、`cargo fmt --check`。
+
+# 2026-06-20 git/local inspection tool enforcement
+- 老爸反馈 Chuang 仍说“看不了 git”，本轮确认 `code_execute` 工具本身存在，执行结果也会回填到 `tool_calls_json` / `tool_events_json`；真正缺口是 `git/status/diff/log` 这类本地仓库检查没有被识别成“必须工具执行”的任务。
+- `src/cli_runtime.rs` 已把本地/仓库/终端/服务/容器等检查词纳入 `should_require_action_for_local_task()`；当用户说“看 git 状态 / git diff / git log / rg / ls / cat / 检查日志 / 看服务状态”等，如果模型没先调用工具就直接 `FINAL` 或普通文本拒绝，会被记录为协议错误并要求下一轮只输出 `ACTION`。
+- `tool_protocol_repair_prompt()` 已针对本地任务明确要求使用 `code_execute`、`list_dir`、`file_read` 或 `file_write`，并给出 `git status --short` 的合法 ACTION 示例。若多轮仍不调用工具，最终返回 `tool_loop_status=missing_required_action`，不再伪装完成。
+- 新增回归 `run_with_options_forces_action_for_git_inspection_request`：模型第一轮说没有 git 能力时，runtime 会纠偏并执行 `code_execute git status --short`，最终 `tool_calls_json` 记录 `atomic_tool_name=code_execute`。
+- 验证已通过：`cargo fmt --check`、`cargo check -q`、`cargo test -q run_with_options_forces_action_for_git_inspection_request`、`cargo test -q --test tool_runtime_tests execution_slot_uses_configured_shell_risk_rules`、`cargo test -q --test cli_smoke_tests cli_repl_command_accepts_one_turn_and_exits`、`git diff --check -- src/cli_runtime.rs src/main.rs README.md docs/progress-log.md docs/handoff-current.md assets/capability_primer.txt identity/FIRST_WAKE.md scripts/launch-chuang-agent-repl.sh scripts/chuang-feishu-bridge.sh scripts/chuang-mvp-smoke.sh`。
+
+# 2026-06-20 终端 REPL 可读性增强
+- 追加可见执行 trace：老爸反馈 opencode 能看到过程，Chuang 现在默认显示 `trace` 区，包含 context engine、token 数、recall hit、drop count、model finish、耗时、工具调用数、协议错误数和工具事件摘要。这里显示的是可审计执行过程，不打印模型隐藏思维原文。
+- REPL 命令新增 `/trace` 和 `/notrace`，可在交互中开关 trace 显示；启动横幅命令列表同步展示这两个命令。PTY 实测 `/notrace` 后下一轮只显示运行摘要和最终答复，不显示 trace 区。
+- 本轮按老爸反馈“喜欢 opencode 终端风格，Chuang 终端太简陋”先做轻量终端外壳增强，没有替换 runtime、没有引入复杂 TUI 依赖。确认本机 opencode 实际路径为 `/home/user/.opencode/bin/opencode`，版本 `1.17.4`，参考其命令/终端体验但不复制源码。
+- `cargo run -- repl` / `chuang` 在真实 TTY 下现在会显示 `Chuang Terminal` 启动横幅、`chuang>` 输入提示、运行中 provider/model/workspace 状态、每轮耗时、工具调用数、协议错误数、tool loop status、工具事件摘要和 runtime report id。
+- 新增 REPL 内置命令：`/help`、`/status`、`/verbose`、`/quiet`、`/clear`、`/exit`/`/quit`。非 TTY 管道模式仍保持旧的简洁输出，避免破坏 smoke/acceptance 脚本。
+- 现场验证：PTY 下 `CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh` 可显示横幅、`/help`、运行中状态、结果摘要和 `report: report-turn-1`；退出后脚本正常结束。
+- 已通过：`cargo check -q`、`cargo test -q --test cli_smoke_tests cli_repl_command_accepts_one_turn_and_exits`、`cargo test -q --test cli_repl_provider_transport_tests --test cli_repl_default_transport_tests`。后续如果要进一步接近 opencode，可再做全屏 TUI、历史列表、会话选择、命令补全和工具事件实时流。
+
+# 2026-06-20 提示词体系吸收与运行时 primer 加固
+- 追加老爸的新口径：Chuang 不能因为任务“敏感”就空泛拒绝；授权业务运维、账号池、风控、充值、渠道、漏洞验证和合法网安测试应默认推进。边界按授权和违法风险判断：自有资产、靶场、赏金或明确授权可以做；未授权攻击第三方、盗号、窃密、后门、勒索、破坏服务不能做。
+- 本轮按老爸要求研究公开 Codex / Claude Code / AGENTS.md / prompt 汇总思路，并转成 Chuang 自己的提示词规则。没有直接复制第三方大段系统提示词；只吸收结构原则：身份分层、项目规则注入、工具协议、任务闭环、验证证据、保护用户改动和风险前置。
+- 新增 `docs/prompt-doctrine-2026-06-20.md`，记录来源口径、抽象原则、已融入位置和后续方向，避免以后又把 Feishu 入口、provider、runtime、记忆本体混在一起。
+- `assets/capability_primer.txt` 已从单纯“有哪些工具”扩展为短运行纪律：先理解现场、能闭环不只给建议、普通本地动作必须 ACTION 工具完成并验证、不伪造工具执行/测试通过、失败报告真实错误、尊重现有工作树、入口只是插件。
+- `identity/FIRST_WAKE.md` 已补充：终端入口是第一入口，Feishu 只是可替换插件；提示词是行为约束；没有工具结果/文件证据/测试输出/现场验证时不能伪造完成。
+
+# 2026-06-20 终端入口自用体验补齐
+- 本轮继续按“我们自己本机终端使用，不考虑发布/安装”的口径推进 Chuang 终端版。发现并修复两个真实入口问题：`chuang --help` 之前会被当成普通任务发给模型，现在改为本地静态帮助；`chuang ask` 从任意目录调用时之前会误把工具工作区切到项目根，现在会保留用户发起命令时的当前目录。
+- `/home/user/.local/bin/chuang` 现在提供 `help/-h/--help`、`accept`、`stub`、`ask` 和自然语言任务入口；`ask`/自然语言任务会生成临时绝对路径 runtime config，保证身份、规则、provider、队列等仍指向 Chuang 项目，而工具工作区保持为用户当前目录。
+- 运行时继续收紧“假完成”：本地动作任务如果轮次耗尽仍没有任何工具调用，不再把模型普通文本兜底成成功，而是返回 `tool_loop_status=missing_required_action` 和“没有完成真实本地动作”的明确失败。新增回归 `run_with_options_reports_failure_when_local_action_never_calls_tool`。
+- 终端验收脚本新增覆盖：`chuang --help` 必须显示 `chuang accept`；跨目录 `chuang ask` 必须在 caller workspace 里写入 `notes/caller.txt`，且 `tool_surface_json.workspace_root` 必须等于 caller workspace。
+- 验证已通过：`bash -n /home/user/.local/bin/chuang`、`bash -n scripts/chuang-terminal-acceptance.sh`、`git diff --check -- src/cli_runtime.rs README.md scripts/chuang-terminal-acceptance.sh`、定向 cargo 回归三项，以及完整 `chuang accept`。最新完整验收输出 `chuang_terminal_acceptance_ok`，工作目录 `/tmp/chuang-terminal-acceptance-610892`。
+- 当前完成度口径：如果不考虑发布、安装器、对外阉割版和 Feishu 插件入口，终端自用主链已经非常接近完成；剩余主要是继续积累更多真实桌面动作 allowlist 场景和少量使用体验打磨。
+
+# 2026-06-20 终端版主线验收闭环
+- 本轮按老爸要求把 Feishu 从主线里拿掉，只验收 `chuang` 终端入口本身是否能完整工作。新增 `scripts/chuang-terminal-acceptance.sh`，覆盖命令入口、三项 live gate、真实 provider 工具循环、普通本地动作纠偏、session memory、subagent dispatch/run/collect、goal plan/dispatch/step/collect。
+- 终端验收脚本会在 `/tmp/chuang-terminal-acceptance-*` 创建隔离工作区和临时配置；stub 配置用于状态/记忆/子任务/goal，真实配置只在 `CHUANG_PROXY_API_KEY` 已通过 `~/.config/chuang-agent/provider.env` 提供时用于工具循环验收。脚本不清理临时目录，方便失败后复盘。
+- 修复了终端工具循环里“假完成”的漏洞：本地动作任务如果没有任何 ACTION 工具调用，模型不能直接 `FINAL: 已完成`；运行时会记录 `missing_required_action` 协议错误并要求先调用工具。之前的首轮普通文本能力否认仍会被 `plain_text_response` 纠偏。新增回归测试覆盖“说没有能力”和“没调用工具就说完成”两种情况。
+- `scripts/chuang-terminal-acceptance.sh` 已按当前 JSON 结构修正 subagent/goal collect 断言：检查 `report_available`、`dispatch_available`、`parent_context_handoff.accepted`、`available_report_count`、无 missing/blocked run，以及 `report_validated` admission refs。
+- 验证已通过：`bash -n scripts/chuang-terminal-acceptance.sh`、`git diff --check -- src/cli_runtime.rs scripts/chuang-terminal-acceptance.sh`、定向 cargo 回归 `run_with_options_forces_action_after_local_capability_denial` / `run_with_options_rejects_local_final_before_any_tool_call` / `run_with_options_feeds_plain_text_back_to_model`、以及完整 `sh scripts/chuang-terminal-acceptance.sh`。最终输出 `chuang_terminal_acceptance_ok`，最新工作目录 `/tmp/chuang-terminal-acceptance-604345`。
+- 当前完成度口径：终端主链已经可以视为可用闭环，用户在本地输入 `chuang` 后应能使用模型、文件/命令工具、记忆、子任务和 goal 流。尚未宣称全局 100% 的部分是外部入口插件化、真实桌面动作的更多 allowlist 场景、Wiki/GBrain/浏览器等外部 receipt 的生产级配置，以及最终发布打包。
+
+# 2026-06-20 本地 chuang 能力默认可用修复
+- 本轮修复终端 `chuang` 入口反复自称“没有桌面写入/键鼠/文件创建能力”的问题。`/home/user/.local/bin/chuang` 与 `scripts/launch-chuang-agent-repl.sh` 现在默认设置 `CHUANG_REAL_ACTUATOR_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_CODEX_RUNNER_ENABLE=1`，本地 CLI/REPL 启动时三项 live gate 默认全开。
+- `assets/capability_primer.txt` 已明确本地 CLI/REPL 不是只读壳，具备 `file_read/file_write/code_execute/list_dir`、`locate/screenshot`、`open_app/mouse/keyboard`、`wait/human_suspend` 等受治理工具面；普通本地动作应优先输出 ACTION 工具调用，不再回答“没有能力”。删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问仍必须询问或拒绝。
+- `src/cli_runtime.rs` 新增普通本地动作的首轮纯文本拦截：如果模型第一轮嘴硬说不能创建/写文件/执行命令/打开点击输入，会被作为 `plain_text_response` 协议错误喂回模型，要求改用 ACTION 工具闭环。新增回归测试锁住该行为。
+- 启动脚本的真实 provider 检查从旧 `CODEX_PPTOKEN_API_KEY` 对齐到当前 `config.toml` 使用的 `CHUANG_PROXY_API_KEY`；`scripts/chuang-mvp-smoke.sh` 的临时 provider env 也同步更新。已通过 `bash -n`、stub REPL、定向 cargo 测试，并用真实 `chuang ask` 验证创建了 `~/Desktop/chuangtest` 与 `~/桌面/chuangtest`。
+
 # 2026-05-30 Global real-live receipt 聚合器落地
 - 本轮继续收口 Chuang 的真实全局 ready 路径，新增 `scripts/chuang-global-real-live-receipt.sh`。它会消费或采集 Feishu、provider、subagent_live_rehearsal、desktop、browser、wiki、GBrain 7 条 source receipt，映射成 canonical overlay，再交给 `scripts/chuang-live-operator-receipt-collect.sh` 做最终校验和 `can_mark_real_live_ready` 推导。
 - 默认边界保持保守：provider live request 默认不执行，只有传 `--include-provider-live` 或设置 `CHUANG_GLOBAL_RECEIPT_INCLUDE_PROVIDER_LIVE=1` 才会真实调用 provider；desktop dry-run rehearsal 不会被提升成 `real_execution=true`；脚本不重启服务、不改 repo、不删除文件、不碰 Hermes。

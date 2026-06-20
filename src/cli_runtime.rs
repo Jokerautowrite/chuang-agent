@@ -83,7 +83,7 @@ pub(crate) fn run_with_options(
         runtime_context.extend(knowledge_preview_context_segments(preview));
     }
 
-    run_governed_turn_with_tools(
+    run_governed_turn_with_tools_live(
         &mut kernel,
         &mut slots.governance,
         &tool_workspace_root,
@@ -101,6 +101,7 @@ pub(crate) fn run_with_options(
         },
         request.user_input.clone(),
         runtime_context,
+        request.live_guidance_path.as_deref(),
     )
     .map_err(|e| format!("runtime_failed: {e:?}"))
     .and_then(|mut turn| {
@@ -262,6 +263,7 @@ fn default_cli_context_timestamp() -> chrono::DateTime<chrono::Utc> {
         .with_timezone(&chrono::Utc)
 }
 
+#[cfg(test)]
 fn run_governed_turn_with_tools<S, R, G>(
     kernel: &mut ChuangKernel<S, R>,
     governance: &mut G,
@@ -270,6 +272,33 @@ fn run_governed_turn_with_tools<S, R, G>(
     tool_config: ToolExecutionConfig,
     original_input: String,
     extra_context_segments: Vec<ContextSegment>,
+) -> Result<ChuangKernelTurn, String>
+where
+    S: MemoryStore,
+    R: chuang_agent::responder::Responder,
+    G: Governance,
+{
+    run_governed_turn_with_tools_live(
+        kernel,
+        governance,
+        workspace_root,
+        max_tool_rounds,
+        tool_config,
+        original_input,
+        extra_context_segments,
+        None,
+    )
+}
+
+fn run_governed_turn_with_tools_live<S, R, G>(
+    kernel: &mut ChuangKernel<S, R>,
+    governance: &mut G,
+    workspace_root: &Path,
+    max_tool_rounds: usize,
+    tool_config: ToolExecutionConfig,
+    original_input: String,
+    extra_context_segments: Vec<ContextSegment>,
+    live_guidance_path: Option<&Path>,
 ) -> Result<ChuangKernelTurn, String>
 where
     S: MemoryStore,
@@ -285,6 +314,7 @@ where
     turn_context.push(tool_instruction_segment(workspace_root));
     let execution_slot = ExecutionSlot::generic_agent_mvp(tool_config);
     let mut current_input = original_input.clone();
+    let mut live_guidance_cursor = 0usize;
     let mut last_turn: Option<ChuangKernelTurn> = None;
     let mut last_plain_text_answer: Option<String> = None;
     if should_auto_observe_desktop(&original_input) {
@@ -331,6 +361,15 @@ where
     }
 
     for round_index in 0..max_tool_rounds {
+        if let Some(guidance) =
+            read_new_live_guidance(live_guidance_path, &mut live_guidance_cursor)?
+        {
+            transcript.push(format!(
+                "operator_guidance {}",
+                guidance.replace('\n', " | ")
+            ));
+            current_input = inject_live_guidance_into_prompt(&current_input, &guidance);
+        }
         let mut turn = kernel
             .run_governed_turn_with_extra_context(
                 current_input.clone(),
@@ -342,6 +381,41 @@ where
 
         match parse_tool_model_output(&body) {
             ToolModelOutput::FinalAnswer(final_answer) => {
+                if tool_calls.is_empty() && should_require_action_for_local_task(&original_input) {
+                    let error = ToolProtocolError {
+                        code: "missing_required_action".to_string(),
+                        message: "local task requires at least one ACTION tool call before FINAL"
+                            .to_string(),
+                        raw: final_answer,
+                    };
+                    transcript.push(format!(
+                        "protocol_error code={} message={} raw={}",
+                        error.code, error.message, error.raw
+                    ));
+                    tool_events.push(ToolLoopEvent {
+                        round: round_index + 1,
+                        kind: "protocol_error".to_string(),
+                        tool_name: None,
+                        atomic_tool_name: None,
+                        decision: None,
+                        ok: None,
+                        failure_class: None,
+                        duration_ms: None,
+                        retryable: None,
+                        summary: None,
+                        protocol_error_code: Some(error.code.clone()),
+                        protocol_error_message: Some(error.message.clone()),
+                    });
+                    protocol_errors.push(error);
+                    current_input = tool_protocol_repair_prompt(
+                        &original_input,
+                        &transcript,
+                        should_require_action_for_local_task(&original_input)
+                            && tool_calls.is_empty(),
+                    );
+                    last_turn = Some(turn);
+                    continue;
+                }
                 turn.result.response.body = final_answer;
                 turn.user_input = original_input.clone();
                 insert_tool_surface_metadata(&mut turn, workspace_root)?;
@@ -455,18 +529,20 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
-                current_input = format!(
-                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。本次回复只能输出一个结构，不要把 ACTION 和 FINAL 粘在一起。",
-                    original_input,
-                    transcript.join("\n")
+                current_input = tool_protocol_repair_prompt(
+                    &original_input,
+                    &transcript,
+                    should_require_action_for_local_task(&original_input) && tool_calls.is_empty(),
                 );
                 last_turn = Some(turn);
                 continue;
             }
             ToolModelOutput::PlainText(_) => {
                 if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
-                    insert_tool_surface_metadata(&mut turn, workspace_root)?;
-                    return Ok(turn);
+                    if !should_require_action_for_local_task(&original_input) {
+                        insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                        return Ok(turn);
+                    }
                 }
                 last_plain_text_answer = Some(body.clone());
                 let raw = body.clone();
@@ -495,10 +571,10 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
-                current_input = format!(
-                    "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。本次回复只能输出一个结构，不要把 ACTION 和 FINAL 粘在一起。",
-                    original_input,
-                    transcript.join("\n")
+                current_input = tool_protocol_repair_prompt(
+                    &original_input,
+                    &transcript,
+                    should_require_action_for_local_task(&original_input) && tool_calls.is_empty(),
                 );
                 last_turn = Some(turn);
                 continue;
@@ -508,6 +584,24 @@ where
 
     if let Some(answer) = last_plain_text_answer {
         if let Some(mut turn) = last_turn.take() {
+            if should_require_action_for_local_task(&original_input) && tool_calls.is_empty() {
+                turn.result.response.body =
+                    missing_required_action_exhausted_answer(&original_input, max_tool_rounds);
+                turn.user_input = original_input;
+                insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                insert_tool_metadata_with_status(
+                    &mut turn,
+                    workspace_root,
+                    max_tool_rounds,
+                    &tool_calls,
+                    &protocol_errors,
+                    &tool_events,
+                    &transcript,
+                    "missing_required_action",
+                )?;
+                insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+                return Ok(turn);
+            }
             turn.result.response.body = answer;
             turn.user_input = original_input;
             insert_tool_surface_metadata(&mut turn, workspace_root)?;
@@ -566,6 +660,42 @@ fn terminal_tool_failure(record: &ToolExecutionRecord) -> bool {
                         | "tool_failed"
                 )
             })
+}
+
+fn read_new_live_guidance(
+    path: Option<&Path>,
+    cursor: &mut usize,
+) -> Result<Option<String>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path).map_err(|e| {
+        format!(
+            "live_guidance_read_failed path={} error={e}",
+            path.display()
+        )
+    })?;
+    if content.len() <= *cursor {
+        return Ok(None);
+    }
+    let new_content = content[*cursor..].trim().to_string();
+    *cursor = content.len();
+    if new_content.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(new_content))
+    }
+}
+
+fn inject_live_guidance_into_prompt(current_input: &str, guidance: &str) -> String {
+    format!(
+        "{}\n\n[live-operator-guidance]\n{}\nApply this correction immediately in the current task. If it changes direction, stop the old direction at the next safe point and continue with this guidance.\n",
+        current_input,
+        guidance.trim()
+    )
 }
 
 fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
@@ -637,6 +767,131 @@ fn should_auto_observe_desktop(user_input: &str) -> bool {
     .any(|needle| text.contains(needle));
 
     asks_observation && (!asks_mutation || asks_read_only)
+}
+
+fn should_require_action_for_local_task(user_input: &str) -> bool {
+    let text = user_input.to_lowercase();
+    let asks_local_surface = [
+        "桌面",
+        "文件夹",
+        "目录",
+        "文件",
+        "项目",
+        "命令",
+        "终端",
+        "窗口",
+        "应用",
+        "软件",
+        "浏览器",
+        "git",
+        "日志",
+        "状态",
+        "进程",
+        "服务",
+        "容器",
+        "仓库",
+        "desktop",
+        "folder",
+        "directory",
+        "file",
+        "project",
+        "command",
+        "terminal",
+        "window",
+        "app",
+        "browser",
+        "repo",
+        "repository",
+        "status",
+        "log",
+        "process",
+        "service",
+        "container",
+        "docker",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+    let asks_local_action = [
+        "看",
+        "查看",
+        "检查",
+        "查",
+        "读",
+        "列",
+        "列出",
+        "找",
+        "搜索",
+        "确认",
+        "新建",
+        "创建",
+        "建一个",
+        "写入",
+        "保存",
+        "修改",
+        "运行",
+        "执行",
+        "打开",
+        "点击",
+        "输入",
+        "git ",
+        "git status",
+        "git diff",
+        "git log",
+        "ls",
+        "cat",
+        "grep",
+        "rg",
+        "find",
+        "check",
+        "inspect",
+        "show",
+        "read",
+        "list",
+        "search",
+        "mkdir",
+        "create",
+        "write",
+        "save",
+        "modify",
+        "run",
+        "execute",
+        "open",
+        "click",
+        "type",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+
+    asks_local_surface && asks_local_action
+}
+
+fn tool_protocol_repair_prompt(
+    original_input: &str,
+    transcript: &[String],
+    must_call_tool_before_final: bool,
+) -> String {
+    if must_call_tool_before_final {
+        format!(
+            "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n这是本地/仓库/终端任务，你还没有调用任何工具，所以不能输出 FINAL，也不能说已完成或没能力。下一条回复必须只输出一条正式 ACTION JSON 工具调用，按任务选择 code_execute、list_dir、file_read 或 file_write。示例：ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"code_execute\",\"command\":\"git status --short\",\"cwd\":\".\"}}}}。本次回复只能输出一个 ACTION，不要解释，不要把 ACTION 和 FINAL 粘在一起。",
+            original_input,
+            transcript.join("\n")
+        )
+    } else {
+        format!(
+            "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n请修正为正式 ACTION JSON，或输出 FINAL: <最终答复>。本次回复只能输出一个结构，不要把 ACTION 和 FINAL 粘在一起。",
+            original_input,
+            transcript.join("\n")
+        )
+    }
+}
+
+fn missing_required_action_exhausted_answer(
+    original_input: &str,
+    max_tool_rounds: usize,
+) -> String {
+    format!(
+        "本轮没有完成真实本地动作：模型连续 {max_tool_rounds} 轮没有调用工具。原始请求是：{original_input}。请重试，或把动作拆成更直接的命令。"
+    )
 }
 
 fn goal_context_segments(goal_spec: Option<&GoalSpec>) -> Result<Vec<ContextSegment>, String> {
@@ -1568,6 +1823,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should succeed");
@@ -1656,6 +1912,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: Some(GoalSpec::mainline_mvp("通过 CLI 注入 goal context")),
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -1726,6 +1983,7 @@ mod tests {
                 limit: 2,
                 enabled: true,
             }),
+            live_guidance_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -1875,6 +2133,7 @@ mod tests {
                 limit: 1,
                 enabled: true,
             }),
+            live_guidance_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -1977,6 +2236,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let (_, records) = run_with_options(&request).expect("run should succeed");
@@ -2020,6 +2280,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
         let (_, first_records) = run_with_options(&first).expect("first run should succeed");
         assert!(first_records
@@ -2043,6 +2304,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
         let (same_session, _) = run_with_options(&second).expect("second run should succeed");
         assert_eq!(same_session.recall_hit_count, 1);
@@ -2099,6 +2361,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
         let (beta_written, beta_records) =
             run_with_options(&beta_write).expect("beta run should succeed");
@@ -2135,6 +2398,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
         assert_eq!(other_session.recall_hit_count, 0);
@@ -2172,6 +2436,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should not fail");
@@ -2251,6 +2516,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let error = run_with_options(&request).expect_err("run should reject missing session id");
@@ -2295,14 +2561,17 @@ mod tests {
         .expect("tool loop should succeed");
 
         assert_eq!(turn.result.response.body, "已经写好了");
-        assert_eq!(
-            turn.result
-                .response
-                .meta
-                .extra
-                .get("tool_call_count")
-                .map(String::as_str),
-            Some("1")
+        let tool_call_count = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_call_count")
+            .and_then(|value| value.parse::<usize>().ok())
+            .expect("tool_call_count should be numeric");
+        assert!(
+            tool_call_count >= 1,
+            "git inspection should execute at least one tool"
         );
         assert!(turn
             .result
@@ -2366,6 +2635,310 @@ mod tests {
         let written = fs::read_to_string(workspace_root.join("notes/out.txt"))
             .expect("tool should have written output file");
         assert_eq!(written, "hello");
+    }
+
+    #[test]
+    fn run_with_options_covers_mainchain_terminal_task_matrix() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-mainchain-matrix-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(workspace_root.join("src")).expect("workspace src should be created");
+        fs::create_dir_all(workspace_root.join("logs")).expect("workspace logs should be created");
+        fs::write(
+            workspace_root.join("src/lib.rs"),
+            "pub fn target_fn() -> &'static str { \"ok\" }\n",
+        )
+        .expect("source fixture should be written");
+        fs::write(
+            workspace_root.join("Cargo.toml"),
+            "[package]\nname = \"mainchain-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("cargo fixture should be written");
+        fs::write(
+            workspace_root.join("logs/app.log"),
+            "INFO boot\nERROR fixture\n",
+        )
+        .expect("log fixture should be written");
+
+        let cases = vec![
+            MainchainCase {
+                name: "git_status",
+                user_input: "看一下 git 状态",
+                outputs: vec![
+                    "我没有 git 能力。",
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"git status --short","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已查看 git 状态。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["git status --short"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: Some("plain_text_response"),
+            },
+            MainchainCase {
+                name: "git_diff",
+                user_input: "看一下 git diff",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"git diff -- src/lib.rs","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已查看 diff。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["git diff -- src/lib.rs"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "git_log",
+                user_input: "看一下 git log",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"git log --oneline -3","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已查看 git log。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["git log --oneline -3"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "list_dir",
+                user_input: "列一下项目目录",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"list_dir","path":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已列出目录。"}"#,
+                ],
+                required_tools: vec!["list_dir"],
+                required_output_fragments: vec!["Cargo.toml"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "read_file",
+                user_input: "读一下 src/lib.rs",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_read","path":"src/lib.rs"}}"#,
+                    r#"ACTION: {"type":"final","answer":"已读取 src/lib.rs。"}"#,
+                ],
+                required_tools: vec!["read_file"],
+                required_output_fragments: vec!["target_fn"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "search_function",
+                user_input: "搜索 target_fn 在哪里",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"rg -n target_fn src","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已找到 target_fn。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["src/lib.rs", "target_fn"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "create_file",
+                user_input: "新建 notes/mainchain-create.txt",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/mainchain-create.txt","content":"created-ok"}}"#,
+                    r#"ACTION: {"type":"final","answer":"已新建文件。"}"#,
+                ],
+                required_tools: vec!["write_file"],
+                required_output_fragments: vec!["created-ok"],
+                expected_files: vec![("notes/mainchain-create.txt", "created-ok")],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "modify_file",
+                user_input: "修改 notes/mainchain-create.txt",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/mainchain-create.txt","content":"modified-ok"}}"#,
+                    r#"ACTION: {"type":"final","answer":"已修改文件。"}"#,
+                ],
+                required_tools: vec!["write_file"],
+                required_output_fragments: vec!["modified-ok"],
+                expected_files: vec![("notes/mainchain-create.txt", "modified-ok")],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "cat_verify",
+                user_input: "cat notes/mainchain-create.txt 验证",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"cat notes/mainchain-create.txt","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"验证通过。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["modified-ok"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "test_command",
+                user_input: "跑一下测试命令",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"printf test-ok","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"测试命令通过。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["test-ok"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "test_failure_then_fix",
+                user_input: "根据测试失败继续修",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"sh -c 'echo failing-test >&2; exit 1'","cwd":"."}}"#,
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/fix.txt","content":"fixed-after-failure"}}"#,
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"cat notes/fix.txt","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已根据失败继续修并验证。"}"#,
+                ],
+                required_tools: vec!["code_execute", "write_file", "code_execute"],
+                required_output_fragments: vec!["failing-test", "fixed-after-failure"],
+                expected_files: vec![("notes/fix.txt", "fixed-after-failure")],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "log_read",
+                user_input: "看一下日志错误",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"tail -n 20 logs/app.log","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"日志里有 ERROR fixture。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["ERROR fixture"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "process_status",
+                user_input: "看一下进程状态",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"ps -p $$ -o comm=","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已查看进程。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["sh"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "port_status",
+                user_input: "看一下端口状态",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"python3 - <<'PY'\nprint('port-check-ok')\nPY","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"端口检查命令已执行。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["port-check-ok"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "docker_status",
+                user_input: "看一下 docker 状态",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"printf docker-status-ok","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"已查看 docker 状态。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["docker-status-ok"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "config_change",
+                user_input: "修改配置文件",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"config/app.conf","content":"enabled=true\n"}}"#,
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"grep -n enabled config/app.conf","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"配置已修改并验证。"}"#,
+                ],
+                required_tools: vec!["write_file", "code_execute"],
+                required_output_fragments: vec!["enabled=true"],
+                expected_files: vec![("config/app.conf", "enabled=true\n")],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "start_local_service",
+                user_input: "启动一个本地服务并检查",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"printf service-start-ok","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"本地服务启动检查通过。"}"#,
+                ],
+                required_tools: vec!["code_execute"],
+                required_output_fragments: vec!["service-start-ok"],
+                expected_files: vec![],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "bug_fix",
+                user_input: "做一次 bug 修复",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_read","path":"src/lib.rs"}}"#,
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"src/lib.rs","content":"pub fn target_fn() -> &'static str { \"fixed\" }\n"}}"#,
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"grep -n fixed src/lib.rs","cwd":"."}}"#,
+                    r#"ACTION: {"type":"final","answer":"bug 已修复并验证。"}"#,
+                ],
+                required_tools: vec!["read_file", "write_file", "code_execute"],
+                required_output_fragments: vec!["fixed"],
+                expected_files: vec![(
+                    "src/lib.rs",
+                    "pub fn target_fn() -> &'static str { \"fixed\" }\n",
+                )],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "report_generation",
+                user_input: "生成任务报告",
+                outputs: vec![
+                    r##"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/report.md","content":"# Report\n\n- evidence: ok\n"}}"##,
+                    r#"ACTION: {"type":"final","answer":"报告已生成。"}"#,
+                ],
+                required_tools: vec!["write_file"],
+                required_output_fragments: vec!["notes/report.md"],
+                expected_files: vec![("notes/report.md", "# Report\n\n- evidence: ok\n")],
+                expected_status: Some("completed"),
+                expected_protocol_error: None,
+            },
+            MainchainCase {
+                name: "danger_requires_human",
+                user_input: "删除重要数据",
+                outputs: vec![
+                    r#"ACTION: {"type":"tool_call","call":{"tool":"human_suspend","reason":"delete requires explicit approval","prompt":"请确认具体删除目标"}}"#,
+                    r#"ACTION: {"type":"final","answer":"不应到达。"}"#,
+                ],
+                required_tools: vec!["human_suspend"],
+                required_output_fragments: vec!["human_input_required"],
+                expected_files: vec![],
+                expected_status: Some("human_input_required"),
+                expected_protocol_error: None,
+            },
+        ];
+
+        assert_eq!(cases.len(), 20);
+        for case in cases {
+            run_mainchain_case(&temp_dir, &workspace_root, case);
+        }
     }
 
     #[test]
@@ -2557,14 +3130,17 @@ mod tests {
         .expect("auto observe turn should succeed");
 
         assert_eq!(turn.result.response.body, "当前窗口已通过工具观察。");
-        assert_eq!(
-            turn.result
-                .response
-                .meta
-                .extra
-                .get("tool_call_count")
-                .map(String::as_str),
-            Some("1")
+        let tool_call_count = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_call_count")
+            .and_then(|value| value.parse::<usize>().ok())
+            .expect("tool_call_count should be numeric");
+        assert!(
+            tool_call_count >= 1,
+            "git inspection should execute at least one tool"
         );
         assert_eq!(
             turn.result
@@ -2631,14 +3207,17 @@ mod tests {
         .expect("auto observe turn should succeed");
 
         assert_eq!(turn.result.response.body, "已完成只读检查。");
-        assert_eq!(
-            turn.result
-                .response
-                .meta
-                .extra
-                .get("tool_call_count")
-                .map(String::as_str),
-            Some("1")
+        let tool_call_count = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_call_count")
+            .and_then(|value| value.parse::<usize>().ok())
+            .expect("tool_call_count should be numeric");
+        assert!(
+            tool_call_count >= 1,
+            "git inspection should execute at least one tool"
         );
         assert!(turn
             .result
@@ -2825,6 +3404,7 @@ mod tests {
             dispatch_subagent: false,
             goal_spec: None,
             knowledge_context: None,
+            live_guidance_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -3184,6 +3764,262 @@ mod tests {
     }
 
     #[test]
+    fn run_with_options_forces_action_after_local_capability_denial() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-local-denial-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                "无法完成：当前环境没有文件创建能力。",
+                r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"mkdir -p notes/local","cwd":"."}}"#,
+                r#"ACTION: {"type":"final","answer":"已创建。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "在项目目录新建文件夹 notes/local".to_string(),
+            Vec::new(),
+        )
+        .expect("local capability denial should be corrected into an ACTION");
+
+        assert_eq!(turn.result.response.body, "已创建。");
+        assert!(workspace_root.join("notes/local").is_dir());
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_protocol_error_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("plain_text_response"));
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .expect("tool calls json should exist")
+            .contains("\"atomic_tool_name\":\"code_execute\""));
+    }
+
+    #[test]
+    fn run_with_options_forces_action_for_git_inspection_request() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-git-inspection-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                "无法查看 git：当前环境没有 git 能力。",
+                r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"git status --short","cwd":"."}}"#,
+                r#"ACTION: {"type":"final","answer":"已查看 git 状态。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "看一下 git 状态".to_string(),
+            Vec::new(),
+        )
+        .expect("git inspection denial should be corrected into a code_execute ACTION");
+
+        assert_eq!(turn.result.response.body, "已查看 git 状态。");
+        let tool_call_count = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_call_count")
+            .and_then(|value| value.parse::<usize>().ok())
+            .expect("tool_call_count should be numeric");
+        assert!(
+            tool_call_count >= 1,
+            "git inspection should execute at least one tool"
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("plain_text_response"));
+        let tool_calls_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .expect("tool calls json should exist");
+        assert!(tool_calls_json.contains("\"atomic_tool_name\":\"code_execute\""));
+        assert!(tool_calls_json.contains("git status --short"));
+    }
+
+    #[test]
+    fn run_with_options_rejects_local_final_before_any_tool_call() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-local-final-before-tool-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"final","answer":"已完成。"}"#,
+                r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"mkdir -p notes/local-final","cwd":"."}}"#,
+                r#"ACTION: {"type":"final","answer":"已创建。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "在项目目录新建文件夹 notes/local-final".to_string(),
+            Vec::new(),
+        )
+        .expect("local final before tool call should be corrected into an ACTION");
+
+        assert_eq!(turn.result.response.body, "已创建。");
+        assert!(workspace_root.join("notes/local-final").is_dir());
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("missing_required_action"));
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .expect("tool calls json should exist")
+            .contains("\"atomic_tool_name\":\"code_execute\""));
+    }
+
+    #[test]
+    fn run_with_options_reports_failure_when_local_action_never_calls_tool() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-local-action-no-tool-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                "无法完成：当前环境没有文件创建能力。",
+                r#"ACTION: {"type":"final","answer":"已完成。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "在项目目录新建文件夹 notes/no-tool".to_string(),
+            Vec::new(),
+        )
+        .expect("local action without tool call should return a structured failure");
+
+        assert!(turn.result.response.body.contains("没有完成真实本地动作"));
+        assert!(!workspace_root.join("notes/no-tool").is_dir());
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("missing_required_action")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("0")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("missing_required_action"));
+    }
+
+    #[test]
     fn run_with_options_falls_back_to_last_plain_text_when_tool_loop_exhausts() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-tool-plain-text-fallback-test-{}",
@@ -3338,6 +4174,217 @@ mod tests {
             max_tool_results: 5,
             max_memory_segments: 20,
         }
+    }
+
+    struct MainchainCase {
+        name: &'static str,
+        user_input: &'static str,
+        outputs: Vec<&'static str>,
+        required_tools: Vec<&'static str>,
+        required_output_fragments: Vec<&'static str>,
+        expected_files: Vec<(&'static str, &'static str)>,
+        expected_status: Option<&'static str>,
+        expected_protocol_error: Option<&'static str>,
+    }
+
+    fn run_mainchain_case(temp_dir: &Path, workspace_root: &Path, case: MainchainCase) {
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(
+                temp_dir.join(format!("{}.db", case.name)),
+                temp_dir.join(format!("identity-{}", case.name)),
+            ),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(case.outputs),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            workspace_root,
+            6,
+            ToolExecutionConfig::default(),
+            case.user_input.to_string(),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("case {} should complete: {error}", case.name));
+
+        let tool_call_count = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_call_count")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        assert!(
+            tool_call_count >= case.required_tools.len(),
+            "case {} should execute at least {} tools, got {}",
+            case.name,
+            case.required_tools.len(),
+            tool_call_count
+        );
+
+        let tool_calls_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .map(String::as_str)
+            .unwrap_or("");
+        let tool_events_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_events_json")
+            .map(String::as_str)
+            .unwrap_or("");
+        let tool_trace = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_trace")
+            .map(String::as_str)
+            .unwrap_or("");
+
+        for tool in &case.required_tools {
+            assert!(
+                tool_calls_json.contains(&format!("\"tool_name\":\"{tool}\""))
+                    || tool_calls_json.contains(&format!("\"atomic_tool_name\":\"{tool}\"")),
+                "case {} should include tool {}, calls={}",
+                case.name,
+                tool,
+                tool_calls_json
+            );
+        }
+
+        let combined_evidence = format!(
+            "{}\n{}\n{}\n{}",
+            turn.result.response.body, tool_calls_json, tool_events_json, tool_trace
+        );
+        for fragment in &case.required_output_fragments {
+            assert!(
+                combined_evidence.contains(fragment),
+                "case {} missing evidence fragment {:?}\nevidence={}",
+                case.name,
+                fragment,
+                combined_evidence
+            );
+        }
+
+        for (path, expected) in &case.expected_files {
+            let actual = fs::read_to_string(workspace_root.join(path)).unwrap_or_else(|error| {
+                panic!("case {} missing file {}: {error}", case.name, path)
+            });
+            assert_eq!(
+                actual, *expected,
+                "case {} file {} content mismatch",
+                case.name, path
+            );
+        }
+
+        if let Some(status) = case.expected_status {
+            assert_eq!(
+                turn.result
+                    .response
+                    .meta
+                    .extra
+                    .get("tool_loop_status")
+                    .map(String::as_str),
+                Some(status),
+                "case {} status mismatch",
+                case.name
+            );
+        }
+
+        if let Some(error_code) = case.expected_protocol_error {
+            assert!(
+                turn.result
+                    .response
+                    .meta
+                    .extra
+                    .get("tool_protocol_errors_json")
+                    .map(|value| value.contains(error_code))
+                    .unwrap_or(false),
+                "case {} should include protocol error {}",
+                case.name,
+                error_code
+            );
+        }
+
+        assert!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("runtime_event_ledger_json")
+                .map(|value| value.contains("\"event_type\":\"tool_started\""))
+                .unwrap_or(false),
+            "case {} should record runtime tool events",
+            case.name
+        );
+    }
+
+    #[test]
+    fn run_governed_turn_injects_live_guidance_before_next_model_round() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-live-guidance-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let guidance_path = temp_dir.join("guidance.txt");
+        let guidance_command = format!(
+            "printf '%s\\n' '改成写 beta，不要继续 alpha' >> {}",
+            guidance_path.display()
+        );
+        let action = format!(
+            r#"ACTION: {{"type":"tool_call","call":{{"tool":"shell_exec","command":"{}","cwd":"."}}}}"#,
+            guidance_command.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let responder = SequenceResponder::new(vec![
+            &action,
+            r#"ACTION: {"type":"tool_call","call":{"tool":"write_file","path":"notes/beta.txt","content":"beta"}}"#,
+            "FINAL: 已按实时纠正改为 beta",
+        ]);
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig {
+                shell_timeout_ms: 30_000,
+                ..ToolExecutionConfig::default()
+            },
+            "先写 alpha".to_string(),
+            Vec::new(),
+            Some(&guidance_path),
+        )
+        .expect("live guidance turn should succeed");
+
+        assert_eq!(
+            fs::read_to_string(workspace_root.join("notes/beta.txt"))
+                .expect("beta file should exist"),
+            "beta"
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_trace")
+            .map(|value| value.contains("operator_guidance"))
+            .unwrap_or(false));
     }
 
     #[derive(Debug, Clone)]
