@@ -1,3 +1,9 @@
+# 2026-06-21 终端工作台 UI 二次修复
+- 老爸复看后反馈上一版 `chuang` 终端仍不像 opencode：输入框不明显、运行中过程不可见、可读性差。本轮确认 `4750117 Improve chuang terminal mainchain` 已推到 `origin/main`，但那版只是轻量 REPL，不是全屏/工作台体验。
+- 本轮先做低风险 UI 修复，不改 provider、不改中转 key、不动 live receipt：真实 TTY 启动时清屏并显示 `Chuang Terminal` 顶部栏，输入提示改为 `╭─ input` / `╰─ chuang ›`，运行任务显示 RUNNING 分区，完成后按 DONE / TRACE / TOOL EVENTS / ANSWER / REPORT 分区展示。
+- 运行中输入区保持可用；任务未完成时每 5 秒打印 `[working Ns]` 状态，提示仍可输入 `!guidance` 注入当前任务。TRACE 只展示可审计 runtime/tool evidence，不打印模型隐藏思考原文；工具事件移到独立 TOOL EVENTS 分区，避免重复刷屏。
+- 已用 PTY stub 目检：`CHUANG_REPL_STUB=1 chuang` 能显示顶部栏、明显输入框、RUNNING/DONE/TRACE/TOOL EVENTS/ANSWER/REPORT 分区。下一步若还要更接近 opencode，应进入真正 TUI：历史会话列表、实时工具流、命令补全、左右栏/滚动区域，而不是继续堆普通 stdout 文本。
+
 # 2026-06-20 提交前盘点与收口
 - 本轮按老爸要求盘点工作树并准备提交。当前应纳入 Chuang 开发提交的是终端 REPL 工作台、当前任务 live guidance 安全点注入、主链工具调用纠偏、真实验收脚本、prompt doctrine、能力 primer、README、progress 与 handoff。
 - 明确不纳入本轮提交的脏数据：`docs/vultr-migration-status-2026-06-08.md` 属于 Vultr/cliproxy 运维记录，和本轮 Chuang 终端主链开发不是同一主题；`notes/` 是临时/未归档输出；`subscription_*.png` 是订阅图素材/产物，不属于 Chuang 代码提交。

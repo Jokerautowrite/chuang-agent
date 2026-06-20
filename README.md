@@ -14,7 +14,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 
 ## 当前状态
 
-- `chuang`：首选终端入口，直接启动本地交互 REPL；交互终端会显示启动横幅、`chuang>` 输入提示、运行中状态、可见执行 trace、工具摘要、耗时和 `/help`、`/status`、`/trace`、`/notrace`、`/verbose`、`/quiet`、`/clear`、`/exit` 等内置命令。任务运行中可输入 `!你的补充`，Chuang 会把它注入当前任务，并在同一轮的下一个安全点传给模型；运行中直接输入普通文本也会作为当前任务补充。空闲时输入 `!你的补充` 才会排队到下一次提交。
+- `chuang`：首选终端入口，直接启动本地交互 REPL；真实 TTY 会显示工作台式顶部栏、明显的 `╭─ input / ╰─ chuang ›` 输入框、运行区、完成区、TRACE、TOOL EVENTS、ANSWER 和 REPORT 分区。任务运行中输入区保持可用，每 5 秒显示工作状态，可用 `!你的补充` 注入当前任务，并在同一轮下一个安全点传给模型；运行中直接输入普通文本也会作为当前任务补充。空闲时输入 `!你的补充` 才会排队到下一次提交。`/help`、`/status`、`/trace`、`/notrace`、`/verbose`、`/quiet`、`/clear`、`/exit` 为内置命令。注意：终端显示的是可审计 runtime/tool trace，不打印模型隐藏思考原文。
 - `chuang ask "TEXT"`：用终端主线跑一次真实本地 runtime。
 - `chuang status --config config.toml --json`：查看当前终端主线状态。
 - `chuang mainchain-accept`：运行真实标准主链总验收，屏幕只显示阶段 OK/FAIL，详细日志写入 `/tmp/chuang-mainchain-acceptance-*`；会先跑 20 项矩阵和基础合同，再调用真实 provider 完成终端端到端验收和自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。

@@ -182,6 +182,7 @@ fn repl_interactive_loop(
     let mut turn_count = 0usize;
     let mut pending_guidance: Vec<String> = Vec::new();
     let mut running: Option<RunningTurn> = None;
+    let mut last_tick_second: Option<u64> = None;
     let (input_sender, input_receiver) = mpsc::channel::<Option<String>>();
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -203,6 +204,9 @@ fn repl_interactive_loop(
     print_repl_prompt(stdout, false, pending_guidance.len())?;
 
     loop {
+        if print_running_tick(stdout, running.as_ref(), &mut last_tick_second)? {
+            print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
+        }
         if poll_running_turn(
             stdout,
             &mut running,
@@ -211,6 +215,7 @@ fn repl_interactive_loop(
             verbose,
             &mut pending_guidance,
         )? {
+            last_tick_second = None;
             print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
         }
 
@@ -312,11 +317,18 @@ fn process_repl_input(
 
     let user_input = merge_repl_guidance(input, pending_guidance);
     pending_guidance.clear();
+    print_repl_section_rule(stdout, "RUNNING")?;
+    writeln!(stdout, "task      {}", compact_preview(&user_input, 120))
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "╭─ running  provider={} model={} workspace={}",
-        summary.provider_id,
-        summary.model_name,
+        "provider  {} / {}",
+        summary.provider_id, summary.model_name
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(
+        stdout,
+        "workspace {}",
         env::current_dir()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "unknown".to_string())
@@ -324,7 +336,7 @@ fn process_repl_input(
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "│  type !<your note> while running to inject guidance at the next safe point"
+        "input     type !text while running to inject guidance at the next safe point"
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
@@ -332,6 +344,32 @@ fn process_repl_input(
         .map_err(|e| format!("stdout_flush_failed: {e}"))?;
     *running = Some(spawn_repl_turn(options.clone(), user_input));
     Ok(InputAction::Continue)
+}
+
+fn print_running_tick(
+    stdout: &mut io::Stdout,
+    running: Option<&RunningTurn>,
+    last_tick_second: &mut Option<u64>,
+) -> Result<bool, String> {
+    let Some(turn) = running else {
+        *last_tick_second = None;
+        return Ok(false);
+    };
+    let elapsed = turn.started_at.elapsed().as_secs();
+    if elapsed == 0 || elapsed % 5 != 0 || *last_tick_second == Some(elapsed) {
+        return Ok(false);
+    }
+    *last_tick_second = Some(elapsed);
+    writeln!(
+        stdout,
+        "\n[working {:>3}s] waiting for model/tools; input remains live for !guidance",
+        elapsed
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))?;
+    Ok(true)
 }
 
 fn poll_running_turn(
@@ -477,15 +515,18 @@ fn print_repl_prompt(
     running: bool,
     guidance_count: usize,
 ) -> Result<(), String> {
+    writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
     if running {
-        write!(stdout, "\nchuang running").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        write!(stdout, "╭─ input [running: !guidance]")
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
     } else {
-        write!(stdout, "\nchuang").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        write!(stdout, "╭─ input").map_err(|e| format!("stdout_write_failed: {e}"))?;
     }
     if guidance_count > 0 {
         write!(stdout, " +{guidance_count}").map_err(|e| format!("stdout_write_failed: {e}"))?;
     }
-    write!(stdout, "> ").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+    write!(stdout, "╰─ chuang › ").map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))
@@ -533,9 +574,10 @@ fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
 
 fn print_repl_banner(stdout: &mut io::Stdout, options: &CliOptions) -> Result<(), String> {
     let summary = options.runtime.summary();
+    write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "\n       _                                \n  ___ | |__   _   _   __ _  _ __    __ _ \n / __|| '_ \\ | | | | / _` || '_ \\  / _` |\n| (__ | | | || |_| || (_| || | | || (_| |\n \\___||_| |_| \\__,_| \\__, ||_| |_| \\__, |\n                     |___/         |___/ \n\n  agent: chuang-cli\n  provider: {}  model: {}\n  commands: /help /status /trace /notrace /verbose /quiet /clear /exit\n  while running: type !text to inject guidance at the next safe point\n",
+        "╭────────────────────────────────────────────────────────────╮\n│ Chuang Terminal                                            │\n│ provider {:<20} model {:<19} │\n│ commands /help /status /trace /notrace /verbose /quiet /exit │\n│ running input stays live: type !text to guide current task  │\n╰────────────────────────────────────────────────────────────╯\n\nVisible trace shows audited runtime/tool evidence, not hidden model reasoning.",
         summary.provider_id, summary.model_name
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -555,7 +597,7 @@ fn handle_repl_command(
         "/help" | "/?" => {
             writeln!(
                 stdout,
-                "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /trace     show visible execution trace\n  /notrace   hide visible execution trace\n  /verbose   print full runtime metadata after each turn\n  /quiet     show concise answers only\n  /clear     clear the screen\n  /exit      leave the terminal\n\nMid-task guidance\n  !text      inject creator guidance into the current task at the next safe point\n  plain text while running is also injected into the current task\n  !text while idle is queued for the next submitted task\n\nTips\n  Chuang shows visible execution trace, tool calls, elapsed time and report id. Hidden model reasoning is not printed.\n"
+                "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /trace     show visible execution trace\n  /notrace   hide visible execution trace\n  /verbose   print full runtime metadata after each turn\n  /quiet     show concise answers only\n  /clear     clear the screen\n  /exit      leave the terminal\n\nMid-task guidance\n  !text      inject creator guidance into the current task at the next safe point\n  plain text while running is also injected into the current task\n  !text while idle is queued for the next submitted task\n\nDisplay\n  The input box stays visible between turns.\n  Running tasks print a small progress tick every 5s.\n  Results are split into trace, tool events, answer, and report id.\n  Hidden model reasoning is not printed.\n"
             )
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
@@ -621,9 +663,10 @@ fn print_repl_result(
         .get("tool_loop_status")
         .map(String::as_str)
         .unwrap_or("none");
+    print_repl_section_rule(stdout, "DONE")?;
     writeln!(
         stdout,
-        "╰─ done turn={} elapsed={}ms tools={} protocol_errors={} status={}",
+        "turn      {}\nelapsed   {}ms\ntools     {}\nprotocol  {}\nstatus    {}",
         turn_count,
         elapsed_ms,
         tool_meta.tool_call_count,
@@ -631,7 +674,7 @@ fn print_repl_result(
         tool_status
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "   input: {input_preview}")
+    writeln!(stdout, "input     {input_preview}")
         .map_err(|e| format!("stdout_write_failed: {e}"))?;
     if pending_guidance_count > 0 {
         writeln!(
@@ -643,16 +686,20 @@ fn print_repl_result(
     if show_trace {
         print_visible_trace(stdout, result, elapsed_ms, &tool_meta, tool_status)?;
     }
+    if !tool_meta.tool_events.is_empty() {
+        print_repl_section_rule(stdout, "TOOL EVENTS")?;
+    }
     for event in &tool_meta.tool_events {
         if let Some(line) = format_tool_event(event) {
-            writeln!(stdout, "   {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(stdout, "- {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
     }
-    writeln!(stdout, "\n{}", result.response.body.trim())
+    print_repl_section_rule(stdout, "ANSWER")?;
+    writeln!(stdout, "{}", result.response.body.trim())
         .map_err(|e| format!("stdout_write_failed: {e}"))?;
     if let Some(report_id) = meta.get("runtime_report_id") {
-        writeln!(stdout, "\nreport: {report_id}")
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        print_repl_section_rule(stdout, "REPORT")?;
+        writeln!(stdout, "{report_id}").map_err(|e| format!("stdout_write_failed: {e}"))?;
     }
     stdout
         .flush()
@@ -666,10 +713,10 @@ fn print_visible_trace(
     tool_meta: &ToolLoopMeta,
     tool_status: &str,
 ) -> Result<(), String> {
-    writeln!(stdout, "\ntrace").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    print_repl_section_rule(stdout, "TRACE")?;
     writeln!(
         stdout,
-        "  context: engine={} tokens={} recall_hits={} dropped={}",
+        "context   engine={} tokens={} recall_hits={} dropped={}",
         result.context_engine_kind,
         result.packed_token_count,
         result.recall_hit_count,
@@ -678,7 +725,7 @@ fn print_visible_trace(
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "  model: {} finish={}",
+        "model     {} finish={}",
         result.response.model_name,
         result
             .response
@@ -690,16 +737,19 @@ fn print_visible_trace(
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "  execution: elapsed={}ms tools={} protocol_errors={} status={}",
+        "runtime   elapsed={}ms tools={} protocol_errors={} status={}",
         elapsed_ms, tool_meta.tool_call_count, tool_meta.tool_protocol_error_count, tool_status
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    for event in &tool_meta.tool_events {
-        if let Some(line) = format_tool_event(event) {
-            writeln!(stdout, "  {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
-        }
-    }
     Ok(())
+}
+
+fn print_repl_section_rule(stdout: &mut io::Stdout, title: &str) -> Result<(), String> {
+    writeln!(
+        stdout,
+        "\n── {title} ─────────────────────────────────────────────"
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))
 }
 
 fn format_tool_event(event: &serde_json::Value) -> Option<String> {
