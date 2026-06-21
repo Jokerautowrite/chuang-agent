@@ -4508,6 +4508,7 @@ mod tests {
             "先写 alpha".to_string(),
             Vec::new(),
             Some(&guidance_path),
+            None,
         )
         .expect("live guidance turn should succeed");
 

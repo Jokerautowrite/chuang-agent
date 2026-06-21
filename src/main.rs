@@ -1071,3 +1071,65 @@ fn status_command(args: &[String]) -> Result<(), String> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repl_progress_event_formats_live_tool_stream_items() {
+        let started = serde_json::json!({
+            "kind": "turn_started",
+            "details": {
+                "input_preview": "看一下 git 状态并报告当前分支"
+            }
+        })
+        .to_string();
+        let tool_done = serde_json::json!({
+            "kind": "tool_finished",
+            "details": {
+                "tool": "code_execute",
+                "ok": true,
+                "summary": "command exited with status 0"
+            }
+        })
+        .to_string();
+        let protocol = serde_json::json!({
+            "kind": "protocol_error",
+            "details": {
+                "code": "plain_text_response"
+            }
+        })
+        .to_string();
+
+        assert_eq!(
+            format_progress_event(&started),
+            Some("turn started: 看一下 git 状态并报告当前分支".to_string())
+        );
+        assert_eq!(
+            format_progress_event(&tool_done),
+            Some("tool code_execute ok command exited with status 0".to_string())
+        );
+        assert_eq!(
+            format_progress_event(&protocol),
+            Some("protocol plain_text_response".to_string())
+        );
+    }
+
+    #[test]
+    fn repl_answer_preview_caps_long_scrollback_without_losing_marker() {
+        let long_answer = "a".repeat(REPL_ANSWER_PREVIEW_CHARS + 20);
+        let preview = multiline_preview(&long_answer, REPL_ANSWER_PREVIEW_CHARS);
+
+        assert_eq!(preview.chars().count(), REPL_ANSWER_PREVIEW_CHARS);
+        assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn repl_answer_wraps_long_lines_for_terminal_readability() {
+        let rows = wrap_line_by_chars("abcdefghijkl", 5);
+
+        assert_eq!(rows, vec!["abcde", "fghij", "kl"]);
+        assert!(rows.iter().all(|row| row.chars().count() <= 5));
+    }
+}
