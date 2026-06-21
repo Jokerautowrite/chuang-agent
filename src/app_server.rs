@@ -947,6 +947,7 @@ fn run_turn_with_tools(
         goal_spec,
         knowledge_context: None,
         live_guidance_path: None,
+        progress_path: None,
     };
 
     let (result, records) = run_with_options(&request)?;

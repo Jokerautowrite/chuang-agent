@@ -398,6 +398,7 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
         goal_spec,
         knowledge_context,
         live_guidance_path: None,
+        progress_path: None,
     })
 }
 

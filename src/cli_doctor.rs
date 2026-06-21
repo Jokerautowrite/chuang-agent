@@ -619,6 +619,7 @@ fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
         goal_spec: None,
         knowledge_context: None,
         live_guidance_path: None,
+        progress_path: None,
     })
     .map(|_| ())
 }

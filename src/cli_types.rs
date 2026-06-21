@@ -33,6 +33,7 @@ pub(crate) struct RunCliRequest {
     pub(crate) goal_spec: Option<GoalSpec>,
     pub(crate) knowledge_context: Option<KnowledgeContextCliRequest>,
     pub(crate) live_guidance_path: Option<PathBuf>,
+    pub(crate) progress_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

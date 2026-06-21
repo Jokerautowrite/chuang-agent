@@ -260,6 +260,7 @@ fn channel_simulate_command(args: &[String]) -> Result<(), String> {
             .map(|goal| GoalSpec::mainline_mvp(goal.clone())),
         knowledge_context: None,
         live_guidance_path: None,
+        progress_path: None,
     })?;
     let tool_meta = ToolLoopMeta::from_extra(&result.response.meta.extra)?;
     let runtime_observability = runtime_observability_meta(&result);

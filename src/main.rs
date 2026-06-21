@@ -157,6 +157,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         })?;
         if verbose {
             print_runtime_result(&result);
@@ -183,6 +184,7 @@ fn repl_interactive_loop(
     let mut pending_guidance: Vec<String> = Vec::new();
     let mut running: Option<RunningTurn> = None;
     let mut last_tick_second: Option<u64> = None;
+    let mut progress_cursor = ProgressCursor::default();
     let (input_sender, input_receiver) = mpsc::channel::<Option<String>>();
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -204,6 +206,9 @@ fn repl_interactive_loop(
     print_repl_prompt(stdout, false, pending_guidance.len())?;
 
     loop {
+        if poll_progress_events(stdout, running.as_ref(), &mut progress_cursor)? {
+            print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
+        }
         if print_running_tick(stdout, running.as_ref(), &mut last_tick_second)? {
             print_repl_prompt(stdout, running.is_some(), pending_guidance.len())?;
         }
@@ -346,6 +351,140 @@ fn process_repl_input(
     Ok(InputAction::Continue)
 }
 
+#[derive(Default)]
+struct ProgressCursor {
+    bytes_read: u64,
+    visible_count: usize,
+}
+
+fn poll_progress_events(
+    stdout: &mut io::Stdout,
+    running: Option<&RunningTurn>,
+    cursor: &mut ProgressCursor,
+) -> Result<bool, String> {
+    let Some(turn) = running else {
+        cursor.bytes_read = 0;
+        cursor.visible_count = 0;
+        return Ok(false);
+    };
+    let content = match fs::read_to_string(&turn.progress_path) {
+        Ok(content) => content,
+        Err(_) => return Ok(false),
+    };
+    let start = cursor.bytes_read.min(content.len() as u64) as usize;
+    let new_content = &content[start..];
+    if new_content.trim().is_empty() {
+        return Ok(false);
+    }
+    if cursor.visible_count == 0 {
+        writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    for line in new_content.lines().filter(|line| !line.trim().is_empty()) {
+        if let Some(display) = format_progress_event(line) {
+            cursor.visible_count += 1;
+            print_live_tool_stream_line(stdout, cursor.visible_count, &display)?;
+        }
+    }
+    cursor.bytes_read = content.len() as u64;
+    stdout
+        .flush()
+        .map_err(|e| format!("stdout_flush_failed: {e}"))?;
+    Ok(true)
+}
+
+fn format_progress_event(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let kind = value.get("kind").and_then(|value| value.as_str())?;
+    let details = value
+        .get("details")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    match kind {
+        "turn_started" => details
+            .get("input_preview")
+            .and_then(|value| value.as_str())
+            .map(|text| format!("turn started: {}", compact_preview(text, 48))),
+        "model_started" => Some(format!(
+            "model round {} started",
+            details
+                .get("round")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+        )),
+        "model_finished" => Some(format!(
+            "model round {} finished chars={}",
+            details
+                .get("round")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            details
+                .get("chars")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+        )),
+        "tool_started" => Some(format!(
+            "tool {} started",
+            details
+                .get("tool")
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool")
+        )),
+        "tool_finished" => Some(format!(
+            "tool {} {} {}",
+            details
+                .get("tool")
+                .and_then(|value| value.as_str())
+                .unwrap_or("tool"),
+            if details
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                "ok"
+            } else {
+                "failed"
+            },
+            compact_preview(
+                details
+                    .get("summary")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(""),
+                46
+            )
+        )),
+        "protocol_error" => Some(format!(
+            "protocol {}",
+            details
+                .get("code")
+                .and_then(|value| value.as_str())
+                .unwrap_or("error")
+        )),
+        "guidance_injected" => Some(format!(
+            "guidance injected chars={}",
+            details
+                .get("chars")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+        )),
+        _ => Some(kind.to_string()),
+    }
+}
+
+fn print_live_tool_stream_line(
+    stdout: &mut io::Stdout,
+    index: usize,
+    text: &str,
+) -> Result<(), String> {
+    writeln!(
+        stdout,
+        "│ {:>3} │ {:<18} │ {}",
+        index,
+        "live tool stream",
+        compact_preview(text, 80)
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))
+}
+
 fn print_running_tick(
     stdout: &mut io::Stdout,
     running: Option<&RunningTurn>,
@@ -421,6 +560,7 @@ struct RunningTurn {
     handle: thread::JoinHandle<()>,
     result: Option<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
     guidance_path: PathBuf,
+    progress_path: PathBuf,
 }
 
 fn spawn_repl_turn(options: CliOptions, user_input: String) -> RunningTurn {
@@ -431,8 +571,14 @@ fn spawn_repl_turn(options: CliOptions, user_input: String) -> RunningTurn {
         std::process::id(),
         started_at.elapsed().as_nanos()
     ));
+    let progress_path = env::temp_dir().join(format!(
+        "chuang-repl-progress-{}-{}.jsonl",
+        std::process::id(),
+        started_at.elapsed().as_nanos()
+    ));
     let (sender, receiver) = mpsc::channel();
     let request_guidance_path = guidance_path.clone();
+    let request_progress_path = progress_path.clone();
     let handle = thread::spawn(move || {
         let result = run_with_options(&RunCliRequest {
             options,
@@ -448,6 +594,7 @@ fn spawn_repl_turn(options: CliOptions, user_input: String) -> RunningTurn {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: Some(request_guidance_path),
+            progress_path: Some(request_progress_path),
         })
         .map(|(result, _)| result);
         let _ = sender.send(result);
@@ -459,6 +606,7 @@ fn spawn_repl_turn(options: CliOptions, user_input: String) -> RunningTurn {
         handle,
         result: None,
         guidance_path,
+        progress_path,
     }
 }
 
@@ -560,6 +708,11 @@ fn compact_preview(input: &str, max_chars: usize) -> String {
     preview
 }
 
+fn fixed_cell(input: &str, width: usize) -> String {
+    let preview = compact_preview(input, width);
+    format!("{preview:<width$}")
+}
+
 fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("guidance_dir_create_failed: {e}"))?;
@@ -577,7 +730,7 @@ fn print_repl_banner(stdout: &mut io::Stdout, options: &CliOptions) -> Result<()
     write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(
         stdout,
-        "╭────────────────────────────────────────────────────────────╮\n│ Chuang Terminal                                            │\n│ provider {:<20} model {:<19} │\n│ commands /help /status /trace /notrace /verbose /quiet /exit │\n│ running input stays live: type !text to guide current task  │\n╰────────────────────────────────────────────────────────────╯\n\nVisible trace shows audited runtime/tool evidence, not hidden model reasoning.",
+        "╭──────────────────────────── Chuang Terminal ────────────────────────────╮\n│ provider {:<20} model {:<21} │\n│ left: status/context      center: scrollback      right: live tool stream │\n│ /help /status /trace /notrace /verbose /quiet /exit                       │\n╰──────────────────────────────────────────────────────────────────────────╯\n\nVisible trace shows audited runtime/tool evidence, not hidden model reasoning.",
         summary.provider_id, summary.model_name
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -663,15 +816,24 @@ fn print_repl_result(
         .get("tool_loop_status")
         .map(String::as_str)
         .unwrap_or("none");
+    let elapsed_cell = format!("{elapsed_ms}ms");
+    let report_id = result
+        .response
+        .meta
+        .extra
+        .get("runtime_report_id")
+        .map(String::as_str)
+        .unwrap_or("pending");
     print_repl_section_rule(stdout, "DONE")?;
     writeln!(
         stdout,
-        "turn      {}\nelapsed   {}ms\ntools     {}\nprotocol  {}\nstatus    {}",
+        "┌─ left status ─────────────┬─ center scrollback ───────────────┬─ right tool stream ───────┐\n│ turn      {:<15} │ elapsed   {:<20} │ tools     {:<14} │\n│ status    {:<15} │ protocol  {:<20} │ report    {:<14} │\n└───────────────────────────┴──────────────────────────────────┴──────────────────────────┘",
         turn_count,
-        elapsed_ms,
+        fixed_cell(&elapsed_cell, 20),
         tool_meta.tool_call_count,
+        fixed_cell(tool_status, 15),
         tool_meta.tool_protocol_error_count,
-        tool_status
+        fixed_cell(report_id, 14)
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     writeln!(stdout, "input     {input_preview}")

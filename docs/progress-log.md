@@ -1,3 +1,10 @@
+# 2026-06-21 终端工作台实时工具流与三栏布局
+- 本轮按老爸指定范围继续做 `chuang` 终端体验：只做实时工具流、左右栏/三栏展示、滚动区域可读性；明确不做历史会话列表和命令补全。
+- runtime 新增只给 REPL 使用的 `progress_path`，工具循环会追加 JSONL 进度事件：`turn_started`、`model_started`、`model_finished`、`tool_started`、`tool_finished`、`protocol_error`、`guidance_injected`。其他 CLI/app-server/channel/doctor 入口均传 `None`，不改变原输出。
+- REPL 运行任务时会轮询进度 JSONL，并实时打印 `live tool stream` 行；完成摘要改为 left status / center scrollback / right tool stream 三栏结构，长状态和 report id 会截断，避免把终端列挤坏。
+- 已用 PTY stub 目检：`CHUANG_REPL_STUB=1 chuang` 提交“看一下git状态”后，运行中能看到 turn/model/tool/protocol 事件实时刷出；stub responder 本身会产生较长协议修复文本，这是测试桩噪声，不代表真实 provider 答复形态。
+- 边界保持：这仍是 stdout/PTY 工作台，不是完整 ratatui/opencode 式全屏 TUI；不打印模型隐藏思考原文；未实现历史会话列表和命令补全。
+
 # 2026-06-21 终端工作台 UI 二次修复
 - 老爸复看后反馈上一版 `chuang` 终端仍不像 opencode：输入框不明显、运行中过程不可见、可读性差。本轮确认 `4750117 Improve chuang terminal mainchain` 已推到 `origin/main`，但那版只是轻量 REPL，不是全屏/工作台体验。
 - 本轮先做低风险 UI 修复，不改 provider、不改中转 key、不动 live receipt：真实 TTY 启动时清屏并显示 `Chuang Terminal` 顶部栏，输入提示改为 `╭─ input` / `╰─ chuang ›`，运行任务显示 RUNNING 分区，完成后按 DONE / TRACE / TOOL EVENTS / ANSWER / REPORT 分区展示。

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -102,6 +103,7 @@ pub(crate) fn run_with_options(
         request.user_input.clone(),
         runtime_context,
         request.live_guidance_path.as_deref(),
+        request.progress_path.as_deref(),
     )
     .map_err(|e| format!("runtime_failed: {e:?}"))
     .and_then(|mut turn| {
@@ -287,6 +289,7 @@ where
         original_input,
         extra_context_segments,
         None,
+        None,
     )
 }
 
@@ -299,6 +302,7 @@ fn run_governed_turn_with_tools_live<S, R, G>(
     original_input: String,
     extra_context_segments: Vec<ContextSegment>,
     live_guidance_path: Option<&Path>,
+    progress_path: Option<&Path>,
 ) -> Result<ChuangKernelTurn, String>
 where
     S: MemoryStore,
@@ -317,7 +321,24 @@ where
     let mut live_guidance_cursor = 0usize;
     let mut last_turn: Option<ChuangKernelTurn> = None;
     let mut last_plain_text_answer: Option<String> = None;
+    write_progress_event(
+        progress_path,
+        "turn_started",
+        Some(serde_json::json!({
+            "input_preview": truncate_history_text(&original_input, 120),
+            "max_tool_rounds": max_tool_rounds,
+        })),
+    )?;
     if should_auto_observe_desktop(&original_input) {
+        write_progress_event(
+            progress_path,
+            "tool_started",
+            Some(serde_json::json!({
+                "round": 1,
+                "tool": "locate",
+                "summary": "auto desktop observation before model call",
+            })),
+        )?;
         let call = ToolCall::Locate {
             target: Some("screen".to_string()),
         };
@@ -352,6 +373,16 @@ where
             protocol_error_message: None,
         });
         tool_calls.push(record);
+        write_progress_event(
+            progress_path,
+            "tool_finished",
+            Some(serde_json::json!({
+                "round": 1,
+                "tool": "locate",
+                "ok": tool_calls.last().map(|record| record.ok).unwrap_or(false),
+                "summary": tool_calls.last().map(|record| record.summary.clone()).unwrap_or_default(),
+            })),
+        )?;
         current_input = format!(
             "{}\nreq:{}\ntool:{}\nFINAL:<最终答复>",
             read_only_capability_banner(),
@@ -369,7 +400,22 @@ where
                 guidance.replace('\n', " | ")
             ));
             current_input = inject_live_guidance_into_prompt(&current_input, &guidance);
+            write_progress_event(
+                progress_path,
+                "guidance_injected",
+                Some(serde_json::json!({
+                    "round": round_index + 1,
+                    "chars": guidance.chars().count(),
+                })),
+            )?;
         }
+        write_progress_event(
+            progress_path,
+            "model_started",
+            Some(serde_json::json!({
+                "round": round_index + 1,
+            })),
+        )?;
         let mut turn = kernel
             .run_governed_turn_with_extra_context(
                 current_input.clone(),
@@ -378,6 +424,15 @@ where
             )
             .map_err(|e| format!("{e:?}"))?;
         let body = turn.result.response.body.trim().to_string();
+        write_progress_event(
+            progress_path,
+            "model_finished",
+            Some(serde_json::json!({
+                "round": round_index + 1,
+                "finish": turn.result.response.meta.finish_reason.as_deref().unwrap_or("none"),
+                "chars": body.chars().count(),
+            })),
+        )?;
 
         match parse_tool_model_output(&body) {
             ToolModelOutput::FinalAnswer(final_answer) => {
@@ -407,6 +462,14 @@ where
                         protocol_error_message: Some(error.message.clone()),
                     });
                     protocol_errors.push(error);
+                    write_progress_event(
+                        progress_path,
+                        "protocol_error",
+                        Some(serde_json::json!({
+                            "round": round_index + 1,
+                            "code": "missing_required_action",
+                        })),
+                    )?;
                     current_input = tool_protocol_repair_prompt(
                         &original_input,
                         &transcript,
@@ -434,6 +497,15 @@ where
                 return Ok(turn);
             }
             ToolModelOutput::ToolCall(call) => {
+                let tool_name = tool_call_name(&call).to_string();
+                write_progress_event(
+                    progress_path,
+                    "tool_started",
+                    Some(serde_json::json!({
+                        "round": round_index + 1,
+                        "tool": tool_name,
+                    })),
+                )?;
                 let task_id = format!("{}:tool:{}", turn.turn_id, tool_calls.len() + 1);
                 let outcome = execution_slot.execute_or_reject_with_governance_and_ledger(
                     &mut runtime_event_ledger,
@@ -468,6 +540,17 @@ where
                     protocol_error_message: None,
                 });
                 tool_calls.push(record);
+                write_progress_event(
+                    progress_path,
+                    "tool_finished",
+                    Some(serde_json::json!({
+                        "round": round_index + 1,
+                        "tool": tool_calls.last().map(|record| tool_call_name(&record.call).to_string()).unwrap_or_default(),
+                        "ok": tool_calls.last().map(|record| record.ok).unwrap_or(false),
+                        "decision": tool_events.last().and_then(|event| event.decision.clone()).unwrap_or_default(),
+                        "summary": tool_calls.last().map(|record| record.summary.clone()).unwrap_or_default(),
+                    })),
+                )?;
                 if tool_calls
                     .last()
                     .and_then(|record| record.failure_class.as_deref())
@@ -529,6 +612,14 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
+                write_progress_event(
+                    progress_path,
+                    "protocol_error",
+                    Some(serde_json::json!({
+                        "round": round_index + 1,
+                        "code": protocol_errors.last().map(|error| error.code.clone()).unwrap_or_default(),
+                    })),
+                )?;
                 current_input = tool_protocol_repair_prompt(
                     &original_input,
                     &transcript,
@@ -571,6 +662,14 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
+                write_progress_event(
+                    progress_path,
+                    "protocol_error",
+                    Some(serde_json::json!({
+                        "round": round_index + 1,
+                        "code": protocol_errors.last().map(|error| error.code.clone()).unwrap_or_default(),
+                    })),
+                )?;
                 current_input = tool_protocol_repair_prompt(
                     &original_input,
                     &transcript,
@@ -644,6 +743,34 @@ where
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+fn write_progress_event(
+    progress_path: Option<&Path>,
+    kind: &str,
+    details: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let Some(path) = progress_path else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("progress_dir_create_failed: {e}"))?;
+    }
+    let event = serde_json::json!({
+        "schema_version": 1,
+        "kind": kind,
+        "ts_ms": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0),
+        "details": details.unwrap_or_else(|| serde_json::json!({})),
+    });
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("progress_open_failed: {e}"))?;
+    writeln!(file, "{event}").map_err(|e| format!("progress_write_failed: {e}"))
 }
 
 fn terminal_tool_failure(record: &ToolExecutionRecord) -> bool {
@@ -1824,6 +1951,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should succeed");
@@ -1913,6 +2041,7 @@ mod tests {
             goal_spec: Some(GoalSpec::mainline_mvp("通过 CLI 注入 goal context")),
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -1984,6 +2113,7 @@ mod tests {
                 enabled: true,
             }),
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -2134,6 +2264,7 @@ mod tests {
                 enabled: true,
             }),
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
@@ -2237,6 +2368,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (_, records) = run_with_options(&request).expect("run should succeed");
@@ -2281,6 +2413,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
         let (_, first_records) = run_with_options(&first).expect("first run should succeed");
         assert!(first_records
@@ -2305,6 +2438,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
         let (same_session, _) = run_with_options(&second).expect("second run should succeed");
         assert_eq!(same_session.recall_hit_count, 1);
@@ -2362,6 +2496,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
         let (beta_written, beta_records) =
             run_with_options(&beta_write).expect("beta run should succeed");
@@ -2399,6 +2534,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
         assert_eq!(other_session.recall_hit_count, 0);
@@ -2437,6 +2573,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, records) = run_with_options(&request).expect("run should not fail");
@@ -2517,6 +2654,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let error = run_with_options(&request).expect_err("run should reject missing session id");
@@ -3405,6 +3543,7 @@ mod tests {
             goal_spec: None,
             knowledge_context: None,
             live_guidance_path: None,
+            progress_path: None,
         };
 
         let (result, _) = run_with_options(&request).expect("run should succeed");
