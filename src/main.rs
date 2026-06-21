@@ -4,7 +4,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod app_server;
 mod cli_args;
@@ -44,6 +44,9 @@ use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_skill::skill_command;
 use cli_subagent::subagent_command;
 use cli_types::*;
+
+const REPL_ANSWER_PREVIEW_CHARS: usize = 2400;
+const REPL_TEXT_WRAP_WIDTH: usize = 96;
 
 fn main() {
     if let Err(message) = run_cli() {
@@ -857,8 +860,7 @@ fn print_repl_result(
         }
     }
     print_repl_section_rule(stdout, "ANSWER")?;
-    writeln!(stdout, "{}", result.response.body.trim())
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    print_repl_answer(stdout, result.response.body.trim(), turn_count)?;
     if let Some(report_id) = meta.get("runtime_report_id") {
         print_repl_section_rule(stdout, "REPORT")?;
         writeln!(stdout, "{report_id}").map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -866,6 +868,93 @@ fn print_repl_result(
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))
+}
+
+fn print_repl_answer(
+    stdout: &mut io::Stdout,
+    answer: &str,
+    turn_count: usize,
+) -> Result<(), String> {
+    let answer_chars = answer.chars().count();
+    if answer_chars <= REPL_ANSWER_PREVIEW_CHARS {
+        print_wrapped_text(stdout, answer, REPL_TEXT_WRAP_WIDTH)?;
+        return Ok(());
+    }
+
+    let snapshot_path = write_repl_answer_snapshot(answer, turn_count)?;
+    let preview = multiline_preview(answer, REPL_ANSWER_PREVIEW_CHARS);
+    print_wrapped_text(stdout, &preview, REPL_TEXT_WRAP_WIDTH)?;
+    writeln!(
+        stdout,
+        "\n[answer truncated: showing {} of {} chars; full saved to {}]",
+        REPL_ANSWER_PREVIEW_CHARS,
+        answer_chars,
+        snapshot_path.display()
+    )
+    .map_err(|e| format!("stdout_write_failed: {e}"))
+}
+
+fn write_repl_answer_snapshot(answer: &str, turn_count: usize) -> Result<PathBuf, String> {
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let path = env::temp_dir().join(format!(
+        "chuang-repl-answer-{}-{}-{}.txt",
+        std::process::id(),
+        turn_count,
+        ts_ms
+    ));
+    fs::write(&path, answer).map_err(|e| format!("answer_snapshot_write_failed: {e}"))?;
+    Ok(path)
+}
+
+fn multiline_preview(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let mut preview = input
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    preview.push('…');
+    preview
+}
+
+fn print_wrapped_text(stdout: &mut io::Stdout, text: &str, width: usize) -> Result<(), String> {
+    for line in text.lines() {
+        if line.is_empty() {
+            writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+            continue;
+        }
+        for wrapped in wrap_line_by_chars(line, width) {
+            writeln!(stdout, "{wrapped}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+    }
+    if text.ends_with('\n') {
+        writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+    }
+    Ok(())
+}
+
+fn wrap_line_by_chars(line: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut current_len = 0usize;
+    for ch in line.chars() {
+        if current_len >= width {
+            rows.push(current);
+            current = String::new();
+            current_len = 0;
+        }
+        current.push(ch);
+        current_len += 1;
+    }
+    if !current.is_empty() {
+        rows.push(current);
+    }
+    rows
 }
 
 fn print_visible_trace(

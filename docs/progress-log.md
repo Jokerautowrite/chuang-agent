@@ -1,3 +1,8 @@
+# 2026-06-21 终端滚动区长答案限流
+- 本轮继续优化 `chuang` 终端可读性，范围仍限定在交互 REPL 输出层；不做历史会话列表、不做命令补全、不改 provider/runtime 语义。
+- 解决上一轮 PTY 目检暴露的问题：stub 或协议修复场景下 ANSWER 可能很长，直接整段刷屏会把实时工具流和三栏摘要冲出可视区域。现在 TTY 结果区会按固定宽度换行，并对超长 ANSWER 只显示前 2400 字符预览。
+- 完整 ANSWER 不丢失，会写到 `/tmp/chuang-repl-answer-<pid>-<turn>-<ts>.txt`，终端打印该路径。这个文件是本机临时快照，只用于滚动区可读性，不进入记忆、不进入报告、不改变 `RuntimeResult`。
+
 # 2026-06-21 终端工作台实时工具流与三栏布局
 - 本轮按老爸指定范围继续做 `chuang` 终端体验：只做实时工具流、左右栏/三栏展示、滚动区域可读性；明确不做历史会话列表和命令补全。
 - runtime 新增只给 REPL 使用的 `progress_path`，工具循环会追加 JSONL 进度事件：`turn_started`、`model_started`、`model_finished`、`tool_started`、`tool_finished`、`protocol_error`、`guidance_injected`。其他 CLI/app-server/channel/doctor 入口均传 `None`，不改变原输出。
