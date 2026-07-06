@@ -1,3 +1,27 @@
+# 2026-06-24 终端 typed events 与 THINKING/STEPS 展示
+- 本轮按老爸要求让 `chuang` 终端显示更接近当前 OpenCode/Codex 工作台格式，但仍保持 stdout/PTY 路线，不引入 ratatui/TUI 依赖。
+- 新增 `src/terminal_event.rs`，把 REPL progress JSONL 从散装 `kind/details` 推进为 `TerminalEvent` typed schema：turn、step、model、tool、protocol、guidance、answer 都有显式事件类型。
+- `src/cli_runtime.rs` 现在写 `schema_version=2` 的 typed terminal events；运行开始会显示 context preparation step，模型轮次、工具开始/结束、协议错误、guidance 注入和 answer ready 都进入同一事件流。
+- `src/main.rs` 的 REPL 轮询仍兼容旧 progress JSON，但新事件会分流渲染成 `thinking / steps` 与 `tool stream` 两类；完成区新增 `THINKING / STEPS` 分区并把工具完成摘要改名为 `TOOL STREAM`，明确这是可审计执行进度，不打印隐藏模型思考原文。
+- 老爸实测后发现运行中 progress 后重复刷 prompt，会把 `╰─ chuang ›` 和事件行黏在一起；已改为运行中 progress/tick 不重打 prompt，并把本轮已显示的 step events 保存到 `ProgressCursor`，最终 `THINKING / STEPS` 回放真实步骤，而不是只打印说明文字。
+- 老爸继续实测“给自己体检下”后发现输出仍像内部日志：本轮进一步压缩 progress 文案，工具行不再打印 `decision/rules` 长串，模型轮次显示为 `thinking/model replied`，running tick 从 5 秒降噪到 15 秒。工具循环耗尽现在会返回人类可读正文和 `tool_loop_status=tool_loop_exhausted`，不再只在 REPL 打一行 raw error。
+- 继续按老爸要求补启动视觉：真实 TTY 启动横幅改为固定宽度 `CHUANG` 工作台启动牌，所有行通过 `banner_row` / `banner_center_row` 按字符数补齐，避免 provider/model 变化导致破框；同时将 ANSWER 手动换行宽度从 96 收窄到 78，减少终端自动折行导致中文尾部断得难看的情况。
+- 新增/更新回归：`repl_progress_event_formats_typed_terminal_events` 锁住 typed event 渲染；旧 progress event 格式化测试同步改为 `ProgressDisplay::Step/Tool`。
+- 本轮验证通过：`cargo fmt --check`、`cargo check -q`、`cargo test -q repl_progress_event_formats`、`cargo test -q repl_banner`、`cargo test -q tool_loop_exhausted_answer_is_operator_readable`、`cargo test -q repl_`。
+
+# 2026-06-22 Goal 模式多子代理补强 REPL 续接
+- 本轮按老爸要求开启 goal 模式，并在终端侧并行派出 3 个子代理：REPL/history worker、验收覆盖 worker、只读 explorer；主线程同步集成结果，未删除文件、未提交 git。
+- REPL 续接继续加固：最近对话窗口现在在 `max_turns=0` 时返回空上下文，并保证窗口从 user 边界开始，避免孤立 assistant 回复进入下一轮。
+- 修复每轮临时 `guidance/progress` 文件名唯一性：不再用刚创建的 `started_at.elapsed().as_nanos()`，改为 wall-clock timestamp + 进程内递增序号，避免快速连续 turn 复用路径。
+- 启动横幅同步展示 `/history`；新增 CLI smoke 静态回归锁住交互 REPL 路径确实携带 `conversation_history`、记录历史、使用唯一 nonce、暴露 `/history`。
+- 验证通过：`cargo fmt --check`、`cargo check -q`、`cargo test -q repl_`、`cargo test -q --test cli_smoke_tests cli_repl_command_accepts_one_turn_and_exits`、`cargo test -q --test cli_smoke_tests cli_repl_interactive_path_carries_recent_history_and_unique_temp_files`、`cargo test -q run_with_options_injects_recent_conversation_history`、`git diff --check`。
+
+# 2026-06-22 REPL 最近对话续接
+- 本轮继续推进 Chuang 终端主链，选择低风险高收益的会话续接补强，而不是继续堆终端样式。
+- 交互 REPL 现在会保留最近 8 轮 user/assistant 原文，并在下一轮通过既有 `conversation_history` 注入 runtime，让“继续/刚才/按上面”这类短句能真实承接上下文。
+- 新增 `/history` 内置命令，只展示最近对话预览；不打印模型隐藏思考，不引入持久化历史列表，也不改变非 REPL、app-server、channel 路径。
+- 新增单元测试锁住 REPL 历史只保留最近 8 轮成对上下文，避免长期交互无限膨胀。
+
 # 2026-06-21 终端 UI 回归固化
 - 本轮继续推进 Chuang，但不再继续堆终端样式，而是把刚落地的终端体验关键点固化成代码级回归，防止后续改 REPL 时退化。
 - 新增 `src/main.rs` 单元测试覆盖：progress JSONL 事件格式化为 `live tool stream` 文案、长 ANSWER 预览必须截断并保留省略标记、长单行输出必须按固定宽度换行。
