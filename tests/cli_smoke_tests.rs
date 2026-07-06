@@ -1861,6 +1861,21 @@ fn cli_repl_command_accepts_one_turn_and_exits() {
 }
 
 #[test]
+fn cli_repl_interactive_path_carries_recent_history_and_unique_temp_files() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let main_rs =
+        fs::read_to_string(manifest_dir.join("src/main.rs")).expect("main.rs should be readable");
+
+    assert!(main_rs.contains("let mut conversation_history: Vec<ConversationHistoryItem>"));
+    assert!(main_rs.contains("recent_repl_conversation_history("));
+    assert!(main_rs.contains("conversation_history,"));
+    assert!(main_rs.contains("record_repl_conversation_turn("));
+    assert!(main_rs.contains("REPL_TURN_SEQUENCE.fetch_add"));
+    assert!(main_rs.contains("/history   show recent REPL conversation context"));
+    assert!(!main_rs.contains("started_at.elapsed().as_nanos()"));
+}
+
+#[test]
 fn cli_run_can_remember_turn_summary_when_requested() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir;

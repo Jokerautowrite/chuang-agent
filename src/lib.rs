@@ -52,6 +52,7 @@ pub mod subagent_report;
 pub mod subagent_spawner;
 pub mod subagent_tree_events;
 pub mod subagent_tree_ledger;
+pub mod terminal_event;
 pub mod tool_loop_meta;
 pub mod tool_registry_slot;
 pub mod tool_runtime;

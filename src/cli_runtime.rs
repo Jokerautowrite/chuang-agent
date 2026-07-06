@@ -22,6 +22,7 @@ use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
+use chuang_agent::terminal_event::{StepStatus, TerminalEvent};
 use chuang_agent::tool_runtime::{
     parse_tool_model_output, ExecutionSlot, MemoryToolContext, ToolCall, ToolExecutionConfig,
     ToolExecutionRecord, ToolLoopEvent, ToolLoopReport, ToolModelOutput, ToolProtocolError,
@@ -321,23 +322,38 @@ where
     let mut live_guidance_cursor = 0usize;
     let mut last_turn: Option<ChuangKernelTurn> = None;
     let mut last_plain_text_answer: Option<String> = None;
-    write_progress_event(
+    write_terminal_event(
         progress_path,
-        "turn_started",
-        Some(serde_json::json!({
-            "input_preview": truncate_history_text(&original_input, 120),
-            "max_tool_rounds": max_tool_rounds,
-        })),
+        &TerminalEvent::TurnStarted {
+            input_preview: truncate_history_text(&original_input, 120),
+            max_tool_rounds,
+        },
+    )?;
+    write_terminal_event(
+        progress_path,
+        &TerminalEvent::StepStarted {
+            title: "prepare context".to_string(),
+            detail: Some(
+                "identity, recent history, working context, and tool instructions".to_string(),
+            ),
+        },
+    )?;
+    write_terminal_event(
+        progress_path,
+        &TerminalEvent::StepFinished {
+            title: "prepare context".to_string(),
+            status: StepStatus::Ok,
+            detail: Some(format!("segments={}", turn_context.len())),
+        },
     )?;
     if should_auto_observe_desktop(&original_input) {
-        write_progress_event(
+        write_terminal_event(
             progress_path,
-            "tool_started",
-            Some(serde_json::json!({
-                "round": 1,
-                "tool": "locate",
-                "summary": "auto desktop observation before model call",
-            })),
+            &TerminalEvent::ToolStarted {
+                round: 1,
+                tool: "locate".to_string(),
+                summary: Some("auto desktop observation before model call".to_string()),
+            },
         )?;
         let call = ToolCall::Locate {
             target: Some("screen".to_string()),
@@ -373,15 +389,18 @@ where
             protocol_error_message: None,
         });
         tool_calls.push(record);
-        write_progress_event(
+        write_terminal_event(
             progress_path,
-            "tool_finished",
-            Some(serde_json::json!({
-                "round": 1,
-                "tool": "locate",
-                "ok": tool_calls.last().map(|record| record.ok).unwrap_or(false),
-                "summary": tool_calls.last().map(|record| record.summary.clone()).unwrap_or_default(),
-            })),
+            &TerminalEvent::ToolFinished {
+                round: 1,
+                tool: "locate".to_string(),
+                ok: tool_calls.last().map(|record| record.ok).unwrap_or(false),
+                decision: tool_events.last().and_then(|event| event.decision.clone()),
+                summary: tool_calls
+                    .last()
+                    .map(|record| record.summary.clone())
+                    .unwrap_or_default(),
+            },
         )?;
         current_input = format!(
             "{}\nreq:{}\ntool:{}\nFINAL:<最终答复>",
@@ -400,21 +419,19 @@ where
                 guidance.replace('\n', " | ")
             ));
             current_input = inject_live_guidance_into_prompt(&current_input, &guidance);
-            write_progress_event(
+            write_terminal_event(
                 progress_path,
-                "guidance_injected",
-                Some(serde_json::json!({
-                    "round": round_index + 1,
-                    "chars": guidance.chars().count(),
-                })),
+                &TerminalEvent::GuidanceInjected {
+                    round: round_index + 1,
+                    chars: guidance.chars().count(),
+                },
             )?;
         }
-        write_progress_event(
+        write_terminal_event(
             progress_path,
-            "model_started",
-            Some(serde_json::json!({
-                "round": round_index + 1,
-            })),
+            &TerminalEvent::ModelStarted {
+                round: round_index + 1,
+            },
         )?;
         let mut turn = kernel
             .run_governed_turn_with_extra_context(
@@ -424,14 +441,19 @@ where
             )
             .map_err(|e| format!("{e:?}"))?;
         let body = turn.result.response.body.trim().to_string();
-        write_progress_event(
+        write_terminal_event(
             progress_path,
-            "model_finished",
-            Some(serde_json::json!({
-                "round": round_index + 1,
-                "finish": turn.result.response.meta.finish_reason.as_deref().unwrap_or("none"),
-                "chars": body.chars().count(),
-            })),
+            &TerminalEvent::ModelFinished {
+                round: round_index + 1,
+                finish: turn
+                    .result
+                    .response
+                    .meta
+                    .finish_reason
+                    .clone()
+                    .unwrap_or_else(|| "none".to_string()),
+                chars: body.chars().count(),
+            },
         )?;
 
         match parse_tool_model_output(&body) {
@@ -462,13 +484,12 @@ where
                         protocol_error_message: Some(error.message.clone()),
                     });
                     protocol_errors.push(error);
-                    write_progress_event(
+                    write_terminal_event(
                         progress_path,
-                        "protocol_error",
-                        Some(serde_json::json!({
-                            "round": round_index + 1,
-                            "code": "missing_required_action",
-                        })),
+                        &TerminalEvent::ProtocolError {
+                            round: round_index + 1,
+                            code: "missing_required_action".to_string(),
+                        },
                     )?;
                     current_input = tool_protocol_repair_prompt(
                         &original_input,
@@ -480,6 +501,14 @@ where
                     continue;
                 }
                 turn.result.response.body = final_answer;
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::AnswerReady {
+                        chars: turn.result.response.body.chars().count(),
+                        truncated: false,
+                        snapshot_path: None,
+                    },
+                )?;
                 turn.user_input = original_input.clone();
                 insert_tool_surface_metadata(&mut turn, workspace_root)?;
                 if !tool_calls.is_empty() || !protocol_errors.is_empty() {
@@ -498,13 +527,13 @@ where
             }
             ToolModelOutput::ToolCall(call) => {
                 let tool_name = tool_call_name(&call).to_string();
-                write_progress_event(
+                write_terminal_event(
                     progress_path,
-                    "tool_started",
-                    Some(serde_json::json!({
-                        "round": round_index + 1,
-                        "tool": tool_name,
-                    })),
+                    &TerminalEvent::ToolStarted {
+                        round: round_index + 1,
+                        tool: tool_name,
+                        summary: None,
+                    },
                 )?;
                 let task_id = format!("{}:tool:{}", turn.turn_id, tool_calls.len() + 1);
                 let outcome = execution_slot.execute_or_reject_with_governance_and_ledger(
@@ -540,16 +569,21 @@ where
                     protocol_error_message: None,
                 });
                 tool_calls.push(record);
-                write_progress_event(
+                write_terminal_event(
                     progress_path,
-                    "tool_finished",
-                    Some(serde_json::json!({
-                        "round": round_index + 1,
-                        "tool": tool_calls.last().map(|record| tool_call_name(&record.call).to_string()).unwrap_or_default(),
-                        "ok": tool_calls.last().map(|record| record.ok).unwrap_or(false),
-                        "decision": tool_events.last().and_then(|event| event.decision.clone()).unwrap_or_default(),
-                        "summary": tool_calls.last().map(|record| record.summary.clone()).unwrap_or_default(),
-                    })),
+                    &TerminalEvent::ToolFinished {
+                        round: round_index + 1,
+                        tool: tool_calls
+                            .last()
+                            .map(|record| tool_call_name(&record.call).to_string())
+                            .unwrap_or_default(),
+                        ok: tool_calls.last().map(|record| record.ok).unwrap_or(false),
+                        decision: tool_events.last().and_then(|event| event.decision.clone()),
+                        summary: tool_calls
+                            .last()
+                            .map(|record| record.summary.clone())
+                            .unwrap_or_default(),
+                    },
                 )?;
                 if tool_calls
                     .last()
@@ -612,13 +646,15 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
-                write_progress_event(
+                write_terminal_event(
                     progress_path,
-                    "protocol_error",
-                    Some(serde_json::json!({
-                        "round": round_index + 1,
-                        "code": protocol_errors.last().map(|error| error.code.clone()).unwrap_or_default(),
-                    })),
+                    &TerminalEvent::ProtocolError {
+                        round: round_index + 1,
+                        code: protocol_errors
+                            .last()
+                            .map(|error| error.code.clone())
+                            .unwrap_or_default(),
+                    },
                 )?;
                 current_input = tool_protocol_repair_prompt(
                     &original_input,
@@ -662,13 +698,15 @@ where
                     protocol_error_message: Some(error.message.clone()),
                 });
                 protocol_errors.push(error);
-                write_progress_event(
+                write_terminal_event(
                     progress_path,
-                    "protocol_error",
-                    Some(serde_json::json!({
-                        "round": round_index + 1,
-                        "code": protocol_errors.last().map(|error| error.code.clone()).unwrap_or_default(),
-                    })),
+                    &TerminalEvent::ProtocolError {
+                        round: round_index + 1,
+                        code: protocol_errors
+                            .last()
+                            .map(|error| error.code.clone())
+                            .unwrap_or_default(),
+                    },
                 )?;
                 current_input = tool_protocol_repair_prompt(
                     &original_input,
@@ -740,16 +778,32 @@ where
             insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
             return Ok(turn);
         }
+        turn.result.response.body = tool_loop_exhausted_answer(
+            &original_input,
+            max_tool_rounds,
+            tool_calls.len(),
+            protocol_errors.len(),
+        );
+        turn.user_input = original_input;
+        insert_tool_surface_metadata(&mut turn, workspace_root)?;
+        insert_tool_metadata_with_status(
+            &mut turn,
+            workspace_root,
+            max_tool_rounds,
+            &tool_calls,
+            &protocol_errors,
+            &tool_events,
+            &transcript,
+            "tool_loop_exhausted",
+        )?;
+        insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+        return Ok(turn);
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
 }
 
-fn write_progress_event(
-    progress_path: Option<&Path>,
-    kind: &str,
-    details: Option<serde_json::Value>,
-) -> Result<(), String> {
+fn write_terminal_event(progress_path: Option<&Path>, event: &TerminalEvent) -> Result<(), String> {
     let Some(path) = progress_path else {
         return Ok(());
     };
@@ -757,13 +811,12 @@ fn write_progress_event(
         fs::create_dir_all(parent).map_err(|e| format!("progress_dir_create_failed: {e}"))?;
     }
     let event = serde_json::json!({
-        "schema_version": 1,
-        "kind": kind,
+        "schema_version": 2,
         "ts_ms": SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis())
             .unwrap_or(0),
-        "details": details.unwrap_or_else(|| serde_json::json!({})),
+        "event": event,
     });
     let mut file = OpenOptions::new()
         .create(true)
@@ -1018,6 +1071,17 @@ fn missing_required_action_exhausted_answer(
 ) -> String {
     format!(
         "本轮没有完成真实本地动作：模型连续 {max_tool_rounds} 轮没有调用工具。原始请求是：{original_input}。请重试，或把动作拆成更直接的命令。"
+    )
+}
+
+fn tool_loop_exhausted_answer(
+    original_input: &str,
+    max_tool_rounds: usize,
+    tool_call_count: usize,
+    protocol_error_count: usize,
+) -> String {
+    format!(
+        "本轮没有拿到最终答复：模型已经跑满 {max_tool_rounds} 轮工具循环，但没有输出 FINAL。\n\n已执行工具：{tool_call_count} 次。协议修复：{protocol_error_count} 次。\n原始请求：{original_input}\n\n建议：把目标拆小后重试，或提高 tool_max_rounds；如果反复出现，说明模型需要更强的 FINAL 输出约束。"
     )
 }
 
@@ -4216,6 +4280,16 @@ mod tests {
             .get("tool_protocol_errors_json")
             .expect("tool protocol errors json should exist")
             .contains("plain_text_response"));
+    }
+
+    #[test]
+    fn tool_loop_exhausted_answer_is_operator_readable() {
+        let answer = tool_loop_exhausted_answer("给自己体检下", 4, 3, 1);
+
+        assert!(answer.contains("没有拿到最终答复"));
+        assert!(answer.contains("已执行工具：3 次"));
+        assert!(answer.contains("协议修复：1 次"));
+        assert!(answer.contains("提高 tool_max_rounds"));
     }
 
     #[test]
