@@ -4,11 +4,14 @@ use chuang_agent::chuang_kernel::{
     ChuangKernel, ChuangKernelConfig, ChuangKernelGovernanceError, ChuangKernelMemoryError,
     IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
-use chuang_agent::context_engine::{ContextBudget, ContextEngineKind};
+use chuang_agent::context_engine::{
+    ContextBudget, ContextEngineKind, ContextSegment, SegmentSource,
+};
 use chuang_agent::governance::{
     ActionKind, Governance, GovernanceError, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
 use chuang_agent::hermes_memory::DualFileMemorySnapshot;
+use chuang_agent::identity_registry::AgentIdentity;
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::responder::FakeResponder;
 use chuang_agent::subagent_report::ExecutionStatus;
@@ -44,6 +47,16 @@ fn kernel<S>(config: ChuangKernelConfig, store: S) -> ChuangKernel<S, FakeRespon
     ChuangKernel::with_responder(config, store, FakeResponder::new("stub-responder"))
 }
 
+fn run_turn<S: MemoryStore>(
+    kernel: &mut ChuangKernel<S, FakeResponder>,
+    user_input: impl Into<String>,
+) -> chuang_agent::chuang_kernel::ChuangKernelTurn {
+    let mut governance = StaticRuleGovernance::new();
+    kernel
+        .run_governed_turn(user_input, &mut governance)
+        .expect("governed kernel turn should run")
+}
+
 #[test]
 fn chuang_kernel_runs_minimal_auditable_turn() {
     let mut store = InMemoryMemoryStore::new();
@@ -57,9 +70,7 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
         .expect("memory seed should succeed");
     let mut kernel = kernel(kernel_config(), store);
 
-    let turn = kernel
-        .run_turn("创项目 MVP 先跑通")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "创项目 MVP 先跑通");
 
     assert_eq!(turn.turn_id, "turn-1");
     assert_eq!(turn.user_input, "创项目 MVP 先跑通");
@@ -67,7 +78,11 @@ fn chuang_kernel_runs_minimal_auditable_turn() {
     assert_eq!(turn.report.report_id.0, "report-turn-1");
     assert_eq!(turn.report.agent_id.0, "chuang-mvp");
     assert_eq!(turn.report.status, ExecutionStatus::Success);
-    assert_eq!(turn.governance_decision, None);
+    assert!(matches!(
+        turn.governance_decision,
+        Some(RiskDecision::Allowed { .. })
+    ));
+    assert!(turn.report.governance_decision.is_some());
     assert!(turn.result.prompt.contains("[chuang-agent-runtime]"));
     assert!(turn.result.packed_context_preview.contains("system-core"));
     assert!(turn
@@ -101,6 +116,36 @@ fn chuang_kernel_can_run_turn_through_governance_and_audit() {
     assert_eq!(audit[0].task_id.0, "turn-1");
     assert!(audit[0].delta_bytes > 0);
     assert!(audit[0].reason.starts_with("allowed:"));
+}
+
+#[test]
+fn public_turn_entry_with_extra_context_always_returns_governance_decision() {
+    let mut kernel = kernel(kernel_config(), InMemoryMemoryStore::new());
+    let mut governance = StaticRuleGovernance::new();
+    let extra_context = ContextSegment {
+        id: "test-extra-context".to_string(),
+        source: SegmentSource::Working,
+        content: "public governed entry regression".to_string(),
+        tokens: Some(4),
+        priority: 100,
+        created_at: chrono::Utc::now(),
+        last_accessed: chrono::Utc::now(),
+        metadata: Default::default(),
+    };
+
+    let turn = kernel
+        .run_governed_turn_with_extra_context(
+            "通过带上下文的公开入口跑一轮",
+            &mut governance,
+            vec![extra_context],
+        )
+        .expect("public governed turn entry should run");
+
+    assert!(matches!(
+        turn.governance_decision,
+        Some(RiskDecision::Allowed { .. })
+    ));
+    assert!(turn.report.governance_decision.is_some());
 }
 
 #[derive(Debug, Clone)]
@@ -142,18 +187,14 @@ fn chuang_kernel_blocks_governed_turn_before_runtime() {
 fn chuang_kernel_can_write_turn_summary_memory_after_execution() {
     let mut kernel = kernel(kernel_config(), InMemoryMemoryStore::new());
 
-    let turn = kernel
-        .run_turn("记住这次 MVP 闭环")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "记住这次 MVP 闭环");
     let record_id = kernel
         .remember_turn(&turn)
         .expect("turn memory should be written");
 
     assert_eq!(record_id, "turn-memory-turn-1");
 
-    let second = kernel
-        .run_turn("MVP")
-        .expect("second turn should recall stored memory");
+    let second = run_turn(&mut kernel, "MVP");
 
     assert!(second.result.recall_summary.contains("记住这次 MVP 闭环"));
     assert_eq!(second.result.recall_hit_count, 1);
@@ -167,9 +208,7 @@ fn chuang_kernel_passes_context_engine_choice_to_runtime() {
     };
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
-    let turn = kernel
-        .run_turn("内核切换上下文引擎")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "内核切换上下文引擎");
 
     assert_eq!(turn.result.context_engine_kind, "summary_compression");
 }
@@ -220,9 +259,7 @@ fn chuang_kernel_injects_identity_snapshot_into_runtime_context() {
     };
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
-    let turn = kernel
-        .run_turn("现在读取身份快照")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "现在读取身份快照");
     let snapshot = kernel.snapshot();
 
     assert!(turn.result.prompt.contains("identity-user"));
@@ -248,22 +285,35 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
             story_exists: true,
             first_wake: "第一次醒来先确认身份、边界和老爸的禁令。".to_string(),
             first_wake_exists: true,
-            agents_registry: "agent_id = \"chuang\"".to_string(),
+            agents_registry:
+                "agent_id = \"chuang\"\nagent_id = \"xiaochuang\"\nsecret = \"must-not-leak\""
+                    .to_string(),
             agents_registry_exists: true,
+            active_identity: Some(AgentIdentity {
+                agent_id: "chuang".to_string(),
+                display_name: "创".to_string(),
+                shell_kind: "codex-rust".to_string(),
+                role: "local-agent-os-kernel".to_string(),
+                memory_body_id: "chuang-local-body".to_string(),
+                lineage: vec!["xiaochuang".to_string()],
+                allowed_channels: vec!["cli".to_string()],
+                active: true,
+            }),
         }),
         ..kernel_config()
     };
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
-    let turn = kernel
-        .run_turn("读取 first wake")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "读取 first wake");
     let snapshot = kernel.snapshot();
 
     assert!(turn.result.prompt.contains("identity-first-wake"));
     assert!(turn.result.prompt.contains("第一次醒来先确认身份"));
     assert!(turn.result.prompt.contains("identity-soul"));
-    assert!(turn.result.prompt.contains("identity-agents"));
+    assert!(turn.result.prompt.contains("identity-active-agent"));
+    assert!(turn.result.prompt.contains("\"agent_id\":\"chuang\""));
+    assert!(!turn.result.prompt.contains("\"agent_id\":\"xiaochuang\""));
+    assert!(!turn.result.prompt.contains("must-not-leak"));
     assert_eq!(
         snapshot.identity_first_wake_chars,
         Some("第一次醒来先确认身份、边界和老爸的禁令。".chars().count())
@@ -303,9 +353,7 @@ fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
     };
     let mut kernel = kernel(config, store);
 
-    let turn = kernel
-        .run_turn("这次写入应该超过硬上限")
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "这次写入应该超过硬上限");
     let err = kernel
         .remember_turn(&turn)
         .expect_err("oversized memory write should fail");
@@ -329,9 +377,7 @@ fn chuang_kernel_rejects_turn_memory_when_hard_limit_is_exceeded() {
         other => panic!("unexpected error: {other:?}"),
     }
 
-    let next = kernel
-        .run_turn("硬上限")
-        .expect("next turn should still run");
+    let next = run_turn(&mut kernel, "硬上限");
     assert_eq!(next.result.recall_hit_count, 0);
 }
 
@@ -343,9 +389,7 @@ fn chuang_kernel_compacts_session_turn_memory_when_hard_limit_is_exceeded() {
     };
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
-    let turn = kernel
-        .run_turn("会话记忆需要压缩".repeat(120))
-        .expect("kernel turn should run");
+    let turn = run_turn(&mut kernel, "会话记忆需要压缩".repeat(120));
     let receipt = kernel
         .remember_session_turn(&turn, "alpha")
         .expect("session memory should compact and write");
@@ -366,13 +410,14 @@ fn chuang_kernel_rejects_invalid_runtime_request_without_incrementing_turn() {
     };
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
+    let mut governance = StaticRuleGovernance::new();
     let error = kernel
-        .run_turn("这个请求应该失败")
+        .run_governed_turn("这个请求应该失败", &mut governance)
         .expect_err("zero recall limit should fail");
 
     assert_eq!(
         format!("{:?}", error),
-        "Recall(InvalidRequest(\"limit_must_be_positive\"))"
+        "Runtime(Recall(InvalidRequest(\"limit_must_be_positive\")))"
     );
     assert_eq!(kernel.snapshot().turn_count, 0);
 }

@@ -7,6 +7,15 @@ work_dir="${TMPDIR:-/tmp}/chuang-agent-live-gaps-check-$$"
 status_json="$work_dir/status.json"
 preflight_json="$work_dir/live-preflight.json"
 provider_env_file="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
+chuang_agent_bin="${CHUANG_AGENT_BIN:-}"
+
+run_chuang() {
+    if [ -n "$chuang_agent_bin" ]; then
+        "$chuang_agent_bin" "$@"
+    else
+        cargo run --quiet -- "$@"
+    fi
+}
 
 if [ "${1:-}" = "--json" ]; then
     mode="json"
@@ -46,8 +55,8 @@ fi
 
 cd "$root_dir"
 
-cargo run --quiet -- status --json > "$status_json"
-cargo run --quiet -- subagent live-preflight \
+run_chuang status --json > "$status_json"
+run_chuang subagent live-preflight \
   --runner-command scripts/chuang-codex-runner.py \
   --allow-runner-command scripts/chuang-codex-runner.py \
   --requires-capability rehearsal \

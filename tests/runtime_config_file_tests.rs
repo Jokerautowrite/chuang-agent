@@ -444,18 +444,49 @@ base_url = "https://api.example.com/v1"
 model = "gpt-test"
 api_key_env = "CHUANG_AGENT_TEST_API_KEY"
 transport = "stub"
+reasoning_effort = "xhigh"
 "#,
     )
     .expect("config should parse");
     std::env::remove_var("CHUANG_AGENT_TEST_API_KEY");
 
     assert!(matches!(
-        config.provider,
+        &config.provider,
         ProviderConfig::OpenAICompatible(provider)
             if provider.provider_id == "test-provider"
                 && provider.api_key == "test-key"
                 && provider.model_name == "gpt-test"
+                && provider.reasoning_effort.map(|effort| effort.as_str()) == Some("xhigh")
     ));
+    assert_eq!(
+        config.summary().provider_reasoning_effort.as_deref(),
+        Some("xhigh")
+    );
+}
+
+#[test]
+fn config_file_rejects_unsupported_reasoning_effort() {
+    std::env::set_var("CHUANG_AGENT_REASONING_TEST_API_KEY", "test-key");
+    let error = parse_runtime_config_file(
+        r#"
+[provider]
+kind = "openai_compatible"
+base_url = "https://api.example.com/v1"
+model = "gpt-test"
+api_key_env = "CHUANG_AGENT_REASONING_TEST_API_KEY"
+reasoning_effort = "extreme"
+"#,
+    )
+    .expect_err("unsupported reasoning effort should be rejected");
+    std::env::remove_var("CHUANG_AGENT_REASONING_TEST_API_KEY");
+
+    assert_eq!(
+        error,
+        RuntimeConfigFileError::InvalidValue {
+            key: "provider.reasoning_effort".to_string(),
+            value: "extreme".to_string(),
+        }
+    );
 }
 
 #[test]

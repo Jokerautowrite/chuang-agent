@@ -107,12 +107,54 @@ impl FromStr for ProviderTransport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+    XHigh,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+        }
+    }
+}
+
+impl fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ReasoningEffort {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "xhigh" => Ok(Self::XHigh),
+            other => Err(format!(
+                "unsupported reasoning effort: {other} (supported: low, medium, high, xhigh)"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAICompatibleProviderAdapter {
     identity: ProviderIdentity,
     base_url: String,
     api_key: String,
     transport: ProviderTransport,
+    reasoning_effort: Option<ReasoningEffort>,
     request_timeout_ms: u64,
     tls_ca_cert_path: Option<PathBuf>,
 }
@@ -132,6 +174,7 @@ impl OpenAICompatibleProviderAdapter {
             base_url: base_url.into(),
             api_key: api_key.into(),
             transport: ProviderTransport::Stub,
+            reasoning_effort: None,
             request_timeout_ms: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             tls_ca_cert_path: None,
         }
@@ -139,6 +182,11 @@ impl OpenAICompatibleProviderAdapter {
 
     pub fn with_transport(mut self, transport: ProviderTransport) -> Self {
         self.transport = transport;
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, reasoning_effort: Option<ReasoningEffort>) -> Self {
+        self.reasoning_effort = reasoning_effort;
         self
     }
 
@@ -192,13 +240,16 @@ impl OpenAICompatibleProviderAdapter {
     ) -> Result<HttpRequestPreview, ProviderConfigError> {
         let envelope = self.build_request_envelope(request)?;
         let url = format!("{}/responses", envelope.base_url.trim_end_matches('/'),);
-        let body_json = json!({
+        let mut body = json!({
             "model": envelope.model,
             "instructions": envelope.instructions,
             "input": envelope.input,
             "store": envelope.store,
-        })
-        .to_string();
+        });
+        if let Some(reasoning_effort) = self.reasoning_effort {
+            body["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
+        }
+        let body_json = body.to_string();
 
         Ok(HttpRequestPreview {
             method: "POST".to_string(),

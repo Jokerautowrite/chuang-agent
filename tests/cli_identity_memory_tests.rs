@@ -13,17 +13,24 @@ fn temp_root(name: &str) -> PathBuf {
 }
 
 fn write_fake_config(root: &std::path::Path) -> PathBuf {
+    write_fake_config_with_subagent(root, false)
+}
+
+fn write_fake_config_with_subagent(root: &std::path::Path, queued_external: bool) -> PathBuf {
     std::fs::create_dir_all(root).expect("config root should be created");
     let config_path = root.join("config.toml");
-    std::fs::write(
-        &config_path,
-        format!(
-            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
-            root.join("memory.db").display(),
-            root.join("identity-default").display()
-        ),
-    )
-    .expect("fake config should be written");
+    let mut config = format!(
+        "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nprovider = \"fake\"\nprovider_id = \"fake-runtime\"\nmodel = \"stub-responder\"\n",
+        root.join("memory.db").display(),
+        root.join("identity-default").display()
+    );
+    if queued_external {
+        config.push_str(&format!(
+            "subagent = \"queued_external\"\nsubagent_queue_root = \"{}\"\n",
+            root.join("subagent-queue").display()
+        ));
+    }
+    std::fs::write(&config_path, config).expect("fake config should be written");
     config_path
 }
 
@@ -169,6 +176,63 @@ fn cli_identity_memory_can_append_experience_entry() {
 }
 
 #[test]
+fn cli_run_remember_session_identity_experience_and_dispatch_succeeds_together() {
+    let root = temp_root("remember-run-flow");
+    let config_path = write_fake_config_with_subagent(&root, true);
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
+            "--input",
+            "把这轮沉淀到 session 和 identity",
+            "--session-id",
+            "alpha",
+            "--remember-session",
+            "--remember-identity",
+            "--remember-experience",
+            "--dispatch-subagent",
+        ])
+        .output()
+        .expect("cargo run should execute");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let memory = std::fs::read_to_string(root.join("identity-default").join("MEMORY.md"))
+        .expect("memory file should exist");
+    assert!(memory.contains("user=把这轮沉淀到 session 和 identity"));
+
+    let experiences = std::fs::read_to_string(root.join("identity-default").join("experiences.md"))
+        .expect("experiences file should exist");
+    assert!(experiences.contains("source=runtime_turn"));
+    assert!(experiences.contains("user=把这轮沉淀到 session 和 identity"));
+
+    let dispatch_dir = root.join("subagent-queue").join("dispatch");
+    let dispatch_entries: Vec<_> = std::fs::read_dir(&dispatch_dir)
+        .expect("dispatch dir should exist")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("dispatch dir should be readable");
+    assert_eq!(dispatch_entries.len(), 1);
+
+    let db_path = root.join("memory.db");
+    let archive = chuang_agent::session_archive::SqliteSessionArchive::open(&db_path)
+        .expect("session archive should open");
+    let archived = archive.replay("alpha").expect("replay should succeed");
+    assert_eq!(archived.len(), 1);
+    assert_eq!(
+        archived[0].raw_user_input,
+        "把这轮沉淀到 session 和 identity"
+    );
+}
+
+#[test]
 fn cli_memory_session_search_filters_by_session_id() {
     let root = temp_root("session-search");
     let config_path = write_fake_config(&root);
@@ -273,7 +337,7 @@ fn cli_memory_lim_extract_returns_dry_run_candidates() {
             "--config",
             config_path.to_str().expect("config path should be utf8"),
             "--input",
-            "LIM候选经验：命令超时需要看 timeout_ms",
+            "LIM候选经验：请求超时需要看 timeout_ms",
             "--session-id",
             "alpha",
             "--remember-session",

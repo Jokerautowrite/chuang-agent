@@ -1,4 +1,4 @@
-use crate::common::Timestamp;
+use crate::lifecycle::checkpoint::now_timestamp;
 use crate::lifecycle::{CommandEffect, LifecycleCommand, LifecycleState};
 
 #[derive(Debug, Clone, Default)]
@@ -130,7 +130,7 @@ impl LifecycleTransitionTable {
     fn defer(command: LifecycleCommand) -> CommandEffect<LifecycleCommand> {
         CommandEffect::Deferred {
             command,
-            inserted_at: Timestamp("deferred".to_string()),
+            inserted_at: now_timestamp(),
         }
     }
 }

@@ -8,6 +8,7 @@ fn run_receipt_script(script_path: &PathBuf) -> Value {
     let output = Command::new("bash")
         .arg(script_path)
         .arg("--json")
+        .env("CHUANG_AGENT_BIN", env!("CARGO_BIN_EXE_chuang-agent"))
         .output()
         .expect("receipt script should execute");
 
@@ -40,7 +41,7 @@ fn live_runner_rehearsal_receipt_script_uses_bounded_command_runner_protocol() {
     assert!(script.contains("--max-concurrency 1"));
     assert!(script.contains("subagent report"));
     assert!(script.contains("subagent collect"));
-    assert!(script.contains("approved_by_cli_flag: --approve-exec"));
+    assert!(script.contains("approval_receipt=cli_flag:--approve-exec"));
     assert!(script.contains("single_worker_rehearsal_live_receipt"));
 
     assert!(!script.contains("systemctl"));
@@ -113,10 +114,10 @@ fn live_runner_rehearsal_receipt_script_outputs_positive_rehearsal_receipt() {
     assert_eq!(report["status"], "Success");
     assert_eq!(report["exit_code"], 0);
     assert!(report["report_id"].as_str().is_some());
-    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(report["governance_decision"]["decision"], "allowed");
     assert_eq!(
         report["governance_decision"]["reason"],
-        "approved_by_cli_flag: --approve-exec"
+        "approval_receipt=cli_flag:--approve-exec"
     );
     assert_eq!(report["report_admission"]["status"], "Accepted");
     assert_eq!(

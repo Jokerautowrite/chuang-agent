@@ -44,9 +44,25 @@ pub struct GovernanceError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OperatorApprovalEvidence {
+    pub approval_id: String,
+    pub operator_ref: String,
+    pub evidence_ref: String,
+}
+
 pub trait Governance {
     fn classify(&self, action: &ProposedAction) -> Result<RiskDecision, GovernanceError>;
     fn audit(&mut self, record: AuditRecord) -> Result<(), GovernanceError>;
+
+    fn verify_operator_approval(
+        &self,
+        _evidence: &OperatorApprovalEvidence,
+    ) -> Result<(), GovernanceError> {
+        Err(GovernanceError {
+            message: "operator approval authority unavailable".to_string(),
+        })
+    }
 }
 
 pub fn risk_decision_label(decision: &RiskDecision) -> String {

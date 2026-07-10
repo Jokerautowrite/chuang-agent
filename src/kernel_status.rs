@@ -1453,8 +1453,8 @@ fn build_release_readiness(
         verifies_real_external_services: global_real_live_receipt.verified,
         uses_stub_or_local_fixtures: !global_real_live_receipt.verified,
         writes_repo_files: false,
-        current: "second test version is checkpoint-continuable: readiness, smoke, goal/run, and subagent protocol surfaces are visible while partial modules remain adapter/plugin boundaries".to_string(),
-        next_action: "keep readiness/smoke/goal-run/subagent protocol green while hardening real adapters without reopening core".to_string(),
+        current: "local project and contract surfaces are ready; external live adapters remain acceptance-gated and do not reduce local completion".to_string(),
+        next_action: "keep local gates green while collecting operator-approved external receipts without reopening the completed core".to_string(),
         acceptance,
     }
 }

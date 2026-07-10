@@ -3,6 +3,15 @@ set -euo pipefail
 
 FORMAT="text"
 SMOKE_NAME="${CHUANG_LIVE_REHEARSAL_SMOKE_NAME:-single_live_worker_rehearsal}"
+chuang_agent_bin="${CHUANG_AGENT_BIN:-}"
+
+run_chuang() {
+  if [ -n "$chuang_agent_bin" ]; then
+    "$chuang_agent_bin" "$@"
+  else
+    cargo run --quiet -- "$@"
+  fi
+}
 
 usage() {
   cat <<'USAGE'
@@ -62,7 +71,7 @@ subagent_queue_root = "$queue_root"
 CFG
 
 printf '%s\n' "[rehearsal] live preflight with explicit live gate" >&2
-cargo run --quiet -- subagent live-preflight \
+run_chuang subagent live-preflight \
   --runner-command scripts/chuang-subagent-runner-example.sh \
   --allow-runner-command scripts/chuang-subagent-runner-example.sh \
   --requires-capability rehearsal \
@@ -70,7 +79,7 @@ cargo run --quiet -- subagent live-preflight \
   --json > "$preflight_json"
 
 printf '%s\n' "[rehearsal] dispatch one bounded task" >&2
-cargo run --quiet -- subagent dispatch \
+run_chuang subagent dispatch \
   --config "$config_path" \
   --subagent queued_external \
   --subagent-queue-root "$queue_root" \
@@ -79,7 +88,7 @@ cargo run --quiet -- subagent dispatch \
   --json > "$dispatch_json"
 
 printf '%s\n' "[rehearsal] run one command worker with capability match" >&2
-cargo run --quiet -- subagent run-loop \
+run_chuang subagent run-loop \
   --config "$config_path" \
   --subagent queued_external \
   --subagent-queue-root "$queue_root" \
@@ -139,14 +148,14 @@ PY
 run_id="$(cat "$run_id_file")"
 
 printf '%s\n' "[rehearsal] collect report and admission evidence" >&2
-cargo run --quiet -- subagent report \
+run_chuang subagent report \
   --config "$config_path" \
   --subagent queued_external \
   --subagent-queue-root "$queue_root" \
   --run-id "$run_id" \
   --json > "$report_json"
 
-cargo run --quiet -- subagent collect \
+run_chuang subagent collect \
   --config "$config_path" \
   --subagent queued_external \
   --subagent-queue-root "$queue_root" \
@@ -179,8 +188,8 @@ admission = collect_output["report_admission"]
 
 assert report["status"] == "Success"
 assert report["exit_code"] == 0
-assert report["governance_decision"]["decision"] == "needs_approval"
-assert report["governance_decision"]["reason"] == "approved_by_cli_flag: --approve-exec"
+assert report["governance_decision"]["decision"] == "allowed"
+assert report["governance_decision"]["reason"] == "approval_receipt=cli_flag:--approve-exec"
 assert admission["status"] == "Accepted"
 assert admission["reason_code"] == "report_validated"
 assert admission["controller_agent_id"] == "cli-subagent-controller"

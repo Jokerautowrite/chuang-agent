@@ -184,6 +184,7 @@ fn openai_provider_config_redacts_api_key_in_summary() {
         api_key: "test-key".to_string(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        reasoning_effort: None,
         request_timeout_ms: None,
         tls_ca_cert_path: None,
     });
@@ -198,6 +199,7 @@ fn openai_provider_config_redacts_api_key_in_summary() {
     assert_eq!(summary.api_key_state, Some("<set>".to_string()));
     assert_eq!(summary.provider_tls_ca_cert_path, None);
     assert_eq!(summary.provider_request_timeout_ms, None);
+    assert_eq!(summary.provider_reasoning_effort, None);
 }
 
 #[test]
@@ -209,6 +211,7 @@ fn openai_provider_config_exposes_request_timeout_in_summary() {
         api_key: "test-key".to_string(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        reasoning_effort: Some("high".parse().expect("reasoning effort should parse")),
         request_timeout_ms: Some(12_345),
         tls_ca_cert_path: None,
     });
@@ -219,6 +222,7 @@ fn openai_provider_config_exposes_request_timeout_in_summary() {
     let summary = config.summary();
 
     assert_eq!(summary.provider_request_timeout_ms, Some(12_345));
+    assert_eq!(summary.provider_reasoning_effort.as_deref(), Some("high"));
 }
 
 #[test]
@@ -229,6 +233,7 @@ fn openai_provider_config_rejects_missing_required_fields() {
         api_key: String::new(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        reasoning_effort: None,
         request_timeout_ms: None,
         tls_ca_cert_path: None,
     });

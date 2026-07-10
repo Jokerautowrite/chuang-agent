@@ -2,16 +2,17 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chuang_agent::governance::{RiskDecision, StaticRuleGovernance};
+use chuang_agent::governance::{OperatorApprovalEvidence, RiskDecision, StaticRuleGovernance};
 use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEventKind, RuntimeEventLedger,
 };
 use chuang_agent::tool_runtime::{
-    execute_tool_call, execute_tool_call_with_governance, parse_final_answer,
-    parse_tool_action_envelope, parse_tool_action_envelope_result, parse_tool_call,
-    parse_tool_model_output, proposed_action_for_tool_call, ExecutionSlot, MemoryToolContext,
-    ShellRiskRules, ToolActionEnvelope, ToolCall, ToolExecutionConfig, ToolLoopReport,
-    ToolModelOutput, ToolSurfaceStatus, WriteOperation,
+    execute_tool_call, execute_tool_call_with_governance,
+    execute_tool_call_with_governance_and_ledger, parse_final_answer, parse_tool_action_envelope,
+    parse_tool_action_envelope_result, parse_tool_call, parse_tool_model_output,
+    proposed_action_for_tool_call, ExecutionSlot, MemoryToolContext, OperatorApprovalReceipt,
+    PendingApproval, ShellRiskRules, ToolActionEnvelope, ToolCall, ToolExecutionConfig,
+    ToolLoopReport, ToolModelOutput, ToolSurfaceStatus, WriteOperation,
 };
 use chuang_agent::workspace_file_adapter::WorkspaceFileAdapter;
 
@@ -21,6 +22,32 @@ fn temp_workspace(name: &str) -> PathBuf {
         .expect("clock should move forward")
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-tool-{name}-{nanos}"))
+}
+
+fn register_operator_approval(
+    governance: &mut StaticRuleGovernance,
+    pending: &PendingApproval,
+) -> OperatorApprovalReceipt {
+    let operator_ref = "operator:test".to_string();
+    let evidence_ref = format!("operator-evidence://{}", pending.approval_id);
+    governance
+        .register_operator_approval(OperatorApprovalEvidence {
+            approval_id: pending.approval_id.clone(),
+            operator_ref: operator_ref.clone(),
+            evidence_ref: evidence_ref.clone(),
+        })
+        .expect("operator approval evidence should register");
+    OperatorApprovalReceipt {
+        approval_id: pending.approval_id.clone(),
+        call_id: pending.call_id.clone(),
+        call_fingerprint: pending.call_fingerprint.clone(),
+        target_fingerprint: pending.target_fingerprint.clone(),
+        workspace_fingerprint: pending.workspace_fingerprint.clone(),
+        policy_marker: pending.policy_marker.clone(),
+        approved: true,
+        operator_ref,
+        evidence_ref,
+    }
 }
 
 #[test]
@@ -1244,22 +1271,27 @@ fn execution_slot_records_runtime_ledger_events_for_rejected_tool_calls() {
     assert!(!outcome.record.ok);
     assert_eq!(
         outcome.record.failure_class.as_deref(),
-        Some("governance_rejected")
+        Some("approval_pending")
     );
+    assert!(outcome.pending_approval.is_some());
     let events = ledger
         .query_by_turn("thread-2", "turn-2")
         .expect("ledger should list rejected turn events");
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].event_type, RuntimeEventKind::ToolStarted);
-    assert_eq!(events[1].event_type, RuntimeEventKind::ToolFinished);
+    assert_eq!(events[1].event_type, RuntimeEventKind::ApprovalRequested);
     assert!(events[1]
         .risk_decision
         .as_ref()
         .is_some_and(|decision| decision.decision.starts_with("needs_approval")));
-    assert!(events.iter().all(|event| event
+    assert!(events[0]
         .evidence_ref
         .as_deref()
-        .is_some_and(|value| value.starts_with("tool://"))));
+        .is_some_and(|value| value.starts_with("tool://")));
+    assert!(events[1]
+        .evidence_ref
+        .as_deref()
+        .is_some_and(|value| value.starts_with("approval://")));
     assert_eq!(
         events[0].call_id.as_deref(),
         Some("tool:shell_exec:cli:turn-2:tool-1")
@@ -1267,6 +1299,45 @@ fn execution_slot_records_runtime_ledger_events_for_rejected_tool_calls() {
     assert_eq!(
         events[1].call_id.as_deref(),
         Some("tool:shell_exec:cli:turn-2:tool-1")
+    );
+}
+
+#[test]
+fn governed_ledger_wrapper_returns_pending_without_tool_finished() {
+    let root = temp_workspace("governed-ledger-pending");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+
+    let outcome = execute_tool_call_with_governance_and_ledger(
+        &mut ledger,
+        "thread-wrapper",
+        "turn-wrapper",
+        &root,
+        &mut governance,
+        &ToolCall::ShellExec {
+            command: "rm -rf notes".to_string(),
+            cwd: Some(".".to_string()),
+        },
+        "cli",
+        "turn-wrapper:tool-1",
+        &ToolExecutionConfig::default(),
+    )
+    .expect("needs approval should return pending state");
+
+    assert!(outcome.pending_approval.is_some());
+    let events = ledger
+        .query_by_turn("thread-wrapper", "turn-wrapper")
+        .expect("events should list");
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.event_type.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            RuntimeEventKind::ToolStarted,
+            RuntimeEventKind::ApprovalRequested,
+        ]
     );
 }
 
@@ -1389,6 +1460,8 @@ fn execution_slot_can_return_governance_rejection_as_record() {
         outcome.record.failure_class.as_deref(),
         Some("governance_rejected")
     );
+    assert!(!outcome.record.retryable);
+    assert!(outcome.pending_approval.is_none());
     assert!(outcome
         .record
         .decision
@@ -1427,8 +1500,10 @@ fn execution_slot_can_return_needs_approval_rejection_as_record() {
     assert!(!outcome.record.ok);
     assert_eq!(
         outcome.record.failure_class.as_deref(),
-        Some("governance_rejected")
+        Some("approval_pending")
     );
+    assert!(outcome.record.retryable);
+    assert!(outcome.pending_approval.is_some());
     assert!(outcome
         .record
         .decision
@@ -1441,6 +1516,452 @@ fn execution_slot_can_return_needs_approval_rejection_as_record() {
     assert_eq!(
         governance.audit_records()[0].operation,
         "tool.code_execute.rejected"
+    );
+}
+
+#[test]
+fn execution_slot_resumes_exact_pending_call_with_matching_operator_receipt() {
+    let root = temp_workspace("approval-resume");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let call = ToolCall::ShellExec {
+        command: "printf 'marker\\n' >> approved.txt; # rm -rf notes".to_string(),
+        cwd: Some(".".to_string()),
+    };
+    let outcome = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-resume",
+            "turn-resume",
+            &root,
+            &mut governance,
+            &call,
+            "cli",
+            "turn-resume:tool-1",
+        )
+        .expect("approval request should return pending state");
+    assert!(!root.join("approved.txt").exists());
+    let pending = outcome
+        .pending_approval
+        .expect("pending approval should exist");
+    assert_eq!(
+        serde_json::from_str::<ToolCall>(&pending.serialized_tool_call)
+            .expect("stored call should deserialize"),
+        call
+    );
+    let receipt = register_operator_approval(&mut governance, &pending);
+    let duplicate_pending = pending.clone();
+    let approval_id = pending.approval_id.clone();
+
+    let resumed = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-resume",
+            "turn-resume",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect("matching approval should resume exact call");
+
+    assert!(resumed.record.ok);
+    assert!(resumed.pending_approval.is_none());
+    assert!(duplicate_pending.call_fingerprint.starts_with("sha256:"));
+    assert!(duplicate_pending.target_fingerprint.starts_with("sha256:"));
+    assert!(duplicate_pending
+        .workspace_fingerprint
+        .starts_with("sha256:"));
+    assert!(duplicate_pending.policy_marker.starts_with("sha256:"));
+    assert_eq!(
+        fs::read_to_string(root.join("approved.txt")).expect("approved call should execute"),
+        "marker\n"
+    );
+    let restarted_slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let duplicate_error = restarted_slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-resume",
+            "turn-resume",
+            &root,
+            &mut governance,
+            duplicate_pending,
+            &receipt,
+        )
+        .expect_err("the same approval must execute only once across slot restarts");
+    assert_eq!(duplicate_error, "approval_already_consumed");
+    assert_eq!(
+        fs::read_to_string(root.join("approved.txt")).expect("approved output should remain"),
+        "marker\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let marker = root
+            .join(".chuang/runtime/consumed-approvals")
+            .join(format!("{approval_id}.json"));
+        assert_eq!(
+            fs::metadata(marker)
+                .expect("consumption marker should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let events = ledger
+        .query_by_turn("thread-resume", "turn-resume")
+        .expect("events should list");
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.event_type.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            RuntimeEventKind::ToolStarted,
+            RuntimeEventKind::ApprovalRequested,
+            RuntimeEventKind::ApprovalResolved,
+            RuntimeEventKind::ToolFinished,
+        ]
+    );
+}
+
+#[test]
+fn execution_slot_rejects_mismatched_approval_receipt_without_execution() {
+    let root = temp_workspace("approval-mismatch");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-mismatch",
+            "turn-mismatch",
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "printf marker > must-not-exist.txt; # rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-mismatch:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    let receipt = OperatorApprovalReceipt {
+        approval_id: pending.approval_id.clone(),
+        call_id: pending.call_id.clone(),
+        call_fingerprint: pending.call_fingerprint.clone(),
+        target_fingerprint: pending.target_fingerprint.clone(),
+        workspace_fingerprint: pending.workspace_fingerprint.clone(),
+        policy_marker: "tampered-policy".to_string(),
+        approved: true,
+        operator_ref: "operator:test".to_string(),
+        evidence_ref: "operator-evidence://tampered".to_string(),
+    };
+
+    let error = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-mismatch",
+            "turn-mismatch",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect_err("mismatched receipt must not resume");
+
+    assert_eq!(error, "operator_approval_receipt_mismatch");
+    assert!(!root.join("must-not-exist.txt").exists());
+    assert!(!ledger
+        .query_by_turn("thread-mismatch", "turn-mismatch")
+        .expect("events should list")
+        .iter()
+        .any(|event| event.event_type == RuntimeEventKind::ApprovalResolved));
+}
+
+#[test]
+fn execution_slot_rejects_pending_approval_copied_to_another_workspace() {
+    let original_root = temp_workspace("approval-original-workspace");
+    let other_root = temp_workspace("approval-other-workspace");
+    fs::create_dir_all(&original_root).expect("original workspace should be created");
+    fs::create_dir_all(&other_root).expect("other workspace should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-workspace",
+            "turn-workspace",
+            &original_root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "printf marker > must-not-exist.txt; # rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-workspace:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    let receipt = register_operator_approval(&mut governance, &pending);
+
+    let error = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-workspace",
+            "turn-workspace",
+            &other_root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect_err("approval must stay bound to its original workspace");
+
+    assert_eq!(error, "approval_pending_revalidation_failed");
+    assert!(!other_root.join("must-not-exist.txt").exists());
+}
+
+#[test]
+fn execution_slot_rejects_tampered_pending_approval_id() {
+    let root = temp_workspace("approval-tampered-id");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let mut pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-tampered-id",
+            "turn-tampered-id",
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "printf marker > must-not-exist.txt; # rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-tampered-id:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    pending.approval_id = "approval-tampered".to_string();
+    let receipt = register_operator_approval(&mut governance, &pending);
+
+    let error = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-tampered-id",
+            "turn-tampered-id",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect_err("tampered approval id must not pass revalidation");
+
+    assert_eq!(error, "approval_pending_revalidation_failed");
+    assert!(!root.join("must-not-exist.txt").exists());
+}
+
+#[test]
+fn execution_slot_rejects_matching_but_unregistered_operator_receipt() {
+    let root = temp_workspace("approval-unregistered");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-unregistered",
+            "turn-unregistered",
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "printf marker > must-not-exist.txt; # rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-unregistered:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    let receipt = OperatorApprovalReceipt {
+        approval_id: pending.approval_id.clone(),
+        call_id: pending.call_id.clone(),
+        call_fingerprint: pending.call_fingerprint.clone(),
+        target_fingerprint: pending.target_fingerprint.clone(),
+        workspace_fingerprint: pending.workspace_fingerprint.clone(),
+        policy_marker: pending.policy_marker.clone(),
+        approved: true,
+        operator_ref: "operator:forged".to_string(),
+        evidence_ref: "operator-evidence://forged".to_string(),
+    };
+
+    let error = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-unregistered",
+            "turn-unregistered",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect_err("matching caller-authored fields must not self-authorize");
+
+    assert_eq!(error, "operator_approval_not_authorized");
+    assert!(!root.join("must-not-exist.txt").exists());
+}
+
+#[test]
+fn execution_slot_rejects_empty_operator_ref_without_execution() {
+    let root = temp_workspace("approval-empty-operator");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-empty-operator",
+            "turn-empty-operator",
+            &root,
+            &mut governance,
+            &ToolCall::ShellExec {
+                command: "printf marker > must-not-exist.txt; # rm -rf notes".to_string(),
+                cwd: Some(".".to_string()),
+            },
+            "cli",
+            "turn-empty-operator:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    let receipt = OperatorApprovalReceipt {
+        approval_id: pending.approval_id.clone(),
+        call_id: pending.call_id.clone(),
+        call_fingerprint: pending.call_fingerprint.clone(),
+        target_fingerprint: pending.target_fingerprint.clone(),
+        workspace_fingerprint: pending.workspace_fingerprint.clone(),
+        policy_marker: pending.policy_marker.clone(),
+        approved: true,
+        operator_ref: " ".to_string(),
+        evidence_ref: "operator-evidence://empty-operator".to_string(),
+    };
+
+    let error = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-empty-operator",
+            "turn-empty-operator",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect_err("empty operator ref must be rejected");
+
+    assert_eq!(error, "operator_approval_operator_ref_required");
+    assert!(!root.join("must-not-exist.txt").exists());
+}
+
+#[test]
+fn failed_approved_call_is_consumed_before_partial_side_effect_can_be_replayed() {
+    let root = temp_workspace("approval-failed-consumed");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let call = ToolCall::ShellExec {
+        command: "printf 'partial\\n' >> partial.txt; exit 7; # rm -rf notes".to_string(),
+        cwd: Some(".".to_string()),
+    };
+    let pending = slot
+        .execute_or_reject_with_governance_and_ledger(
+            &mut ledger,
+            "thread-partial",
+            "turn-partial",
+            &root,
+            &mut governance,
+            &call,
+            "cli",
+            "turn-partial:tool-1",
+        )
+        .expect("approval request should return pending state")
+        .pending_approval
+        .expect("pending approval should exist");
+    let receipt = register_operator_approval(&mut governance, &pending);
+    let duplicate_pending = pending.clone();
+    let pending_call_id = pending.call_id.clone();
+
+    let first = slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-partial",
+            "turn-partial",
+            &root,
+            &mut governance,
+            pending,
+            &receipt,
+        )
+        .expect("failed command should return its tool record");
+    assert!(!first.record.ok);
+    assert_eq!(
+        fs::read_to_string(root.join("partial.txt")).expect("partial effect should exist"),
+        "partial\n"
+    );
+
+    let restarted_slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let retry_error = restarted_slot
+        .resume_approved_with_ledger(
+            &mut ledger,
+            "thread-partial",
+            "turn-partial",
+            &root,
+            &mut governance,
+            duplicate_pending,
+            &receipt,
+        )
+        .expect_err("failed approved execution must not replay after restart");
+    assert_eq!(retry_error, "approval_already_consumed");
+    assert_eq!(
+        fs::read_to_string(root.join("partial.txt")).expect("partial effect should not repeat"),
+        "partial\n"
+    );
+    let events = ledger
+        .query_by_turn("thread-partial", "turn-partial")
+        .expect("events should list");
+    let resolved = events
+        .iter()
+        .find(|event| event.event_type == RuntimeEventKind::ApprovalResolved)
+        .expect("failed approved execution should still have a terminal approval event");
+    assert!(resolved
+        .risk_decision
+        .as_ref()
+        .is_some_and(|decision| decision.reason.contains("tool execution failed")));
+    assert!(resolved
+        .evidence_ref
+        .as_deref()
+        .is_some_and(|reference| reference.ends_with("/failed")));
+    let finished = events
+        .iter()
+        .filter(|event| event.event_type == RuntimeEventKind::ToolFinished)
+        .collect::<Vec<_>>();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(
+        finished[0].call_id.as_deref(),
+        Some(pending_call_id.as_str())
     );
 }
 

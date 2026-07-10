@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,20 +15,30 @@ use chuang_agent::context_engine::{ContextSegment, SegmentSource};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
-use chuang_agent::memory_store::MemoryStore;
+use chuang_agent::identity_registry::{
+    compatibility_default_identity, IdentityRegistry, IdentityRegistryError,
+};
+use chuang_agent::memory_admission::{
+    preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
+};
+use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
-use chuang_agent::runtime_event_ledger::{InMemoryRuntimeEventLedger, RuntimeEventLedger};
+use chuang_agent::runtime_event_ledger::{
+    InMemoryRuntimeEventLedger, RuntimeEvent, RuntimeEventLedger,
+};
+use chuang_agent::session_archive::SqliteSessionArchive;
 use chuang_agent::slot_registry::build_runtime_slots;
+use chuang_agent::subagent_queue::FileSubagentQueueConfig;
 use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
     ContextIsolation, SpawnRequest, SubagentSpawner, SubagentToolPolicy,
 };
 use chuang_agent::terminal_event::{StepStatus, TerminalEvent};
 use chuang_agent::tool_runtime::{
-    parse_tool_model_output, ExecutionSlot, MemoryToolContext, ToolCall, ToolExecutionConfig,
-    ToolExecutionRecord, ToolLoopEvent, ToolLoopReport, ToolModelOutput, ToolProtocolError,
-    ToolSurfaceStatus,
+    parse_tool_model_output, ExecutionSlot, MemoryToolContext, PendingApproval, ToolCall,
+    ToolExecutionConfig, ToolExecutionRecord, ToolLoopEvent, ToolLoopReport, ToolModelOutput,
+    ToolProtocolError, ToolSurfaceStatus,
 };
 use chuang_agent::{common::AgentId, common::TaskId};
 
@@ -53,6 +65,7 @@ pub(crate) fn run_with_options(
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
 
     let mut runtime = request.options.runtime.clone();
+    ensure_cli_channel_metadata(&mut runtime.metadata);
     if let Some(session_id) = &request.session_id {
         runtime
             .metadata
@@ -117,6 +130,8 @@ pub(crate) fn run_with_options(
 pub(crate) fn kernel_config_from_runtime(
     runtime: &RuntimeConfig,
 ) -> Result<ChuangKernelConfig, String> {
+    let mut metadata = runtime.metadata.clone();
+    ensure_cli_channel_metadata(&mut metadata);
     let dual_file_config = runtime
         .identity_memory
         .build_dual_file_config()
@@ -126,12 +141,17 @@ pub(crate) fn kernel_config_from_runtime(
         .snapshot()
         .map_err(|e| format!("identity_memory_snapshot_failed: {e:?}"))?;
     let identity_bootstrap_snapshot = load_identity_bootstrap_snapshot(runtime)?;
+    let agent_id = identity_bootstrap_snapshot
+        .active_identity
+        .as_ref()
+        .map(|identity| identity.agent_id.clone())
+        .unwrap_or_else(|| "chuang-cli".to_string());
 
     Ok(ChuangKernelConfig {
-        agent_id: "chuang-cli".to_string(),
+        agent_id,
         parent_agent_id: None,
         recall_limit: runtime.recall_limit,
-        metadata: runtime.metadata.clone(),
+        metadata,
         context_budget: Some(runtime.context_budget.clone()),
         context_engine_kind: Some(runtime.context_engine.to_context_engine_kind()),
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
@@ -144,9 +164,24 @@ pub(crate) fn default_db_path() -> PathBuf {
     PathBuf::from("./data/chuang-agent.db")
 }
 
-fn load_identity_bootstrap_snapshot(
+pub(crate) fn load_identity_bootstrap_snapshot(
     runtime: &RuntimeConfig,
 ) -> Result<IdentityBootstrapSnapshot, String> {
+    let registry_path = &runtime.identity_bootstrap.agents_registry_path;
+    let agents_registry_exists = registry_path.exists();
+    let agents_registry = read_optional_identity_file(registry_path)?;
+    let active_identity = if agents_registry_exists {
+        let registry =
+            IdentityRegistry::parse(&agents_registry).map_err(format_identity_registry_error)?;
+        Some(
+            registry
+                .select_active(None, configured_runtime_channel(runtime).or(Some("cli")))
+                .map_err(format_identity_registry_error)?,
+        )
+    } else {
+        Some(compatibility_default_identity("chuang-cli"))
+    };
+
     Ok(IdentityBootstrapSnapshot {
         soul: read_optional_identity_file(&runtime.identity_bootstrap.soul_path)?,
         soul_exists: runtime.identity_bootstrap.soul_path.exists(),
@@ -154,11 +189,32 @@ fn load_identity_bootstrap_snapshot(
         story_exists: runtime.identity_bootstrap.story_path.exists(),
         first_wake: read_optional_identity_file(&runtime.identity_bootstrap.first_wake_path)?,
         first_wake_exists: runtime.identity_bootstrap.first_wake_path.exists(),
-        agents_registry: read_optional_identity_file(
-            &runtime.identity_bootstrap.agents_registry_path,
-        )?,
-        agents_registry_exists: runtime.identity_bootstrap.agents_registry_path.exists(),
+        agents_registry,
+        agents_registry_exists,
+        active_identity,
     })
+}
+
+fn format_identity_registry_error(error: IdentityRegistryError) -> String {
+    format!("identity_registry_invalid: {error:?}")
+}
+
+fn configured_runtime_channel(runtime: &RuntimeConfig) -> Option<&str> {
+    runtime
+        .metadata
+        .get("channel")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn ensure_cli_channel_metadata(metadata: &mut BTreeMap<String, String>) {
+    match metadata.get_mut("channel") {
+        Some(value) if value.trim().is_empty() => *value = "cli".to_string(),
+        Some(_) => {}
+        None => {
+            metadata.insert("channel".to_string(), "cli".to_string());
+        }
+    }
 }
 
 fn conversation_history_context_segments(
@@ -546,6 +602,7 @@ where
                     "cli",
                     task_id,
                 )?;
+                let pending_approval = outcome.pending_approval.clone();
                 let record = outcome.record;
                 transcript.push(format!(
                     "call={} decision={} ok={} summary={}",
@@ -585,6 +642,20 @@ where
                             .unwrap_or_default(),
                     },
                 )?;
+                if let Some(pending) = pending_approval {
+                    return finish_pending_approval_turn(
+                        turn,
+                        &original_input,
+                        workspace_root,
+                        round_index + 1,
+                        &tool_calls,
+                        &protocol_errors,
+                        &tool_events,
+                        &transcript,
+                        &runtime_event_ledger,
+                        &pending,
+                    );
+                }
                 if tool_calls
                     .last()
                     .and_then(|record| record.failure_class.as_deref())
@@ -801,6 +872,109 @@ where
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_pending_approval_turn(
+    mut turn: ChuangKernelTurn,
+    original_input: &str,
+    workspace_root: &Path,
+    rounds: usize,
+    tool_calls: &[ToolExecutionRecord],
+    protocol_errors: &[ToolProtocolError],
+    tool_events: &[ToolLoopEvent],
+    transcript: &[String],
+    runtime_event_ledger: &InMemoryRuntimeEventLedger,
+    pending: &PendingApproval,
+) -> Result<ChuangKernelTurn, String> {
+    let pending_path = persist_pending_approval(workspace_root, pending)?;
+    turn.user_input = original_input.to_string();
+    turn.result.response.body = format!(
+        "本轮已暂停，等待明确审批。\napproval_id={}\npending_file={}\n未执行目标动作。",
+        pending.approval_id,
+        pending_path.display()
+    );
+    insert_tool_surface_metadata(&mut turn, workspace_root)?;
+    insert_tool_metadata_with_status(
+        &mut turn,
+        workspace_root,
+        rounds,
+        tool_calls,
+        protocol_errors,
+        tool_events,
+        transcript,
+        "human_input_required",
+    )?;
+    insert_runtime_event_ledger_metadata(&mut turn, runtime_event_ledger)?;
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert(
+        "tool_loop_status".to_string(),
+        "human_input_required".to_string(),
+    );
+    extra.insert("human_input_required".to_string(), "true".to_string());
+    extra.insert(
+        "pending_approval_id".to_string(),
+        pending.approval_id.clone(),
+    );
+    extra.insert(
+        "pending_approval_path".to_string(),
+        pending_path.display().to_string(),
+    );
+    extra.insert(
+        "pending_approval_policy_marker".to_string(),
+        pending.policy_marker.clone(),
+    );
+    Ok(turn)
+}
+
+fn persist_pending_approval(
+    workspace_root: &Path,
+    pending: &PendingApproval,
+) -> Result<PathBuf, String> {
+    let normalized_root = fs::canonicalize(workspace_root).map_err(|error| {
+        format!(
+            "pending_approval_workspace_invalid path={} error={error}",
+            workspace_root.display()
+        )
+    })?;
+    let relative = PathBuf::from(".chuang")
+        .join("runtime")
+        .join("pending-approvals")
+        .join(format!("{}.json", pending.approval_id));
+    let candidate = chuang_agent::path_utils::resolve_candidate_preserving_existing_symlinks(
+        &workspace_root.join(relative),
+    )?;
+    if !candidate.starts_with(&normalized_root) {
+        return Err("pending_approval_path_outside_workspace".to_string());
+    }
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| "pending_approval_parent_invalid".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("pending_approval_dir_create_failed: {error}"))?;
+    let bytes = serde_json::to_vec_pretty(pending)
+        .map_err(|_| "pending_approval_serialize_failed".to_string())?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    match options.open(&candidate) {
+        Ok(mut file) => {
+            file.write_all(&bytes)
+                .map_err(|error| format!("pending_approval_write_failed: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("pending_approval_sync_failed: {error}"))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = fs::read(&candidate)
+                .map_err(|read_error| format!("pending_approval_read_failed: {read_error}"))?;
+            if existing != bytes {
+                return Err("pending_approval_file_conflict".to_string());
+            }
+        }
+        Err(error) => return Err(format!("pending_approval_create_failed: {error}")),
+    }
+    Ok(candidate)
 }
 
 fn write_terminal_event(progress_path: Option<&Path>, event: &TerminalEvent) -> Result<(), String> {
@@ -1401,9 +1575,19 @@ fn insert_runtime_event_ledger_metadata(
     turn: &mut ChuangKernelTurn,
     ledger: &InMemoryRuntimeEventLedger,
 ) -> Result<(), String> {
-    let events = ledger
-        .list()
-        .map_err(|e| format!("runtime_event_ledger_read_failed: {e}"))?;
+    let mut events = turn
+        .result
+        .response
+        .meta
+        .extra
+        .get("runtime_event_ledger_json")
+        .and_then(|raw| serde_json::from_str::<Vec<RuntimeEvent>>(raw).ok())
+        .unwrap_or_default();
+    events.extend(
+        ledger
+            .list()
+            .map_err(|e| format!("runtime_event_ledger_read_failed: {e}"))?,
+    );
     let extra = &mut turn.result.response.meta.extra;
     extra.insert(
         "runtime_event_ledger_available".to_string(),
@@ -1498,9 +1682,9 @@ fn read_optional_identity_file(path: &PathBuf) -> Result<String, String> {
     })
 }
 
-fn remember_turn_if_requested<S, R>(
+fn remember_turn_if_requested<R>(
     options: &CliOptions,
-    kernel: &mut ChuangKernel<S, R>,
+    kernel: &mut ChuangKernel<SqliteMemoryStore, R>,
     mut turn: chuang_agent::chuang_kernel::ChuangKernelTurn,
     request: &RunCliRequest,
 ) -> Result<
@@ -1511,10 +1695,11 @@ fn remember_turn_if_requested<S, R>(
     String,
 >
 where
-    S: MemoryStore,
     R: chuang_agent::responder::Responder,
 {
     let mut records = RememberedRecords::default();
+    let mut pending_session_archive: Option<PendingSessionArchive> = None;
+    let mut remember_commit = RememberCommitTracker::new(request);
     records.runtime_report_id = Some(turn.report.report_id.0.clone());
     insert_runtime_report_metadata(&mut turn);
 
@@ -1560,95 +1745,471 @@ where
             .session_id
             .as_ref()
             .ok_or_else(|| "remember_session_requires_session_id: pass --session-id".to_string())?;
-        match kernel.remember_session_turn(&turn, session_id) {
-            Ok(receipt) => {
-                records.session_record_id = Some(receipt.record_id);
-                turn.result.response.meta.extra.insert(
-                    "session_memory_write_status".to_string(),
-                    if receipt.compacted {
-                        "compacted"
-                    } else {
-                        "written"
-                    }
-                    .to_string(),
-                );
-                turn.result.response.meta.extra.insert(
-                    "session_memory_summary_kind".to_string(),
-                    if receipt.compacted {
-                        "compacted_turn_summary"
-                    } else {
-                        "turn_summary"
-                    }
-                    .to_string(),
-                );
-                if receipt.compacted {
-                    turn.result.response.meta.extra.insert(
-                        "session_memory_compacted_from_chars".to_string(),
-                        receipt.attempted_chars.to_string(),
-                    );
-                    turn.result.response.meta.extra.insert(
-                        "session_memory_compacted_to_chars".to_string(),
-                        receipt.stored_chars.to_string(),
-                    );
-                }
+        match kernel.prepare_session_turn_memory(&turn, session_id) {
+            Ok(prepared) => {
+                pending_session_archive = Some(PendingSessionArchive::Prepared {
+                    session_id: session_id.clone(),
+                    summary: prepared.record,
+                    record_id: prepared.receipt.record_id,
+                    metadata: SessionMemoryWriteMetadata::Prepared {
+                        compacted: prepared.receipt.compacted,
+                        attempted_chars: prepared.receipt.attempted_chars,
+                        stored_chars: prepared.receipt.stored_chars,
+                    },
+                });
             }
             Err(chuang_agent::chuang_kernel::ChuangKernelMemoryError::HardLimitExceeded {
                 limit_chars,
                 attempted_chars,
                 existing_entries,
             }) => {
-                turn.result.response.meta.extra.insert(
-                    "session_memory_write_status".to_string(),
-                    "hard_limit_exceeded".to_string(),
-                );
-                turn.result.response.meta.extra.insert(
-                    "session_memory_write_error".to_string(),
-                    format!(
-                        "memory_write_hard_limit_exceeded limit_chars={} attempted_chars={} existing_entries={}",
-                        limit_chars,
-                        attempted_chars,
-                        if existing_entries.is_empty() {
-                            "none".to_string()
-                        } else {
-                            existing_entries
-                                .into_iter()
-                                .map(|entry| format!("{}:{}chars", entry.id, entry.chars))
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        }
-                    ),
-                );
-                turn.result.response.meta.extra.insert(
-                    "session_memory_write_requested".to_string(),
-                    "true".to_string(),
-                );
-                turn.result.response.meta.extra.insert(
-                    "session_memory_summary_kind".to_string(),
-                    "none".to_string(),
-                );
+                pending_session_archive = Some(PendingSessionArchive::HardLimitExceeded {
+                    session_id: session_id.clone(),
+                    metadata: SessionMemoryWriteMetadata::HardLimitExceeded {
+                        error: format!(
+                            "memory_write_hard_limit_exceeded limit_chars={} attempted_chars={} existing_entries={}",
+                            limit_chars,
+                            attempted_chars,
+                            if existing_entries.is_empty() {
+                                "none".to_string()
+                            } else {
+                                existing_entries
+                                    .into_iter()
+                                    .map(|entry| format!("{}:{}chars", entry.id, entry.chars))
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            }
+                        ),
+                    },
+                });
             }
             Err(err) => return Err(format_kernel_memory_error(err)),
         }
     }
 
-    insert_session_memory_metadata(&mut turn, request, &records);
+    let pending_identity_write = if request.remember_identity {
+        Some(prepare_identity_turn_write(options, &turn)?)
+    } else {
+        None
+    };
+
+    let pending_experience_write = if request.remember_experience {
+        Some(prepare_experience_turn_write(options, &turn)?)
+    } else {
+        None
+    };
+
+    let pending_subagent_dispatch = if request.dispatch_subagent {
+        Some(prepare_subagent_dispatch(options, &turn)?)
+    } else {
+        None
+    };
+
+    if let Some(pending) = pending_session_archive {
+        records.session_record_id = pending.commit(options, &mut turn)?;
+        remember_commit.mark_applied(RememberWorkflowStep::Archive);
+    }
 
     if request.remember_identity {
-        records.identity_record_id = Some(remember_identity_turn(options, &turn)?);
+        match pending_identity_write
+            .expect("identity write should be prepared when requested")
+            .commit()
+        {
+            Ok(record_id) => {
+                records.identity_record_id = Some(record_id);
+                remember_commit.mark_applied(RememberWorkflowStep::Identity);
+            }
+            Err(error) => {
+                if !remember_commit.has_applied_steps() {
+                    return Err(error);
+                }
+                remember_commit.mark_failed(RememberWorkflowStep::Identity, error);
+                insert_session_memory_metadata(&mut turn, request, &records);
+                remember_commit.apply_metadata(&mut turn);
+                return Ok((turn.result, records));
+            }
+        }
     }
 
     if request.remember_experience {
-        records.experience_record_id = Some(remember_experience_turn(options, &turn)?);
+        match pending_experience_write
+            .expect("experience write should be prepared when requested")
+            .commit()
+        {
+            Ok(record_id) => {
+                records.experience_record_id = Some(record_id);
+                remember_commit.mark_applied(RememberWorkflowStep::Experience);
+            }
+            Err(error) => {
+                if !remember_commit.has_applied_steps() {
+                    return Err(error);
+                }
+                remember_commit.mark_failed(RememberWorkflowStep::Experience, error);
+                insert_session_memory_metadata(&mut turn, request, &records);
+                remember_commit.apply_metadata(&mut turn);
+                return Ok((turn.result, records));
+            }
+        }
     }
 
     if request.dispatch_subagent {
-        let receipt = dispatch_subagent_turn(options, &turn)?;
-        records.subagent_dispatch_run_id = Some(receipt.run_id.0);
-        records.subagent_dispatch_agent_id = Some(receipt.agent_id.0);
-        records.subagent_dispatch_task_id = Some(turn.report.task_id.0.clone());
+        match pending_subagent_dispatch
+            .expect("subagent dispatch should be prepared when requested")
+            .commit()
+        {
+            Ok(receipt) => {
+                records.subagent_dispatch_run_id = Some(receipt.run_id.0);
+                records.subagent_dispatch_agent_id = Some(receipt.agent_id.0);
+                records.subagent_dispatch_task_id = Some(turn.report.task_id.0.clone());
+                remember_commit.mark_applied(RememberWorkflowStep::QueuedDispatch);
+            }
+            Err(error) => {
+                if !remember_commit.has_applied_steps() {
+                    return Err(error);
+                }
+                remember_commit.mark_failed(RememberWorkflowStep::QueuedDispatch, error);
+                insert_session_memory_metadata(&mut turn, request, &records);
+                remember_commit.apply_metadata(&mut turn);
+                return Ok((turn.result, records));
+            }
+        }
     }
 
+    insert_session_memory_metadata(&mut turn, request, &records);
+    remember_commit.apply_metadata(&mut turn);
     Ok((turn.result, records))
+}
+
+enum PendingSessionArchive {
+    Prepared {
+        session_id: String,
+        summary: MemoryRecord,
+        record_id: String,
+        metadata: SessionMemoryWriteMetadata,
+    },
+    HardLimitExceeded {
+        session_id: String,
+        metadata: SessionMemoryWriteMetadata,
+    },
+}
+
+enum SessionMemoryWriteMetadata {
+    Prepared {
+        compacted: bool,
+        attempted_chars: usize,
+        stored_chars: usize,
+    },
+    HardLimitExceeded {
+        error: String,
+    },
+}
+
+impl PendingSessionArchive {
+    fn commit(
+        self,
+        options: &CliOptions,
+        turn: &mut ChuangKernelTurn,
+    ) -> Result<Option<String>, String> {
+        match self {
+            Self::Prepared {
+                session_id,
+                summary,
+                record_id,
+                metadata,
+            } => {
+                archive_session_turn(options, turn, &session_id, Some(summary))?;
+                metadata.apply(turn);
+                Ok(Some(record_id))
+            }
+            Self::HardLimitExceeded {
+                session_id,
+                metadata,
+            } => {
+                archive_session_turn(options, turn, &session_id, None)?;
+                metadata.apply(turn);
+                Ok(None)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RememberWorkflowStep {
+    Archive,
+    Identity,
+    Experience,
+    QueuedDispatch,
+}
+
+impl RememberWorkflowStep {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Archive => "archive",
+            Self::Identity => "identity",
+            Self::Experience => "experience",
+            Self::QueuedDispatch => "queued_dispatch",
+        }
+    }
+
+    fn status_key(self) -> &'static str {
+        match self {
+            Self::Archive => "remember_archive_status",
+            Self::Identity => "remember_identity_status",
+            Self::Experience => "remember_experience_status",
+            Self::QueuedDispatch => "remember_queued_dispatch_status",
+        }
+    }
+}
+
+struct RememberCommitTracker {
+    requested_steps: Vec<RememberWorkflowStep>,
+    applied_steps: Vec<RememberWorkflowStep>,
+    failed_step: Option<RememberWorkflowStep>,
+    failure_message: Option<String>,
+    step_statuses: BTreeMap<&'static str, &'static str>,
+}
+
+impl RememberCommitTracker {
+    fn new(request: &RunCliRequest) -> Self {
+        let mut requested_steps = Vec::new();
+        let mut step_statuses = BTreeMap::new();
+        for (requested, step) in [
+            (request.remember_session, RememberWorkflowStep::Archive),
+            (request.remember_identity, RememberWorkflowStep::Identity),
+            (
+                request.remember_experience,
+                RememberWorkflowStep::Experience,
+            ),
+            (
+                request.dispatch_subagent,
+                RememberWorkflowStep::QueuedDispatch,
+            ),
+        ] {
+            if requested {
+                requested_steps.push(step);
+                step_statuses.insert(step.status_key(), "pending");
+            } else {
+                step_statuses.insert(step.status_key(), "not_requested");
+            }
+        }
+        Self {
+            requested_steps,
+            applied_steps: Vec::new(),
+            failed_step: None,
+            failure_message: None,
+            step_statuses,
+        }
+    }
+
+    fn mark_applied(&mut self, step: RememberWorkflowStep) {
+        self.step_statuses.insert(step.status_key(), "applied");
+        if !self.applied_steps.contains(&step) {
+            self.applied_steps.push(step);
+        }
+    }
+
+    fn mark_failed(&mut self, step: RememberWorkflowStep, error: String) {
+        self.step_statuses.insert(step.status_key(), "failed");
+        self.failed_step = Some(step);
+        self.failure_message = Some(error);
+    }
+
+    fn pending_steps(&self) -> Vec<RememberWorkflowStep> {
+        self.requested_steps
+            .iter()
+            .copied()
+            .filter(|step| !self.applied_steps.contains(step) && self.failed_step != Some(*step))
+            .collect()
+    }
+
+    fn has_applied_steps(&self) -> bool {
+        !self.applied_steps.is_empty()
+    }
+
+    fn overall_status(&self) -> &'static str {
+        if self.requested_steps.is_empty() {
+            "not_requested"
+        } else if self.failed_step.is_some() {
+            "partial_success"
+        } else {
+            "complete"
+        }
+    }
+
+    fn blind_retry_safe(&self) -> bool {
+        self.requested_steps.is_empty()
+    }
+
+    fn apply_metadata(&self, turn: &mut ChuangKernelTurn) {
+        let applied_steps = self
+            .applied_steps
+            .iter()
+            .map(|step| step.as_str().to_string())
+            .collect::<Vec<_>>();
+        let pending_steps = self
+            .pending_steps()
+            .into_iter()
+            .map(|step| step.as_str().to_string())
+            .collect::<Vec<_>>();
+        let failed_step = self.failed_step.map(RememberWorkflowStep::as_str);
+        let failure_message = self.failure_message.clone().unwrap_or_default();
+
+        let extra = &mut turn.result.response.meta.extra;
+        extra.insert(
+            "remember_commit_status".to_string(),
+            self.overall_status().to_string(),
+        );
+        extra.insert(
+            "remember_blind_retry_safe".to_string(),
+            self.blind_retry_safe().to_string(),
+        );
+        extra.insert(
+            "remember_failed_step".to_string(),
+            failed_step.unwrap_or("none").to_string(),
+        );
+        extra.insert(
+            "remember_failure_message".to_string(),
+            failure_message.clone(),
+        );
+        extra.insert(
+            "remember_applied_steps_json".to_string(),
+            serde_json::json!(applied_steps).to_string(),
+        );
+        extra.insert(
+            "remember_pending_steps_json".to_string(),
+            serde_json::json!(pending_steps).to_string(),
+        );
+        extra.insert(
+            "remember_repair_json".to_string(),
+            serde_json::json!({
+                "status": self.overall_status(),
+                "blind_retry_safe": self.blind_retry_safe(),
+                "failed_step": failed_step,
+                "failure_message": if failure_message.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(failure_message)
+                },
+                "applied_steps": applied_steps,
+                "pending_steps": pending_steps,
+                "recommended_action": match self.overall_status() {
+                    "partial_success" => "resume_from_failed_step_without_blind_replaying_archive",
+                    "complete" => "no_repair_needed",
+                    _ => "no_repair_needed",
+                },
+            })
+            .to_string(),
+        );
+        for (key, status) in &self.step_statuses {
+            extra.insert((*key).to_string(), (*status).to_string());
+        }
+    }
+}
+
+impl SessionMemoryWriteMetadata {
+    fn apply(self, turn: &mut ChuangKernelTurn) {
+        let extra = &mut turn.result.response.meta.extra;
+        match self {
+            Self::Prepared {
+                compacted,
+                attempted_chars,
+                stored_chars,
+            } => {
+                extra.insert(
+                    "session_memory_write_status".to_string(),
+                    if compacted { "compacted" } else { "written" }.to_string(),
+                );
+                extra.insert(
+                    "session_memory_summary_kind".to_string(),
+                    if compacted {
+                        "compacted_turn_summary"
+                    } else {
+                        "turn_summary"
+                    }
+                    .to_string(),
+                );
+                if compacted {
+                    extra.insert(
+                        "session_memory_compacted_from_chars".to_string(),
+                        attempted_chars.to_string(),
+                    );
+                    extra.insert(
+                        "session_memory_compacted_to_chars".to_string(),
+                        stored_chars.to_string(),
+                    );
+                }
+            }
+            Self::HardLimitExceeded { error } => {
+                extra.insert(
+                    "session_memory_write_status".to_string(),
+                    "hard_limit_exceeded".to_string(),
+                );
+                extra.insert("session_memory_write_error".to_string(), error);
+                extra.insert(
+                    "session_memory_write_requested".to_string(),
+                    "true".to_string(),
+                );
+                extra.insert(
+                    "session_memory_summary_kind".to_string(),
+                    "none".to_string(),
+                );
+            }
+        }
+    }
+}
+
+fn archive_session_turn(
+    options: &CliOptions,
+    turn: &mut ChuangKernelTurn,
+    session_id: &str,
+    searchable_summary: Option<MemoryRecord>,
+) -> Result<(), String> {
+    let runtime_event_refs = turn
+        .result
+        .response
+        .meta
+        .extra
+        .get("runtime_event_ledger_json")
+        .and_then(|raw| serde_json::from_str::<Vec<RuntimeEvent>>(raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|event| event.evidence_ref)
+        .collect::<Vec<_>>();
+    let runtime_report_ref = format!("runtime-report://{}", turn.report.report_id.0);
+    let archive = SqliteSessionArchive::open(&options.runtime.db_path)
+        .map_err(|error| format!("session_archive_open_failed: {error}"))?;
+    let archived = match searchable_summary {
+        Some(summary) => archive.append_with_summary(
+            session_id,
+            turn.user_input.clone(),
+            turn.result.response.body.clone(),
+            runtime_event_refs,
+            vec![runtime_report_ref],
+            summary,
+        ),
+        None => archive.append(
+            session_id,
+            turn.user_input.clone(),
+            turn.result.response.body.clone(),
+            runtime_event_refs,
+            vec![runtime_report_ref],
+            None,
+        ),
+    }
+    .map_err(|error| format!("session_archive_append_failed: {error}"))?;
+
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert("session_archive_status".to_string(), "written".to_string());
+    extra.insert(
+        "session_archive_sequence".to_string(),
+        archived.sequence.to_string(),
+    );
+    extra.insert(
+        "session_archive_created_at".to_string(),
+        archived.created_at,
+    );
+    extra.insert("session_archive_replayable".to_string(), "true".to_string());
+    Ok(())
 }
 
 fn insert_runtime_report_metadata(turn: &mut chuang_agent::chuang_kernel::ChuangKernelTurn) {
@@ -1733,79 +2294,61 @@ fn insert_session_memory_metadata(
     }
 }
 
-fn dispatch_subagent_turn(
-    options: &CliOptions,
+fn build_subagent_dispatch_request(
     turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
-) -> Result<chuang_agent::subagent_spawner::SpawnReceipt, String> {
-    if options.runtime.subagent != SubagentConfig::QueuedExternal {
-        return Err(
-            "subagent_dispatch_requires_queued_external: pass --subagent queued_external"
-                .to_string(),
-        );
+) -> SpawnRequest {
+    SpawnRequest {
+        task_id: TaskId(turn.report.task_id.0.clone()),
+        parent_agent_id: AgentId("chuang-cli".to_string()),
+        agent_name: "worker".to_string(),
+        task: format!(
+            "处理 runtime report {}: user={} summary={}",
+            turn.report.report_id.0, turn.user_input, turn.report.summary
+        ),
+        tool_policy: SubagentToolPolicy::Analyze,
+        context_isolation: ContextIsolation::Isolated,
+        token_budget: 1024,
+        idle_timeout_ms: 30_000,
+        recursive_spawn: false,
+        metadata: BTreeMap::from([
+            ("source".to_string(), "cli-run".to_string()),
+            ("turn_id".to_string(), turn.turn_id.clone()),
+            ("report_id".to_string(), turn.report.report_id.0.clone()),
+        ]),
     }
-
-    let mut slots = build_runtime_slots(&options.runtime)
-        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
-    slots
-        .subagent
-        .spawn(SpawnRequest {
-            task_id: TaskId(turn.report.task_id.0.clone()),
-            parent_agent_id: AgentId("chuang-cli".to_string()),
-            agent_name: "worker".to_string(),
-            task: format!(
-                "处理 runtime report {}: user={} summary={}",
-                turn.report.report_id.0, turn.user_input, turn.report.summary
-            ),
-            tool_policy: SubagentToolPolicy::Analyze,
-            context_isolation: ContextIsolation::Isolated,
-            token_budget: 1024,
-            idle_timeout_ms: 30_000,
-            recursive_spawn: false,
-            metadata: BTreeMap::from([
-                ("source".to_string(), "cli-run".to_string()),
-                ("turn_id".to_string(), turn.turn_id.clone()),
-                ("report_id".to_string(), turn.report.report_id.0.clone()),
-            ]),
-        })
-        .map_err(|e| format!("subagent_dispatch_failed: {e:?}"))
 }
 
-fn remember_identity_turn(
+fn prepare_identity_turn_write(
     options: &CliOptions,
     turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
-) -> Result<String, String> {
+) -> Result<PendingIdentityTurnWrite, String> {
     let dual_file_config = options
         .runtime
         .identity_memory
         .build_dual_file_config()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
-    let mut store = FileDualFileMemoryStore::open(dual_file_config)
-        .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
     let entry_id = unique_identity_turn_id(&turn.turn_id)?;
     let content = format!(
         "user={}\nresponse={}\nsummary={}",
         turn.user_input, turn.result.response.body, turn.report.summary
     );
-    store
-        .append_memory(HotMemoryEntry {
-            id: entry_id.clone(),
-            content,
-        })
-        .map_err(format_identity_memory_error)?;
-    Ok(entry_id)
+    preview_identity_memory_append(&dual_file_config, &entry_id, &content)?;
+    Ok(PendingIdentityTurnWrite {
+        dual_file_config,
+        entry_id,
+        content,
+    })
 }
 
-fn remember_experience_turn(
+fn prepare_experience_turn_write(
     options: &CliOptions,
     turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
-) -> Result<String, String> {
+) -> Result<PendingExperienceTurnWrite, String> {
     let dual_file_config = options
         .runtime
         .identity_memory
         .build_dual_file_config()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
-    let mut store = FileDualFileMemoryStore::open(dual_file_config)
-        .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
     let entry_id = unique_experience_turn_id(&turn.turn_id)?;
     let governance = turn
         .report
@@ -1824,13 +2367,92 @@ fn remember_experience_turn(
         turn.report.summary,
         extract_experience_lesson(turn),
     );
-    store
-        .append_experience(HotMemoryEntry {
-            id: entry_id.clone(),
-            content,
-        })
-        .map_err(format_identity_memory_error)?;
-    Ok(entry_id)
+    preview_identity_experience_append(&dual_file_config, &entry_id, &content)?;
+    Ok(PendingExperienceTurnWrite {
+        dual_file_config,
+        entry_id,
+        content,
+    })
+}
+
+fn prepare_subagent_dispatch(
+    options: &CliOptions,
+    turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
+) -> Result<PendingSubagentDispatch, String> {
+    if options.runtime.subagent != SubagentConfig::QueuedExternal {
+        return Err(
+            "subagent_dispatch_requires_queued_external: pass --subagent queued_external"
+                .to_string(),
+        );
+    }
+    let queue_config = options
+        .runtime
+        .subagent_queue
+        .build_file_queue_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    preview_subagent_queue_paths(&queue_config)?;
+    let request = build_subagent_dispatch_request(turn);
+    preview_subagent_dispatch_request(&request)?;
+    Ok(PendingSubagentDispatch {
+        runtime: options.runtime.clone(),
+        request,
+    })
+}
+
+struct PendingIdentityTurnWrite {
+    dual_file_config: chuang_agent::hermes_memory::DualFileMemoryConfig,
+    entry_id: String,
+    content: String,
+}
+
+impl PendingIdentityTurnWrite {
+    fn commit(self) -> Result<String, String> {
+        let mut store = FileDualFileMemoryStore::open(self.dual_file_config)
+            .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
+        store
+            .append_memory(HotMemoryEntry {
+                id: self.entry_id.clone(),
+                content: self.content,
+            })
+            .map_err(format_identity_memory_error)?;
+        Ok(self.entry_id)
+    }
+}
+
+struct PendingExperienceTurnWrite {
+    dual_file_config: chuang_agent::hermes_memory::DualFileMemoryConfig,
+    entry_id: String,
+    content: String,
+}
+
+impl PendingExperienceTurnWrite {
+    fn commit(self) -> Result<String, String> {
+        let mut store = FileDualFileMemoryStore::open(self.dual_file_config)
+            .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
+        store
+            .append_experience(HotMemoryEntry {
+                id: self.entry_id.clone(),
+                content: self.content,
+            })
+            .map_err(format_identity_memory_error)?;
+        Ok(self.entry_id)
+    }
+}
+
+struct PendingSubagentDispatch {
+    runtime: RuntimeConfig,
+    request: SpawnRequest,
+}
+
+impl PendingSubagentDispatch {
+    fn commit(self) -> Result<chuang_agent::subagent_spawner::SpawnReceipt, String> {
+        let mut slots = build_runtime_slots(&self.runtime)
+            .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+        slots
+            .subagent
+            .spawn(self.request)
+            .map_err(|e| format!("subagent_dispatch_failed: {e:?}"))
+    }
 }
 
 fn unique_identity_turn_id(turn_id: &str) -> Result<String, String> {
@@ -1899,6 +2521,201 @@ fn format_identity_memory_error(err: chuang_agent::hermes_memory::DualFileMemory
             }
         ),
     }
+}
+
+fn preview_identity_memory_append(
+    config: &chuang_agent::hermes_memory::DualFileMemoryConfig,
+    entry_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    preview_dual_file_append(
+        &config.root,
+        &config.memory_path(),
+        config.memory_max_chars,
+        entry_id,
+        content,
+        false,
+    )
+}
+
+fn preview_identity_experience_append(
+    config: &chuang_agent::hermes_memory::DualFileMemoryConfig,
+    entry_id: &str,
+    content: &str,
+) -> Result<(), String> {
+    preview_dual_file_append(
+        &config.root,
+        &config.experiences_path(),
+        config.memory_max_chars,
+        entry_id,
+        content,
+        true,
+    )
+}
+
+fn preview_dual_file_append(
+    root: &Path,
+    path: &Path,
+    max_chars: usize,
+    entry_id: &str,
+    content: &str,
+    experiences: bool,
+) -> Result<(), String> {
+    if root.exists() && !root.is_dir() {
+        return Err(format!(
+            "identity_memory_open_failed: StorageUnavailable {{ path: {} }}",
+            root.display()
+        ));
+    }
+
+    let current = if path.exists() {
+        fs::read_to_string(path).map_err(|_| {
+            format!(
+                "identity_memory_open_failed: StorageUnavailable {{ path: {} }}",
+                path.display()
+            )
+        })?
+    } else {
+        String::new()
+    };
+    let existing_entries = parse_memory_entry_views_for_preview(&current);
+    if existing_entries.iter().any(|view| view.id == entry_id) {
+        return Err(format!("identity_memory_duplicate_entry id={entry_id}"));
+    }
+    let next = append_hot_memory_entry_text(&current, entry_id, content);
+    match TextMemoryAdmission::new(max_chars).evaluate(&next, existing_entries) {
+        TextMemoryAdmissionDecision::Accepted => Ok(()),
+        TextMemoryAdmissionDecision::Rejected {
+            limit_chars,
+            attempted_chars,
+            existing_entries,
+        } => Err(format_identity_memory_error(
+            chuang_agent::hermes_memory::DualFileMemoryError::HardLimitExceeded {
+                scope: if experiences {
+                    chuang_agent::hermes_memory::DualFileMemoryScope::Experiences
+                } else {
+                    chuang_agent::hermes_memory::DualFileMemoryScope::Memory
+                },
+                limit_chars,
+                attempted_chars,
+                existing_entries,
+            },
+        )),
+    }
+}
+
+fn preview_subagent_queue_paths(config: &FileSubagentQueueConfig) -> Result<(), String> {
+    preview_directory_target(&config.root)?;
+    preview_directory_target(&config.root.join(&config.dispatch_dir))?;
+    preview_directory_target(&config.root.join(&config.report_dir))?;
+    preview_directory_target(&config.root.join(&config.claim_dir))?;
+    preview_directory_target(&config.root.join(&config.claim_release_dir))?;
+    Ok(())
+}
+
+fn preview_subagent_dispatch_request(request: &SpawnRequest) -> Result<(), String> {
+    if request.task_id.0.trim().is_empty() {
+        return Err(
+            "subagent_dispatch_failed: InvalidRequest(\"task_id must not be empty\")".to_string(),
+        );
+    }
+    if request.parent_agent_id.0.trim().is_empty() {
+        return Err(
+            "subagent_dispatch_failed: InvalidRequest(\"parent_agent_id must not be empty\")"
+                .to_string(),
+        );
+    }
+    if request.agent_name.trim().is_empty() {
+        return Err(
+            "subagent_dispatch_failed: InvalidRequest(\"agent_name must not be empty\")"
+                .to_string(),
+        );
+    }
+    if request.task.trim().is_empty() {
+        return Err(
+            "subagent_dispatch_failed: InvalidRequest(\"task must not be empty\")".to_string(),
+        );
+    }
+    if request.token_budget == 0 {
+        return Err(
+            "subagent_dispatch_failed: InvalidRequest(\"token_budget must be greater than zero\")"
+                .to_string(),
+        );
+    }
+    if matches!(request.tool_policy, SubagentToolPolicy::Analyze) && request.recursive_spawn {
+        return Err("subagent_dispatch_failed: InvalidRequest(\"analyze policy cannot enable recursive spawn\")".to_string());
+    }
+    Ok(())
+}
+
+fn preview_directory_target(path: &Path) -> Result<(), String> {
+    if path.exists() && !path.is_dir() {
+        return Err(format!(
+            "subagent_dispatch_failed: StorageUnavailable {{ path: {} }}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn append_hot_memory_entry_text(current: &str, entry_id: &str, content: &str) -> String {
+    let mut next = current.trim_end().to_string();
+    if !next.is_empty() {
+        next.push_str("\n\n");
+    }
+    next.push_str("## ");
+    next.push_str(entry_id);
+    next.push('\n');
+    next.push_str(content.trim());
+    next.push('\n');
+    next
+}
+
+fn parse_memory_entry_views_for_preview(content: &str) -> Vec<MemoryEntryView> {
+    let mut entries = Vec::new();
+    let mut current_id: Option<String> = None;
+    let mut current_body = String::new();
+
+    for line in content.lines() {
+        if let Some(id) = line.strip_prefix("## ") {
+            push_memory_entry_view(
+                &mut entries,
+                current_id.take().or_else(|| {
+                    if current_body.trim().is_empty() {
+                        None
+                    } else {
+                        Some("MEMORY.md:preamble".to_string())
+                    }
+                }),
+                &current_body,
+            );
+            current_id = Some(id.trim().to_string());
+            current_body.clear();
+        } else {
+            if !current_body.is_empty() {
+                current_body.push('\n');
+            }
+            current_body.push_str(line);
+        }
+    }
+
+    push_memory_entry_view(&mut entries, current_id, &current_body);
+    entries
+}
+
+fn push_memory_entry_view(entries: &mut Vec<MemoryEntryView>, id: Option<String>, body: &str) {
+    let Some(id) = id else {
+        return;
+    };
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    entries.push(MemoryEntryView {
+        id,
+        content_preview: preview_chars(trimmed, 80),
+        chars: trimmed.chars().count(),
+    });
 }
 
 fn format_kernel_memory_error(err: chuang_agent::chuang_kernel::ChuangKernelMemoryError) -> String {
@@ -1979,6 +2796,7 @@ fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), Str
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -2078,6 +2896,97 @@ mod tests {
                 .get("runtime_report_status")
                 .map(String::as_str),
             Some("Success")
+        );
+    }
+
+    #[test]
+    fn run_with_options_defaults_missing_channel_metadata_to_cli_for_identity_selection() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-default-channel-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["app-server"]
+"#,
+        );
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "验证默认 cli channel".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let error = run_with_options(&request).expect_err("cli default channel should be enforced");
+        assert!(error.contains("ChannelNotAllowed"), "{error}");
+    }
+
+    #[test]
+    fn load_identity_bootstrap_snapshot_preserves_explicit_non_cli_channel() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-explicit-channel-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["app-server"]
+"#,
+        );
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+        runtime
+            .metadata
+            .insert("channel".to_string(), "app-server".to_string());
+
+        let snapshot =
+            load_identity_bootstrap_snapshot(&runtime).expect("app-server channel should select");
+        assert_eq!(
+            snapshot
+                .active_identity
+                .as_ref()
+                .map(|identity| identity.agent_id.as_str()),
+            Some("chuang")
         );
     }
 
@@ -2485,6 +3394,24 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .starts_with("turn-memory-session-alpha-turn-1-"));
+        let archived = SqliteSessionArchive::open(&runtime.db_path)
+            .expect("session archive should reopen")
+            .replay("alpha")
+            .expect("session archive should replay");
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].sequence, 1);
+        assert_eq!(archived[0].raw_user_input, "会话记忆锚点A");
+        assert!(archived[0].raw_response.contains("会话记忆锚点A"));
+        assert_eq!(
+            archived[0].runtime_report_refs,
+            vec!["runtime-report://report-turn-1"]
+        );
+        assert!(!archived[0].runtime_event_refs.is_empty());
+        assert!(archived[0]
+            .searchable_summary_pointer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("memory://turn-memory-session-alpha-turn-1-"));
 
         let second = RunCliRequest {
             options: CliOptions {
@@ -2611,6 +3538,563 @@ mod tests {
                 .map(String::as_str),
             Some("memory_scope=session,session_id=alpha")
         );
+    }
+
+    #[test]
+    fn remember_turn_if_requested_returns_partial_success_when_identity_commit_fails_after_archive_commit(
+    ) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-remember-partial-identity-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let kernel_db_path = temp_dir.join("kernel-memory.db");
+        let session_archive_path = temp_dir.join("session-archive.db");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let kernel_identity_root = temp_dir.join("kernel-identity");
+        fs::create_dir_all(&kernel_identity_root).expect("identity root should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(kernel_db_path, kernel_identity_root.clone()),
+            SqliteMemoryStore::open(temp_dir.join("kernel-store.db"))
+                .expect("sqlite store should open"),
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"ok\"}"),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "先跑一轮，再尝试写 session+identity".to_string(),
+            Vec::new(),
+        )
+        .expect("turn should succeed");
+
+        let runtime = test_runtime(session_archive_path.clone(), session_archive_path.clone());
+        let options = CliOptions {
+            runtime: runtime.clone(),
+        };
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: turn.user_input.clone(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: true,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (result, records) = remember_turn_if_requested(&options, &mut kernel, turn, &request)
+            .expect("archive should commit and identity failure should be partial success");
+        assert!(records.session_record_id.is_some());
+        assert!(records.identity_record_id.is_none());
+        let archived = SqliteSessionArchive::open(&session_archive_path)
+            .expect("session archive should open")
+            .replay("alpha")
+            .expect("replay should succeed");
+        assert_eq!(archived.len(), 1);
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_commit_status")
+                .map(String::as_str),
+            Some("partial_success")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_blind_retry_safe")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_failed_step")
+                .map(String::as_str),
+            Some("identity")
+        );
+        assert!(result
+            .response
+            .meta
+            .extra
+            .get("remember_failure_message")
+            .expect("failure message should exist")
+            .contains("identity_memory_open_failed"));
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_applied_steps_json")
+                    .expect("applied steps should exist")
+            )
+            .expect("applied steps json should parse"),
+            vec!["archive".to_string()]
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_pending_steps_json")
+                    .expect("pending steps should exist")
+            )
+            .expect("pending steps json should parse"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_archive_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_identity_status")
+                .map(String::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_experience_status")
+                .map(String::as_str),
+            Some("not_requested")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_queued_dispatch_status")
+                .map(String::as_str),
+            Some("not_requested")
+        );
+    }
+
+    #[test]
+    fn remember_turn_if_requested_returns_partial_success_when_dispatch_commit_fails_after_prior_commits(
+    ) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-remember-partial-dispatch-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let session_archive_path = temp_dir.join("session-archive.db");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let identity_root = temp_dir.join("identity");
+        fs::create_dir_all(&identity_root).expect("identity root should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("kernel-memory.db"), identity_root.clone()),
+            SqliteMemoryStore::open(temp_dir.join("kernel-store.db"))
+                .expect("sqlite store should open"),
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"ok\"}"),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "先跑一轮，再尝试写 session+identity+experience+subagent".to_string(),
+            Vec::new(),
+        )
+        .expect("turn should succeed");
+
+        let mut runtime = test_runtime(session_archive_path.clone(), identity_root.clone());
+        runtime.subagent = SubagentConfig::QueuedExternal;
+        runtime.subagent_queue.root = session_archive_path.clone();
+        let options = CliOptions {
+            runtime: runtime.clone(),
+        };
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: turn.user_input.clone(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: true,
+            remember_experience: true,
+            dispatch_subagent: true,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (result, records) = remember_turn_if_requested(&options, &mut kernel, turn, &request)
+            .expect("dispatch failure should be partial success after prior commits");
+        assert!(records.session_record_id.is_some());
+        assert!(records.identity_record_id.is_some());
+        assert!(records.experience_record_id.is_some());
+        assert!(records.subagent_dispatch_run_id.is_none());
+        let archived = SqliteSessionArchive::open(&session_archive_path)
+            .expect("session archive should open")
+            .replay("alpha")
+            .expect("replay should succeed");
+        assert_eq!(archived.len(), 1);
+        assert!(fs::read_to_string(identity_root.join("MEMORY.md"))
+            .expect("memory file should exist")
+            .contains("user=先跑一轮，再尝试写 session+identity+experience+subagent"));
+        assert!(fs::read_to_string(identity_root.join("experiences.md"))
+            .expect("experiences file should exist")
+            .contains("source=runtime_turn"));
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_commit_status")
+                .map(String::as_str),
+            Some("partial_success")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_failed_step")
+                .map(String::as_str),
+            Some("queued_dispatch")
+        );
+        assert!(!result
+            .response
+            .meta
+            .extra
+            .get("remember_failure_message")
+            .expect("failure message should exist")
+            .is_empty());
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_applied_steps_json")
+                    .expect("applied steps should exist")
+            )
+            .expect("applied steps json should parse"),
+            vec![
+                "archive".to_string(),
+                "identity".to_string(),
+                "experience".to_string()
+            ]
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_pending_steps_json")
+                    .expect("pending steps should exist")
+            )
+            .expect("pending steps json should parse"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_archive_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_identity_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_experience_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_queued_dispatch_status")
+                .map(String::as_str),
+            Some("failed")
+        );
+    }
+
+    #[test]
+    fn remember_turn_if_requested_marks_complete_when_all_commits_succeed() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-remember-complete-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let session_archive_path = temp_dir.join("session-archive.db");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let identity_root = temp_dir.join("identity");
+        fs::create_dir_all(&identity_root).expect("identity root should be created");
+        let queue_root = temp_dir.join("subagent-queue");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("kernel-memory.db"), identity_root.clone()),
+            SqliteMemoryStore::open(temp_dir.join("kernel-store.db"))
+                .expect("sqlite store should open"),
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"ok\"}"),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "先跑一轮，再完整写入 remember 组合".to_string(),
+            Vec::new(),
+        )
+        .expect("turn should succeed");
+
+        let mut runtime = test_runtime(session_archive_path.clone(), identity_root);
+        runtime.subagent = SubagentConfig::QueuedExternal;
+        runtime.subagent_queue.root = queue_root.clone();
+        let options = CliOptions {
+            runtime: runtime.clone(),
+        };
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: turn.user_input.clone(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: true,
+            remember_experience: true,
+            dispatch_subagent: true,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (result, records) = remember_turn_if_requested(&options, &mut kernel, turn, &request)
+            .expect("all remember commits should succeed");
+        assert!(records.session_record_id.is_some());
+        assert!(records.identity_record_id.is_some());
+        assert!(records.experience_record_id.is_some());
+        assert!(records.subagent_dispatch_run_id.is_some());
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_commit_status")
+                .map(String::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_blind_retry_safe")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_failed_step")
+                .map(String::as_str),
+            Some("none")
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_applied_steps_json")
+                    .expect("applied steps should exist")
+            )
+            .expect("applied steps json should parse"),
+            vec![
+                "archive".to_string(),
+                "identity".to_string(),
+                "experience".to_string(),
+                "queued_dispatch".to_string()
+            ]
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(
+                result
+                    .response
+                    .meta
+                    .extra
+                    .get("remember_pending_steps_json")
+                    .expect("pending steps should exist")
+            )
+            .expect("pending steps json should parse"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_archive_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_identity_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_experience_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert_eq!(
+            result
+                .response
+                .meta
+                .extra
+                .get("remember_queued_dispatch_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+        assert!(queue_root.join("dispatch").exists());
+    }
+
+    #[test]
+    fn remember_turn_if_requested_does_not_write_identity_experience_or_dispatch_before_archive_failure(
+    ) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-session-archive-side-effect-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let valid_db_path = temp_dir.join("memory.db");
+        let invalid_archive_path = temp_dir.join("archive-target-is-dir");
+        fs::create_dir_all(&invalid_archive_path).expect("archive failure dir should exist");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let identity_root = temp_dir.join("identity");
+        let queue_root = temp_dir.join("subagent-queue");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(valid_db_path, identity_root.clone()),
+            SqliteMemoryStore::open(temp_dir.join("kernel-memory.db"))
+                .expect("sqlite store should open"),
+            CaptureResponder::new("ACTION: {\"type\":\"final\",\"answer\":\"ok\"}"),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "先跑一轮，再尝试写 session+identity+experience+subagent".to_string(),
+            Vec::new(),
+        )
+        .expect("turn should succeed");
+
+        let mut runtime = test_runtime(invalid_archive_path, identity_root.clone());
+        runtime.subagent = SubagentConfig::QueuedExternal;
+        runtime.subagent_queue.root = queue_root.clone();
+        let options = CliOptions {
+            runtime: runtime.clone(),
+        };
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: turn.user_input.clone(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: true,
+            remember_experience: true,
+            dispatch_subagent: true,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let error = remember_turn_if_requested(&options, &mut kernel, turn, &request)
+            .expect_err("archive write should fail");
+        assert!(error.contains("session_archive_open_failed"), "{error}");
+        let memory_path = identity_root.join("MEMORY.md");
+        let experiences_path = identity_root.join("experiences.md");
+        assert!(
+            !memory_path.exists()
+                || fs::read_to_string(&memory_path)
+                    .expect("memory file should be readable")
+                    .trim()
+                    .is_empty()
+        );
+        assert!(
+            !experiences_path.exists()
+                || fs::read_to_string(&experiences_path)
+                    .expect("experiences file should be readable")
+                    .trim()
+                    .is_empty()
+        );
+        assert!(!queue_root.join("dispatch").exists());
     }
 
     #[test]
@@ -2813,6 +4297,9 @@ mod tests {
             .expect("runtime event ledger json should exist");
         assert!(runtime_events_json.contains("\"event_type\":\"tool_started\""));
         assert!(runtime_events_json.contains("\"event_type\":\"tool_finished\""));
+        assert!(runtime_events_json.contains("\"event_type\":\"context_packed\""));
+        assert!(runtime_events_json.contains("\"event_type\":\"provider_requested\""));
+        assert!(runtime_events_json.contains("\"event_type\":\"provider_responded\""));
         assert!(runtime_events_json.contains("\"risk_decision\""));
         assert_eq!(
             turn.result
@@ -2821,7 +4308,7 @@ mod tests {
                 .extra
                 .get("runtime_event_count")
                 .map(String::as_str),
-            Some("2")
+            Some("7")
         );
         let tool_report_json = turn
             .result
@@ -3211,6 +4698,90 @@ mod tests {
                 .len(),
             1,
             "tool loop should not ask the model for the next round after human_suspend"
+        );
+    }
+
+    #[test]
+    fn governed_tool_loop_persists_dangerous_call_without_executing_it() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-pending-approval-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"printf executed > must-not-exist.txt; # rm -rf notes","cwd":"."}}"#,
+            r#"ACTION: {"type":"final","answer":"this should not be reached"}"#,
+        ]);
+        let remaining_outputs = responder.outputs.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "删除 notes 前先等待审批".to_string(),
+            Vec::new(),
+        )
+        .expect("dangerous call should suspend with a persisted approval");
+
+        assert!(!workspace_root.join("must-not-exist.txt").exists());
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("human_input_required")
+        );
+        let pending_path = PathBuf::from(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("pending_approval_path")
+                .expect("pending approval path should be recorded"),
+        );
+        assert!(pending_path.starts_with(
+            fs::canonicalize(&workspace_root).expect("workspace should canonicalize")
+        ));
+        let pending: PendingApproval = serde_json::from_slice(
+            &fs::read(&pending_path).expect("pending approval file should exist"),
+        )
+        .expect("pending approval file should deserialize");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&pending_path)
+                    .expect("pending metadata should exist")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(
+            turn.result.response.meta.extra.get("pending_approval_id"),
+            Some(&pending.approval_id)
+        );
+        assert_eq!(
+            remaining_outputs
+                .lock()
+                .expect("sequence lock should succeed")
+                .len(),
+            1,
+            "tool loop must stop before asking the model for another round"
         );
     }
 
@@ -3843,7 +5414,7 @@ mod tests {
             &workspace_root,
             4,
             ToolExecutionConfig::default(),
-            "读取文件".to_string(),
+            "测试工具协议纠错".to_string(),
             Vec::new(),
         )
         .expect("tool loop should continue after protocol error");
@@ -4381,7 +5952,7 @@ mod tests {
 
     fn goal_context_test_budget() -> chuang_agent::context_engine::ContextBudget {
         chuang_agent::context_engine::ContextBudget {
-            max_tokens: 4096,
+            max_tokens: 8192,
             reserve_system_tokens: 64,
             min_working_tokens: 1,
             max_tool_results: 5,
@@ -4707,5 +6278,11 @@ mod tests {
             };
 
         kernel_config_from_runtime(&runtime).expect("kernel config should build")
+    }
+
+    fn write_identity_registry(identity_root: &Path, content: &str) {
+        fs::create_dir_all(identity_root).expect("identity root should be created");
+        fs::write(identity_root.join("agents.toml"), content)
+            .expect("agents registry should write");
     }
 }

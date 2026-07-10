@@ -9,6 +9,9 @@ use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallReques
 use crate::memory_store::MemoryStore;
 use crate::responder::{Responder, ResponderMeta, ResponderOutput, ResponderRequest};
 use crate::runtime_config::default_context_budget as runtime_default_context_budget;
+use crate::runtime_event_ledger::{
+    RuntimeEvent, RuntimeEventKind, RuntimeEventLedger, RuntimeEventLedgerError,
+};
 use crate::tool_loop_meta::{
     derive_tool_protocol_correction_context, derive_tool_protocol_typed_failure,
 };
@@ -55,6 +58,7 @@ pub struct ContextDebugInfo {
 pub enum AgentRuntimeError {
     Recall(MemoryRecallError),
     ContextPack(ContextPackError),
+    EventLedger(String),
 }
 
 pub struct AgentRuntime<S, R> {
@@ -87,6 +91,37 @@ impl<S, R> AgentRuntime<S, R> {
 
 impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
     pub fn run(&self, request: &RuntimeRequest) -> Result<RuntimeResult, AgentRuntimeError> {
+        self.run_with_event_sink(request, None, &mut |_| Ok(()))
+    }
+
+    pub fn run_with_ledger<L: RuntimeEventLedger>(
+        &self,
+        request: &RuntimeRequest,
+        ledger: &mut L,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<RuntimeResult, AgentRuntimeError> {
+        self.run_with_event_sink(request, Some((thread_id, turn_id)), &mut |event| {
+            ledger.append(event)
+        })
+    }
+
+    fn run_with_event_sink<F>(
+        &self,
+        request: &RuntimeRequest,
+        event_ids: Option<(&str, &str)>,
+        emit: &mut F,
+    ) -> Result<RuntimeResult, AgentRuntimeError>
+    where
+        F: FnMut(RuntimeEvent) -> Result<(), RuntimeEventLedgerError>,
+    {
+        emit_runtime_event(
+            emit,
+            event_ids,
+            RuntimeEventKind::TurnStarted,
+            Some("runtime://turn/started"),
+        )?;
+
         let recall_result = self
             .recall
             .recall(&RecallRequest {
@@ -94,11 +129,33 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
                 metadata: request.metadata.clone(),
                 limit: request.recall_limit,
             })
-            .map_err(AgentRuntimeError::Recall)?;
+            .map_err(|error| {
+                let _ = emit_runtime_event(
+                    emit,
+                    event_ids,
+                    RuntimeEventKind::TurnFailed,
+                    Some("runtime://failure/recall"),
+                );
+                AgentRuntimeError::Recall(error)
+            })?;
 
         let packed_context = self
             .pack_context(request, &recall_result.segments)
-            .map_err(AgentRuntimeError::ContextPack)?;
+            .map_err(|error| {
+                let _ = emit_runtime_event(
+                    emit,
+                    event_ids,
+                    RuntimeEventKind::TurnFailed,
+                    Some("runtime://failure/context_pack"),
+                );
+                AgentRuntimeError::ContextPack(error)
+            })?;
+        emit_runtime_event(
+            emit,
+            event_ids,
+            RuntimeEventKind::ContextPacked,
+            Some("runtime://context/packed"),
+        )?;
 
         let packed_context_preview = packed_context.render_prompt();
         let context_compaction_summary =
@@ -109,18 +166,30 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             request.user_input, packed_context_preview
         );
 
+        emit_runtime_event(
+            emit,
+            event_ids,
+            RuntimeEventKind::ProviderRequested,
+            Some("runtime://provider/requested"),
+        )?;
         let mut runtime_response =
             map_runtime_response(self.responder.generate(&ResponderRequest {
                 prompt: prompt.clone(),
                 user_input: request.user_input.clone(),
                 recall_hit_count: recall_result.hits.len(),
             }));
+        emit_runtime_event(
+            emit,
+            event_ids,
+            RuntimeEventKind::ProviderResponded,
+            Some("runtime://provider/responded"),
+        )?;
         runtime_response.meta.extra.insert(
             "context_compaction_summary_json".to_string(),
             context_compaction_summary,
         );
 
-        Ok(RuntimeResult {
+        let result = RuntimeResult {
             prompt,
             response: runtime_response,
             recall_summary: recall_result.summary,
@@ -135,7 +204,14 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
                 budget_exceeded_reasons: packed_context.budget_exceeded_reasons.clone(),
                 working_reservation: packed_context.working_reservation.clone(),
             },
-        })
+        };
+        emit_runtime_event(
+            emit,
+            event_ids,
+            RuntimeEventKind::TurnCompleted,
+            Some("runtime://turn/completed"),
+        )?;
+        Ok(result)
     }
 
     fn pack_context(
@@ -159,6 +235,26 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
             segments,
         )
     }
+}
+
+fn emit_runtime_event<F>(
+    emit: &mut F,
+    event_ids: Option<(&str, &str)>,
+    kind: RuntimeEventKind,
+    evidence_ref: Option<&str>,
+) -> Result<(), AgentRuntimeError>
+where
+    F: FnMut(RuntimeEvent) -> Result<(), RuntimeEventLedgerError>,
+{
+    let Some((thread_id, turn_id)) = event_ids else {
+        return Ok(());
+    };
+
+    let mut event = RuntimeEvent::new(kind, thread_id).with_turn_id(turn_id);
+    if let Some(evidence_ref) = evidence_ref {
+        event = event.with_evidence_ref(evidence_ref);
+    }
+    emit(event).map_err(|error| AgentRuntimeError::EventLedger(error.to_string()))
 }
 
 fn map_runtime_response(output: ResponderOutput) -> RuntimeResponse {

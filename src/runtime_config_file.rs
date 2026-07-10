@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::hermes_memory::{DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS};
 use crate::knowledge_read::{KnowledgeReadConfig, KnowledgeReadSourceConfig};
-use crate::provider_openai_compatible::ProviderTransport;
+use crate::provider_openai_compatible::{ProviderTransport, ReasoningEffort};
 use crate::runtime_config::{
     ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
     ControlPlaneConfig, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
@@ -370,6 +370,18 @@ fn parse_primary_provider(
                             .unwrap_or_default(),
                     })?
                     .unwrap_or(ProviderTransport::Stub),
+                reasoning_effort: get_any(
+                    values,
+                    &["provider.reasoning_effort", "reasoning_effort"],
+                )
+                .map(|value| value.parse::<ReasoningEffort>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: "provider.reasoning_effort".to_string(),
+                    value: get_any(values, &["provider.reasoning_effort", "reasoning_effort"])
+                        .cloned()
+                        .unwrap_or_default(),
+                })?,
                 request_timeout_ms: get_any(
                     values,
                     &["provider.request_timeout_ms", "provider_timeout_ms"],
@@ -435,6 +447,27 @@ fn parse_fallback_provider(
                     .unwrap_or_default(),
                 })?
                 .unwrap_or(ProviderTransport::Stub),
+                reasoning_effort: get_any(
+                    values,
+                    &[
+                        "fallback.provider.reasoning_effort",
+                        "fallback_reasoning_effort",
+                    ],
+                )
+                .map(|value| value.parse::<ReasoningEffort>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: "fallback.provider.reasoning_effort".to_string(),
+                    value: get_any(
+                        values,
+                        &[
+                            "fallback.provider.reasoning_effort",
+                            "fallback_reasoning_effort",
+                        ],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?,
                 request_timeout_ms: get_any(
                     values,
                     &[

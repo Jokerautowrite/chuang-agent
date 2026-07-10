@@ -615,15 +615,32 @@ fn run_one_pending_subagent_with_allowlist(
         });
     };
 
-    let report = match request.runner.as_str() {
-        "fake" => build_fake_runner_report(&dispatch, &mut evolution)?,
-        "command" => build_command_runner_report(&dispatch, request, &mut evolution)?,
-        runner => return Err(format!("unsupported subagent runner: {runner}")),
+    let run_result = (|| {
+        let report = match request.runner.as_str() {
+            "fake" => build_fake_runner_report(&dispatch, &mut evolution)?,
+            "command" => build_command_runner_report(&dispatch, request, &mut evolution)?,
+            runner => return Err(format!("unsupported subagent runner: {runner}")),
+        };
+        let report_admission = build_report_admission(&report)?;
+        let report_path = queue
+            .write_report(&dispatch.run_id, &report)
+            .map_err(|e| format!("subagent_report_write_failed: {e:?}"))?;
+        Ok((report, report_admission, report_path))
+    })();
+    let (report, report_admission, report_path) = match run_result {
+        Ok(result) => result,
+        Err(error) => {
+            let release_reason = format!("worker_failure:{}", error_reason_code(&error));
+            if let Err(release_error) =
+                queue.release_claim(&dispatch.run_id, &owner, &release_reason)
+            {
+                return Err(format!(
+                    "{error}; subagent_claim_release_failed: {release_error:?}"
+                ));
+            }
+            return Err(error);
+        }
     };
-    let report_admission = build_report_admission(&report)?;
-    let report_path = queue
-        .write_report(&dispatch.run_id, &report)
-        .map_err(|e| format!("subagent_report_write_failed: {e:?}"))?;
     Ok(SubagentRunOnceCliOutput {
         runner: request.runner.clone(),
         worker_capabilities: request.worker_capabilities.clone(),
@@ -1109,9 +1126,13 @@ fn command_runner_governance_decision(
 ) -> GovernanceDecisionSummary {
     GovernanceDecisionSummary {
         action_id: format!("subagent-command-runner:{}", dispatch.run_id.0),
-        decision: "needs_approval".to_string(),
-        reason: "approved_by_cli_flag: --approve-exec".to_string(),
+        decision: "allowed".to_string(),
+        reason: "approval_receipt=cli_flag:--approve-exec".to_string(),
     }
+}
+
+fn error_reason_code(error: &str) -> &str {
+    error.split([':', ';']).next().unwrap_or("worker_failed")
 }
 
 fn build_report_admission(

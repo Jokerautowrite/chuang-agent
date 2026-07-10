@@ -232,7 +232,10 @@ fn forbidden_feishu_credential_env_names() -> &'static [&'static str] {
 fn channel_simulate_command(args: &[String]) -> Result<(), String> {
     let request = parse_channel_simulate(args)?;
     let app_server_request = app_server_turn_start_request(1, &request.inbound)?;
-    let runtime = build_runtime_for_workspace(&request.inbound.workspace_root)?;
+    let mut runtime = build_runtime_for_workspace(&request.inbound.workspace_root)?;
+    runtime
+        .metadata
+        .insert("channel".to_string(), request.inbound.channel.clone());
     let kernel = kernel_config_from_runtime(&runtime)?;
     let live_readiness = build_chuang_mvp_status(&runtime, &kernel)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?

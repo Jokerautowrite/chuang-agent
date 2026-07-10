@@ -1,7 +1,7 @@
 use chuang_agent::common::{AgentId, AllocationId, TaskId, Timestamp};
 use chuang_agent::memory_policy::{
     ActiveAllocation, AdmissionDecision, AdmissionRequest, BudgetConfig, BudgetManager, BudgetMode,
-    CommitError, EvictionPlan, FreedBytes, MemoryAdmissionPolicy, ReclaimError, ReservationToken,
+    CommitError, EvictionPlan, FreedBytes, MemoryAdmissionPolicy, ReservationToken,
 };
 
 fn sample_policy() -> MemoryAdmissionPolicy {
@@ -26,6 +26,18 @@ fn sample_request(id: &str, bytes: u64, priority: u8) -> AdmissionRequest {
         priority,
         requested_at: Timestamp("2026-04-30T10:30:00.123Z".to_string()),
     }
+}
+
+fn reserve_at(policy: &mut MemoryAdmissionPolicy, request: &AdmissionRequest) -> ReservationToken {
+    policy
+        .try_reserve_at(request, Timestamp("2026-04-30T10:30:00.000Z".to_string()))
+        .expect("reservation should succeed")
+}
+
+fn commit_at(policy: &mut MemoryAdmissionPolicy, token: ReservationToken) -> AllocationId {
+    policy
+        .commit_at(token, "2026-04-30T10:30:01.000Z")
+        .expect("commit should succeed")
 }
 
 #[test]
@@ -76,11 +88,10 @@ fn try_reserve_adds_pending_reservation_without_active_allocation() {
     let mut policy = sample_policy();
     let request = sample_request("1", 256, 1);
 
-    let token = policy
-        .try_reserve(&request)
-        .expect("reservation should succeed");
+    let token = reserve_at(&mut policy, &request);
 
     assert_eq!(token.granted_bytes, 256);
+    assert_eq!(token.expires_at.0, "2026-04-30T10:30:05.000Z");
     assert_eq!(policy.active_allocations.len(), 0);
     assert_eq!(policy.reservations.len(), 1);
 }
@@ -89,11 +100,9 @@ fn try_reserve_adds_pending_reservation_without_active_allocation() {
 fn commit_moves_reservation_into_active_allocations() {
     let mut policy = sample_policy();
     let request = sample_request("1", 256, 1);
-    let token = policy
-        .try_reserve(&request)
-        .expect("reservation should succeed");
+    let token = reserve_at(&mut policy, &request);
 
-    let allocation_id = policy.commit(token).expect("commit should succeed");
+    let allocation_id = commit_at(&mut policy, token);
 
     assert_eq!(allocation_id.0, "alloc-1");
     assert_eq!(policy.reservations.len(), 0);
@@ -105,9 +114,7 @@ fn commit_moves_reservation_into_active_allocations() {
 fn release_reservation_clears_pending_reservation() {
     let mut policy = sample_policy();
     let request = sample_request("1", 256, 1);
-    let token = policy
-        .try_reserve(&request)
-        .expect("reservation should succeed");
+    let token = reserve_at(&mut policy, &request);
 
     policy.release_reservation(token);
 
@@ -119,10 +126,8 @@ fn release_reservation_clears_pending_reservation() {
 fn reclaim_releases_active_allocation_bytes() {
     let mut policy = sample_policy();
     let request = sample_request("1", 256, 1);
-    let token = policy
-        .try_reserve(&request)
-        .expect("reservation should succeed");
-    let _allocation_id = policy.commit(token).expect("commit should succeed");
+    let token = reserve_at(&mut policy, &request);
+    let _allocation_id = commit_at(&mut policy, token);
 
     let freed = policy
         .reclaim(
@@ -154,23 +159,27 @@ fn commit_rejects_unknown_reservation() {
 }
 
 #[test]
-fn reclaim_rejects_missing_allocation() {
+fn duplicate_reclaim_is_idempotent() {
     let mut policy = sample_policy();
+    let request = sample_request("1", 256, 1);
+    let token = reserve_at(&mut policy, &request);
+    commit_at(&mut policy, token);
 
-    let err = policy
+    let first = policy
         .reclaim(
             &TaskId("task-1".to_string()),
             &AgentId("agent-1".to_string()),
         )
-        .expect_err("reclaim should fail");
+        .expect("first reclaim should succeed");
+    let duplicate = policy
+        .reclaim(
+            &TaskId("task-1".to_string()),
+            &AgentId("agent-1".to_string()),
+        )
+        .expect("duplicate reclaim should be idempotent");
 
-    assert_eq!(
-        err,
-        ReclaimError::AllocationNotFound {
-            task_id: TaskId("task-1".to_string()),
-            agent_id: AgentId("agent-1".to_string()),
-        }
-    );
+    assert_eq!(first, FreedBytes(256));
+    assert_eq!(duplicate, FreedBytes(0));
 }
 
 #[test]
@@ -208,10 +217,10 @@ fn admit_with_eviction_replaces_candidates_with_new_allocation() {
     let mut policy = sample_policy();
     let low1 = sample_request("1", 200, 1);
     let low2 = sample_request("2", 200, 1);
-    let token1 = policy.try_reserve(&low1).unwrap();
-    let token2 = policy.try_reserve(&low2).unwrap();
-    let alloc1 = policy.commit(token1).unwrap();
-    let alloc2 = policy.commit(token2).unwrap();
+    let token1 = reserve_at(&mut policy, &low1);
+    let token2 = reserve_at(&mut policy, &low2);
+    let alloc1 = commit_at(&mut policy, token1);
+    let alloc2 = commit_at(&mut policy, token2);
 
     let high = sample_request("high", 500, 9);
     let decision = policy
@@ -237,6 +246,58 @@ fn admit_with_eviction_fails_when_candidate_missing() {
         err,
         chuang_agent::memory_policy::DenyReason::CandidateNotEvictable
     );
+    assert!(policy.active_allocations.is_empty());
+}
+
+#[test]
+fn admit_with_eviction_rolls_back_when_reclaimed_budget_is_insufficient() {
+    let mut policy = sample_policy();
+    let low = sample_request("low", 400, 1);
+    let token = reserve_at(&mut policy, &low);
+    let allocation_id = commit_at(&mut policy, token);
+    let before = policy.clone();
+
+    let too_large = sample_request("large", 900, 9);
+    let err = policy
+        .admit_with_eviction(&too_large, &[allocation_id])
+        .expect_err("insufficient eviction should fail");
+
+    assert_eq!(err, chuang_agent::memory_policy::DenyReason::BudgetExceeded);
+    assert_eq!(policy, before);
+}
+
+#[test]
+fn admit_with_eviction_rolls_back_when_candidate_list_contains_duplicates() {
+    let mut policy = sample_policy();
+    let low = sample_request("low", 400, 1);
+    let token = reserve_at(&mut policy, &low);
+    let allocation_id = commit_at(&mut policy, token);
+    let before = policy.clone();
+
+    let high = sample_request("high", 500, 9);
+    let err = policy
+        .admit_with_eviction(&high, &[allocation_id.clone(), allocation_id])
+        .expect_err("duplicate candidate should fail validation");
+
+    assert_eq!(
+        err,
+        chuang_agent::memory_policy::DenyReason::CandidateNotEvictable
+    );
+    assert_eq!(policy, before);
+}
+
+#[test]
+fn reservation_ttl_uses_injected_now_and_commit_checks_expiry_boundary() {
+    let mut policy = sample_policy();
+    let request = sample_request("ttl", 256, 1);
+    let token = reserve_at(&mut policy, &request);
+
+    assert_eq!(token.expires_at.0, "2026-04-30T10:30:05.000Z");
+    let err = policy
+        .commit_at(token.clone(), "2026-04-30T10:30:05.000Z")
+        .expect_err("reservation should expire at the boundary");
+    assert_eq!(err, CommitError::ReservationExpired);
+    assert_eq!(policy.reservations, vec![token]);
     assert!(policy.active_allocations.is_empty());
 }
 

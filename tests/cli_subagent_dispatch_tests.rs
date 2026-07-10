@@ -1203,6 +1203,79 @@ fn cli_subagent_run_once_command_runner_requires_explicit_approval() {
 }
 
 #[test]
+fn cli_subagent_run_once_releases_claim_immediately_when_command_spawn_fails() {
+    let queue_root = temp_queue_root("command-runner-spawn-failure-release");
+    let dispatch = dispatch_task(
+        &queue_root,
+        "task-cli-command-spawn-failure",
+        "命令 runner 启动失败后释放 claim",
+    );
+    let run_id = dispatch["run_id"].as_str().expect("run id");
+
+    let failed = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "command",
+            "--runner-command",
+            "chuang-command-that-does-not-exist",
+            "--approve-exec",
+            "--json",
+        ])
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("command_runner_spawn_failed"));
+    let release: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            queue_root
+                .join("claim-releases")
+                .join(format!("{run_id}.json")),
+        )
+        .expect("claim release receipt should exist"),
+    )
+    .expect("claim release receipt should be json");
+    assert_eq!(release["run_id"], run_id);
+    assert_eq!(
+        release["reason"],
+        "worker_failure:command_runner_spawn_failed"
+    );
+
+    let retried = cargo_command()
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "subagent",
+            "run-once",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("temp path should be utf8"),
+            "--runner",
+            "fake",
+            "--json",
+        ])
+        .output()
+        .expect("cargo retry should execute");
+
+    assert!(
+        retried.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&retried.stderr)
+    );
+    let retried: Value =
+        serde_json::from_str(&String::from_utf8_lossy(&retried.stdout)).expect("stdout json");
+    assert_eq!(retried["ran"], true);
+    assert_eq!(retried["run_id"], run_id);
+}
+
+#[test]
 fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
     let queue_root = temp_queue_root("command-runner");
     let dispatch = dispatch_task(&queue_root, "task-cli-command", "命令 runner 任务");
@@ -1257,10 +1330,10 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
         report["governance_decision"]["action_id"],
         format!("subagent-command-runner:{run_id}")
     );
-    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(report["governance_decision"]["decision"], "allowed");
     assert_eq!(
         report["governance_decision"]["reason"],
-        "approved_by_cli_flag: --approve-exec"
+        "approval_receipt=cli_flag:--approve-exec"
     );
     let proposals = report["skill_proposals"]
         .as_array()
@@ -1337,10 +1410,10 @@ fn cli_subagent_run_once_command_runner_accepts_protocol_report_json() {
         report["governance_decision"]["action_id"],
         format!("subagent-command-runner:{run_id}")
     );
-    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(report["governance_decision"]["decision"], "allowed");
     assert_eq!(
         report["governance_decision"]["reason"],
-        "approved_by_cli_flag: --approve-exec"
+        "approval_receipt=cli_flag:--approve-exec"
     );
 }
 
@@ -1419,7 +1492,7 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
         report["governance_decision"]["action_id"],
         format!("subagent-command-runner:{run_id}")
     );
-    assert_eq!(report["governance_decision"]["decision"], "needs_approval");
+    assert_eq!(report["governance_decision"]["decision"], "allowed");
 }
 
 #[test]

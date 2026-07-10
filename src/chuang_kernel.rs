@@ -9,11 +9,13 @@ use crate::governance::{
     ProposedAction, RiskDecision,
 };
 use crate::hermes_memory::DualFileMemorySnapshot;
+use crate::identity_registry::AgentIdentity;
 use crate::memory_admission::{
     preview_chars, MemoryEntryView, TextMemoryAdmission, TextMemoryAdmissionDecision,
 };
 use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError};
 use crate::responder::Responder;
+use crate::runtime_event_ledger::{InMemoryRuntimeEventLedger, RuntimeEventLedger};
 use crate::runtime_report::build_runtime_report;
 use crate::subagent_report::{GovernanceDecisionSummary, SubagentReport};
 use serde::Serialize;
@@ -43,6 +45,7 @@ pub struct IdentityBootstrapSnapshot {
     pub first_wake_exists: bool,
     pub agents_registry: String,
     pub agents_registry_exists: bool,
+    pub active_identity: Option<AgentIdentity>,
 }
 
 impl ChuangKernelConfig {
@@ -113,6 +116,12 @@ pub struct RememberTurnReceipt {
     pub compacted: bool,
     pub attempted_chars: usize,
     pub stored_chars: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedTurnMemory {
+    pub record: MemoryRecord,
+    pub receipt: RememberTurnReceipt,
 }
 
 pub struct ChuangKernel<S, R> {
@@ -250,15 +259,6 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         Ok(turn)
     }
 
-    pub fn run_turn(
-        &mut self,
-        user_input: impl Into<String>,
-    ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
-        let next_turn = self.turn_count + 1;
-        let turn_id = format!("turn-{next_turn}");
-        self.run_turn_with_id_and_extra_context(turn_id, user_input.into(), Vec::new())
-    }
-
     fn run_turn_with_id_and_extra_context(
         &mut self,
         turn_id: String,
@@ -267,13 +267,41 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
     ) -> Result<ChuangKernelTurn, AgentRuntimeError> {
         let mut context_segments = self.identity_context_segments();
         context_segments.extend(extra_context_segments);
-        let result = self.runtime.run(&RuntimeRequest {
-            user_input: user_input.clone(),
-            recall_limit: self.config.recall_limit,
-            metadata: self.config.metadata.clone(),
-            context_budget: self.config.context_budget.clone(),
-            extra_context_segments: context_segments,
-        })?;
+        let thread_id = self
+            .config
+            .metadata
+            .get("session_id")
+            .cloned()
+            .unwrap_or_else(|| format!("agent:{}", self.config.agent_id));
+        let mut runtime_event_ledger = InMemoryRuntimeEventLedger::new();
+        let mut result = self.runtime.run_with_ledger(
+            &RuntimeRequest {
+                user_input: user_input.clone(),
+                recall_limit: self.config.recall_limit,
+                metadata: self.config.metadata.clone(),
+                context_budget: self.config.context_budget.clone(),
+                extra_context_segments: context_segments,
+            },
+            &mut runtime_event_ledger,
+            &thread_id,
+            &turn_id,
+        )?;
+        let runtime_events = runtime_event_ledger
+            .list()
+            .map_err(|error| AgentRuntimeError::EventLedger(error.to_string()))?;
+        result.response.meta.extra.insert(
+            "runtime_event_ledger_available".to_string(),
+            "true".to_string(),
+        );
+        result.response.meta.extra.insert(
+            "runtime_event_count".to_string(),
+            runtime_events.len().to_string(),
+        );
+        result.response.meta.extra.insert(
+            "runtime_event_ledger_json".to_string(),
+            serde_json::to_string(&runtime_events)
+                .map_err(|error| AgentRuntimeError::EventLedger(error.to_string()))?,
+        );
         let report = build_runtime_report(
             &result,
             format!("report-{turn_id}"),
@@ -316,6 +344,22 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         )
     }
 
+    pub fn prepare_session_turn_memory(
+        &mut self,
+        turn: &ChuangKernelTurn,
+        session_id: &str,
+    ) -> Result<PreparedTurnMemory, ChuangKernelMemoryError> {
+        self.prepare_turn_memory_with_metadata(
+            turn,
+            BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), session_id.to_string()),
+            ]),
+            Some(format!("session-{session_id}")),
+            true,
+        )
+    }
+
     fn remember_turn_with_metadata(
         &mut self,
         turn: &ChuangKernelTurn,
@@ -323,6 +367,26 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         record_scope: Option<String>,
         allow_compaction: bool,
     ) -> Result<RememberTurnReceipt, ChuangKernelMemoryError> {
+        let prepared = self.prepare_turn_memory_with_metadata(
+            turn,
+            extra_metadata,
+            record_scope,
+            allow_compaction,
+        )?;
+        self.runtime
+            .memory_store_mut()
+            .put(prepared.record)
+            .map_err(ChuangKernelMemoryError::Store)?;
+        Ok(prepared.receipt)
+    }
+
+    fn prepare_turn_memory_with_metadata(
+        &mut self,
+        turn: &ChuangKernelTurn,
+        extra_metadata: BTreeMap<String, String>,
+        record_scope: Option<String>,
+        allow_compaction: bool,
+    ) -> Result<PreparedTurnMemory, ChuangKernelMemoryError> {
         let record_id = record_scope
             .map(|scope| {
                 format!(
@@ -412,22 +476,20 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
         metadata.extend(self.config.metadata.clone());
         metadata.extend(extra_metadata);
         let stored_chars = content.chars().count();
-
-        self.runtime
-            .memory_store_mut()
-            .put(MemoryRecord {
+        Ok(PreparedTurnMemory {
+            record: MemoryRecord {
                 id: record_id.clone(),
                 content,
                 metadata,
-                created_at: "2026-05-01T00:00:00Z".to_string(),
+                created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
                 expires_at: None,
-            })
-            .map_err(ChuangKernelMemoryError::Store)?;
-        Ok(RememberTurnReceipt {
-            record_id,
-            compacted,
-            attempted_chars: original_chars,
-            stored_chars,
+            },
+            receipt: RememberTurnReceipt {
+                record_id,
+                compacted,
+                attempted_chars: original_chars,
+                stored_chars,
+            },
         })
     }
 
@@ -481,13 +543,8 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                     248,
                 ));
             }
-            if !snapshot.agents_registry.trim().is_empty() {
-                segments.push(identity_segment(
-                    "identity-agents",
-                    "agents.toml",
-                    &compact_identity_bootstrap_content(&snapshot.agents_registry, 180, 8),
-                    247,
-                ));
+            if let Some(identity) = &snapshot.active_identity {
+                segments.push(active_identity_segment(identity));
             }
         }
 
@@ -671,6 +728,12 @@ fn identity_segment(id: &str, source_file: &str, content: &str, priority: u8) ->
             .into_iter()
             .collect(),
     }
+}
+
+fn active_identity_segment(identity: &AgentIdentity) -> ContextSegment {
+    let content =
+        serde_json::to_string(identity).expect("AgentIdentity serialization should be infallible");
+    identity_segment("identity-active-agent", "agents.toml", &content, 247)
 }
 
 fn compact_identity_bootstrap_content(content: &str, max_chars: usize, max_lines: usize) -> String {

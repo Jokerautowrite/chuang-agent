@@ -65,7 +65,7 @@ fn write_workspace_config(workspace: &PathBuf) {
         "Channel test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n").expect("agents should write");
+    write_identity_registry(workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep channel replies concise.\n",
@@ -95,6 +95,24 @@ transport = "stub"
     .expect("config should write");
 }
 
+fn write_identity_registry(workspace: &PathBuf) {
+    fs::write(
+        workspace.join("identity/agents.toml"),
+        r#"memory_body_id = "chuang-local-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "local-agent-os-kernel"
+memory_body_id = "chuang-local-body"
+allowed_channels = ["chuang-feishu", "feishu-dedicated-chuang", "cli", "app-server"]
+"#,
+    )
+    .expect("agents should write");
+}
+
 #[test]
 fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     let workspace = temp_workspace("simulate");
@@ -109,6 +127,8 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         .arg("msg-1")
         .arg("--sender-id")
         .arg("user-1")
+        .arg("--channel")
+        .arg("chuang-feishu")
         .arg("--thread-id")
         .arg("thread-1")
         .arg("--text")
@@ -125,7 +145,7 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
     );
     let parsed: Value = serde_json::from_slice(&output.stdout).expect("stdout should be json");
 
-    assert_eq!(parsed["inbound"]["channel"], "feishu-dedicated-chuang");
+    assert_eq!(parsed["inbound"]["channel"], "chuang-feishu");
     assert_eq!(parsed["app_server_request"]["method"], "turn/start");
     assert_eq!(parsed["app_server_request"]["params"]["text"], "还在吗？");
     assert_eq!(parsed["outbound"]["thread_id"], "thread-1");
@@ -173,7 +193,7 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
         parsed["runtime_observability"]["tool_unified_execution_failure_count"],
         "0"
     );
-    assert_eq!(parsed["runtime_observability"]["runtime_event_count"], "0");
+    assert_eq!(parsed["runtime_observability"]["runtime_event_count"], "5");
     assert_eq!(
         parsed["runtime_observability"]["runtime_event_tool_started_count"],
         "0"
@@ -344,6 +364,35 @@ fn cli_channel_simulate_runs_workspace_config_without_fake_responder() {
 }
 
 #[test]
+fn cli_channel_simulate_rejects_channel_not_allowed_by_identity_registry() {
+    let workspace = temp_workspace("simulate-channel-not-allowed");
+    write_workspace_config(&workspace);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("channel")
+        .arg("simulate")
+        .arg("--workspace-root")
+        .arg(&workspace)
+        .arg("--message-id")
+        .arg("msg-channel-not-allowed")
+        .arg("--sender-id")
+        .arg("user-1")
+        .arg("--channel")
+        .arg("hermes-feishu")
+        .arg("--text")
+        .arg("不应进入运行时")
+        .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
+        .output()
+        .expect("channel simulate should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("identity_registry_invalid"));
+    assert!(stderr.contains("ChannelNotAllowed"));
+    assert!(stderr.contains("hermes-feishu"));
+}
+
+#[test]
 fn cli_channel_simulate_surfaces_nonzero_tool_protocol_errors() {
     let workspace = temp_workspace("simulate-tool-protocol-error");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
@@ -357,7 +406,7 @@ fn cli_channel_simulate_surfaces_nonzero_tool_protocol_errors() {
         "Channel test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n").expect("agents should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep channel replies concise.\n",
@@ -432,7 +481,7 @@ transport = "http"
         .arg("--thread-id")
         .arg("thread-protocol-1")
         .arg("--text")
-        .arg("读取文件")
+        .arg("测试工具协议纠错")
         .arg("--json")
         .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
         .output()
@@ -489,7 +538,7 @@ fn cli_channel_simulate_text_surfaces_protocol_error_codes_without_raw_payload()
         "Channel test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n").expect("agents should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep channel replies concise.\n",
@@ -564,7 +613,7 @@ transport = "http"
         .arg("--thread-id")
         .arg("thread-protocol-text-1")
         .arg("--text")
-        .arg("读取文件")
+        .arg("测试工具协议纠错")
         .env("CHUANG_AGENT_CHANNEL_TEST_API_KEY", "test-key")
         .output()
         .expect("channel simulate should execute");

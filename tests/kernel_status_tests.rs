@@ -1384,6 +1384,7 @@ fn kernel_status_exposes_identity_bootstrap_presence_flags() {
             first_wake_exists: false,
             agents_registry: String::new(),
             agents_registry_exists: false,
+            active_identity: None,
         }),
     };
 

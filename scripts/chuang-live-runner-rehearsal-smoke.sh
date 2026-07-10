@@ -220,8 +220,8 @@ for path in sys.argv[1:]:
     assert report["exit_code"] == 2
     assert "codex runner disabled" in report["summary"]
     assert report["stderr_preview"] == "codex runner disabled by default"
-    assert report["governance_decision"]["decision"] == "needs_approval"
-    assert report["governance_decision"]["reason"] == "approved_by_cli_flag: --approve-exec"
+    assert report["governance_decision"]["decision"] == "allowed"
+    assert report["governance_decision"]["reason"] == "approval_receipt=cli_flag:--approve-exec"
 PY
 
 printf 'live_runner_rehearsal_smoke_ok work_dir=%s queue_root=%s run_id=%s\n' "$work_dir" "$queue_root" "$run_id"

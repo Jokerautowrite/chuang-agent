@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod app_server;
+mod cli_approval;
 mod cli_args;
 mod cli_channel;
 mod cli_config;
@@ -29,6 +30,7 @@ mod cli_types;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::terminal_event::{StepStatus, TerminalEvent};
 use chuang_agent::tool_loop_meta::ToolLoopMeta;
+use cli_approval::approval_command;
 use cli_args::*;
 use cli_channel::channel_command;
 use cli_config::config_command;
@@ -80,6 +82,7 @@ fn run_cli() -> Result<(), String> {
         Some("experiment") => experiment_command(&args[2..]),
         Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),
+        Some("approval") => approval_command(&args[2..]),
         _ => Err(usage()),
     }
 }

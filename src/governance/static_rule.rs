@@ -1,13 +1,16 @@
 use crate::common::AuditRecord;
+use std::collections::BTreeSet;
 
 use super::{
-    ActionKind, Governance, GovernanceError, MarkdownRuleSet, ProposedAction, RiskDecision,
+    ActionKind, Governance, GovernanceError, MarkdownRuleSet, OperatorApprovalEvidence,
+    ProposedAction, RiskDecision,
 };
 
 #[derive(Debug, Default, Clone)]
 pub struct StaticRuleGovernance {
     audit_records: Vec<AuditRecord>,
     rules: Option<MarkdownRuleSet>,
+    operator_approvals: BTreeSet<OperatorApprovalEvidence>,
 }
 
 impl StaticRuleGovernance {
@@ -19,11 +22,28 @@ impl StaticRuleGovernance {
         Self {
             audit_records: Vec::new(),
             rules: Some(rules),
+            operator_approvals: BTreeSet::new(),
         }
     }
 
     pub fn audit_records(&self) -> &[AuditRecord] {
         &self.audit_records
+    }
+
+    pub fn register_operator_approval(
+        &mut self,
+        evidence: OperatorApprovalEvidence,
+    ) -> Result<(), GovernanceError> {
+        if evidence.approval_id.trim().is_empty()
+            || evidence.operator_ref.trim().is_empty()
+            || evidence.evidence_ref.trim().is_empty()
+        {
+            return Err(GovernanceError {
+                message: "operator approval evidence fields must not be empty".to_string(),
+            });
+        }
+        self.operator_approvals.insert(evidence);
+        Ok(())
     }
 }
 
@@ -72,6 +92,19 @@ impl Governance for StaticRuleGovernance {
     fn audit(&mut self, record: AuditRecord) -> Result<(), GovernanceError> {
         self.audit_records.push(record);
         Ok(())
+    }
+
+    fn verify_operator_approval(
+        &self,
+        evidence: &OperatorApprovalEvidence,
+    ) -> Result<(), GovernanceError> {
+        if self.operator_approvals.contains(evidence) {
+            Ok(())
+        } else {
+            Err(GovernanceError {
+                message: "operator approval evidence is not registered".to_string(),
+            })
+        }
     }
 }
 

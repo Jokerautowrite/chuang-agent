@@ -1,4 +1,3 @@
-use chuang_agent::common::Timestamp;
 use chuang_agent::lifecycle::{
     CommandEffect, LifecycleCommand, LifecycleState, LifecycleTransitionTable,
 };
@@ -32,13 +31,15 @@ fn start_on_failed_is_deferred() {
 
     let effect = table.evaluate(&LifecycleState::Failed, &LifecycleCommand::Start);
 
-    assert_eq!(
-        effect,
-        CommandEffect::Deferred {
-            command: LifecycleCommand::Start,
-            inserted_at: Timestamp("deferred".to_string()),
-        }
-    );
+    let CommandEffect::Deferred {
+        command,
+        inserted_at,
+    } = effect
+    else {
+        panic!("expected deferred effect");
+    };
+    assert_eq!(command, LifecycleCommand::Start);
+    chrono::DateTime::parse_from_rfc3339(&inserted_at.0).unwrap();
 }
 
 #[test]
@@ -70,13 +71,15 @@ fn resume_on_starting_is_deferred() {
 
     let effect = table.evaluate(&LifecycleState::Starting, &LifecycleCommand::Resume);
 
-    assert_eq!(
-        effect,
-        CommandEffect::Deferred {
-            command: LifecycleCommand::Resume,
-            inserted_at: Timestamp("deferred".to_string()),
-        }
-    );
+    let CommandEffect::Deferred {
+        command,
+        inserted_at,
+    } = effect
+    else {
+        panic!("expected deferred effect");
+    };
+    assert_eq!(command, LifecycleCommand::Resume);
+    chrono::DateTime::parse_from_rfc3339(&inserted_at.0).unwrap();
 }
 
 #[test]
@@ -178,11 +181,13 @@ fn restart_on_uninitialized_is_deferred() {
 
     let effect = table.evaluate(&LifecycleState::Uninitialized, &LifecycleCommand::Restart);
 
-    assert_eq!(
-        effect,
-        CommandEffect::Deferred {
-            command: LifecycleCommand::Restart,
-            inserted_at: Timestamp("deferred".to_string()),
-        }
-    );
+    let CommandEffect::Deferred {
+        command,
+        inserted_at,
+    } = effect
+    else {
+        panic!("expected deferred effect");
+    };
+    assert_eq!(command, LifecycleCommand::Restart);
+    chrono::DateTime::parse_from_rfc3339(&inserted_at.0).unwrap();
 }

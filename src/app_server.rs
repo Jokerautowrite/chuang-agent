@@ -751,7 +751,10 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         .map(|thread| thread.workspace_root.clone())
         .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
 
-    let runtime = build_runtime_for_workspace(&workspace_root)?;
+    let mut runtime = build_runtime_for_workspace(&workspace_root)?;
+    runtime
+        .metadata
+        .insert("channel".to_string(), "app-server".to_string());
     let runtime = override_runtime_model(runtime, params);
     let live_readiness = build_chuang_mvp_status(&runtime, &kernel_config_from_runtime(&runtime)?)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?

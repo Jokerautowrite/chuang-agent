@@ -1,6 +1,8 @@
 use crate::common::Timestamp;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LifecycleState {
     Uninitialized,
     Starting,
@@ -14,7 +16,8 @@ pub enum LifecycleState {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LifecycleCommand {
     Start,
     Pause,
@@ -25,7 +28,8 @@ pub enum LifecycleCommand {
     Restart,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "effect", rename_all = "snake_case")]
 pub enum CommandEffect<Cmd> {
     Accepted {
         next_state: LifecycleState,
@@ -40,7 +44,8 @@ pub enum CommandEffect<Cmd> {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
 pub enum CommandRejectReason {
     InvalidState {
         current: LifecycleState,

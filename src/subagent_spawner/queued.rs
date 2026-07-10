@@ -5,6 +5,7 @@ use crate::subagent_report::{ExecutionStatus, SubagentReport};
 use crate::subagent_spawner::{
     build_subagent_report, validate_spawn_request, KillReason, RunId, SpawnReceipt, SpawnRequest,
     SubagentDispatch, SubagentError, SubagentSpawner, SubagentState,
+    QUEUED_STEER_MESSAGES_METADATA_KEY,
 };
 
 #[derive(Debug, Clone)]
@@ -13,7 +14,15 @@ struct QueuedRun {
     receipt: SpawnReceipt,
     state: SubagentState,
     dispatch: SubagentDispatch,
+    steer_inbox: Vec<String>,
     report: Option<SubagentReport>,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedQueuedSpawn {
+    run_id: RunId,
+    receipt: SpawnReceipt,
+    queued_run: QueuedRun,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -34,13 +43,15 @@ impl QueuedSubagentSpawner {
         run_id: RunId,
         agent_id: AgentId,
     ) -> Result<SpawnReceipt, SubagentError> {
-        self.spawn_inner(request, run_id, agent_id)
+        let prepared = self.prepare_spawn(request, run_id, agent_id)?;
+        Ok(self.commit_prepared_spawn(prepared, None))
     }
 
     pub fn restore_dispatch(
         &mut self,
         dispatch: SubagentDispatch,
     ) -> Result<SpawnReceipt, SubagentError> {
+        let restored_run_number = queued_run_number(&dispatch.run_id);
         let request = SpawnRequest {
             task_id: dispatch.task_id.clone(),
             parent_agent_id: dispatch.parent_agent_id.clone(),
@@ -53,7 +64,11 @@ impl QueuedSubagentSpawner {
             recursive_spawn: dispatch.recursive_spawn,
             metadata: dispatch.metadata.clone(),
         };
-        self.spawn_inner(request, dispatch.run_id, dispatch.agent_id)
+        let prepared = self.prepare_spawn(request, dispatch.run_id, dispatch.agent_id)?;
+        if let Some(restored_run_number) = restored_run_number {
+            self.next_run = self.next_run.max(restored_run_number);
+        }
+        Ok(self.commit_prepared_spawn(prepared, None))
     }
 
     pub fn pending_dispatches(&self) -> Vec<SubagentDispatch> {
@@ -61,6 +76,10 @@ impl QueuedSubagentSpawner {
             .iter()
             .filter_map(|run_id| self.runs.get(&run_id.0).map(|run| run.dispatch.clone()))
             .collect()
+    }
+
+    pub fn dispatch_snapshot(&self, run_id: &RunId) -> Option<SubagentDispatch> {
+        self.runs.get(&run_id.0).map(|run| run.dispatch.clone())
     }
 
     pub fn take_next_dispatch(&mut self) -> Option<SubagentDispatch> {
@@ -103,12 +122,92 @@ impl QueuedSubagentSpawner {
         self.runs.get(&run_id.0).map(|run| &run.state)
     }
 
-    fn spawn_inner(
+    pub fn steer_messages(&self, run_id: &RunId) -> Option<&[String]> {
+        self.runs
+            .get(&run_id.0)
+            .map(|run| run.steer_inbox.as_slice())
+    }
+
+    pub fn persist_steer<F>(
+        &mut self,
+        run_id: &RunId,
+        message: String,
+        persist_dispatch: F,
+    ) -> Result<(), SubagentError>
+    where
+        F: FnOnce(&SubagentDispatch) -> Result<(), SubagentError>,
+    {
+        let (next_dispatch, next_steer_inbox) = {
+            let run = self
+                .runs
+                .get(&run_id.0)
+                .ok_or_else(|| SubagentError::UnknownRun(run_id.clone()))?;
+
+            if !matches!(run.state, SubagentState::Running) {
+                return Err(SubagentError::NotRunning(run_id.clone()));
+            }
+
+            if message.trim().is_empty() {
+                return Err(SubagentError::InvalidRequest(
+                    "steer message must not be empty".to_string(),
+                ));
+            }
+
+            let mut next_steer_inbox = run.steer_inbox.clone();
+            next_steer_inbox.push(message.clone());
+
+            let mut next_dispatch = run.dispatch.clone();
+            next_dispatch.metadata.insert(
+                QUEUED_STEER_MESSAGES_METADATA_KEY.to_string(),
+                encode_steer_messages(&next_steer_inbox),
+            );
+
+            (next_dispatch, next_steer_inbox)
+        };
+
+        persist_dispatch(&next_dispatch)?;
+
+        let run = self
+            .runs
+            .get_mut(&run_id.0)
+            .ok_or_else(|| SubagentError::UnknownRun(run_id.clone()))?;
+
+        if !matches!(run.state, SubagentState::Running) {
+            return Err(SubagentError::NotRunning(run_id.clone()));
+        }
+
+        run.steer_inbox = next_steer_inbox;
+        run.dispatch = next_dispatch;
+        Ok(())
+    }
+
+    pub fn persist_spawn<F>(
+        &mut self,
+        request: SpawnRequest,
+        persist_dispatch: F,
+    ) -> Result<SpawnReceipt, SubagentError>
+    where
+        F: FnOnce(&SubagentDispatch) -> Result<(), SubagentError>,
+    {
+        let next_run = self
+            .next_run
+            .checked_add(1)
+            .ok_or_else(|| SubagentError::InvalidRequest("next_run overflow".to_string()))?;
+        let run_id = RunId(format!("queued-run-{next_run}"));
+        let agent_id = AgentId(format!("{}-{next_run}", request.agent_name));
+        let prepared = self.prepare_spawn(request, run_id, agent_id)?;
+
+        persist_dispatch(&prepared.queued_run.dispatch)?;
+
+        Ok(self.commit_prepared_spawn(prepared, Some(next_run)))
+    }
+
+    fn prepare_spawn(
         &mut self,
         request: SpawnRequest,
         run_id: RunId,
         agent_id: AgentId,
-    ) -> Result<SpawnReceipt, SubagentError> {
+    ) -> Result<PreparedQueuedSpawn, SubagentError> {
         validate_spawn_request(&request)?;
         if run_id.0.trim().is_empty() {
             return Err(SubagentError::InvalidRequest(
@@ -126,6 +225,7 @@ impl QueuedSubagentSpawner {
                 run_id.0
             )));
         }
+        let steer_inbox = decode_steer_messages(&request.metadata)?;
         let receipt = SpawnReceipt {
             run_id: run_id.clone(),
             agent_id: agent_id.clone(),
@@ -148,47 +248,47 @@ impl QueuedSubagentSpawner {
             metadata: request.metadata.clone(),
         };
 
-        self.runs.insert(
-            run_id.0.clone(),
-            QueuedRun {
+        Ok(PreparedQueuedSpawn {
+            run_id,
+            receipt: receipt.clone(),
+            queued_run: QueuedRun {
                 request,
-                receipt: receipt.clone(),
+                receipt,
                 state: SubagentState::Running,
                 dispatch,
+                steer_inbox,
                 report: None,
             },
-        );
-        self.dispatch_queue.push(run_id);
+        })
+    }
 
-        Ok(receipt)
+    fn commit_prepared_spawn(
+        &mut self,
+        prepared: PreparedQueuedSpawn,
+        next_run: Option<u64>,
+    ) -> SpawnReceipt {
+        let PreparedQueuedSpawn {
+            run_id,
+            receipt,
+            queued_run,
+        } = prepared;
+
+        self.runs.insert(run_id.0.clone(), queued_run);
+        self.dispatch_queue.push(run_id);
+        if let Some(next_run) = next_run {
+            self.next_run = next_run;
+        }
+        receipt
     }
 }
 
 impl SubagentSpawner for QueuedSubagentSpawner {
     fn spawn(&mut self, request: SpawnRequest) -> Result<SpawnReceipt, SubagentError> {
-        self.next_run += 1;
-        let run_id = RunId(format!("queued-run-{}", self.next_run));
-        let agent_id = AgentId(format!("{}-{}", request.agent_name, self.next_run));
-        self.spawn_inner(request, run_id, agent_id)
+        self.persist_spawn(request, |_| Ok(()))
     }
 
     fn steer(&mut self, run_id: &RunId, message: String) -> Result<(), SubagentError> {
-        let run = self
-            .runs
-            .get(&run_id.0)
-            .ok_or_else(|| SubagentError::UnknownRun(run_id.clone()))?;
-
-        if !matches!(run.state, SubagentState::Running) {
-            return Err(SubagentError::NotRunning(run_id.clone()));
-        }
-
-        if message.trim().is_empty() {
-            return Err(SubagentError::InvalidRequest(
-                "steer message must not be empty".to_string(),
-            ));
-        }
-
-        Ok(())
+        self.persist_steer(run_id, message, |_| Ok(()))
     }
 
     fn kill(&mut self, run_id: &RunId, reason: KillReason) -> Result<(), SubagentError> {
@@ -225,4 +325,27 @@ impl SubagentSpawner for QueuedSubagentSpawner {
             ))),
         }
     }
+}
+
+fn decode_steer_messages(
+    metadata: &BTreeMap<String, String>,
+) -> Result<Vec<String>, SubagentError> {
+    let Some(raw_messages) = metadata.get(QUEUED_STEER_MESSAGES_METADATA_KEY) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_str(raw_messages).map_err(|error| {
+        SubagentError::InvalidRequest(format!(
+            "invalid {}: {}",
+            QUEUED_STEER_MESSAGES_METADATA_KEY, error
+        ))
+    })
+}
+
+fn encode_steer_messages(messages: &[String]) -> String {
+    serde_json::to_string(messages).expect("serializing steer messages should not fail")
+}
+
+fn queued_run_number(run_id: &RunId) -> Option<u64> {
+    let suffix = run_id.0.strip_prefix("queued-run-")?;
+    suffix.parse::<u64>().ok()
 }

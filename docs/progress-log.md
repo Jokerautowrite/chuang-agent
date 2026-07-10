@@ -1,3 +1,21 @@
+# 2026-07-10 Chuang 本地完成度收口
+- 本轮按项目目标对 provider、memory、governance、runtime events、subagent、identity/channel、lifecycle、session archive 和 acceptance 边界做并行审计；结论收敛为 `local_completion=100%`，同时保持 `global_real_live_ready=false`、`live_readiness.overall_state=local_ready_live_pending`、`real_external_acceptance_pending=true`。
+- provider reasoning effort 已从隐式默认变成受校验配置并透传；memory policy 已覆盖 reservation TTL、启动失败 rollback、幂等 reclaim 和原子 eviction rollback；governance 保持强制装配。
+- runtime 事件已统一为可序列化 ledger；审批恢复会按 `ApprovalResolved -> ToolFinished` 闭合工具生命周期。子代理支持 claim/steer/report；queued spawn/steer 均先持久化 dispatch、成功后提交内存态，恢复后从最大 `queued-run-N` 继续编号；identity registry 和 channel allowlist 进入 typed contract，普通 CLI 缺省补 `channel=cli`，不再可绕过 allowlist。
+- lifecycle checkpoint 会完整恢复 runtime refs，早期 v1 payload 缺新字段时保持兼容，恢复后的后续持久化不会覆盖丢失引用。SQLite session archive + searchable summary 保持同一事务；remember workflow 先 preview 全部请求步骤，再提交 archive 和后续 identity/experience/dispatch。archive 前失败无后续副作用；若 archive 已提交而后续 requested step 失败，则由 remember workflow 显式返回不可盲重试的 `partial_success`。`SqliteSessionArchive::open` 会独立初始化所需 schema，不依赖其他 store 先打开。
+- 危险工具审批恢复已改为持久化签名票据：票据绑定 approval/call/target/workspace/policy 的 SHA-256 指纹并在执行前消费；验签只信任 `/etc/chuang-agent/operator-approval.pub`，拒绝 per-call/env 公钥覆盖，要求 trust anchor 文件和父目录 root-owned 且不可替换，并限制票据 15 分钟有效、未来时钟偏差最多 60 秒。
+- 外部 Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 继续由 canonical global receipt 单独验收；历史可联系/响应记录不能替代当前 receipt，也不作为本地完成阻塞。
+- 最终门禁已通过：`cargo fmt --all --check`、`cargo check -q`、`git diff --check`、`cargo test -q`、`cargo test -q -- --test-threads=1`、`sh scripts/chuang-candidate-verify.sh`；候选标志为 `chuang_candidate_verify_ok`，最终只读复审无剩余 P0/P1。
+
+# 2026-07-10 小策全面自审与运行链优化
+- 本轮按用户要求结合长期记忆、历史使用习惯、飞书桥日志、Codex doctor、插件、技能和备份链做全面审计；没有运行自动自修改 evolver，只采用其“历史证据 -> 提案 -> 验证 -> 固化”方法。
+- Codex CLI 从 `0.141.0` 升级到 `0.144.1`，旧版完整归档；真实 `gpt-5.6-terra/high` Responses 请求返回 `pong`，app-server 初始化与 `model/list` 通过。
+- 飞书桥新增 `quiet/normal/verbose` 日志档，默认 `normal` 屏蔽逐 delta、token usage、rate limit 高频事件；CardKit 新增 5 分钟故障熔断，失败时继续走 legacy card，冷却后自动恢复。
+- 飞书默认 effort 从 `medium` 修正为 `high`；插件市场从失效 Wine 路径修正为 Linux 主机快照。未完成 OAuth 的 Cloudflare MCP 暂时禁用，browser-use 与 chrome 插件保持启用。
+- 周便携备份改为解析 `codex-feishu-bridge-current` 的真实源目录，恢复时重建稳定软链接，并纳入 rescue service unit；`DRY_RUN=1 KEEP_STAGING=1` 验证通过。
+- 新增 `~/.codex/skills/xiaoce-self-audit`，包含脱敏只读 doctor 脚本，skill validator 与真实执行均通过。
+- 完整报告见 `docs/xiaoce-self-optimization-audit-2026-07-10.md`。
+
 # 2026-06-24 终端 typed events 与 THINKING/STEPS 展示
 - 本轮按老爸要求让 `chuang` 终端显示更接近当前 OpenCode/Codex 工作台格式，但仍保持 stdout/PTY 路线，不引入 ratatui/TUI 依赖。
 - 新增 `src/terminal_event.rs`，把 REPL progress JSONL 从散装 `kind/details` 推进为 `TerminalEvent` typed schema：turn、step、model、tool、protocol、guidance、answer 都有显式事件类型。
@@ -2585,3 +2603,11 @@
   - `sh scripts/chuang-mvp-smoke.sh`
   - `sh scripts/chuang-candidate-verify.sh`
 - 下一步入口：先把当前 live receipt/status/readiness 这一批改动复查并提交；提交前建议再跑 `sh scripts/chuang-third-test-smoke.sh` 和必要时全量 `cargo test -q`。提交后再推进真实 operator receipt 收口，不要把 local-ready、mapped、gated、frozen 或 provider env `<set>` 写成 live-ready。
+
+# 2026-07-10 小策飞书桥日志写盘加固
+- 飞书桥 `normal` 日志在已有 delta、token usage、rate limit 降噪基础上，进一步屏蔽 `item/started`、`item/completed`、`turn/diff/updated`、`turn/plan/updated` 和 routine thread 状态事件；`verbose` 仍保留完整 RPC 交通用于限时排障，警告、错误、请求摘要和回合完成日志继续保留。
+- `codex-feishu-bot.service` 新增服务级 journal 兜底限流：`LogRateLimitIntervalSec=30s`、`LogRateLimitBurst=200`，防止异常循环重新形成高频写盘。
+- `/home/user/.local/bin/codex-cli-preflight` 改为健康时静默退出，仅在缺失 native package、执行修复或修复失败时写入 `codex-cli-preflight.log`；实测健康运行前后日志大小和 mtime 均不变。
+- 已通过 `npm run test:log-level`、`npm run check`、`bash -n /home/user/.local/bin/codex-cli-preflight`、`systemd-analyze --user verify codex-feishu-bot.service`，并回读 systemd 限流属性为 `30s/200`。
+- 所有改动已备份到 `/home/user/.codex/backups/xiaoce-log-hardening-20260710-100745`。历史 `journald` 约 1.6 GB、`~/.codex/log` 约 367 MB，本轮按删除保护规则未清理。
+- 2026-07-10 10:13:06 CST 已完成唯一一次飞书桥重启：服务 `active/running`、`NRestarts=0`、长连接成功；启动窗口 16 行且 routine RPC/delta/error 均为 0。13:18 后真实回合复查仍为 routine RPC/delta/token usage/rate limit/error 全部 0，默认模型保持 `gpt-5.6-terra/high`。

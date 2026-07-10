@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
@@ -20,7 +21,8 @@ use chuang_agent::slot_registry::{
 };
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
-    ContextIsolation, SpawnRequest, SubagentError, SubagentSpawner, SubagentToolPolicy,
+    ContextIsolation, RunId, SpawnRequest, SubagentError, SubagentSpawner, SubagentToolPolicy,
+    QUEUED_STEER_MESSAGES_METADATA_KEY,
 };
 use chuang_agent::tool_runtime::ToolCall;
 use chuang_agent::{common::AgentId, common::ReportId, common::TaskId, common::Timestamp};
@@ -233,6 +235,7 @@ fn slot_registry_builds_provider_responder_from_config() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         }))
@@ -255,6 +258,7 @@ fn slot_registry_provider_fallback_uses_secondary_on_primary_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         })),
@@ -321,6 +325,7 @@ fn slot_registry_marks_unconfigured_fallback_on_model_capacity_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         }))
@@ -391,6 +396,7 @@ fn slot_registry_provider_fallback_preserves_primary_capacity_reason() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         })),
@@ -457,6 +463,7 @@ fn slot_registry_provider_fallback_does_not_mask_unlisted_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         })),
@@ -536,6 +543,7 @@ fn slot_registry_rejects_invalid_provider_config_before_adapter_use() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
+            reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
         }))
@@ -552,6 +560,7 @@ fn slot_registry_rejects_runtime_with_invalid_provider_slot() {
         api_key: String::new(),
         model_name: "gpt-4.1-mini".to_string(),
         transport: ProviderTransport::Stub,
+        reasoning_effort: None,
         request_timeout_ms: None,
         tls_ca_cert_path: None,
     });
@@ -649,6 +658,77 @@ fn slot_registry_queued_external_rejects_invalid_spawn_without_dispatch_file() {
 }
 
 #[test]
+fn slot_registry_queued_external_spawn_write_failure_rolls_back_in_memory_state() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-spawn-rollback"),
+    };
+
+    let dispatch_path = config
+        .subagent_queue
+        .root
+        .join("dispatch")
+        .join("queued-run-1.json");
+    let tmp_path = dispatch_path.with_extension("tmp");
+    fs::create_dir_all(&tmp_path).expect("tmp path blocker should be created");
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let error = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued-spawn-rollback".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "失败时不要留下 queued ghost 状态".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect_err("spawn should fail when dispatch artifact write fails");
+
+    assert!(
+        matches!(error, SubagentError::InvalidRequest(message) if message.contains("StorageUnavailable"))
+    );
+    assert!(!dispatch_path.exists());
+
+    match &slots.subagent {
+        SubagentRuntimeSlot::QueuedExternal { spawner, queue } => {
+            assert!(spawner.pending_dispatches().is_empty());
+            assert!(spawner.state(&RunId("queued-run-1".to_string())).is_none());
+            assert!(queue
+                .read_dispatch(&RunId("queued-run-1".to_string()))
+                .expect("queue read should still work")
+                .is_none());
+        }
+        SubagentRuntimeSlot::Fake(_) => panic!("expected queued external subagent slot"),
+    }
+
+    fs::remove_dir_all(&tmp_path).expect("tmp path blocker should be removable");
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued-spawn-rollback-retry".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "重试时 run id 不应跳号".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("retry spawn should succeed");
+
+    assert_eq!(receipt.run_id.0, "queued-run-1");
+    assert!(dispatch_path.exists());
+}
+
+#[test]
 fn slot_registry_queued_external_slot_attaches_report_from_queue_on_collect() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.subagent = SubagentConfig::QueuedExternal;
@@ -691,6 +771,254 @@ fn slot_registry_queued_external_slot_attaches_report_from_queue_on_collect() {
 
     assert_eq!(collected, report);
     assert_eq!(collected.summary, "queued slot worker completed");
+}
+
+#[test]
+fn slot_registry_queued_external_steer_rewrites_dispatch_artifact() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-steer"),
+    };
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued-steer".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "把 steer 写回 queue artifact".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("queued spawn should succeed");
+
+    slots
+        .subagent
+        .steer(&receipt.run_id, "先补失败路径".to_string())
+        .expect("first steer should persist");
+    slots
+        .subagent
+        .steer(&receipt.run_id, "再补回执校验".to_string())
+        .expect("second steer should persist");
+
+    let persisted_dispatch = match &slots.subagent {
+        SubagentRuntimeSlot::QueuedExternal { queue, .. } => queue
+            .read_dispatch(&receipt.run_id)
+            .expect("dispatch should read from queue")
+            .expect("dispatch should exist on disk"),
+        SubagentRuntimeSlot::Fake(_) => panic!("expected queued external subagent slot"),
+    };
+    let steer_messages = serde_json::from_str::<Vec<String>>(
+        persisted_dispatch
+            .metadata
+            .get(QUEUED_STEER_MESSAGES_METADATA_KEY)
+            .expect("persisted dispatch should carry steer messages"),
+    )
+    .expect("persisted steer metadata should decode");
+
+    assert_eq!(
+        steer_messages,
+        vec!["先补失败路径".to_string(), "再补回执校验".to_string()]
+    );
+}
+
+#[test]
+fn slot_registry_queued_external_steer_write_failure_rolls_back_in_memory_state() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-steer-rollback"),
+    };
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should build");
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-queued-steer-rollback".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "失败时不要让 steer 留在内存态".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("queued spawn should succeed");
+
+    slots
+        .subagent
+        .steer(&receipt.run_id, "先补失败路径".to_string())
+        .expect("first steer should persist");
+
+    let dispatch_path = config
+        .subagent_queue
+        .root
+        .join("dispatch")
+        .join(format!("{}.json", receipt.run_id.0));
+    let tmp_path = dispatch_path.with_extension("tmp");
+    fs::create_dir_all(&tmp_path).expect("tmp path blocker should be created");
+
+    let error = slots
+        .subagent
+        .steer(&receipt.run_id, "这条不应残留".to_string())
+        .expect_err("second steer should fail when queue artifact write fails");
+    assert!(
+        matches!(error, SubagentError::InvalidRequest(message) if message.contains("StorageUnavailable"))
+    );
+
+    let (persisted_dispatch, in_memory_messages, in_memory_dispatch) = match &slots.subagent {
+        SubagentRuntimeSlot::QueuedExternal { spawner, queue } => (
+            queue
+                .read_dispatch(&receipt.run_id)
+                .expect("dispatch should remain readable")
+                .expect("dispatch should still exist on disk"),
+            spawner
+                .steer_messages(&receipt.run_id)
+                .expect("run should remain in memory")
+                .to_vec(),
+            spawner
+                .dispatch_snapshot(&receipt.run_id)
+                .expect("dispatch snapshot should remain available"),
+        ),
+        SubagentRuntimeSlot::Fake(_) => panic!("expected queued external subagent slot"),
+    };
+
+    let persisted_messages = serde_json::from_str::<Vec<String>>(
+        persisted_dispatch
+            .metadata
+            .get(QUEUED_STEER_MESSAGES_METADATA_KEY)
+            .expect("persisted dispatch should keep steer messages"),
+    )
+    .expect("persisted steer metadata should decode");
+    let in_memory_dispatch_messages = serde_json::from_str::<Vec<String>>(
+        in_memory_dispatch
+            .metadata
+            .get(QUEUED_STEER_MESSAGES_METADATA_KEY)
+            .expect("in-memory dispatch should keep steer messages"),
+    )
+    .expect("in-memory steer metadata should decode");
+
+    assert_eq!(persisted_messages, vec!["先补失败路径".to_string()]);
+    assert_eq!(in_memory_messages, vec!["先补失败路径".to_string()]);
+    assert_eq!(
+        in_memory_dispatch_messages,
+        vec!["先补失败路径".to_string()]
+    );
+}
+
+#[test]
+fn slot_registry_queued_external_restores_pending_dispatches_and_continues_numbering() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-restore-numbering"),
+    };
+
+    let dispatch_dir = config.subagent_queue.root.join("dispatch");
+    fs::create_dir_all(&dispatch_dir).expect("dispatch dir should be created");
+    fs::write(
+        dispatch_dir.join("queued-run-7.json"),
+        r#"{
+  "run_id":"queued-run-7",
+  "agent_id":"worker-7",
+  "task_id":"task-restored-7",
+  "parent_agent_id":"xiaoce",
+  "agent_name":"worker",
+  "task":"恢复编号 7",
+  "tool_policy":"Execute",
+  "context_isolation":"Isolated",
+  "token_budget":768,
+  "idle_timeout_ms":30000,
+  "recursive_spawn":false,
+  "metadata":{}
+}"#,
+    )
+    .expect("dispatch should be written");
+    fs::write(
+        dispatch_dir.join("persisted-run-alpha.json"),
+        r#"{
+  "run_id":"persisted-run-alpha",
+  "agent_id":"worker-alpha",
+  "task_id":"task-restored-alpha",
+  "parent_agent_id":"xiaoce",
+  "agent_name":"worker",
+  "task":"恢复自定义编号",
+  "tool_policy":"Execute",
+  "context_isolation":"Isolated",
+  "token_budget":768,
+  "idle_timeout_ms":30000,
+  "recursive_spawn":false,
+  "metadata":{}
+}"#,
+    )
+    .expect("dispatch should be written");
+
+    let mut slots = build_runtime_slots(&config).expect("queued slot should rebuild from queue");
+    let restored_run_ids = match &slots.subagent {
+        SubagentRuntimeSlot::QueuedExternal { spawner, .. } => spawner
+            .pending_dispatches()
+            .into_iter()
+            .map(|dispatch| dispatch.run_id.0)
+            .collect::<Vec<_>>(),
+        SubagentRuntimeSlot::Fake(_) => panic!("expected queued external subagent slot"),
+    };
+    assert_eq!(
+        restored_run_ids,
+        vec![
+            "persisted-run-alpha".to_string(),
+            "queued-run-7".to_string()
+        ]
+    );
+
+    let receipt = slots
+        .subagent
+        .spawn(SpawnRequest {
+            task_id: TaskId("task-after-restore".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "重建后继续编号".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 768,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: Default::default(),
+        })
+        .expect("spawn should continue after restored queue");
+
+    assert_eq!(receipt.run_id.0, "queued-run-8");
+    assert!(dispatch_dir.join("queued-run-7.json").exists());
+    assert!(dispatch_dir.join("queued-run-8.json").exists());
+}
+
+#[test]
+fn slot_registry_queued_external_rebuild_fails_on_corrupt_dispatch_artifact() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.subagent = SubagentConfig::QueuedExternal;
+    config.subagent_queue = SubagentQueueConfig {
+        root: temp_queue_root("queued-corrupt-dispatch"),
+    };
+
+    let dispatch_dir = config.subagent_queue.root.join("dispatch");
+    fs::create_dir_all(&dispatch_dir).expect("dispatch dir should be created");
+    fs::write(dispatch_dir.join("queued-run-1.json"), "{not valid json")
+        .expect("corrupt dispatch should be written");
+
+    let error = build_runtime_slots(&config).expect_err("corrupt dispatch should fail rebuild");
+
+    assert_eq!(error.field, "subagent_queue.dispatch");
+    assert!(error
+        .message
+        .contains("failed to restore queued dispatches"));
+    assert!(error.message.contains("Decode"));
 }
 
 fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {

@@ -13,8 +13,8 @@ use crate::genesis_actuator::{
     GenesisActuator, GenesisAskRequest, GenesisAskResponse, GenesisCommandSpec, GenesisError,
 };
 use crate::governance::{
-    Governance, GovernanceError, MarkdownRuleSet, ProposedAction, RiskDecision,
-    StaticRuleGovernance,
+    Governance, GovernanceError, MarkdownRuleSet, OperatorApprovalEvidence, ProposedAction,
+    RiskDecision, StaticRuleGovernance,
 };
 use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use crate::responder::{
@@ -61,6 +61,17 @@ pub enum ProviderSlot {
 #[derive(Debug, Clone)]
 pub enum GovernanceSlot {
     StaticRule(StaticRuleGovernance),
+}
+
+impl GovernanceSlot {
+    pub fn register_operator_approval(
+        &mut self,
+        evidence: OperatorApprovalEvidence,
+    ) -> Result<(), GovernanceError> {
+        match self {
+            Self::StaticRule(governance) => governance.register_operator_approval(evidence),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +145,7 @@ pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot,
                 config.model_name.clone(),
             )
             .with_transport(config.transport.clone())
+            .with_reasoning_effort(config.reasoning_effort)
             .with_request_timeout_ms(config.request_timeout_ms.unwrap_or(60_000))
             .with_tls_ca_cert_path(config.tls_ca_cert_path.clone()),
         )),
@@ -207,11 +219,20 @@ fn build_subagent(config: &RuntimeConfig) -> Result<SubagentRuntimeSlot, ConfigE
         RuntimeConfig {
             subagent: SubagentConfig::QueuedExternal,
             ..
-        } => Ok(SubagentRuntimeSlot::QueuedExternal {
-            spawner: QueuedSubagentSpawner::new(),
-            queue: FileSubagentQueue::open(config.subagent_queue.build_file_queue_config()?)
-                .map_err(subagent_queue_config_error)?,
-        }),
+        } => {
+            let queue = FileSubagentQueue::open(config.subagent_queue.build_file_queue_config()?)
+                .map_err(subagent_queue_config_error)?;
+            let mut spawner = QueuedSubagentSpawner::new();
+            let dispatches = queue
+                .list_dispatches()
+                .map_err(subagent_queue_restore_error)?;
+            for dispatch in dispatches {
+                spawner
+                    .restore_dispatch(dispatch)
+                    .map_err(subagent_restore_config_error)?;
+            }
+            Ok(SubagentRuntimeSlot::QueuedExternal { spawner, queue })
+        }
     }
 }
 
@@ -240,6 +261,20 @@ fn subagent_queue_config_error(error: FileSubagentQueueError) -> ConfigError {
     }
 }
 
+fn subagent_queue_restore_error(error: FileSubagentQueueError) -> ConfigError {
+    ConfigError {
+        field: "subagent_queue.dispatch".to_string(),
+        message: format!("failed to restore queued dispatches: {error:?}"),
+    }
+}
+
+fn subagent_restore_config_error(error: SubagentError) -> ConfigError {
+    ConfigError {
+        field: "subagent_queue.dispatch".to_string(),
+        message: format!("failed to restore queued dispatch into spawner: {error:?}"),
+    }
+}
+
 fn subagent_queue_runtime_error(error: FileSubagentQueueError) -> SubagentError {
     SubagentError::InvalidRequest(format!("subagent queue failed: {error:?}"))
 }
@@ -254,6 +289,15 @@ impl Governance for GovernanceSlot {
     fn audit(&mut self, record: AuditRecord) -> Result<(), GovernanceError> {
         match self {
             Self::StaticRule(governance) => governance.audit(record),
+        }
+    }
+
+    fn verify_operator_approval(
+        &self,
+        evidence: &OperatorApprovalEvidence,
+    ) -> Result<(), GovernanceError> {
+        match self {
+            Self::StaticRule(governance) => governance.verify_operator_approval(evidence),
         }
     }
 }
@@ -493,30 +537,26 @@ impl SubagentSpawner for SubagentRuntimeSlot {
     fn spawn(&mut self, request: SpawnRequest) -> Result<SpawnReceipt, SubagentError> {
         match self {
             Self::Fake(spawner) => spawner.spawn(request),
-            Self::QueuedExternal { spawner, queue } => {
-                let receipt = spawner.spawn(request)?;
-                let dispatch = spawner
-                    .pending_dispatches()
-                    .into_iter()
-                    .find(|dispatch| dispatch.run_id == receipt.run_id)
-                    .ok_or_else(|| {
-                        SubagentError::InvalidRequest(format!(
-                            "queued dispatch missing for run_id={}",
-                            receipt.run_id.0
-                        ))
-                    })?;
+            Self::QueuedExternal { spawner, queue } => spawner.persist_spawn(request, |dispatch| {
                 queue
-                    .write_dispatch(&dispatch)
-                    .map_err(subagent_queue_runtime_error)?;
-                Ok(receipt)
-            }
+                    .write_dispatch(dispatch)
+                    .map(|_| ())
+                    .map_err(subagent_queue_runtime_error)
+            }),
         }
     }
 
     fn steer(&mut self, run_id: &RunId, message: String) -> Result<(), SubagentError> {
         match self {
             Self::Fake(spawner) => spawner.steer(run_id, message),
-            Self::QueuedExternal { spawner, .. } => spawner.steer(run_id, message),
+            Self::QueuedExternal { spawner, queue } => {
+                spawner.persist_steer(run_id, message, |dispatch| {
+                    queue
+                        .write_dispatch(dispatch)
+                        .map(|_| ())
+                        .map_err(subagent_queue_runtime_error)
+                })
+            }
         }
     }
 

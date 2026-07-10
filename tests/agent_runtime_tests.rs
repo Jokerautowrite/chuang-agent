@@ -8,6 +8,9 @@ use chuang_agent::context_engine::{
 };
 use chuang_agent::memory_store::{InMemoryMemoryStore, MemoryRecord, MemoryStore};
 use chuang_agent::responder::{FakeResponder, ScriptedResponder};
+use chuang_agent::runtime_event_ledger::{
+    InMemoryRuntimeEventLedger, RuntimeEventKind, RuntimeEventLedger,
+};
 
 fn record(id: &str, content: &str, metadata: &[(&str, &str)], created_at: &str) -> MemoryRecord {
     MemoryRecord {
@@ -65,6 +68,76 @@ fn agent_runtime_runs_minimal_loop_with_packed_context() {
     assert_eq!(result.context_engine_kind, "deterministic_budget");
     assert_eq!(result.response.model_name, "stub-responder");
     assert!(result.response.body.contains("现在先把创项目跑起来"));
+}
+
+#[test]
+fn agent_runtime_records_context_provider_and_turn_events() {
+    let runtime = runtime(InMemoryMemoryStore::new());
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+
+    runtime
+        .run_with_ledger(
+            &RuntimeRequest {
+                user_input: "记录完整运行事件".to_string(),
+                recall_limit: 1,
+                metadata: BTreeMap::new(),
+                context_budget: None,
+                extra_context_segments: Vec::new(),
+            },
+            &mut ledger,
+            "thread-runtime",
+            "turn-runtime",
+        )
+        .expect("runtime should succeed");
+
+    let events = ledger.list().expect("events should list");
+    let kinds = events
+        .iter()
+        .map(|event| event.event_type.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        vec![
+            RuntimeEventKind::TurnStarted,
+            RuntimeEventKind::ContextPacked,
+            RuntimeEventKind::ProviderRequested,
+            RuntimeEventKind::ProviderResponded,
+            RuntimeEventKind::TurnCompleted,
+        ]
+    );
+    assert!(events.iter().all(|event| {
+        event.thread_id == "thread-runtime"
+            && event.turn_id.as_deref() == Some("turn-runtime")
+            && event.evidence_ref.is_some()
+    }));
+}
+
+#[test]
+fn agent_runtime_records_typed_failure_without_prompt_payload() {
+    let runtime = runtime(InMemoryMemoryStore::new());
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+
+    let error = runtime
+        .run_with_ledger(
+            &RuntimeRequest {
+                user_input: "secret-like-user-input".to_string(),
+                recall_limit: 0,
+                metadata: BTreeMap::new(),
+                context_budget: None,
+                extra_context_segments: Vec::new(),
+            },
+            &mut ledger,
+            "thread-failure",
+            "turn-failure",
+        )
+        .expect_err("invalid recall should fail");
+
+    assert!(matches!(error, AgentRuntimeError::Recall(_)));
+    let encoded = serde_json::to_string(&ledger.list().expect("events should list"))
+        .expect("events should serialize");
+    assert!(encoded.contains("\"event_type\":\"turn_failed\""));
+    assert!(encoded.contains("runtime://failure/recall"));
+    assert!(!encoded.contains("secret-like-user-input"));
 }
 
 #[test]

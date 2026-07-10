@@ -1,14 +1,16 @@
 # Third Test Candidate Quick Entry
 
-更新时间：2026-05-13
+更新时间：2026-07-10
 
-这一页只回答四件事：现在哪些已经是 `local-ready`，哪些必须人工 live check，怎么跑第三测试版候选，和 100% 前最后的硬门槛是什么。
+这一页只回答四件事：现在哪些已经达到 `local_completion=100%`，哪些必须人工 live check，怎么跑第三测试版候选，和 global real-live 前最后的硬门槛是什么。
 
 ## 一句话结论
 
-第三测试版候选不是“所有 live adapter 全开”，而是先用最小真实链路证明：老爸能通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、single worker rehearsal 证据，然后再回到本地 `final verify` 绿。
+第三测试版候选不是“所有 live adapter 全开”，而是本地完成后的独立 external acceptance 层：主控收集 provider/env、operator receipt、single worker rehearsal 等现场证据，然后再回到本地 `final verify` 绿。
 
-2026-05-13 更新：Chuang 专用 Feishu bridge 已由 systemd 长连接保持 active，`channel feishu-check` 和 bridge command smoke 已通过；老爸已确认能在 Feishu 联系上 Chuang。第三测试候选的本地 gates 已收口到 `final verify`、live-readonly preflight、live-gaps、candidate verify、operator checklist/receipt 模板结构、provider readiness 只读检查，以及 `runtime_report_surface=11/26` 的 runtime/report 状态面复验。最新 `sh scripts/chuang-candidate-verify.sh` 输出 `chuang_candidate_verify_ok`，`sh scripts/chuang-third-test-smoke.sh` 输出 `third_test_candidate_smoke_ok`，全量 `cargo test -q` 已通过；GoalRun 最新 checkpoint 为 `checkpoint-1778614688417630606`，count 到 159，wrapper 静态测试也已锁住 handoff/subagent 字段集合。下一步不再卡“桥是否挂上”或“本地门禁是否可跑”，而是收集 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。
+当前 canonical 结论：项目本地合同已完成，`local_completion=100%`；默认 live 状态仍为 `local_ready_live_pending`。2026-05 的 Feishu 可联系记录只作为历史线索，不代替当前 canonical receipt。第三测试候选的本地 gates 已收口到 `final verify`、live-readonly preflight、live-gaps、candidate verify、operator checklist/receipt 模板结构、provider readiness 只读检查，以及 runtime/report 状态面复验。下一步不是重开本地核心，而是按需收集 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七项真实 live receipt。
+
+本地合同新增覆盖包括：checkpoint runtime refs 可恢复，早期 v1 payload 缺少新增字段时仍兼容；session archive 与 searchable summary 使用同一 SQLite 事务，而 remember workflow 在 archive 已提交后若后续 identity / experience / queued dispatch 失败，会显式返回不可盲重试的 `partial_success`；queued spawn/steer 先持久化后提交内存态，恢复标准 `queued-run-N` 后从最大编号继续，非标准 run id 不推进计数器。上述能力不改变 global real-live 仍 pending 的边界。
 
 当前固定状态词：
 
@@ -38,7 +40,7 @@
 
 ### 必须人工 live check
 
-- ✅ Chuang 专用 Feishu live 通道已连通（2026-05-16，老爸确认）；剩余：保存可审计 receipt（request_id + transcript ref）。
+- Chuang 专用 Feishu 在 2026-05-16 有历史可联系记录；当前仍需新的可审计 canonical receipt（request_id + transcript ref）。
 - 在 Chuang 专用 Feishu 会话发 `/tools`，确认可见能力包含 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本和图片 OCR 边界。
 - Chuang provider env/readiness 对齐，输出只允许 `变量名=<set>`；真实 provider acceptance 还需要单独 live request receipt 或 runtime report id，不能由 `<set>` 代替。
 - desktop/browser 的只读观察回执单独跑一轮，确认 `observe` / `screenshot` 回执里有 `read_only=true` 和 `live_gate_required=false`，但不把它写成 click/input live ready。
@@ -46,7 +48,7 @@
 - 单个 worker live rehearsal 通过 gate + allowlist + capability routing + report admission。
 - live rehearsal 之后再次跑 `sh scripts/chuang-final-verify.sh`，确认本地合同没坏。
 
-## 100% 前唯一硬门槛
+## Global Real-Live 前唯一硬门槛
 
 唯一硬门槛不是“再多跑几个 smoke”，而是把上面的人工 live 链闭环做实：
 
@@ -56,7 +58,7 @@
 4. 单个 worker live rehearsal 完整。
 5. rehearsal 后 `final verify` 仍然通过。
 
-这条链没有闭环前，不算 100%。
+这条链没有闭环前，不能标记 `global_real_live_ready`；但不影响已经通过本地合同和门禁证明的 `local_completion=100%`。
 
 ## 建议执行顺序
 

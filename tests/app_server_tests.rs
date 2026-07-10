@@ -55,6 +55,24 @@ fn find_header_end(bytes: &[u8]) -> Option<usize> {
     bytes.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
+fn write_identity_registry(workspace: &PathBuf) {
+    fs::write(
+        workspace.join("identity/agents.toml"),
+        r#"memory_body_id = "chuang-local-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "local-agent-os-kernel"
+memory_body_id = "chuang-local-body"
+allowed_channels = ["chuang-feishu", "cli", "app-server"]
+"#,
+    )
+    .expect("agents registry should write");
+}
+
 fn write_basic_stub_workspace(workspace: &PathBuf) {
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
@@ -66,8 +84,7 @@ fn write_basic_stub_workspace(workspace: &PathBuf) {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -98,6 +115,55 @@ transport = "stub"
 }
 
 #[test]
+fn app_server_turn_rejects_identity_without_app_server_channel_permission() {
+    let workspace = temp_workspace("channel-not-allowed");
+    write_basic_stub_workspace(&workspace);
+    let registry_path = workspace.join("identity/agents.toml");
+    let registry = fs::read_to_string(&registry_path).expect("registry should read");
+    fs::write(
+        &registry_path,
+        registry.replace(
+            r#"allowed_channels = ["chuang-feishu", "cli", "app-server"]"#,
+            r#"allowed_channels = ["chuang-feishu", "cli"]"#,
+        ),
+    )
+    .expect("registry should remove app-server channel");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"不应进入运行时"}}}}"#,
+        workspace.display()
+    )
+    .expect("turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(output.status.success());
+    let responses = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let response = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("turn/start error response should exist");
+    let message = response["error"]["message"]
+        .as_str()
+        .expect("error message should be a string");
+    assert!(message.contains("identity_registry_invalid"));
+    assert!(message.contains("ChannelNotAllowed"));
+    assert!(message.contains("app-server"));
+}
+
+#[test]
 fn app_server_turn_uses_workspace_provider_config() {
     let workspace = temp_workspace("provider-config");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
@@ -110,8 +176,7 @@ fn app_server_turn_uses_workspace_provider_config() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -225,7 +290,7 @@ transport = "stub"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_event_count"],
-        "0"
+        "5"
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["runtime_event_tool_started_count"],
@@ -503,7 +568,7 @@ transport = "stub"
     );
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]["runtime_event_count"],
-        "0"
+        "5"
     );
     assert_eq!(
         turn_completed["params"]["turn"]["runtimeObservability"]
@@ -705,8 +770,7 @@ fn app_server_turn_surfaces_nonzero_tool_protocol_errors() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -780,7 +844,7 @@ transport = "http"
     let mut stdin = child.stdin.take().expect("stdin should exist");
     writeln!(
         stdin,
-        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"读取文件"}}}}"#,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"测试工具协议纠错"}}}}"#,
         workspace.display()
     )
     .expect("turn/start should write");
@@ -1022,8 +1086,7 @@ fn app_server_turn_compacts_session_memory_hard_limit_without_failing_turn() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1143,8 +1206,7 @@ fn app_server_turn_surfaces_provider_fallback_diagnostics() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1307,8 +1369,7 @@ fn app_server_turn_surfaces_provider_fallback_primary_config_error_metadata() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1433,8 +1494,7 @@ fn app_server_turn_surfaces_capacity_metadata_on_plain_text_429() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1561,8 +1621,7 @@ fn app_server_turn_marks_200_missing_content_as_provider_error() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1685,8 +1744,7 @@ fn app_server_turn_surfaces_provider_timeout_reason_codes() {
         "Chuang test first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -1826,8 +1884,7 @@ fn app_server_health_reports_workspace_runtime() {
         "Chuang health first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -2470,8 +2527,7 @@ fn app_server_health_diagnostic_reports_missing_provider_env_without_failing() {
         "Chuang health first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",
@@ -2668,8 +2724,7 @@ fn app_server_health_text_reports_diagnostic_summary_and_next_actions() {
         "Chuang health first wake\n",
     )
     .expect("first wake should write");
-    fs::write(workspace.join("identity/agents.toml"), "[agents]\n")
-        .expect("agents registry should write");
+    write_identity_registry(&workspace);
     fs::write(
         workspace.join("rules/core.md"),
         "- Keep the response minimal and testable.\n",

@@ -485,6 +485,7 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
         .arg(&script_path)
         .arg("--json")
         .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
+        .env("CHUANG_AGENT_BIN", env!("CARGO_BIN_EXE_chuang-agent"))
         .current_dir(&manifest_dir)
         .output()
         .expect("live gaps check should execute");
@@ -594,6 +595,7 @@ fn live_gaps_check_reports_ready_with_verified_global_receipt_file() {
         .arg(&script_path)
         .arg("--json")
         .env("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE", &receipt_path)
+        .env("CHUANG_AGENT_BIN", env!("CARGO_BIN_EXE_chuang-agent"))
         .current_dir(&manifest_dir)
         .output()
         .expect("live gaps check should execute");

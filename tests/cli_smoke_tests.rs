@@ -399,7 +399,7 @@ fn live_runner_rehearsal_smoke_uses_disabled_codex_runner_and_report_admission()
     assert!(script.contains("assert report[\"schema_version\"] == \"1.0\""));
     assert!(script.contains("assert report[\"status\"] == \"Failed\""));
     assert!(script.contains("codex runner disabled by default"));
-    assert!(script.contains("approved_by_cli_flag: --approve-exec"));
+    assert!(script.contains("approval_receipt=cli_flag:--approve-exec"));
     assert!(script.contains("live_runner_rehearsal_smoke_ok"));
     assert!(script.contains("unset CHUANG_CODEX_RUNNER_ENABLE"));
     assert!(!script.contains("CHUANG_CODEX_RUNNER_ENABLE=1"));
@@ -580,10 +580,10 @@ fn live_gaps_check_reports_local_preflight_and_real_live_pending_without_live_si
         .expect("live gaps check should be readable");
 
     let status = script
-        .find("cargo run --quiet -- status --json")
+        .find("run_chuang status --json")
         .expect("live gaps check should read status json");
     let preflight = script
-        .find("cargo run --quiet -- subagent live-preflight")
+        .find("run_chuang subagent live-preflight")
         .expect("live gaps check should run live-preflight");
     let matrix = script
         .find("\"matrix\"")

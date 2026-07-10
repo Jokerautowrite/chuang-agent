@@ -1,4 +1,8 @@
-use std::fs;
+use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -10,7 +14,8 @@ use crate::actuator::{
 use crate::atomic_tool::AtomicToolRegistry;
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
-    risk_decision_label, risk_decision_reason, ActionKind, Governance, ProposedAction, RiskDecision,
+    risk_decision_label, risk_decision_reason, ActionKind, Governance, OperatorApprovalEvidence,
+    ProposedAction, RiskDecision,
 };
 use crate::memory_recall::{MemoryRecallPipeline, RecallRequest};
 use crate::memory_store_sqlite::SqliteMemoryStore;
@@ -21,6 +26,7 @@ use crate::runtime_event_ledger::{
 };
 use crate::workspace_file_adapter::WorkspaceFileAdapter;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "tool", rename_all = "snake_case")]
@@ -259,6 +265,60 @@ pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
 pub struct GovernedToolExecutionRecord {
     pub decision: RiskDecision,
     pub record: ToolExecutionRecord,
+    pub pending_approval: Option<PendingApproval>,
+}
+
+pub const PENDING_APPROVAL_MAX_CALL_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingApproval {
+    pub approval_id: String,
+    pub call_id: String,
+    pub agent_id: String,
+    pub task_id: String,
+    pub serialized_tool_call: String,
+    pub call_fingerprint: String,
+    pub target_fingerprint: String,
+    pub workspace_fingerprint: String,
+    pub policy_marker: String,
+    pub risk_decision: PendingRiskDecision,
+}
+
+impl fmt::Debug for PendingApproval {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingApproval")
+            .field("approval_id", &self.approval_id)
+            .field("call_id", &self.call_id)
+            .field("agent_id", &self.agent_id)
+            .field("task_id", &self.task_id)
+            .field("serialized_tool_call", &"<redacted>")
+            .field("call_fingerprint", &self.call_fingerprint)
+            .field("target_fingerprint", &self.target_fingerprint)
+            .field("workspace_fingerprint", &self.workspace_fingerprint)
+            .field("policy_marker", &self.policy_marker)
+            .field("risk_decision", &self.risk_decision)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingRiskDecision {
+    pub decision: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorApprovalReceipt {
+    pub approval_id: String,
+    pub call_id: String,
+    pub call_fingerprint: String,
+    pub target_fingerprint: String,
+    pub workspace_fingerprint: String,
+    pub policy_marker: String,
+    pub approved: bool,
+    pub operator_ref: String,
+    pub evidence_ref: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -302,7 +362,7 @@ pub struct MemoryToolContext {
     pub max_limit: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ExecutionSlot {
     registry: AtomicToolRegistry,
     config: ToolExecutionConfig,
@@ -461,6 +521,33 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memo
             call,
             agent_id,
             task_id,
+            &self.config,
+        )
+    }
+
+    pub fn resume_approved_with_ledger<L, G>(
+        &self,
+        ledger: &mut L,
+        thread_id: impl Into<String>,
+        turn_id: impl Into<String>,
+        workspace_root: &Path,
+        governance: &mut G,
+        pending: PendingApproval,
+        approval: &OperatorApprovalReceipt,
+    ) -> Result<GovernedToolExecutionRecord, String>
+    where
+        L: RuntimeEventLedger,
+        G: Governance,
+    {
+        resume_pending_tool_call_with_registry_and_ledger(
+            ledger,
+            thread_id,
+            turn_id,
+            workspace_root,
+            governance,
+            &self.registry,
+            pending,
+            approval,
             &self.config,
         )
     }
@@ -857,14 +944,46 @@ where
         )
         .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
 
-    let outcome = execute_tool_call_with_governance_and_config(
+    let registry = AtomicToolRegistry::generic_agent_mvp();
+    let mut outcome = execute_tool_call_or_reject_with_registry_and_governance(
         workspace_root,
         governance,
+        &registry,
         call,
         agent_id,
         task_id,
         config,
     );
+
+    if let Ok(outcome) = &outcome {
+        if let Some(pending) = &outcome.pending_approval {
+            ledger
+                .append(
+                    RuntimeEvent::at(
+                        RuntimeEventKind::ApprovalRequested,
+                        thread_id,
+                        now_timestamp(),
+                    )
+                    .with_turn_id(turn_id)
+                    .with_call_id(call_id)
+                    .with_risk_decision(
+                        RuntimeRiskDecision::new(
+                            pending.risk_decision.decision.clone(),
+                            pending.risk_decision.reason.clone(),
+                        )
+                        .with_policy_ref(pending.policy_marker.clone()),
+                    )
+                    .with_evidence_ref(format!("approval://{}/requested", pending.approval_id)),
+                )
+                .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+            return Ok(outcome.clone());
+        }
+    }
+    if let Ok(governed) = &outcome {
+        if is_permanent_tool_rejection(&governed.decision) {
+            outcome = Err(tool_rejection_error(&governed.decision));
+        }
+    }
 
     let finished_event = match &outcome {
         Ok(outcome) => RuntimeEvent::at(
@@ -936,6 +1055,31 @@ where
         task_id,
         config,
     );
+
+    if let Ok(outcome) = &outcome {
+        if let Some(pending) = &outcome.pending_approval {
+            ledger
+                .append(
+                    RuntimeEvent::at(
+                        RuntimeEventKind::ApprovalRequested,
+                        thread_id,
+                        now_timestamp(),
+                    )
+                    .with_turn_id(turn_id)
+                    .with_call_id(call_id)
+                    .with_risk_decision(
+                        RuntimeRiskDecision::new(
+                            pending.risk_decision.decision.clone(),
+                            pending.risk_decision.reason.clone(),
+                        )
+                        .with_policy_ref(pending.policy_marker.clone()),
+                    )
+                    .with_evidence_ref(format!("approval://{}/requested", pending.approval_id)),
+                )
+                .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+            return Ok(outcome.clone());
+        }
+    }
 
     let finished_event = match &outcome {
         Ok(outcome) => RuntimeEvent::at(
@@ -1039,7 +1183,11 @@ fn execute_allowed_tool_call_with_audit<G: Governance>(
         .audit(audit_record)
         .map_err(|e| format!("tool_audit_failed: {}", e.message))?;
 
-    Ok(GovernedToolExecutionRecord { decision, record })
+    Ok(GovernedToolExecutionRecord {
+        decision,
+        record,
+        pending_approval: None,
+    })
 }
 
 fn execute_tool_call_or_reject_with_registry_and_governance<G: Governance>(
@@ -1063,10 +1211,40 @@ fn execute_tool_call_or_reject_with_registry_and_governance<G: Governance>(
         .classify(&proposed)
         .map_err(|e| format!("tool_governance_failed: {}", e.message))?;
 
-    if is_rejected_tool_decision(&decision) {
+    if matches!(decision, RiskDecision::NeedsApproval { .. }) {
+        audit_tool_rejection(
+            governance,
+            registry,
+            call,
+            agent_id.clone(),
+            task_id.clone(),
+            &decision,
+        )?;
+        let pending = build_pending_approval(
+            workspace_root,
+            registry,
+            call,
+            &agent_id,
+            &task_id,
+            &proposed,
+            &decision,
+        )?;
+        let record = governance_pending_record(registry, call, &decision);
+        return Ok(GovernedToolExecutionRecord {
+            decision,
+            record,
+            pending_approval: Some(pending),
+        });
+    }
+
+    if is_permanent_tool_rejection(&decision) {
         audit_tool_rejection(governance, registry, call, agent_id, task_id, &decision)?;
         let record = governance_rejected_record(registry, call, &decision);
-        return Ok(GovernedToolExecutionRecord { decision, record });
+        return Ok(GovernedToolExecutionRecord {
+            decision,
+            record,
+            pending_approval: None,
+        });
     }
 
     execute_allowed_tool_call_with_audit(
@@ -1079,6 +1257,121 @@ fn execute_tool_call_or_reject_with_registry_and_governance<G: Governance>(
         config,
         decision,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resume_pending_tool_call_with_registry_and_ledger<L, G>(
+    ledger: &mut L,
+    thread_id: impl Into<String>,
+    turn_id: impl Into<String>,
+    workspace_root: &Path,
+    governance: &mut G,
+    registry: &AtomicToolRegistry,
+    pending: PendingApproval,
+    approval: &OperatorApprovalReceipt,
+    config: &ToolExecutionConfig,
+) -> Result<GovernedToolExecutionRecord, String>
+where
+    L: RuntimeEventLedger,
+    G: Governance,
+{
+    let thread_id = thread_id.into();
+    let turn_id = turn_id.into();
+    validate_approval_receipt(&pending, approval)?;
+    let call: ToolCall = serde_json::from_str(&pending.serialized_tool_call)
+        .map_err(|_| "approval_pending_call_invalid".to_string())?;
+    let proposed = proposed_action_for_tool_call_with_registry(
+        workspace_root,
+        registry,
+        &call,
+        &config.shell_risk_rules,
+    );
+    let current_decision = governance
+        .classify(&proposed)
+        .map_err(|e| format!("tool_governance_failed: {}", e.message))?;
+    if !matches!(current_decision, RiskDecision::NeedsApproval { .. }) {
+        return Err("approval_policy_no_longer_resumable".to_string());
+    }
+    let recalculated = build_pending_approval(
+        workspace_root,
+        registry,
+        &call,
+        &pending.agent_id,
+        &pending.task_id,
+        &proposed,
+        &current_decision,
+    )?;
+    if recalculated.approval_id != pending.approval_id
+        || recalculated.call_id != pending.call_id
+        || recalculated.call_fingerprint != pending.call_fingerprint
+        || recalculated.target_fingerprint != pending.target_fingerprint
+        || recalculated.workspace_fingerprint != pending.workspace_fingerprint
+        || recalculated.policy_marker != pending.policy_marker
+    {
+        return Err("approval_pending_revalidation_failed".to_string());
+    }
+    governance
+        .verify_operator_approval(&OperatorApprovalEvidence {
+            approval_id: approval.approval_id.clone(),
+            operator_ref: approval.operator_ref.clone(),
+            evidence_ref: approval.evidence_ref.clone(),
+        })
+        .map_err(|_| "operator_approval_not_authorized".to_string())?;
+    persist_approval_consumption(workspace_root, &pending, approval)?;
+
+    let decision = RiskDecision::Allowed {
+        reason: format!("operator_approval_receipt:{}", approval.operator_ref),
+    };
+    let outcome = execute_allowed_tool_call_with_audit(
+        workspace_root,
+        governance,
+        registry,
+        &call,
+        pending.agent_id.clone(),
+        pending.task_id.clone(),
+        config,
+        decision,
+    )?;
+    let (resolution_reason, evidence_suffix) = if outcome.record.ok {
+        ("operator approval receipt accepted", "resolved")
+    } else {
+        (
+            "operator approval receipt accepted; tool execution failed",
+            "failed",
+        )
+    };
+    let call_id = pending.call_id.clone();
+    let policy_marker = pending.policy_marker.clone();
+    let approval_id = pending.approval_id.clone();
+    ledger
+        .append(
+            RuntimeEvent::at(
+                RuntimeEventKind::ApprovalResolved,
+                thread_id.clone(),
+                now_timestamp(),
+            )
+            .with_turn_id(turn_id.clone())
+            .with_call_id(call_id.clone())
+            .with_risk_decision(
+                RuntimeRiskDecision::new("allowed", resolution_reason)
+                    .with_policy_ref(policy_marker),
+            )
+            .with_evidence_ref(format!("approval://{approval_id}/{evidence_suffix}")),
+        )
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+    ledger
+        .append(
+            RuntimeEvent::at(RuntimeEventKind::ToolFinished, thread_id, now_timestamp())
+                .with_turn_id(turn_id)
+                .with_call_id(call_id.clone())
+                .with_risk_decision(RuntimeRiskDecision::new(
+                    risk_decision_label(&outcome.decision),
+                    risk_decision_reason(&outcome.decision),
+                ))
+                .with_evidence_ref(format!("tool://{call_id}/finished")),
+        )
+        .map_err(|e| format!("tool_event_ledger_failed: {e}"))?;
+    Ok(outcome)
 }
 
 fn audit_tool_rejection<G: Governance>(
@@ -1363,6 +1656,7 @@ fn execute_shell_exec(
         .arg("-lc")
         .arg(command)
         .current_dir(&cwd_path)
+        .env("CHUANG_GOVERNED_TOOL_PROCESS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1693,6 +1987,18 @@ fn governance_rejected_record(
     record
 }
 
+fn governance_pending_record(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    decision: &RiskDecision,
+) -> ToolExecutionRecord {
+    let mut record = failed_record(registry, call, "tool_approval_pending".to_string());
+    record.failure_class = Some("approval_pending".to_string());
+    record.decision = Some(risk_decision_label(decision));
+    record.retryable = true;
+    record
+}
+
 fn is_rejected_tool_decision(decision: &RiskDecision) -> bool {
     matches!(
         decision,
@@ -1700,6 +2006,151 @@ fn is_rejected_tool_decision(decision: &RiskDecision) -> bool {
             | RiskDecision::DraftOnly { .. }
             | RiskDecision::NeedsApproval { .. }
     )
+}
+
+fn is_permanent_tool_rejection(decision: &RiskDecision) -> bool {
+    matches!(
+        decision,
+        RiskDecision::Blocked { .. } | RiskDecision::DraftOnly { .. }
+    )
+}
+
+fn build_pending_approval(
+    workspace_root: &Path,
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    agent_id: &str,
+    task_id: &str,
+    proposed: &ProposedAction,
+    decision: &RiskDecision,
+) -> Result<PendingApproval, String> {
+    let serialized_tool_call =
+        serde_json::to_string(call).map_err(|_| "approval_call_serialize_failed".to_string())?;
+    if serialized_tool_call.len() > PENDING_APPROVAL_MAX_CALL_BYTES {
+        return Err("approval_call_exceeds_bounded_receipt".to_string());
+    }
+    let call_id = tool_call_event_id(call, agent_id, task_id);
+    let call_fingerprint = stable_fingerprint(&serialized_tool_call);
+    let target_fingerprint = stable_fingerprint(&proposed.target);
+    let workspace_fingerprint = stable_fingerprint(
+        &fs::canonicalize(workspace_root)
+            .map_err(|error| format!("approval_workspace_invalid: {error}"))?
+            .display()
+            .to_string(),
+    );
+    let policy_marker = stable_fingerprint(&format!(
+        "{}|{:?}|{}|{}",
+        proposed.action_id,
+        proposed.kind,
+        registry.mapping_for_call(call).audit_operation,
+        risk_decision_label(decision)
+    ));
+    let approval_id = format!(
+        "approval-{}",
+        stable_fingerprint(&format!(
+            "{call_id}|{call_fingerprint}|{target_fingerprint}|{workspace_fingerprint}|{policy_marker}"
+        ))
+        .trim_start_matches("sha256:")
+    );
+    Ok(PendingApproval {
+        approval_id,
+        call_id,
+        agent_id: agent_id.to_string(),
+        task_id: task_id.to_string(),
+        serialized_tool_call,
+        call_fingerprint,
+        target_fingerprint,
+        workspace_fingerprint,
+        policy_marker,
+        risk_decision: PendingRiskDecision {
+            decision: "needs_approval".to_string(),
+            reason: risk_decision_reason(decision),
+        },
+    })
+}
+
+fn validate_approval_receipt(
+    pending: &PendingApproval,
+    approval: &OperatorApprovalReceipt,
+) -> Result<(), String> {
+    if !approval.approved {
+        return Err("operator_approval_denied".to_string());
+    }
+    if approval.operator_ref.trim().is_empty() {
+        return Err("operator_approval_operator_ref_required".to_string());
+    }
+    if approval.evidence_ref.trim().is_empty() {
+        return Err("operator_approval_evidence_ref_required".to_string());
+    }
+    if approval.approval_id != pending.approval_id
+        || approval.call_id != pending.call_id
+        || approval.call_fingerprint != pending.call_fingerprint
+        || approval.target_fingerprint != pending.target_fingerprint
+        || approval.workspace_fingerprint != pending.workspace_fingerprint
+        || approval.policy_marker != pending.policy_marker
+    {
+        return Err("operator_approval_receipt_mismatch".to_string());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalConsumptionMarker<'a> {
+    approval_id: &'a str,
+    call_id: &'a str,
+    call_fingerprint: &'a str,
+    operator_ref: &'a str,
+    evidence_ref: &'a str,
+    started_at: String,
+}
+
+fn persist_approval_consumption(
+    workspace_root: &Path,
+    pending: &PendingApproval,
+    approval: &OperatorApprovalReceipt,
+) -> Result<(), String> {
+    let relative_path = format!(
+        ".chuang/runtime/consumed-approvals/{}.json",
+        pending.approval_id
+    );
+    let marker_path = resolve_workspace_path(workspace_root, &relative_path)?;
+    let parent = marker_path
+        .parent()
+        .ok_or_else(|| "approval_consumption_parent_invalid".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("approval_consumption_store_unavailable: {error}"))?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = match options.open(&marker_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err("approval_already_consumed".to_string());
+        }
+        Err(error) => {
+            return Err(format!("approval_consumption_store_unavailable: {error}"));
+        }
+    };
+    let marker = ApprovalConsumptionMarker {
+        approval_id: &pending.approval_id,
+        call_id: &pending.call_id,
+        call_fingerprint: &pending.call_fingerprint,
+        operator_ref: &approval.operator_ref,
+        evidence_ref: &approval.evidence_ref,
+        started_at: now_timestamp(),
+    };
+    let bytes = serde_json::to_vec_pretty(&marker)
+        .map_err(|_| "approval_consumption_marker_serialize_failed".to_string())?;
+    file.write_all(&bytes)
+        .map_err(|error| format!("approval_consumption_marker_write_failed: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("approval_consumption_marker_sync_failed: {error}"))
+}
+
+fn stable_fingerprint(value: &str) -> String {
+    let hash = Sha256::digest(value.as_bytes());
+    format!("sha256:{hash:x}")
 }
 
 fn tool_rejection_error(decision: &RiskDecision) -> String {

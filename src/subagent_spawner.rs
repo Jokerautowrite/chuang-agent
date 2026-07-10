@@ -10,6 +10,8 @@ mod queued;
 pub use fake::FakeSubagentSpawner;
 pub use queued::QueuedSubagentSpawner;
 
+pub const QUEUED_STEER_MESSAGES_METADATA_KEY: &str = "queued_steer_messages_json";
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RunId(pub String);

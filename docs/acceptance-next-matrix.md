@@ -1,20 +1,88 @@
 # Acceptance Next Matrix
 
-更新时间：2026-05-30
+更新时间：2026-07-10
 
 快速入口：见 [第三测试版候选一页入口](./third-test-candidate.md) 和 [Live Operator Test Runbook](./live-operator-test-runbook.md)。
 
 ## 结论
 
-当前基线已经达到第二测试版 `local-ready`：
+当前结论更新为：
+
+```text
+project/local contract ready
++ local_completion=100%
++ final verify / candidate verify / third-test smoke 均已有通过证据
++ provider reasoning config、bounded memory、mandatory governance、typed runtime events、
+  approval resume、identity/channel boundary、checkpoint、atomic SQLite session archive
+  均已有本地实现与回归
++ global real-live readiness 仍 pending
+```
+
+当前可以把本地基线从“第二测试版 local-ready”明确上提为“本地合同完成”，但不能把这句话翻译成真实 live 已完成。local 侧已经有 `project_readiness.overall_state=ready`、`release_readiness.overall_state=second_test_version_ready`、`third_test_candidate.real_live_ready=false`、`chuang_final_verify_ok`、`chuang_candidate_verify_ok`、`third_test_candidate_smoke_ok` 这一组证据链，因此 `local_completion=100%` 成立。
+
+同时要把 pending 说清楚：global real-live 仍卡在 operator/parent 收口，而不是卡在本地代码合同。代码已经固定只信任 `/etc/chuang-agent/operator-approval.pub`，并拒绝 per-call/env 公钥覆盖；真实部署仍需 operator provision 该 root-owned trust anchor。live operator receipt 与 Feishu/provider/single worker rehearsal/desktop/browser/wiki/GBrain 七类 canonical real-live receipt 仍需父层现场证据，现阶段不能越权写成 `global_real_live_ready`。
+
+本轮补记的本地完成项如下：
+
+```text
+provider reasoning config 显式化
++ config.toml 已显式设置 reasoning_effort = "xhigh"
++ runtime_config / provider adapter 已校验并透传 reasoning.effort
+
+bounded memory rollback / TTL / reclaim
++ try_reserve -> commit -> release_reservation -> reclaim 闭环已落地
++ TTL 过期释放、重复 reclaim 幂等、驱逐原子回滚已有测试
+
+mandatory governance
++ governance 不可拔掉，tool surface / app-server / CLI / goal 路径共用同一治理与审计链
+
+unified serializable runtime events
++ runtime_event_ledger / unified execution / observability 已进入 status-channel-app-server-report
++ REPL progress 另有 schema_version=2 的 TerminalEvent typed schema
+
+persistent signed approval resume
++ approval resume 需要新鲜的签名 ticket，不接受调用者自选公钥
++ fixed trust anchor = /etc/chuang-agent/operator-approval.pub
++ trust anchor 文件和父目录必须 root-owned、非 symlink、不可 group/other 写入
++ call / target / workspace / policy 使用 SHA-256 指纹绑定
++ forged ticket / stale ticket / mismatch / duplicate replay / cross-workspace resume 都拒绝
++ approval resume 成功或执行失败都输出 ApprovalResolved -> ToolFinished 终态
++ operator 负责部署公钥文件；代码不生成、不保存私钥
+
+typed identity / channel boundary
++ identity registry 强制 memory_body 与 allowed_channels 边界
++ ordinary CLI defaults missing channel metadata to cli; explicit channel is preserved
++ turn_context 强制 provider/model/workspace 等必填
+
+lifecycle checkpoint
++ GoalRun checkpoint-first、collect-ready gate、checkpoint status surface 已齐
++ runtime refs 在 restore -> 后续 persisted transition 后仍完整保留
++ early v1 checkpoint payloads missing new runtime ref fields still load
+
+atomic SQLite session archive
++ session_turn_archive 与 searchable summary pointer 同事务提交，失败整体回滚
++ remember workflow previews all requested steps first, then commits archive, then identity / experience / queued dispatch
++ failure before archive is hard failure with no later side effects
++ if archive has committed and a later requested step fails, remember workflow returns explicit partial_success with blind retry disabled, failed_step, failure_message and repair metadata
++ archive open initializes its own required schema
+
+durable queued subagent spawn / steer
++ steer messages persist in dispatch metadata
++ spawn and steer persist the dispatch artifact before committing in-memory state
++ persist failure leaves no phantom run/message and does not consume the next numbered run id
++ fresh spawner restores steer messages from persisted dispatch
++ fresh spawner continues after the maximum restored queued-run-N suffix; nonstandard restored run ids do not advance the counter
+```
+
+旧的第二测试版 `local-ready` 基线仍保留如下，仅作历史记录，不作为当前 canonical live receipt：
 
 ```text
 final verify 本地闭环通过
 + live-readiness 只读证据通过
 + Feishu / provider / subagent / console 诊断面可复验
 + long-run observability 有只读状态入口
-+ Chuang 专用 Feishu bridge 已 active，老爸已确认可在 Feishu 联系上 Chuang
-+ Feishu `/tools` 可见当前命令能力与边界
++ 当时记录 Chuang 专用 Feishu bridge 可联系
++ 当时记录 Feishu `/tools` 可见命令能力与边界
 + provider readiness check 已纳入本地候选门禁
 ```
 
@@ -22,7 +90,7 @@ final verify 本地闭环通过
 
 今晚候选验收另有 dirty-tree friendly 入口：`sh scripts/chuang-candidate-verify.sh`。它串联 complete-local smoke、live runner rehearsal smoke、`live-gaps` 矩阵、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>` 状态，不连接真实 provider、不打印 secret。缺 provider env 时按候选现场状态报告 blocker，但不会伪装成本地合同失败；operator receipt 模板和 collector 只证明 JSON 结构可填报/可合并，不证明真实外部验收完成。
 
-第三测试版候选不是“所有 live adapter 全开”，而是 100% 前最后一跳：用最小真实链路证明老爸可以通过 Chuang 专用 Feishu live 通道发起请求，主控能拿到 provider/env 状态、operator receipt、单 worker rehearsal 证据，并最终回到本地 verify 绿。真实 runner 池、桌面 mutation、服务控制、wiki/GBrain live 仍后置，不纳入第三测试版必须项。
+第三测试版候选不是“所有 live adapter 全开”，而是从 `local_completion=100%` 走向 global real-live 的独立验收层：用最小真实链路采集 provider/env、operator receipt 和单 worker rehearsal 等现场证据，并最终回到本地 verify 绿。真实 runner 池、桌面 mutation、服务控制、wiki/GBrain live 仍后置，不影响本地完成度。
 
 当前 acceptance 口径必须区分“已 mapped/已 preflight”和“已 live”。GA 9 tools 已 mapped 只代表工具槽位、命令面和能力边界可见；真实 desktop/browser live 仍缺证据。live subagent worker 仍需要 audited adapter、config 和 gate 三件套后才能启用；三大 live gates 默认关闭，分别覆盖 provider live、subagent live runner、desktop/browser actuator live action。Feishu、provider、single worker rehearsal、desktop、browser、wiki、GBrain 都需要各自的真实 live receipt，不能由本地 readiness 或 `<set>` 状态代替。
 
@@ -66,15 +134,15 @@ final verify 本地闭环通过
 | GA 9 tools mapped | `ga_local_mapped_only` | `/tools` / `/capabilities` 和本地诊断面显示 GA 9 工具映射、scope 和边界 | 否，自动和人工查看均可 | 只证明 mapped/routed；真实 desktop/browser live 仍需单独 receipt 和 action allowlist |
 | desktop/browser live gate | `desktop_browser_live_gated` | `desktop_browser_live_gated=true`，等待 action allowlist、live gate 和审计回执；普通打开/点击/输入不要求额外人工审批 | 是 | 当前不是 desktop/browser live ready，不允许由 mapped tools 或 dry-run adapter 代替 |
 | BrowserWorker old path | `browser_worker_frozen` | `status --json` -> `live_readiness.browser_worker_frozen=true` | 否，自动复验即可 | 冻结是排除边界，不是 browser automation live-ready |
-| 人工 Feishu live check | ✅ done | 老爸已确认可通过 Chuang 专用 Feishu 通道联系到 Chuang，live 通道已连通（2026-05-16）；剩余：保存可审计 receipt（request_id + transcript ref） | 是 | 只用 Chuang 专用 bot 和 env；不碰 Codex Feishu、不碰 Hermes、不打印 token |
+| 人工 Feishu live check | historical contact only / canonical receipt pending | 2026-05-16 有人工可联系记录，但当前仍需新的 canonical receipt（request_id + transcript ref）才能进入 global receipt | 是 | 历史可联系记录不能代替当前 canonical receipt；只用 Chuang 专用 bot 和 env，不碰 Codex Feishu、不碰 Hermes、不打印 token |
 | provider env 对齐 | readiness-only | `scripts/chuang-provider-readiness-check.sh` 读取 `status --json`，并在存在时自动吸收标准 `CHUANG_PROVIDER_ENV_FILE`；人工确认 Chuang provider env 变量存在且配置名一致；输出只允许 `<set>/<missing>` | 是 | 不连接真实 provider；不在聊天、日志、文档或 patch 中泄露 secret；无 fallback 时必须显式报错；`provider_live_request_verified_by_status=false` |
 | live operator receipt | candidate | 人工执行 live cutover checklist，保存 request_id、operator、时间、允许范围、回退条件、service evidence ref 和结果摘要；collector 只能收口这些引用 | 是 | receipt 只记录审计元数据，不记录凭证、验证码或私密正文；模板/collector 本身不能标记 real live ready |
 | single worker rehearsal | candidate | 在 live gate + allowlist 下只跑一个 worker rehearsal，确认 report/proposal 被主控接收；对应 receipt id 为 `subagent_live_rehearsal` | 是 | 单 worker、bounded、可停止；worker 不能直接写核心记忆，不能扩大成 runner 池 |
 | final verify after live rehearsal | candidate | live rehearsal 后再次运行 `sh scripts/chuang-final-verify.sh` 和本文档 diff check | 是 | live 尝试不能破坏本地合同；失败时先停在诊断，不做 cleanup/reset |
 
-## 100% 前必须人工验证
+## Global Real-Live 前必须人工验证
 
-这些项目是从第三测试版候选走向 100% 前的真实证据，不应由本地 smoke 冒充：
+这些项目是从 `local_completion=100%` 走向 `global_real_live_ready` 的真实证据，不应由本地 smoke 冒充，也不反向降低本地完成度：
 
 1. Chuang 专用 Feishu live 通道真实收发一次，并拿到可审计 receipt。
 2. Chuang provider env 与运行配置对齐，所有 secret 只显示为 `<set>`。
@@ -93,6 +161,8 @@ final verify 本地闭环通过
 
 ## 当前证据状态
 
+下表同时保留历史现场记录和当前 canonical 状态。凡是没有进入完整 global receipt 的历史记录，只能作为线索，不能把默认状态从 `local_ready_live_pending` 提权。
+
 | 证据面 | 最新状态 | 已验证命令 | 第三测试版含义 |
 | --- | --- | --- | --- |
 | live/readiness status surface | 默认 `local_ready_live_pending`；verified global receipt 时 `global_real_live_ready` | `cargo run --quiet -- status --json` -> `live_readiness` | 状态面固定区分 mapped/gated/frozen/ready/live，不把 local-ready 冒充 live-ready |
@@ -103,8 +173,8 @@ final verify 本地闭环通过
 | runtime/report surface | 已完成 | `cargo test -q --test live_runner_readiness_view_tests`；`cargo test -q --test app_server_tests --test cli_channel_tests --test runtime_report_tests --test kernel_status_tests`；`cargo test -q` | `runtime_report_surface=11/26`，runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 和 unified execution 摘要均可在 readiness/status/channel/app-server/health/wrapper 面复验；GoalRun checkpoint count 到 159；不包含 secret/raw trace 外泄 |
 | candidate verify | 已完成 | `sh scripts/chuang-candidate-verify.sh` -> `chuang_candidate_verify_ok`，并包含 complete-local、live runner rehearsal、live gaps、operator checklist/receipt、goal run status 和 provider readiness check | 本地候选门禁已经覆盖 live gaps、operator/goal 只读摘要、receipt 模板结构和 provider readiness 只读状态；receipt collector 属于本地收口工具，仍需人工 evidence；缺 env 会显式报告 blocker |
 | Feishu evidence | 已完成 | `node --check scripts/chuang-feishu-live-preflight.js && node scripts/chuang-feishu-live-preflight-smoke.js && node scripts/chuang-feishu-command-smoke.js` | 本地命令和诊断链已可复验；`/tools` 已列出当前可见能力与边界 |
-| Feishu live contact | 已推进 | 老爸在 Chuang 专用 Feishu 会话中确认 `/health`、`/session`、`/tools`：bridge=ready、app-server=running、session=`chuang-thread-1`、workspace=`/home/user/projects/chuang-agent`、Feishu/provider env 均为 `<set>`；普通文本 `哈喽` 成功返回 | bridge/session/tools 现场证据已拿到；普通文本已通过主链和 provider 返回，并生成 runtime report `report-turn-1` |
-| provider evidence | live request verified | `scripts/chuang-provider-readiness-check.sh --json` -> `overall_state=ready`、`transport=native`、`api_key_state=<set>`；Feishu 普通文本 `哈喽` -> `gpt-5.5`、API 1 次、runtime report `report-turn-1` | readiness/env 对齐已通过，且 Feishu 主链已拿到一次真实 provider 响应；仍需把 provider receipt 纳入最终 operator receipt，不代表 desktop/browser/wiki/GBrain 已验收 |
+| Feishu live contact | historical evidence, canonical pending | 历史 Chuang 专用 Feishu 会话曾确认 `/health`、`/session`、`/tools` 和普通文本返回 | 可用于定位，但未进入当前完整 canonical global receipt，默认状态仍 pending |
+| provider evidence | historical live response, canonical pending | readiness 检查和历史 runtime report 曾记录一次 provider 返回 | 历史响应不能代替当前 operator-approved provider receipt，也不代表其他 external services 已验收 |
 | subagent evidence | 已完成 | `cargo test -q --test cli_subagent_live_preflight_tests`；`scripts/chuang-live-runner-readiness-view.sh --json`；`sh scripts/chuang-live-runner-rehearsal-smoke.sh` -> `live_runner_rehearsal_smoke_ok` | gate/allowlist/capability/report admission rehearsal 已有；readiness view 和 rehearsal 仍不是 runner 池 ready，下一步只允许 bounded single worker evidence |
 | GA 9 tools evidence | 已完成但非 live | `/tools` / `/capabilities` 和本地诊断面可见 mapped 工具 | `ga_local_mapped_only=true`；映射完成不等于真实 desktop/browser live；缺真实桌面/browser action receipt |
 | desktop/browser live evidence | desktop read-only evidence verified, browser live read pending | `desktop_browser_live_gated=true`；Kubuntu X11 `DISPLAY=:0` + `XAUTHORITY=/run/user/1000/.Xauthority` 下，`scripts/chuang-real-actuator-adapter.py` observe 读取 `current_window_title=飞书`，screenshot 生成 1920x1080 PNG evidence，均为 `read_only=true` / `live_gate_required=false` | 桌面只读 observation 已有 evidence；真实 open/click/input 需要 allowlist/live gate/governance/audit，但不需要额外人工审批；browser URL/title/DOM live read 仍缺 audited adapter，不能由桌面截图代替 |

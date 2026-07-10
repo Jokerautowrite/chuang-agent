@@ -6,7 +6,7 @@ use crate::hermes_memory::{
     DualFileMemoryConfig, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX_CHARS,
 };
 use crate::knowledge_read::KnowledgeReadConfig;
-use crate::provider_openai_compatible::ProviderTransport;
+use crate::provider_openai_compatible::{ProviderTransport, ReasoningEffort};
 use crate::subagent_queue::FileSubagentQueueConfig;
 use crate::tool_runtime::ShellRiskRules;
 use serde::Serialize;
@@ -54,6 +54,7 @@ pub struct OpenAICompatibleConfig {
     pub api_key: String,
     pub model_name: String,
     pub transport: ProviderTransport,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub request_timeout_ms: Option<u64>,
     pub tls_ca_cert_path: Option<PathBuf>,
 }
@@ -166,6 +167,7 @@ pub struct ConfigSummary {
     pub model_name: String,
     pub provider_tls_ca_cert_path: Option<String>,
     pub provider_request_timeout_ms: Option<u64>,
+    pub provider_reasoning_effort: Option<String>,
     pub provider_fallback_policy: Option<String>,
     pub governance_kind: String,
     pub actuator_kind: String,
@@ -307,6 +309,7 @@ impl RuntimeConfig {
             model_name: provider.model_name,
             provider_tls_ca_cert_path: provider.tls_ca_cert_path,
             provider_request_timeout_ms: provider.request_timeout_ms,
+            provider_reasoning_effort: provider.reasoning_effort,
             provider_fallback_policy: provider.fallback_policy,
             governance_kind: self.governance.kind().to_string(),
             actuator_kind: self.actuator.kind().to_string(),
@@ -578,6 +581,7 @@ impl ProviderConfig {
                 tls_ca_cert_path: None,
                 api_key_state: None,
                 request_timeout_ms: None,
+                reasoning_effort: None,
                 fallback_policy: None,
             },
             Self::OpenAICompatible(config) => ProviderSummaryParts {
@@ -590,6 +594,7 @@ impl ProviderConfig {
                     .map(|path| path.display().to_string()),
                 api_key_state: Some(mask_key_state(&config.api_key)),
                 request_timeout_ms: config.request_timeout_ms,
+                reasoning_effort: config.reasoning_effort.map(|effort| effort.to_string()),
                 fallback_policy: None,
             },
             Self::Fallback {
@@ -610,6 +615,7 @@ impl ProviderConfig {
                         fallback.api_key_state.unwrap_or_else(|| "none".to_string())
                     )),
                     request_timeout_ms: primary.request_timeout_ms.or(fallback.request_timeout_ms),
+                    reasoning_effort: primary.reasoning_effort.or(fallback.reasoning_effort),
                     fallback_policy: Some(policy.summary()),
                 }
             }
@@ -953,6 +959,7 @@ struct ProviderSummaryParts {
     model_name: String,
     tls_ca_cert_path: Option<String>,
     request_timeout_ms: Option<u64>,
+    reasoning_effort: Option<String>,
     api_key_state: Option<String>,
     fallback_policy: Option<String>,
 }

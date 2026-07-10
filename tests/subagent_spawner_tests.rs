@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use chuang_agent::common::{AgentId, ReportId, TaskId, Timestamp};
@@ -5,6 +6,7 @@ use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentRepo
 use chuang_agent::subagent_spawner::{
     ContextIsolation, FakeSubagentSpawner, KillReason, QueuedSubagentSpawner, SpawnRequest,
     SubagentError, SubagentSpawner, SubagentState, SubagentToolPolicy,
+    QUEUED_STEER_MESSAGES_METADATA_KEY,
 };
 
 fn request(policy: SubagentToolPolicy) -> SpawnRequest {
@@ -175,6 +177,62 @@ fn queued_spawner_emits_dispatch_and_waits_for_attached_report() {
 }
 
 #[test]
+fn queued_spawner_persists_steer_messages_in_run_inbox() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("spawn should succeed");
+
+    spawner
+        .steer(&receipt.run_id, "先补失败路径测试".to_string())
+        .expect("first steer should succeed");
+    spawner
+        .steer(&receipt.run_id, "再核对审批回执".to_string())
+        .expect("second steer should succeed");
+
+    assert_eq!(
+        spawner.steer_messages(&receipt.run_id),
+        Some(&["先补失败路径测试".to_string(), "再核对审批回执".to_string()][..])
+    );
+}
+
+#[test]
+fn queued_spawner_exposes_steer_messages_in_dispatch_metadata() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("spawn should succeed");
+
+    spawner
+        .steer(&receipt.run_id, "先补失败路径测试".to_string())
+        .expect("first steer should succeed");
+    spawner
+        .steer(&receipt.run_id, "再核对审批回执".to_string())
+        .expect("second steer should succeed");
+
+    let dispatch = spawner
+        .pending_dispatches()
+        .into_iter()
+        .find(|dispatch| dispatch.run_id == receipt.run_id)
+        .expect("dispatch should remain visible");
+    let steer_messages = serde_json::from_str::<Vec<String>>(
+        dispatch
+            .metadata
+            .get(QUEUED_STEER_MESSAGES_METADATA_KEY)
+            .expect("dispatch metadata should carry steer messages"),
+    )
+    .expect("dispatch steer metadata should decode");
+    let encoded = serde_json::to_string(&dispatch).expect("dispatch should serialize");
+
+    assert_eq!(
+        steer_messages,
+        vec!["先补失败路径测试".to_string(), "再核对审批回执".to_string()]
+    );
+    assert!(encoded.contains(QUEUED_STEER_MESSAGES_METADATA_KEY));
+    assert!(encoded.contains("先补失败路径测试"));
+}
+
+#[test]
 fn queued_dispatch_can_roundtrip_as_json() {
     let mut spawner = QueuedSubagentSpawner::new();
     let mut spawn = request(SubagentToolPolicy::Execute);
@@ -249,6 +307,138 @@ fn queued_spawner_can_restore_persisted_dispatch_and_collect_report() {
         .expect("report should be available");
 
     assert_eq!(collected, report);
+}
+
+#[test]
+fn queued_spawner_restores_persisted_steer_messages_into_fresh_instance() {
+    let mut original = QueuedSubagentSpawner::new();
+    let receipt = original
+        .spawn_with_ids(
+            request(SubagentToolPolicy::Execute),
+            chuang_agent::subagent_spawner::RunId("persisted-run-2".to_string()),
+            AgentId("persisted-worker-2".to_string()),
+        )
+        .expect("explicit ids should spawn");
+    original
+        .steer(&receipt.run_id, "补失败路径".to_string())
+        .expect("first steer should succeed");
+    original
+        .steer(&receipt.run_id, "补回执字段".to_string())
+        .expect("second steer should succeed");
+    let dispatch = original
+        .pending_dispatches()
+        .into_iter()
+        .find(|dispatch| dispatch.run_id == receipt.run_id)
+        .expect("dispatch should be pending");
+
+    let mut restored = QueuedSubagentSpawner::new();
+    restored
+        .restore_dispatch(dispatch)
+        .expect("dispatch should restore into running state");
+
+    assert_eq!(
+        restored.steer_messages(&receipt.run_id),
+        Some(&["补失败路径".to_string(), "补回执字段".to_string()][..])
+    );
+}
+
+#[test]
+fn queued_spawner_restores_numbered_run_id_and_continues_from_max_suffix() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    spawner
+        .restore_dispatch(chuang_agent::subagent_spawner::SubagentDispatch {
+            run_id: chuang_agent::subagent_spawner::RunId("queued-run-7".to_string()),
+            agent_id: AgentId("worker-7".to_string()),
+            task_id: TaskId("task-7".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "恢复旧 dispatch".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 1024,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: BTreeMap::new(),
+        })
+        .expect("restore should succeed");
+    spawner
+        .restore_dispatch(chuang_agent::subagent_spawner::SubagentDispatch {
+            run_id: chuang_agent::subagent_spawner::RunId("queued-run-3".to_string()),
+            agent_id: AgentId("worker-3".to_string()),
+            task_id: TaskId("task-3".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "恢复较小编号 dispatch".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 1024,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: BTreeMap::new(),
+        })
+        .expect("restore should succeed");
+
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("spawn should continue from max restored suffix");
+
+    assert_eq!(receipt.run_id.0, "queued-run-8");
+}
+
+#[test]
+fn queued_spawner_restoring_nonstandard_run_id_does_not_advance_counter() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    spawner
+        .restore_dispatch(chuang_agent::subagent_spawner::SubagentDispatch {
+            run_id: chuang_agent::subagent_spawner::RunId("persisted-run-alpha".to_string()),
+            agent_id: AgentId("worker-alpha".to_string()),
+            task_id: TaskId("task-alpha".to_string()),
+            parent_agent_id: AgentId("xiaoce".to_string()),
+            agent_name: "worker".to_string(),
+            task: "恢复自定义 run id".to_string(),
+            tool_policy: SubagentToolPolicy::Execute,
+            context_isolation: ContextIsolation::Isolated,
+            token_budget: 1024,
+            idle_timeout_ms: 30_000,
+            recursive_spawn: false,
+            metadata: BTreeMap::new(),
+        })
+        .expect("restore should succeed");
+
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("nonstandard restored ids should not affect counter");
+
+    assert_eq!(receipt.run_id.0, "queued-run-1");
+}
+
+#[test]
+fn queued_spawner_persist_spawn_rollback_keeps_first_run_id_available() {
+    let mut spawner = QueuedSubagentSpawner::new();
+    let persist_calls = Cell::new(0);
+
+    let err = spawner
+        .persist_spawn(request(SubagentToolPolicy::Execute), |_| {
+            persist_calls.set(persist_calls.get() + 1);
+            Err(SubagentError::InvalidRequest(
+                "dispatch persist failed".to_string(),
+            ))
+        })
+        .expect_err("persist failure should abort spawn");
+
+    assert!(matches!(err, SubagentError::InvalidRequest(_)));
+    assert_eq!(persist_calls.get(), 1);
+    assert!(spawner.pending_dispatches().is_empty());
+    assert!(spawner
+        .state(&chuang_agent::subagent_spawner::RunId(
+            "queued-run-1".to_string()
+        ))
+        .is_none());
+
+    let receipt = spawner
+        .spawn(request(SubagentToolPolicy::Execute))
+        .expect("next spawn should still use first run id");
+    assert_eq!(receipt.run_id.0, "queued-run-1");
 }
 
 #[test]

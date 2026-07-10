@@ -3,6 +3,7 @@ use crate::memory_policy::{
     ActiveAllocation, AdmissionDecision, AdmissionRequest, BudgetConfig, DenyReason,
     MemoryAdmissionPolicy, ReservationToken,
 };
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreedBytes(pub u64);
@@ -34,6 +35,23 @@ pub trait BudgetManager: Send + Sync {
 }
 
 impl MemoryAdmissionPolicy {
+    fn current_timestamp() -> Timestamp {
+        Timestamp(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
+    }
+
+    fn timestamp_after(now: &Timestamp, ttl_ms: u64) -> Result<Timestamp, DenyReason> {
+        let now =
+            DateTime::parse_from_rfc3339(&now.0).map_err(|_| DenyReason::ConcurrentModification)?;
+        let ttl_ms = i64::try_from(ttl_ms).map_err(|_| DenyReason::ConcurrentModification)?;
+        let expires_at = now
+            .checked_add_signed(Duration::milliseconds(ttl_ms))
+            .ok_or(DenyReason::ConcurrentModification)?;
+
+        Ok(Timestamp(
+            expires_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+        ))
+    }
+
     fn available_bytes(&self) -> u64 {
         let active_sum: u64 = self
             .active_allocations
@@ -65,9 +83,7 @@ impl MemoryAdmissionPolicy {
         FreedBytes(released)
     }
 
-    fn evict_allocations(&mut self, evict_candidates: &[AllocationId]) -> Result<u64, DenyReason> {
-        let mut reclaimed = 0;
-
+    fn evict_allocations(&mut self, evict_candidates: &[AllocationId]) -> Result<(), DenyReason> {
         for candidate in evict_candidates {
             let Some(index) = self
                 .active_allocations
@@ -76,18 +92,17 @@ impl MemoryAdmissionPolicy {
             else {
                 return Err(DenyReason::CandidateNotEvictable);
             };
-            reclaimed += self.active_allocations[index].allocated_bytes;
+            self.active_allocations.remove(index);
         }
 
-        self.active_allocations
-            .retain(|allocation| !evict_candidates.contains(&allocation.allocation_id));
-
-        Ok(reclaimed)
+        Ok(())
     }
-}
 
-impl BudgetManager for MemoryAdmissionPolicy {
-    fn try_reserve(&mut self, request: &AdmissionRequest) -> Result<ReservationToken, DenyReason> {
+    pub fn try_reserve_at(
+        &mut self,
+        request: &AdmissionRequest,
+        now: Timestamp,
+    ) -> Result<ReservationToken, DenyReason> {
         if request.requested_bytes > self.available_bytes() {
             return Err(DenyReason::BudgetExceeded);
         }
@@ -99,13 +114,17 @@ impl BudgetManager for MemoryAdmissionPolicy {
             granted_bytes: request.requested_bytes,
             priority: request.priority,
             requested_at: request.requested_at.clone(),
-            expires_at: Timestamp(format!("{}+ttl", request.requested_at.0)),
+            expires_at: Self::timestamp_after(&now, self.config.reservation_ttl_ms)?,
         };
         self.reservations.push(token.clone());
         Ok(token)
     }
 
-    fn commit(&mut self, token: ReservationToken) -> Result<AllocationId, CommitError> {
+    pub fn commit_at(
+        &mut self,
+        token: ReservationToken,
+        now: &str,
+    ) -> Result<AllocationId, CommitError> {
         let Some(index) = self
             .reservations
             .iter()
@@ -113,6 +132,13 @@ impl BudgetManager for MemoryAdmissionPolicy {
         else {
             return Err(CommitError::ReservationExpired);
         };
+
+        if self.reservations[index] != token {
+            return Err(CommitError::ConcurrentModification);
+        }
+        if token.is_expired_at(now) {
+            return Err(CommitError::ReservationExpired);
+        }
 
         let token = self.reservations.remove(index);
         let allocation_id = AllocationId(format!("alloc-{}", self.next_allocation_seq));
@@ -127,6 +153,16 @@ impl BudgetManager for MemoryAdmissionPolicy {
         });
 
         Ok(allocation_id)
+    }
+}
+
+impl BudgetManager for MemoryAdmissionPolicy {
+    fn try_reserve(&mut self, request: &AdmissionRequest) -> Result<ReservationToken, DenyReason> {
+        self.try_reserve_at(request, Self::current_timestamp())
+    }
+
+    fn commit(&mut self, token: ReservationToken) -> Result<AllocationId, CommitError> {
+        self.commit_at(token, &Self::current_timestamp().0)
     }
 
     fn release_reservation(&mut self, token: ReservationToken) {
@@ -147,10 +183,7 @@ impl BudgetManager for MemoryAdmissionPolicy {
         let Some(index) = self.active_allocations.iter().position(|allocation| {
             &allocation.task_id == task_id && &allocation.agent_id == agent_id
         }) else {
-            return Err(ReclaimError::AllocationNotFound {
-                task_id: task_id.clone(),
-                agent_id: agent_id.clone(),
-            });
+            return Ok(FreedBytes(0));
         };
 
         let allocation = self.active_allocations.remove(index);
@@ -162,14 +195,15 @@ impl BudgetManager for MemoryAdmissionPolicy {
         request: &AdmissionRequest,
         evict_candidates: &[AllocationId],
     ) -> Result<AdmissionDecision, DenyReason> {
-        let reclaimed = self.evict_allocations(evict_candidates)?;
-        if request.requested_bytes > self.available_bytes().saturating_add(reclaimed) {
+        let mut planned = self.clone();
+        planned.evict_allocations(evict_candidates)?;
+        if request.requested_bytes > planned.available_bytes() {
             return Err(DenyReason::BudgetExceeded);
         }
 
-        let allocation_id = AllocationId(format!("alloc-{}", self.next_allocation_seq));
-        self.next_allocation_seq += 1;
-        self.active_allocations.push(ActiveAllocation {
+        let allocation_id = AllocationId(format!("alloc-{}", planned.next_allocation_seq));
+        planned.next_allocation_seq += 1;
+        planned.active_allocations.push(ActiveAllocation {
             allocation_id,
             task_id: request.task_id.clone(),
             agent_id: request.agent_id.clone(),
@@ -177,6 +211,7 @@ impl BudgetManager for MemoryAdmissionPolicy {
             priority: request.priority,
             started_at: request.requested_at.clone(),
         });
+        *self = planned;
 
         Ok(AdmissionDecision::Grant {
             granted_bytes: request.requested_bytes,
