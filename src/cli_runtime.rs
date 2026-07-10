@@ -376,6 +376,7 @@ where
     let execution_slot = ExecutionSlot::generic_agent_mvp(tool_config);
     let mut current_input = original_input.clone();
     let mut live_guidance_cursor = 0usize;
+    let mut model_usage = ModelUsageTotals::default();
     let mut last_turn: Option<ChuangKernelTurn> = None;
     let mut last_plain_text_answer: Option<String> = None;
     write_terminal_event(
@@ -388,18 +389,16 @@ where
     write_terminal_event(
         progress_path,
         &TerminalEvent::StepStarted {
-            title: "prepare context".to_string(),
-            detail: Some(
-                "identity, recent history, working context, and tool instructions".to_string(),
-            ),
+            title: "准备上下文".to_string(),
+            detail: Some("整理身份、最近对话、工作上下文和工具约束".to_string()),
         },
     )?;
     write_terminal_event(
         progress_path,
         &TerminalEvent::StepFinished {
-            title: "prepare context".to_string(),
+            title: "准备上下文".to_string(),
             status: StepStatus::Ok,
-            detail: Some(format!("segments={}", turn_context.len())),
+            detail: Some(format!("已装载 {} 段上下文", turn_context.len())),
         },
     )?;
     if should_auto_observe_desktop(&original_input) {
@@ -409,6 +408,8 @@ where
                 round: 1,
                 tool: "locate".to_string(),
                 summary: Some("auto desktop observation before model call".to_string()),
+                activity_title: Some("观察当前界面".to_string()),
+                activity_detail: Some("在模型决策前先确认当前屏幕状态".to_string()),
             },
         )?;
         let call = ToolCall::Locate {
@@ -456,6 +457,10 @@ where
                     .last()
                     .map(|record| record.summary.clone())
                     .unwrap_or_default(),
+                activity_title: Some("观察当前界面".to_string()),
+                activity_detail: Some(human_tool_finished_detail(
+                    tool_calls.last().expect("locate record should exist"),
+                )),
             },
         )?;
         current_input = format!(
@@ -467,6 +472,7 @@ where
     }
 
     for round_index in 0..max_tool_rounds {
+        ensure_turn_not_cancelled(live_guidance_path, progress_path, "模型调用前")?;
         if let Some(guidance) =
             read_new_live_guidance(live_guidance_path, &mut live_guidance_cursor)?
         {
@@ -496,6 +502,8 @@ where
                 turn_context.clone(),
             )
             .map_err(|e| format!("{e:?}"))?;
+        model_usage.observe_and_write(&mut turn);
+        ensure_turn_not_cancelled(live_guidance_path, progress_path, "模型返回后")?;
         let body = turn.result.response.body.trim().to_string();
         write_terminal_event(
             progress_path,
@@ -582,6 +590,7 @@ where
                 return Ok(turn);
             }
             ToolModelOutput::ToolCall(call) => {
+                ensure_turn_not_cancelled(live_guidance_path, progress_path, "工具执行前")?;
                 let tool_name = tool_call_name(&call).to_string();
                 write_terminal_event(
                     progress_path,
@@ -589,6 +598,8 @@ where
                         round: round_index + 1,
                         tool: tool_name,
                         summary: None,
+                        activity_title: Some(human_tool_activity_title(&call).to_string()),
+                        activity_detail: human_tool_activity_detail(&call),
                     },
                 )?;
                 let task_id = format!("{}:tool:{}", turn.turn_id, tool_calls.len() + 1);
@@ -604,6 +615,7 @@ where
                 )?;
                 let pending_approval = outcome.pending_approval.clone();
                 let record = outcome.record;
+                ensure_turn_not_cancelled(live_guidance_path, progress_path, "工具执行后")?;
                 transcript.push(tool_evidence_for_model(
                     &record,
                     &risk_decision_label(&outcome.decision),
@@ -637,6 +649,10 @@ where
                             .last()
                             .map(|record| record.summary.clone())
                             .unwrap_or_default(),
+                        activity_title: tool_calls
+                            .last()
+                            .map(|record| human_tool_activity_title(&record.call).to_string()),
+                        activity_detail: tool_calls.last().map(human_tool_finished_detail),
                     },
                 )?;
                 if let Some(pending) = pending_approval {
@@ -659,10 +675,25 @@ where
                     == Some("human_input_required")
                 {
                     turn.user_input = original_input.clone();
-                    turn.result.response.body = tool_calls
+                    let human_prompt = tool_calls
                         .last()
                         .and_then(|record| record.output.clone())
-                        .unwrap_or_else(|| "human_input_required".to_string());
+                        .and_then(|output| {
+                            output
+                                .split_once(" prompt=")
+                                .map(|(_, prompt)| prompt.trim().to_string())
+                        })
+                        .filter(|prompt| !prompt.is_empty() && prompt != "none");
+                    turn.result.response.body = human_prompt
+                        .map(|prompt| {
+                            format!(
+                                "需要你补充信息后才能继续。\n\n请确认：{prompt}\n\n当前操作已经暂停，没有继续执行后续步骤。"
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            "需要你补充信息后才能继续。\n\n当前操作已经暂停，没有继续执行后续步骤。"
+                                .to_string()
+                        });
                     insert_tool_surface_metadata(&mut turn, workspace_root)?;
                     insert_tool_metadata_with_status(
                         &mut turn,
@@ -902,10 +933,11 @@ where
         write_terminal_event(
             progress_path,
             &TerminalEvent::StepStarted {
-                title: "finalize answer".to_string(),
-                detail: Some("tool execution disabled after round limit".to_string()),
+                title: "整理最终答复".to_string(),
+                detail: Some("工具轮次已用尽，开始整理对用户可读的结论".to_string()),
             },
         )?;
+        ensure_turn_not_cancelled(live_guidance_path, progress_path, "最终答复前")?;
         match attempt_tool_loop_finalization(
             kernel,
             governance,
@@ -920,6 +952,7 @@ where
                 answer,
                 response_kind,
             }) => {
+                model_usage.observe_and_write(&mut turn);
                 turn.result.response.body = answer;
                 turn.user_input = original_input;
                 insert_tool_surface_metadata(&mut turn, workspace_root)?;
@@ -944,9 +977,13 @@ where
                 write_terminal_event(
                     progress_path,
                     &TerminalEvent::StepFinished {
-                        title: "finalize answer".to_string(),
+                        title: "整理最终答复".to_string(),
                         status: StepStatus::Ok,
-                        detail: Some(format!("accepted {response_kind} response")),
+                        detail: Some(match response_kind {
+                            "final" => "已生成最终答复".to_string(),
+                            "plain_text" => "已接受纯文本最终答复".to_string(),
+                            _ => "已完成最终答复整理".to_string(),
+                        }),
                     },
                 )?;
                 write_terminal_event(
@@ -960,11 +997,12 @@ where
                 return Ok(turn);
             }
             Ok(ToolLoopFinalization::Rejected {
-                final_turn,
+                mut final_turn,
                 status,
                 detail,
                 blocked_tool_call,
             }) => {
+                model_usage.observe_and_write(&mut final_turn);
                 turn = final_turn;
                 insert_tool_finalization_metadata(
                     &mut turn,
@@ -976,7 +1014,7 @@ where
                 write_terminal_event(
                     progress_path,
                     &TerminalEvent::StepFinished {
-                        title: "finalize answer".to_string(),
+                        title: "整理最终答复".to_string(),
                         status: StepStatus::Failed,
                         detail: Some(detail),
                     },
@@ -993,11 +1031,9 @@ where
                 write_terminal_event(
                     progress_path,
                     &TerminalEvent::StepFinished {
-                        title: "finalize answer".to_string(),
+                        title: "整理最终答复".to_string(),
                         status: StepStatus::Failed,
-                        detail: Some(
-                            "provider call failed; preserved prior tool evidence".to_string(),
-                        ),
+                        detail: Some("最终答复生成失败，已保留前面的执行证据".to_string()),
                     },
                 )?;
                 turn.result.response.meta.extra.insert(
@@ -1038,6 +1074,80 @@ where
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+fn ensure_turn_not_cancelled(
+    guidance_path: Option<&Path>,
+    progress_path: Option<&Path>,
+    stage: &str,
+) -> Result<(), String> {
+    let Some(path) = guidance_path else {
+        return Ok(());
+    };
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    if !content
+        .lines()
+        .any(|line| line.trim() == "[chuang-control] stop")
+    {
+        return Ok(());
+    }
+    write_terminal_event(
+        progress_path,
+        &TerminalEvent::TurnCancelled {
+            stage: stage.to_string(),
+        },
+    )?;
+    Err(format!("turn_cancelled_at_safe_point:{stage}"))
+}
+
+#[derive(Debug, Default)]
+struct ModelUsageTotals {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
+    model_calls: u64,
+}
+
+impl ModelUsageTotals {
+    fn observe_and_write(&mut self, turn: &mut ChuangKernelTurn) {
+        let extra = &turn.result.response.meta.extra;
+        let prompt_tokens = usage_meta_value(extra, "prompt_tokens");
+        let completion_tokens = usage_meta_value(extra, "completion_tokens");
+        let total_tokens = usage_meta_value(extra, "total_tokens")
+            .unwrap_or_else(|| prompt_tokens.unwrap_or(0) + completion_tokens.unwrap_or(0));
+        self.prompt_tokens = self
+            .prompt_tokens
+            .saturating_add(prompt_tokens.unwrap_or(0));
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(completion_tokens.unwrap_or(0));
+        self.total_tokens = self.total_tokens.saturating_add(total_tokens);
+        self.model_calls = self.model_calls.saturating_add(1);
+
+        let extra = &mut turn.result.response.meta.extra;
+        extra.insert(
+            "aggregate_prompt_tokens".to_string(),
+            self.prompt_tokens.to_string(),
+        );
+        extra.insert(
+            "aggregate_completion_tokens".to_string(),
+            self.completion_tokens.to_string(),
+        );
+        extra.insert(
+            "aggregate_total_tokens".to_string(),
+            self.total_tokens.to_string(),
+        );
+        extra.insert(
+            "aggregate_model_calls".to_string(),
+            self.model_calls.to_string(),
+        );
+    }
+}
+
+fn usage_meta_value(meta: &BTreeMap<String, String>, key: &str) -> Option<u64> {
+    meta.get(key).and_then(|value| value.parse::<u64>().ok())
 }
 
 enum ToolLoopFinalization {
@@ -1119,22 +1229,22 @@ where
             final_turn: turn,
             status: "rejected_tool_call",
             detail: format!(
-                "blocked unexpected {} request; no additional tool was executed",
-                tool_call_name(&call)
+                "已阻止额外的“{}”，未再执行新工具",
+                human_tool_activity_title(&call)
             ),
             blocked_tool_call: true,
         }),
         ToolModelOutput::ProtocolError(error) => Ok(ToolLoopFinalization::Rejected {
             final_turn: turn,
             status: "protocol_error",
-            detail: format!("invalid final response: {}", error.code),
+            detail: format!("最终答复格式无效：{}", error.code),
             blocked_tool_call: false,
         }),
         ToolModelOutput::FinalAnswer(_) | ToolModelOutput::PlainText(_) => {
             Ok(ToolLoopFinalization::Rejected {
                 final_turn: turn,
                 status: "empty_response",
-                detail: "model returned an empty final response".to_string(),
+                detail: "模型没有返回可用的最终答复".to_string(),
                 blocked_tool_call: false,
             })
         }
@@ -1157,7 +1267,7 @@ fn finish_pending_approval_turn(
     let pending_path = persist_pending_approval(workspace_root, pending)?;
     turn.user_input = original_input.to_string();
     turn.result.response.body = format!(
-        "本轮已暂停，等待明确审批。\napproval_id={}\npending_file={}\n未执行目标动作。",
+        "这个操作需要你的确认后才能继续。\n审批编号：{}\n待确认文件：{}\n目标操作尚未执行。",
         pending.approval_id,
         pending_path.display()
     );
@@ -1192,6 +1302,180 @@ fn finish_pending_approval_turn(
         pending.policy_marker.clone(),
     );
     Ok(turn)
+}
+
+fn human_tool_activity_title(call: &ToolCall) -> &'static str {
+    match call {
+        ToolCall::ListDir { .. } => "查看目录",
+        ToolCall::ReadFile { .. } => "读取文件",
+        ToolCall::WriteFile { .. } => "写入文件",
+        ToolCall::Mouse { .. } => "操作鼠标",
+        ToolCall::Keyboard { secret, .. } => {
+            if *secret {
+                "输入敏感信息"
+            } else {
+                "输入内容"
+            }
+        }
+        ToolCall::Screenshot { .. } => "截取画面",
+        ToolCall::Locate { .. } => "定位界面元素",
+        ToolCall::OpenApp { .. } => "打开应用",
+        ToolCall::Wait { .. } => "等待结果",
+        ToolCall::HumanSuspend { .. } => "等待人工处理",
+        ToolCall::ApplyPatch { .. } => "应用补丁",
+        ToolCall::ShellExec { command, .. } => human_shell_activity_title(command),
+        ToolCall::MemoryRecall { .. } => "检索记忆",
+    }
+}
+
+fn human_tool_activity_detail(call: &ToolCall) -> Option<String> {
+    match call {
+        ToolCall::ListDir { .. } => Some("检查目录结构和可用文件".to_string()),
+        ToolCall::ReadFile { .. } => Some("读取文件内容以确认实现或配置".to_string()),
+        ToolCall::WriteFile { .. } => Some("把新的内容写入工作区文件".to_string()),
+        ToolCall::Mouse { .. } => Some("在界面上执行鼠标操作".to_string()),
+        ToolCall::Keyboard { secret, .. } => Some(if *secret {
+            "向界面输入已脱敏的敏感内容".to_string()
+        } else {
+            "向界面输入文本内容".to_string()
+        }),
+        ToolCall::Screenshot { .. } => Some("获取当前画面用于确认状态".to_string()),
+        ToolCall::Locate { .. } => Some("识别当前界面上的目标元素".to_string()),
+        ToolCall::OpenApp { .. } => Some("启动所需应用以继续任务".to_string()),
+        ToolCall::Wait { .. } => Some("等待外部状态变化后继续".to_string()),
+        ToolCall::HumanSuspend { .. } => Some("暂停并等待人工补充信息".to_string()),
+        ToolCall::ApplyPatch { .. } => Some("按补丁内容更新代码或文本".to_string()),
+        ToolCall::ShellExec { command, .. } => Some(human_shell_activity_detail(command)),
+        ToolCall::MemoryRecall { .. } => Some("检索相关记忆和历史线索".to_string()),
+    }
+}
+
+fn human_shell_activity_title(command: &str) -> &'static str {
+    let normalized = normalize_shell_command(command);
+    if contains_any(
+        &normalized,
+        &["cargo test", "pytest", "pnpm test", "npm test", "go test"],
+    ) {
+        "运行测试"
+    } else if contains_any(
+        &normalized,
+        &[
+            "cargo check",
+            "cargo build",
+            "cargo clippy",
+            "npm run build",
+            "pnpm build",
+        ],
+    ) {
+        "检查构建"
+    } else if contains_any(
+        &normalized,
+        &[
+            "git status",
+            "git diff",
+            "git log",
+            "git show",
+            "git branch",
+        ],
+    ) {
+        "检查 Git 状态"
+    } else if contains_any(&normalized, &["rg ", "grep ", "find ", "fd "]) {
+        "搜索代码"
+    } else if contains_any(
+        &normalized,
+        &["cat ", "sed -n", "head ", "tail ", "less ", "awk "],
+    ) {
+        "查看文件内容"
+    } else if contains_any(
+        &normalized,
+        &[
+            "printenv", "env", ".env", "config", "toml", "yaml", "yml", "json",
+        ],
+    ) {
+        "检查配置"
+    } else if contains_any(
+        &normalized,
+        &[
+            "journalctl",
+            "tail -f",
+            "docker logs",
+            "kubectl logs",
+            "log",
+        ],
+    ) {
+        "查看日志"
+    } else if contains_any(
+        &normalized,
+        &[
+            "ps ",
+            "pgrep",
+            "lsof",
+            "ss ",
+            "netstat",
+            "systemctl status",
+            "docker ps",
+        ],
+    ) {
+        "检查运行状态"
+    } else if contains_any(
+        &normalized,
+        &[
+            "systemctl restart",
+            "systemctl start",
+            "docker compose up",
+            "docker restart",
+        ],
+    ) {
+        "启动或重启服务"
+    } else {
+        "执行终端命令"
+    }
+}
+
+fn human_shell_activity_detail(command: &str) -> String {
+    match human_shell_activity_title(command) {
+        "运行测试" => "运行测试来验证当前改动或问题状态".to_string(),
+        "检查构建" => "执行构建或静态检查来确认代码状态".to_string(),
+        "检查 Git 状态" => "查看版本库当前状态和改动范围".to_string(),
+        "搜索代码" => "在工作区中搜索相关代码或文件".to_string(),
+        "查看文件内容" => "通过终端查看文件或输出内容".to_string(),
+        "检查配置" => "核对本地配置或环境设置".to_string(),
+        "查看日志" => "读取日志以定位当前问题".to_string(),
+        "检查运行状态" => "检查进程、端口或服务当前状态".to_string(),
+        "启动或重启服务" => "启动或重启相关服务后继续验证".to_string(),
+        _ => "通过终端执行任务所需的本地操作".to_string(),
+    }
+}
+
+fn normalize_shell_command(command: &str) -> String {
+    command
+        .to_ascii_lowercase()
+        .replace('\n', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn human_tool_finished_detail(record: &ToolExecutionRecord) -> String {
+    if record.ok {
+        format!("{}已完成", human_tool_activity_title(&record.call))
+    } else if record.failure_class.as_deref() == Some("governance_rejected") {
+        format!(
+            "{}未执行，已被治理层拦截",
+            human_tool_activity_title(&record.call)
+        )
+    } else if record.failure_class.as_deref() == Some("human_input_required") {
+        format!(
+            "{}已暂停，等待人工补充",
+            human_tool_activity_title(&record.call)
+        )
+    } else {
+        format!("{}失败", human_tool_activity_title(&record.call))
+    }
 }
 
 fn persist_pending_approval(
@@ -1522,21 +1806,21 @@ fn tool_protocol_repair_prompt(
 
 fn missing_required_action_exhausted_answer(
     original_input: &str,
-    max_tool_rounds: usize,
+    _max_tool_rounds: usize,
 ) -> String {
     format!(
-        "本轮没有完成真实本地动作：模型连续 {max_tool_rounds} 轮没有调用工具。原始请求是：{original_input}。请重试，或把动作拆成更直接的命令。"
+        "这次没有完成实际检查：执行步骤没有成功启动。\n\n你的请求：{original_input}\n\n可以直接重试，或把要检查的目标说得更具体一些。"
     )
 }
 
 fn tool_loop_exhausted_answer(
     original_input: &str,
-    max_tool_rounds: usize,
-    tool_call_count: usize,
-    protocol_error_count: usize,
+    _max_tool_rounds: usize,
+    _tool_call_count: usize,
+    _protocol_error_count: usize,
 ) -> String {
     format!(
-        "本轮工具执行已经停止，但最终总结仍未生成。\n\n模型跑满了 {max_tool_rounds} 轮工具预算，系统随后额外进行了一次禁用工具的强制收口，仍没有得到可用答复。\n已执行工具：{tool_call_count} 次。协议修复：{protocol_error_count} 次。\n原始请求：{original_input}\n\n建议：直接重试本轮。系统不会自动重复执行已经完成的工具动作。"
+        "前面的操作已经停止，但最终结论没有生成成功。\n\n你的请求：{original_input}\n\n已完成的操作不会自动重复。可以直接重试本轮；输入 /trace 可查看技术细节。"
     )
 }
 
@@ -3110,7 +3394,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
-        ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }
@@ -3245,7 +3529,8 @@ mod tests {
             .governance_decision
             .as_deref()
             .expect("governance decision should be present");
-        assert!(decision.starts_with("allowed:read-only or draft action"));
+        assert!(decision.starts_with("allowed:profile=full_local_workspace"));
+        assert!(decision.contains("action=read-only or draft"));
         assert!(decision.contains("rules="));
         let meta_decision = result
             .response
@@ -3253,7 +3538,8 @@ mod tests {
             .extra
             .get("governance_decision")
             .expect("governance decision metadata should be present");
-        assert!(meta_decision.starts_with("allowed:read-only or draft action"));
+        assert!(meta_decision.starts_with("allowed:profile=full_local_workspace"));
+        assert!(meta_decision.contains("action=read-only or draft"));
         assert!(meta_decision.contains("rules="));
         let meta_reason = result
             .response
@@ -3261,7 +3547,8 @@ mod tests {
             .extra
             .get("governance_reason")
             .expect("governance reason metadata should be present");
-        assert!(meta_reason.starts_with("read-only or draft action"));
+        assert!(meta_reason.starts_with("profile=full_local_workspace"));
+        assert!(meta_reason.contains("action=read-only or draft"));
         assert!(meta_reason.contains("rules="));
         assert_eq!(
             result
@@ -4923,7 +5210,7 @@ allowed_channels = ["app-server"]
                     r#"ACTION: {"type":"final","answer":"已查看进程。"}"#,
                 ],
                 required_tools: vec!["code_execute"],
-                required_output_fragments: vec!["sh"],
+                required_output_fragments: vec!["status=Some(0)", "\"exit_code\":0"],
                 expected_files: vec![],
                 expected_status: Some("completed"),
                 expected_protocol_error: None,
@@ -5020,7 +5307,7 @@ allowed_channels = ["app-server"]
                     r#"ACTION: {"type":"final","answer":"不应到达。"}"#,
                 ],
                 required_tools: vec!["human_suspend"],
-                required_output_fragments: vec!["human_input_required"],
+                required_output_fragments: vec!["需要你补充信息"],
                 expected_files: vec![],
                 expected_status: Some("human_input_required"),
                 expected_protocol_error: None,
@@ -5066,7 +5353,9 @@ allowed_channels = ["app-server"]
         )
         .expect("human suspend should return the current turn");
 
-        assert!(turn.result.response.body.contains("human_input_required"));
+        assert!(turn.result.response.body.contains("需要你补充信息"));
+        assert!(turn.result.response.body.contains("approve next action?"));
+        assert!(turn.result.response.body.contains("没有继续执行后续步骤"));
         assert_eq!(
             turn.result
                 .response
@@ -5740,7 +6029,6 @@ allowed_channels = ["app-server"]
             chuang_agent::memory_store::InMemoryMemoryStore::new(),
             SequenceResponder::new(vec![
                 r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"cat .env","cwd":"."}}"#,
-                r#"ACTION: {"type":"final","answer":"工具被治理层拒绝，未执行。"}"#,
             ]),
         );
         let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
@@ -5756,7 +6044,8 @@ allowed_channels = ["app-server"]
         )
         .expect("tool loop should continue after governance rejection");
 
-        assert_eq!(turn.result.response.body, "工具被治理层拒绝，未执行。");
+        assert!(turn.result.response.body.contains("需要你的确认"));
+        assert!(turn.result.response.body.contains("目标操作尚未执行"));
         let tool_calls_json = turn
             .result
             .response
@@ -5764,7 +6053,7 @@ allowed_channels = ["app-server"]
             .extra
             .get("tool_calls_json")
             .expect("tool calls json should exist");
-        assert!(tool_calls_json.contains("\"failure_class\":\"governance_rejected\""));
+        assert!(tool_calls_json.contains("\"failure_class\":\"approval_pending\""));
         assert!(tool_calls_json.contains("\"ok\":false"));
         let tool_events_json = turn
             .result
@@ -5773,7 +6062,7 @@ allowed_channels = ["app-server"]
             .extra
             .get("tool_events_json")
             .expect("tool events json should exist");
-        assert!(tool_events_json.contains("\"failure_class\":\"governance_rejected\""));
+        assert!(tool_events_json.contains("\"failure_class\":\"approval_pending\""));
         assert!(tool_events_json.contains("\"atomic_tool_name\":\"code_execute\""));
         let runtime_events_json = turn
             .result
@@ -5783,8 +6072,9 @@ allowed_channels = ["app-server"]
             .get("runtime_event_ledger_json")
             .expect("runtime event ledger json should exist");
         assert!(runtime_events_json.contains("\"event_type\":\"tool_started\""));
-        assert!(runtime_events_json.contains("\"event_type\":\"tool_finished\""));
-        assert!(runtime_events_json.contains("\"decision\":\"draft_only:"));
+        assert!(runtime_events_json.contains("\"event_type\":\"approval_requested\""));
+        assert!(runtime_events_json.contains("\"decision\":\"needs_approval\""));
+        assert!(runtime_events_json.contains("\"reason\":\"profile=full_local_workspace"));
         assert!(governance
             .audit_records()
             .iter()
@@ -6236,7 +6526,7 @@ allowed_channels = ["app-server"]
         )
         .expect("local action without tool call should return a structured failure");
 
-        assert!(turn.result.response.body.contains("没有完成真实本地动作"));
+        assert!(turn.result.response.body.contains("没有完成实际检查"));
         assert!(!workspace_root.join("notes/no-tool").is_dir());
         assert_eq!(
             turn.result
@@ -6442,7 +6732,7 @@ allowed_channels = ["app-server"]
 
         assert!(workspace_root.join("notes/allowed.txt").is_file());
         assert!(!workspace_root.join("notes/must-not-run.txt").exists());
-        assert!(turn.result.response.body.contains("额外进行了一次禁用工具"));
+        assert!(turn.result.response.body.contains("最终结论没有生成成功"));
         assert_eq!(
             turn.result
                 .response
@@ -6535,6 +6825,93 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
+    fn progress_events_include_human_tool_activity_labels() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-progress-human-tool-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        fs::write(
+            workspace_root.join("Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        )
+        .expect("cargo manifest should be created");
+        let progress_path = temp_dir.join("progress.jsonl");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"cargo test -q >/dev/null || true","cwd":"."}}"#,
+                r#"ACTION: {"type":"final","answer":"测试检查已完成。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "先跑一下测试再总结".to_string(),
+            Vec::new(),
+            None,
+            Some(&progress_path),
+        )
+        .expect("turn should succeed");
+
+        let events = fs::read_to_string(&progress_path).expect("progress file should exist");
+        assert!(events.contains("\"activity_title\":\"运行测试\""));
+        assert!(events.contains("\"activity_detail\":\"运行测试来验证当前改动或问题状态\""));
+        assert!(events.contains("\"activity_detail\":\"运行测试已完成\""));
+    }
+
+    #[test]
+    fn progress_events_use_human_facing_chinese_step_titles() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-progress-human-steps-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let progress_path = temp_dir.join("progress.jsonl");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/finalize.txt","content":"done"}}"#,
+                r#"ACTION: {"type":"final","answer":"已经整理完成。"}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "先写文件再整理".to_string(),
+            Vec::new(),
+            None,
+            Some(&progress_path),
+        )
+        .expect("turn should succeed");
+
+        let events = fs::read_to_string(&progress_path).expect("progress file should exist");
+        assert!(events.contains("\"title\":\"准备上下文\""));
+        assert!(events.contains("整理身份、最近对话、工作上下文和工具约束"));
+        assert!(events.contains("\"title\":\"整理最终答复\""));
+        assert!(events.contains("工具轮次已用尽，开始整理对用户可读的结论"));
+        assert!(events.contains("已生成最终答复"));
+    }
+
+    #[test]
     fn tool_loop_finalization_provider_error_preserves_tool_evidence_and_falls_back() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-tool-finalization-provider-error-test-{}",
@@ -6566,7 +6943,7 @@ allowed_channels = ["app-server"]
         .expect("provider error during finalization should preserve the prior turn");
 
         assert!(workspace_root.join("notes/provider-error.txt").is_file());
-        assert!(turn.result.response.body.contains("最终总结仍未生成"));
+        assert!(turn.result.response.body.contains("最终结论没有生成成功"));
         assert_eq!(
             turn.result
                 .response
@@ -6607,11 +6984,9 @@ allowed_channels = ["app-server"]
     fn tool_loop_exhausted_answer_is_operator_readable() {
         let answer = tool_loop_exhausted_answer("给自己体检下", 4, 3, 1);
 
-        assert!(answer.contains("最终总结仍未生成"));
-        assert!(answer.contains("额外进行了一次禁用工具的强制收口"));
-        assert!(answer.contains("已执行工具：3 次"));
-        assert!(answer.contains("协议修复：1 次"));
-        assert!(answer.contains("不会自动重复执行"));
+        assert!(answer.contains("最终结论没有生成成功"));
+        assert!(answer.contains("已完成的操作不会自动重复"));
+        assert!(answer.contains("输入 /trace"));
     }
 
     #[test]
@@ -6921,6 +7296,52 @@ allowed_channels = ["app-server"]
             .get("tool_trace")
             .map(|value| value.contains("operator_guidance"))
             .unwrap_or(false));
+    }
+
+    #[test]
+    fn run_governed_turn_stops_before_model_when_operator_requests_cancel() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cancel-before-model-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let guidance_path = temp_dir.join("guidance.txt");
+        let progress_path = temp_dir.join("progress.jsonl");
+        fs::write(&guidance_path, "[chuang-control] stop\n").expect("cancel marker should write");
+        let responder = SequenceResponder::new(vec!["FINAL: should not run"]);
+        let remaining_outputs = responder.outputs.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let error = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "检查状态".to_string(),
+            Vec::new(),
+            Some(&guidance_path),
+            Some(&progress_path),
+        )
+        .expect_err("turn should stop before the first model call");
+
+        assert!(error.contains("turn_cancelled_at_safe_point"));
+        assert_eq!(
+            remaining_outputs
+                .lock()
+                .expect("sequence lock should succeed")
+                .len(),
+            1
+        );
+        let events = fs::read_to_string(&progress_path).expect("progress should exist");
+        assert!(events.contains("\"kind\":\"turn_cancelled\""));
+        assert!(events.contains("\"stage\":\"模型调用前\""));
     }
 
     #[derive(Debug, Clone)]

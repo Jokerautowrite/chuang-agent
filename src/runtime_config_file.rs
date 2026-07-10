@@ -53,6 +53,19 @@ pub fn parse_runtime_config_file_with_options(
             .unwrap_or_else(|| "./data/chuang-agent.db".to_string()),
     ));
 
+    if let Some(value) = get_any(&values, &["permission.profile", "permission_profile"]) {
+        config.permission.profile = value.to_string();
+    }
+    if let Some(value) = get_any(&values, &["permission.approval_policy", "approval_policy"]) {
+        config.permission.approval_policy = value.to_string();
+    }
+    if let Some(value) = get_any(
+        &values,
+        &["permission.workspace_root", "permission_workspace_root"],
+    ) {
+        config.permission.workspace_root = PathBuf::from(value);
+    }
+
     if let Some(value) = values.get("recall_limit") {
         config.recall_limit = parse_usize("recall_limit", value)?;
     }
@@ -84,6 +97,16 @@ pub fn parse_runtime_config_file_with_options(
     ) {
         config.tool_loop.shell_risk_rules.service_change =
             parse_pattern_list("tool_loop.risk.service_change", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
+            "tool_loop.risk.privilege_escalation",
+            "tool_shell_risk_privilege_escalation",
+        ],
+    ) {
+        config.tool_loop.shell_risk_rules.privilege_escalation =
+            parse_pattern_list("tool_loop.risk.privilege_escalation", value)?;
     }
     if let Some(value) = get_any(
         &values,

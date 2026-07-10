@@ -5,12 +5,27 @@ use super::{
     ActionKind, Governance, GovernanceError, MarkdownRuleSet, OperatorApprovalEvidence,
     ProposedAction, RiskDecision,
 };
+use crate::permission_profile_slot::{
+    decide_tag, full_local_workspace_profile, PermissionDecision, PermissionProfile, PermissionTag,
+};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct StaticRuleGovernance {
     audit_records: Vec<AuditRecord>,
     rules: Option<MarkdownRuleSet>,
     operator_approvals: BTreeSet<OperatorApprovalEvidence>,
+    permission_profile: PermissionProfile,
+}
+
+impl Default for StaticRuleGovernance {
+    fn default() -> Self {
+        Self {
+            audit_records: Vec::new(),
+            rules: None,
+            operator_approvals: BTreeSet::new(),
+            permission_profile: full_local_workspace_profile(),
+        }
+    }
 }
 
 impl StaticRuleGovernance {
@@ -23,6 +38,14 @@ impl StaticRuleGovernance {
             audit_records: Vec::new(),
             rules: Some(rules),
             operator_approvals: BTreeSet::new(),
+            permission_profile: full_local_workspace_profile(),
+        }
+    }
+
+    pub fn with_profile(permission_profile: PermissionProfile) -> Self {
+        Self {
+            permission_profile,
+            ..Self::default()
         }
     }
 
@@ -58,33 +81,7 @@ impl Governance for StaticRuleGovernance {
             ));
         }
 
-        let decision = match action.kind {
-            ActionKind::Observe | ActionKind::Draft => RiskDecision::Allowed {
-                reason: "read-only or draft action".to_string(),
-            },
-            ActionKind::LocalDesktopInteraction
-            | ActionKind::LocalFileWrite
-            | ActionKind::ShellCommand => RiskDecision::Allowed {
-                reason: "local action allowed by static policy".to_string(),
-            },
-            ActionKind::ExternalSend | ActionKind::PublicPost => RiskDecision::NeedsApproval {
-                reason: "external communication requires approval".to_string(),
-            },
-            ActionKind::Payment | ActionKind::VerificationCodeInput => {
-                RiskDecision::NeedsApproval {
-                    reason: "account-sensitive action requires approval".to_string(),
-                }
-            }
-            ActionKind::DeleteOrCleanup => RiskDecision::NeedsApproval {
-                reason: "destructive action requires explicit target approval".to_string(),
-            },
-            ActionKind::ServiceChange | ActionKind::NetworkChange => RiskDecision::NeedsApproval {
-                reason: "system-disrupting action requires approval".to_string(),
-            },
-            ActionKind::SecretAccess => RiskDecision::DraftOnly {
-                reason: "secret-bearing action may only produce a safe plan".to_string(),
-            },
-        };
+        let decision = permission_decision_for_action(&self.permission_profile, &action.kind);
 
         Ok(self.attach_rules(decision, action))
     }
@@ -104,6 +101,47 @@ impl Governance for StaticRuleGovernance {
             Err(GovernanceError {
                 message: "operator approval evidence is not registered".to_string(),
             })
+        }
+    }
+}
+
+fn permission_decision_for_action(profile: &PermissionProfile, kind: &ActionKind) -> RiskDecision {
+    let (tag, label) = match kind {
+        ActionKind::Observe | ActionKind::Draft => (PermissionTag::Read, "read-only or draft"),
+        ActionKind::LocalDesktopInteraction => {
+            (PermissionTag::OpenApp, "local desktop interaction")
+        }
+        ActionKind::LocalFileWrite => (PermissionTag::FileWrite, "local file write"),
+        ActionKind::ShellCommand => (PermissionTag::CodeExecute, "local code execution"),
+        ActionKind::ExternalSend => (PermissionTag::ExternalSend, "external send"),
+        ActionKind::PublicPost => (PermissionTag::PublicPost, "public post"),
+        ActionKind::Payment => (PermissionTag::Payment, "payment"),
+        ActionKind::VerificationCodeInput => {
+            (PermissionTag::VerificationCode, "verification code input")
+        }
+        ActionKind::DeleteOrCleanup => (PermissionTag::Delete, "delete or cleanup"),
+        ActionKind::SecretAccess => (PermissionTag::SecretAccess, "secret material access"),
+        ActionKind::PrivilegeEscalation => {
+            (PermissionTag::PrivilegeEscalation, "privilege escalation")
+        }
+        ActionKind::ServiceChange => (PermissionTag::ServiceControl, "service change"),
+        ActionKind::NetworkChange => (PermissionTag::NetworkChange, "network change"),
+    };
+    let risk = decide_tag(profile, tag);
+    let reason = format!(
+        "profile={} action={} permission={:?}",
+        profile.name, label, risk.decision
+    );
+
+    match risk.decision {
+        PermissionDecision::Allow | PermissionDecision::AllowWithAudit => {
+            RiskDecision::Allowed { reason }
+        }
+        PermissionDecision::RequireApproval
+        | PermissionDecision::RequireApprovalOrProjectTrust
+        | PermissionDecision::RequireApprovalOrDeny
+        | PermissionDecision::RequireExplicitTargetApproval => {
+            RiskDecision::NeedsApproval { reason }
         }
     }
 }

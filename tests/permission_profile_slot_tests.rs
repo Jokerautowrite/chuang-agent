@@ -1,6 +1,7 @@
 use chuang_agent::permission_profile_slot::{
-    classify_tag, decide_descriptor_risk, decide_tag, local_ga_profile, safe_default_profile,
-    PermissionDecision, PermissionProfileId, PermissionTag, ToolDescriptorRisk,
+    classify_tag, decide_descriptor_risk, decide_tag, full_local_workspace_profile,
+    local_ga_profile, safe_default_profile, PermissionDecision, PermissionProfileId, PermissionTag,
+    ToolDescriptorRisk,
 };
 
 fn descriptor<'a>(
@@ -39,6 +40,25 @@ fn local_ga_profile_maps_readonly_tags_to_allow() {
         let decision = decide_tag(&profile, tag);
         assert_eq!(decision.decision, PermissionDecision::Allow, "{tag:?}");
     }
+}
+
+#[test]
+fn full_local_workspace_is_the_explicit_autonomous_workspace_profile() {
+    let profile = full_local_workspace_profile();
+    assert_eq!(profile.id, PermissionProfileId::FullLocalWorkspace);
+    assert_eq!(profile.name, "full_local_workspace");
+    assert_eq!(
+        decide_tag(&profile, PermissionTag::CodeExecute).decision,
+        PermissionDecision::AllowWithAudit
+    );
+    assert_eq!(
+        decide_tag(&profile, PermissionTag::Delete).decision,
+        PermissionDecision::RequireExplicitTargetApproval
+    );
+    assert_eq!(
+        decide_tag(&profile, PermissionTag::SecretAccess).decision,
+        PermissionDecision::RequireApprovalOrDeny
+    );
 }
 
 #[test]

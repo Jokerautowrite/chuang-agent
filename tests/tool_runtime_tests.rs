@@ -723,7 +723,7 @@ fn workspace_file_adapter_read_file_redacts_secret_like_content() {
         .expect("read should succeed");
 
     assert!(result.redacted);
-    assert_eq!(result.content, "[redacted: secret-like path or content]");
+    assert_eq!(result.content, "api_key = \"[REDACTED]\"\n");
     assert_eq!(result.bytes, "api_key = \"secret-value\"\n".len());
     assert_eq!(result.lines, 1);
 }
@@ -844,6 +844,27 @@ fn tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator() {
         .as_deref()
         .expect("human suspend should explain prompt")
         .contains("confirm next action"));
+}
+
+#[test]
+fn governed_secret_keyboard_input_requires_approval() {
+    let root = temp_workspace("governed-secret-keyboard");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let mut governance = StaticRuleGovernance::new();
+
+    let error = execute_tool_call_with_governance(
+        &root,
+        &mut governance,
+        &ToolCall::Keyboard {
+            text: "123456".to_string(),
+            secret: true,
+        },
+        "cli",
+        "turn-1:tool-1",
+    )
+    .expect_err("secret keyboard input should require approval");
+
+    assert!(error.starts_with("tool_needs_approval:"));
 }
 
 #[test]
@@ -982,7 +1003,7 @@ fn write_file_diff_preview_redacts_secret_like_changes() {
     assert!(record.ok);
     assert_eq!(
         record.write_diff_preview.as_deref(),
-        Some("[redacted: secret-like path or content]")
+        Some("--- before\n+++ after\n+API_KEY=[REDACTED]\n")
     );
     assert_eq!(record.write_operation, Some(WriteOperation::Created));
     assert!(record.output_redacted);
@@ -1028,10 +1049,7 @@ fn read_file_redacts_secret_like_content() {
     );
 
     assert!(record.ok);
-    assert_eq!(
-        record.output.as_deref(),
-        Some("[redacted: secret-like path or content]")
-    );
+    assert_eq!(record.output.as_deref(), Some("API_KEY=[REDACTED]"));
     assert!(record.output_redacted);
     assert_eq!(record.output_bytes, Some("API_KEY=secret-value".len()));
     assert_eq!(record.output_lines, Some(1));
@@ -1051,14 +1069,8 @@ fn shell_exec_redacts_secret_like_stdout_and_stderr() {
     );
 
     assert!(record.ok);
-    assert_eq!(
-        record.stdout.as_deref(),
-        Some("[redacted: secret-like command or output]")
-    );
-    assert_eq!(
-        record.stderr.as_deref(),
-        Some("[redacted: secret-like command or output]")
-    );
+    assert_eq!(record.stdout.as_deref(), Some("API_KEY=[REDACTED]"));
+    assert_eq!(record.stderr.as_deref(), Some("password=[REDACTED]"));
     assert!(record.output_redacted);
     assert!(record.stdout_redacted);
     assert!(record.stderr_redacted);
@@ -1313,11 +1325,11 @@ fn execution_slot_records_runtime_ledger_events_for_rejected_tool_calls() {
         .is_some_and(|value| value.starts_with("approval://")));
     assert_eq!(
         events[0].call_id.as_deref(),
-        Some("tool:shell_exec:cli:turn-2:tool-1")
+        Some("tool:code_execute:cli:turn-2:tool-1")
     );
     assert_eq!(
         events[1].call_id.as_deref(),
-        Some("tool:shell_exec:cli:turn-2:tool-1")
+        Some("tool:code_execute:cli:turn-2:tool-1")
     );
 }
 
@@ -1390,7 +1402,7 @@ fn tool_runtime_requires_approval_for_destructive_shell_commands() {
 }
 
 #[test]
-fn tool_runtime_rejects_secret_shell_commands_as_draft_only() {
+fn tool_runtime_requires_approval_for_real_secret_shell_access() {
     let root = temp_workspace("governed-secret");
     fs::create_dir_all(&root).expect("workspace root should be created");
     let mut governance = StaticRuleGovernance::new();
@@ -1405,9 +1417,9 @@ fn tool_runtime_rejects_secret_shell_commands_as_draft_only() {
         "app-server",
         "turn-1:tool-1",
     )
-    .expect_err("secret-bearing shell command should be draft-only");
+    .expect_err("real secret material access should require approval");
 
-    assert!(error.starts_with("tool_draft_only:"));
+    assert!(error.starts_with("tool_needs_approval:"));
     assert_eq!(governance.audit_records().len(), 1);
     assert_eq!(
         governance.audit_records()[0].operation,
@@ -1415,7 +1427,39 @@ fn tool_runtime_rejects_secret_shell_commands_as_draft_only() {
     );
     assert!(governance.audit_records()[0]
         .reason
-        .contains("decision=draft_only"));
+        .contains("decision=needs_approval"));
+}
+
+#[test]
+fn tool_runtime_allows_workspace_keyword_scans_without_secret_false_positive() {
+    let root = temp_workspace("governed-secret-keyword-scan");
+    fs::create_dir_all(root.join("src")).expect("workspace root should be created");
+    fs::write(
+        root.join("src/rules.rs"),
+        "const MESSAGE: &str = \"secret-bearing action\";\n",
+    )
+    .expect("fixture should write");
+    let mut governance = StaticRuleGovernance::new();
+
+    let outcome = execute_tool_call_with_governance(
+        &root,
+        &mut governance,
+        &ToolCall::ShellExec {
+            command: "rg -n 'secret-bearing action|draft_only|token|password' src".to_string(),
+            cwd: Some(".".to_string()),
+        },
+        "app-server",
+        "turn-1:tool-1",
+    )
+    .expect("source keyword scans should execute in the workspace");
+
+    assert!(matches!(outcome.decision, RiskDecision::Allowed { .. }));
+    assert!(outcome.record.ok);
+    assert!(outcome
+        .record
+        .stdout
+        .as_deref()
+        .is_some_and(|value| value.contains("secret-bearing action")));
 }
 
 #[test]
@@ -1473,19 +1517,22 @@ fn execution_slot_can_return_governance_rejection_as_record() {
         )
         .expect("governance rejection should still become a tool record");
 
-    assert!(matches!(outcome.decision, RiskDecision::DraftOnly { .. }));
+    assert!(matches!(
+        outcome.decision,
+        RiskDecision::NeedsApproval { .. }
+    ));
     assert!(!outcome.record.ok);
     assert_eq!(
         outcome.record.failure_class.as_deref(),
-        Some("governance_rejected")
+        Some("approval_pending")
     );
-    assert!(!outcome.record.retryable);
-    assert!(outcome.pending_approval.is_none());
+    assert!(outcome.record.retryable);
+    assert!(outcome.pending_approval.is_some());
     assert!(outcome
         .record
         .decision
         .as_deref()
-        .is_some_and(|decision| decision.starts_with("draft_only:")));
+        .is_some_and(|decision| decision.starts_with("needs_approval:")));
     assert_eq!(
         governance.audit_records()[0].operation,
         "tool.code_execute.rejected"

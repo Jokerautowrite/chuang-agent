@@ -2,6 +2,7 @@ use chuang_agent::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use chuang_agent::governance::{
     ActionKind, Governance, MarkdownRuleSet, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
+use chuang_agent::permission_profile_slot::safe_default_profile;
 
 fn action(kind: ActionKind, target: &str) -> ProposedAction {
     ProposedAction {
@@ -40,8 +41,10 @@ fn static_governance_requires_approval_for_external_or_destructive_actions() {
         ActionKind::Payment,
         ActionKind::VerificationCodeInput,
         ActionKind::DeleteOrCleanup,
+        ActionKind::PrivilegeEscalation,
         ActionKind::ServiceChange,
         ActionKind::NetworkChange,
+        ActionKind::SecretAccess,
     ] {
         assert!(matches!(
             governance
@@ -66,8 +69,22 @@ fn static_governance_treats_local_desktop_interaction_as_local_action() {
     assert!(matches!(
         decision,
         RiskDecision::Allowed { ref reason }
-            if reason.contains("local action allowed by static policy")
+            if reason.contains("profile=full_local_workspace")
     ));
+}
+
+#[test]
+fn governance_runtime_decision_changes_with_permission_profile() {
+    let governance = StaticRuleGovernance::with_profile(safe_default_profile());
+
+    let decision = governance
+        .classify(&action(
+            ActionKind::LocalDesktopInteraction,
+            "actuator::keyboard",
+        ))
+        .expect("governance should classify");
+
+    assert!(matches!(decision, RiskDecision::NeedsApproval { .. }));
 }
 
 #[test]
@@ -120,7 +137,7 @@ fn static_governance_attaches_rules_fingerprint_to_decision_reason() {
 
     match decision {
         RiskDecision::Allowed { reason } => {
-            assert!(reason.contains("read-only or draft action"));
+            assert!(reason.contains("action=read-only or draft"));
             assert!(reason.contains("rules="));
         }
         other => panic!("unexpected decision: {other:?}"),

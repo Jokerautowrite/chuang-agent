@@ -17,7 +17,8 @@ use crate::knowledge_read::{
 };
 use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
 use crate::permission_profile_slot::{
-    decide_descriptor_risk, local_ga_profile, PermissionDecision, PermissionTag, ToolDescriptorRisk,
+    decide_descriptor_risk, full_local_workspace_profile, PermissionDecision, PermissionTag,
+    ToolDescriptorRisk,
 };
 use crate::plugin_registry::{summarize_plugin_registry, PluginRegistrySummary};
 use crate::runtime_config::{ConfigError, ConfigSummary, ProviderConfig, RuntimeConfig};
@@ -625,7 +626,7 @@ pub fn build_chuang_mvp_status(
             .collect(),
         manifests: atomic_manifests,
     };
-    let policy_tool_status = build_policy_tool_status_surface(&atomic_tools.manifests);
+    let policy_tool_status = build_policy_tool_status_surface(config, &atomic_tools.manifests);
     let runtime_report_surface = build_runtime_report_surface_status();
     let project_readiness = build_project_readiness(
         &config_summary,
@@ -771,6 +772,7 @@ fn tag_label(tag: PermissionTag) -> &'static str {
         PermissionTag::Reset => "reset",
         PermissionTag::Uninstall => "uninstall",
         PermissionTag::Purge => "purge",
+        PermissionTag::PrivilegeEscalation => "privilege_escalation",
         PermissionTag::ServiceControl => "service_control",
         PermissionTag::NetworkChange => "network_change",
         PermissionTag::SecretAccess => "secret_access",
@@ -779,9 +781,10 @@ fn tag_label(tag: PermissionTag) -> &'static str {
 }
 
 fn build_policy_tool_status_surface(
+    config: &RuntimeConfig,
     ga_manifests: &[AtomicToolManifest],
 ) -> PolicyToolStatusSurface {
-    let profile = local_ga_profile();
+    let profile = full_local_workspace_profile();
     let registry = default_tool_registry_slot();
     let mut ga_tool_descriptors = Vec::new();
     let mut ga_tool_descriptor_missing = Vec::new();
@@ -835,6 +838,7 @@ fn build_policy_tool_status_surface(
                 | PermissionTag::Reset
                 | PermissionTag::Uninstall
                 | PermissionTag::Purge
+                | PermissionTag::PrivilegeEscalation
                 | PermissionTag::ServiceControl
                 | PermissionTag::NetworkChange
                 | PermissionTag::SecretAccess
@@ -849,7 +853,10 @@ fn build_policy_tool_status_surface(
 
     PolicyToolStatusSurface {
         active_permission_profile: profile.name.to_string(),
-        policy_source: "runtime_default".to_string(),
+        policy_source: format!(
+            "runtime_config:{}",
+            config.permission.workspace_root.display()
+        ),
         local_ga_default_decision: decision_label(profile.default_decision).to_string(),
         local_ga_normal_local_action_default:
             "file_write/code_execute/open_app/click/input=allow_with_audit".to_string(),
@@ -3193,7 +3200,7 @@ fn governance_readiness_status(
         ok: read_only_decision == "allowed"
             && dangerous_write_decision == "needs_approval"
             && dangerous_shell_decision == "needs_approval"
-            && secret_shell_decision == "draft_only",
+            && secret_shell_decision == "needs_approval",
         kind: config.governance.kind().to_string(),
         rules_loaded: true,
         rules_core_path: config.rules.core_path.display().to_string(),

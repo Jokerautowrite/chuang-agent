@@ -109,7 +109,7 @@ fn desktop_action_rehearsal_receipt_script_outputs_dry_run_receipt() {
     assert_eq!(governance["decision"], "allowed");
     assert_eq!(
         governance["reason"],
-        "local action allowed by static policy"
+        "profile=full_local_workspace action=local desktop interaction permission=AllowWithAudit"
     );
 
     let boundaries = &data["boundaries"];
@@ -162,7 +162,7 @@ fn desktop_action_open_app_goes_through_tool_governance_and_command_actuator() {
     assert_eq!(outcome.record.tool_name, "open_app");
     assert_eq!(
         outcome.record.decision.as_deref(),
-        Some("allowed:local action allowed by static policy")
+        Some("allowed:profile=full_local_workspace action=local desktop interaction permission=AllowWithAudit")
     );
     assert!(outcome
         .record

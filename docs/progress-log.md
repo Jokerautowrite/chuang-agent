@@ -1,3 +1,18 @@
+# 2026-07-11 满血本地终端工作台
+- 交互 REPL 启动页升级为粗体大型 `CHUANG AGENT` ANSI 字样，并紧凑显示当前模型、`full_local_workspace` profile、工作目录及 `/stop` 控制。输入区改为固定边框 composer，状态栏稳定放在输入框下方。
+- 新增会话级状态统计：显示当前模型、packed context / context max / 百分比、上一轮聚合 input/output token 和本次 REPL 累计 token。工具循环包含多次模型调用时会聚合 usage，不再只显示最后一次调用。
+- 默认活动流改为可读状态机摘要：显示“正在理解要求、准备上下文、判断下一步、工具目的、工具结果、整理答复”；成功步骤和成功工具不再默认隐藏。协议纠偏显示为“正在调整/补全”而不是红色内部报错。仍不展示模型隐藏原始思维链、原始命令、密钥或敏感输出。
+- 新增 `/stop` cooperative cancel：终端写入控制标记，runtime 在模型前后、工具前后和最终收口前的安全点停止；不会粗暴杀线程或截断正在写入的状态。停止事件进入 typed terminal event 和可读进度流。
+- pending approval 不再只返回文件后结束。真实交互 TTY 会显示 `[1] 允许一次 / [2] 拒绝 / [3] 查看详情`；允许时严格绑定当前 pending approval 的 call/target/workspace/policy 指纹，调用已有恢复执行链并持久化一次性消费标记，重复批准会被拒绝。批准后以新模型轮次继续总结，已消费的精确高危调用不会自动重放。
+- 已完成三路并行审计（视觉/状态栏、活动流/取消、审批恢复），主线程整合并补回归。已通过 `cargo check --all-targets`、REPL 18 项、DisplayProjector 9 项、取消安全点测试、本地 TTY exact approval 一次性消费测试，并用 `script` 伪 TTY 实测启动、输入、活动流、答复和下一轮状态栏。
+
+# 2026-07-11 人类可读终端投影层
+- 根据老爸实测反馈，终端默认展示从“内部运行日志”改为“人类可读对话”：`你 -> 小创正在处理 -> 2-4 条中文工作进展 -> 小创最终答复`。默认隐藏模型轮次、成功工具完成、协议修复、字符数、工具次数和 report id；`/trace` 与 `/verbose` 继续保留技术详情。
+- 新增独立 `DisplayProjector`，把完整 `TerminalEvent` 投影为可序列化 `DisplayEvent`。runtime 事件与审计数据不丢失，默认 renderer 只消费人类语义；失败、治理阻断、审批和需要人工补充仍保持高显著度。
+- `ToolStarted/ToolFinished` 新增可选 `activity_title/activity_detail`，shell 命令按用途投影为“运行测试、检查构建、检查 Git 状态、搜索代码、查看日志、检查运行状态”等，不展示原始命令和输出。旧 schema v2 payload 不带新字段仍可读取。
+- 工具预算耗尽后的 no-tool finalization 机制保持不变；失败兜底正文改为人话，不再显示“模型跑满 N 轮、协议修复 N 次”。审批正文和 `human_suspend` 也分别改为“需要确认”与“需要补充信息”，结构化状态仍保留在 metadata/report。
+- 已通过 `cargo check --all-targets`、`cargo test -q repl_`、`cargo test -q --test display_projector_tests`、20 项 mainchain matrix、工具收口/审批定向回归、两次 stub 伪 TTY 目检和完整 `cargo test -q`。
+
 # 2026-07-10 OpenCode 风格终端与工具循环强制收口
 - 老爸实测发现两个主链问题：交互终端仍像内部诊断报表；模型连续使用工具达到 `tool_max_rounds=4` 后，没有额外机会生成最终答复，只返回“没有拿到 FINAL”的兜底文案。
 - 已只读取证本机 OpenCode `1.17.13` 的真实终端形态，并把 Chuang interactive TTY 改为紧凑 transcript：启动区收敛为 provider/model/cwd header；用户输入显示为蓝色左侧竖线消息块；thinking/tool 事件进入连续消息流；完成后只保留 assistant header、正文和一行 muted metadata，不再重复打印 `DONE / TRACE / THINKING / TOOL STREAM / ANSWER / REPORT` 大墙。`/trace` 仍保留，但默认关闭。
@@ -2628,3 +2643,14 @@
 - 已通过 `npm run test:log-level`、`npm run check`、`bash -n /home/user/.local/bin/codex-cli-preflight`、`systemd-analyze --user verify codex-feishu-bot.service`，并回读 systemd 限流属性为 `30s/200`。
 - 所有改动已备份到 `/home/user/.codex/backups/xiaoce-log-hardening-20260710-100745`。历史 `journald` 约 1.6 GB、`~/.codex/log` 约 367 MB，本轮按删除保护规则未清理。
 - 2026-07-10 10:13:06 CST 已完成唯一一次飞书桥重启：服务 `active/running`、`NRestarts=0`、长连接成功；启动窗口 16 行且 routine RPC/delta/error 均为 0。13:18 后真实回合复查仍为 routine RPC/delta/token usage/rate limit/error 全部 0，默认模型保持 `gpt-5.6-terra/high`。
+
+# 2026-07-11 full_local_workspace 治理与脱敏收口
+
+- 新增显式 `full_local_workspace` permission profile，并通过 `config.toml` 的 `permission_profile`、`approval_policy=auto_for_workspace`、`permission_workspace_root=/home/user/projects/chuang-agent` 固定当前工作区。
+- `StaticRuleGovernance` 已真正使用 permission profile 做运行时决策，不再只是 status 展示；普通本地读写、patch、构建、测试、扫描、报告和桌面操作自动执行并审计。
+- 高危边界继续保留：删除/清理/重置/卸载、支付/验证码、sudo/root、服务、网络配置、外部发送以及真实秘密材料读取/导出/上传均需明确审批。
+- secret shell 分类从裸关键词改为意图分类；`rg/grep` 扫描 token/key/password/secret 等源码词正常执行，`.env`、auth/credentials、私钥和秘密环境变量的真实读取继续拦截。
+- `code_execute` 已成为规范序列化、事件和审计工具名，旧 `shell_exec` 仅保留输入兼容。
+- 新增共享 `secret_redaction`，文件读取、shell stdout/stderr、命令预览、工具记录和 diff 预览均局部替换真实值为 `[REDACTED]`，保留路径、行号、键名、状态和非敏感上下文。
+- 已生成 `diagnostics/core_health_report.md`，真实 `status --json` 与 `doctor --json` 均确认 profile/workspace/approval policy 正确，governance healthy，secret access 为 `needs_approval`。
+- 最终验收已通过：`cargo fmt --all -- --check`、`git diff --check`、`cargo check --all-targets`、完整 `cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-candidate-verify.sh`。

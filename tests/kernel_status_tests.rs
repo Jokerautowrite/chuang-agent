@@ -100,7 +100,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert_eq!(status.governance.read_only_decision, "allowed");
     assert_eq!(status.governance.dangerous_write_decision, "needs_approval");
     assert_eq!(status.governance.dangerous_shell_decision, "needs_approval");
-    assert_eq!(status.governance.secret_shell_decision, "draft_only");
+    assert_eq!(status.governance.secret_shell_decision, "needs_approval");
     assert!(!status.governance.goal_run_executes);
     assert!(status
         .runtime_capability_primer
@@ -311,9 +311,12 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .any(|field| field == "atomic_tool_name"));
     assert_eq!(
         status.policy_tool_status.active_permission_profile,
-        "local_ga"
+        "full_local_workspace"
     );
-    assert_eq!(status.policy_tool_status.policy_source, "runtime_default");
+    assert!(status
+        .policy_tool_status
+        .policy_source
+        .starts_with("runtime_config:"));
     assert_eq!(
         status.policy_tool_status.local_ga_default_decision,
         "require_approval"

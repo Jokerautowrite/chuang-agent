@@ -78,7 +78,7 @@ assert isinstance(data["goal_run"]["checkpoint_count"], int)
 assert data["goal_run"]["path"].endswith("/context/goal-runs/mainline-mvp.json")
 assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
-assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
@@ -283,7 +283,7 @@ assert status["goal_run"]["plan_exists"] is True
 assert isinstance(status["goal_run"]["checkpoint_count"], int)
 assert_live_readiness(status["live_readiness"])
 policy_tool_status = status["policy_tool_status"]
-assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
@@ -618,7 +618,7 @@ assert data["subagent_readiness"]["worker_runtime_state"] == "local_contract_onl
 assert data["subagent_readiness"]["live_adapter_ready"] is False
 assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
-assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")

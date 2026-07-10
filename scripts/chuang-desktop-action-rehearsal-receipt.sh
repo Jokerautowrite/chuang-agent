@@ -17,7 +17,7 @@ REQUIRED_ENV="CHUANG_REAL_ACTUATOR_ENABLE"
 AUDIT_LABEL="actuator.operation.live"
 GOVERNANCE_ACTION_KIND="LocalDesktopInteraction"
 GOVERNANCE_DECISION="allowed"
-GOVERNANCE_REASON="local action allowed by static policy"
+GOVERNANCE_REASON="profile=full_local_workspace action=local desktop interaction permission=AllowWithAudit"
 
 REQUEST_JSON='{"action":"open_app","open_app":{"app_name":"Chrome"}}'
 

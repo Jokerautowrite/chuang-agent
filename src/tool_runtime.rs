@@ -24,6 +24,7 @@ use crate::runtime_config::ActuatorConfig;
 use crate::runtime_event_ledger::{
     RuntimeEvent, RuntimeEventKind, RuntimeEventLedger, RuntimeRiskDecision,
 };
+use crate::secret_redaction::{is_secret_material_path, redact_sensitive_text};
 use crate::workspace_file_adapter::WorkspaceFileAdapter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -74,7 +75,7 @@ pub enum ToolCall {
     ApplyPatch {
         patch: String,
     },
-    #[serde(alias = "code_execute")]
+    #[serde(rename = "code_execute", alias = "shell_exec")]
     ShellExec {
         command: String,
         #[serde(default)]
@@ -382,6 +383,7 @@ impl Default for ToolExecutionConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellRiskRules {
     pub delete_or_cleanup: Vec<String>,
+    pub privilege_escalation: Vec<String>,
     pub service_change: Vec<String>,
     pub network_change: Vec<String>,
     pub secret_access: Vec<String>,
@@ -399,11 +401,19 @@ impl Default for ShellRiskRules {
                 " rmdir ".to_string(),
                 " git reset --hard".to_string(),
                 " git checkout --".to_string(),
+                " git clean ".to_string(),
                 " purge ".to_string(),
                 " uninstall ".to_string(),
                 " apt remove ".to_string(),
                 " dnf remove ".to_string(),
                 " pacman -r".to_string(),
+            ],
+            privilege_escalation: vec![
+                " sudo ".to_string(),
+                " doas ".to_string(),
+                " su -".to_string(),
+                " chmod -r 777".to_string(),
+                " chmod -r 0777".to_string(),
             ],
             service_change: vec![
                 " systemctl ".to_string(),
@@ -415,23 +425,24 @@ impl Default for ShellRiskRules {
                 " killall ".to_string(),
             ],
             network_change: vec![
-                " curl ".to_string(),
-                " wget ".to_string(),
-                " ssh ".to_string(),
-                " scp ".to_string(),
-                " rsync ".to_string(),
-                " nc ".to_string(),
-                " ncat ".to_string(),
-                " telnet ".to_string(),
+                " nmcli ".to_string(),
+                " ip link ".to_string(),
+                " ip route ".to_string(),
+                " ifconfig ".to_string(),
+                " route add ".to_string(),
+                " route del ".to_string(),
+                " resolvectl ".to_string(),
+                " iptables ".to_string(),
+                " nft ".to_string(),
             ],
             secret_access: vec![
                 " .env".to_string(),
                 " id_rsa".to_string(),
                 " id_ed25519".to_string(),
-                " api_key".to_string(),
-                " token".to_string(),
-                " secret".to_string(),
-                " password".to_string(),
+                " auth.json".to_string(),
+                " credentials.json".to_string(),
+                " .npmrc".to_string(),
+                " .pypirc".to_string(),
             ],
         }
     }
@@ -1450,7 +1461,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
-        ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }
@@ -1536,13 +1547,8 @@ fn execute_read_file(
             )
         }
     };
-    let redacted = should_redact_tool_output(path, &content);
-    let display_content = if redacted {
-        "[redacted: secret-like path or content]".to_string()
-    } else {
-        content.clone()
-    };
-    let truncated = truncate_text_with_flag(&display_content, 10_000);
+    let redaction = redact_sensitive_text(path, &content);
+    let truncated = truncate_text_with_flag(&redaction.text, 10_000);
     let mut record = success_record(
         registry,
         call,
@@ -1558,7 +1564,7 @@ fn execute_read_file(
     .with_paths(path, &file);
     record.output_bytes = Some(content.len());
     record.output_lines = Some(count_lines(&content));
-    record.output_redacted = redacted;
+    record.output_redacted = redaction.redacted;
     record
 }
 
@@ -1692,20 +1698,10 @@ fn execute_shell_exec(
     };
     let stdout_raw = String::from_utf8_lossy(&output.stdout);
     let stderr_raw = String::from_utf8_lossy(&output.stderr);
-    let stdout_redacted = should_redact_tool_output(command, &stdout_raw);
-    let stderr_redacted = should_redact_tool_output(command, &stderr_raw);
-    let stdout_display = if stdout_redacted {
-        "[redacted: secret-like command or output]".to_string()
-    } else {
-        stdout_raw.to_string()
-    };
-    let stderr_display = if stderr_redacted {
-        "[redacted: secret-like command or output]".to_string()
-    } else {
-        stderr_raw.to_string()
-    };
-    let stdout = truncate_text_with_flag(&stdout_display, 8_000);
-    let stderr = truncate_text_with_flag(&stderr_display, 4_000);
+    let stdout_redaction = redact_sensitive_text("stdout", &stdout_raw);
+    let stderr_redaction = redact_sensitive_text("stderr", &stderr_raw);
+    let stdout = truncate_text_with_flag(&stdout_redaction.text, 8_000);
+    let stderr = truncate_text_with_flag(&stderr_redaction.text, 4_000);
     let mut record = success_record(
         registry,
         call,
@@ -1720,7 +1716,7 @@ fn execute_shell_exec(
         false,
     );
     record.cwd = Some(cwd_path.display().to_string());
-    record.command = Some(command.to_string());
+    record.command = Some(redact_sensitive_text("command", command).text);
     record.ok = output.status.success();
     record.stdout = Some(stdout.text);
     record.stderr = Some(stderr.text);
@@ -1729,9 +1725,9 @@ fn execute_shell_exec(
     record.stderr_bytes = Some(output.stderr.len());
     record.stderr_lines = Some(count_lines(&stderr_raw));
     record.exit_code = output.status.code();
-    record.output_redacted = stdout_redacted;
-    record.stdout_redacted = stdout_redacted;
-    record.stderr_redacted = stderr_redacted;
+    record.output_redacted = stdout_redaction.redacted || stderr_redaction.redacted;
+    record.stdout_redacted = stdout_redaction.redacted;
+    record.stderr_redacted = stderr_redaction.redacted;
     record.stdout_truncated = stdout.truncated;
     record.stderr_truncated = stderr.truncated;
     if !record.ok {
@@ -1884,7 +1880,7 @@ fn success_record(
 ) -> ToolExecutionRecord {
     let mapping = registry.mapping_for_call(call);
     ToolExecutionRecord {
-        call: call.clone(),
+        call: redacted_tool_call(call),
         tool_name: tool_call_name(call).to_string(),
         atomic_tool_name: mapping.atomic_tool_name.map(str::to_string),
         ok: true,
@@ -1929,7 +1925,7 @@ fn failed_record(
 ) -> ToolExecutionRecord {
     let mapping = registry.mapping_for_call(call);
     ToolExecutionRecord {
-        call: call.clone(),
+        call: redacted_tool_call(call),
         tool_name: tool_call_name(call).to_string(),
         atomic_tool_name: mapping.atomic_tool_name.map(str::to_string),
         ok: false,
@@ -1964,6 +1960,31 @@ fn failed_record(
         stderr_redacted: false,
         stdout_truncated: false,
         stderr_truncated: false,
+    }
+}
+
+fn redacted_tool_call(call: &ToolCall) -> ToolCall {
+    match call {
+        ToolCall::WriteFile { path, content } => ToolCall::WriteFile {
+            path: path.clone(),
+            content: redact_sensitive_text(path, content).text,
+        },
+        ToolCall::Keyboard { text, secret } => ToolCall::Keyboard {
+            text: if *secret {
+                "[REDACTED]".to_string()
+            } else {
+                redact_sensitive_text("keyboard", text).text
+            },
+            secret: *secret,
+        },
+        ToolCall::ApplyPatch { patch } => ToolCall::ApplyPatch {
+            patch: redact_sensitive_text("patch", patch).text,
+        },
+        ToolCall::ShellExec { command, cwd } => ToolCall::ShellExec {
+            command: redact_sensitive_text("command", command).text,
+            cwd: cwd.clone(),
+        },
+        _ => call.clone(),
     }
 }
 
@@ -2189,12 +2210,13 @@ fn is_retryable_failure(failure_class: &str) -> bool {
 
 fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> ActionKind {
     match call {
-        ToolCall::ListDir { .. } | ToolCall::ReadFile { .. } | ToolCall::MemoryRecall { .. } => {
-            ActionKind::Observe
-        }
-        ToolCall::Mouse { .. } | ToolCall::Keyboard { .. } | ToolCall::OpenApp { .. } => {
-            ActionKind::LocalDesktopInteraction
-        }
+        ToolCall::ListDir { .. } | ToolCall::MemoryRecall { .. } => ActionKind::Observe,
+        ToolCall::ReadFile { path } if is_secret_material_path(path) => ActionKind::SecretAccess,
+        ToolCall::ReadFile { .. } => ActionKind::Observe,
+        ToolCall::Keyboard { secret: true, .. } => ActionKind::SecretAccess,
+        ToolCall::Mouse { .. }
+        | ToolCall::Keyboard { secret: false, .. }
+        | ToolCall::OpenApp { .. } => ActionKind::LocalDesktopInteraction,
         ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
         | ToolCall::Wait { .. }
@@ -2215,19 +2237,123 @@ fn classify_shell_action_kind(command: &str, rules: &ShellRiskRules) -> ActionKi
         return ActionKind::DeleteOrCleanup;
     }
 
+    if contains_any_pattern(&padded, &rules.privilege_escalation) {
+        return ActionKind::PrivilegeEscalation;
+    }
+
     if contains_any_pattern(&padded, &rules.service_change) {
         return ActionKind::ServiceChange;
     }
 
-    if contains_any_pattern(&padded, &rules.network_change) {
-        return ActionKind::NetworkChange;
-    }
-
-    if contains_any_pattern(&padded, &rules.secret_access) {
+    if command_reads_secret_environment(&normalized)
+        || (contains_any_pattern(&padded, &rules.secret_access)
+            && command_accesses_secret_material(&normalized))
+    {
         return ActionKind::SecretAccess;
     }
 
+    if is_external_commit_command(&normalized) {
+        return ActionKind::ExternalSend;
+    }
+
+    if contains_any_pattern(&padded, &rules.network_change)
+        || is_download_pipe_to_shell(&normalized)
+    {
+        return ActionKind::NetworkChange;
+    }
+
     ActionKind::ShellCommand
+}
+
+fn command_reads_secret_environment(command: &str) -> bool {
+    contains_any(command, &["printenv ", " env ", "export "])
+        && contains_any(
+            command,
+            &[
+                "_api_key",
+                "_token",
+                "_secret",
+                "_password",
+                "api_key",
+                "access_token",
+                "private_key",
+            ],
+        )
+}
+
+fn is_download_pipe_to_shell(command: &str) -> bool {
+    let compact = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    (compact.contains("curl ") || compact.contains("wget "))
+        && (compact.contains("| sh")
+            || compact.contains("| bash")
+            || compact.contains("| zsh")
+            || compact.contains("| fish"))
+}
+
+fn is_external_commit_command(command: &str) -> bool {
+    let compact = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.starts_with("git push")
+        || compact.starts_with("ssh ")
+        || compact.starts_with("scp ")
+        || (compact.starts_with("rsync ") && compact.contains(':'))
+        || compact.starts_with("npm publish")
+        || compact.starts_with("cargo publish")
+        || ((compact.starts_with("curl ") || compact.starts_with("wget "))
+            && contains_any(
+                &compact,
+                &[
+                    " -x post",
+                    " --request post",
+                    " --data",
+                    " -d ",
+                    " --form",
+                    " -f ",
+                    " --upload-file",
+                    " -t ",
+                ],
+            ))
+}
+
+fn command_accesses_secret_material(command: &str) -> bool {
+    let tokens = command
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|character: char| {
+                matches!(
+                    character,
+                    '\'' | '"' | '`' | ';' | ',' | '(' | ')' | '[' | ']'
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let program = tokens
+        .first()
+        .and_then(|token| token.rsplit('/').next())
+        .unwrap_or_default();
+
+    if matches!(program, "rg" | "grep") {
+        let positional = tokens
+            .iter()
+            .skip(1)
+            .filter(|token| !token.starts_with('-'))
+            .copied()
+            .collect::<Vec<_>>();
+        return positional
+            .iter()
+            .skip(1)
+            .any(|token| is_secret_material_path(token));
+    }
+
+    contains_any(
+        command,
+        &[
+            "cat ", "head ", "tail ", "less ", "more ", "sed ", "awk ", "grep ", "rg ", "source ",
+            ". ", "cp ", "scp ", "rsync ", "curl ", "wget ", "tar ", "zip ", "base64 ", "openssl ",
+            "pbcopy", "xclip", "python ", "python3 ", "node ", "bash ", "sh ",
+        ],
+    ) || command.contains('<')
+        || command.contains('>')
+        || command.contains("export ")
 }
 
 fn contains_any(value: &str, needles: &[&str]) -> bool {
@@ -2272,14 +2398,14 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
         ToolCall::ShellExec { command, cwd } => format!(
             "{}::{}",
             cwd.as_deref().unwrap_or(".").trim(),
-            command.trim()
+            redact_sensitive_text("command", command).text.trim()
         ),
         ToolCall::MemoryRecall {
             query, session_id, ..
         } => format!(
             "memory::session={}::{}",
             session_id.as_deref().unwrap_or("<configured>"),
-            query.trim()
+            redact_sensitive_text("memory_query", query).text.trim()
         ),
     }
 }
@@ -2313,13 +2439,13 @@ fn tool_summary(call: &ToolCall) -> String {
             format!("apply_patch bytes={}", patch.len())
         }
         ToolCall::ShellExec { command, cwd } => format!(
-            "shell_exec cwd={} command={}",
+            "code_execute cwd={} command={}",
             cwd.as_deref().unwrap_or(".").trim(),
-            command.trim()
+            redact_sensitive_text("command", command).text.trim()
         ),
         ToolCall::MemoryRecall { query, limit, .. } => format!(
             "memory_recall query={} limit={}",
-            query.trim(),
+            redact_sensitive_text("memory_query", query).text.trim(),
             limit
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "default".to_string())
@@ -2354,7 +2480,7 @@ fn cwd_from_call(call: &ToolCall) -> Option<String> {
 
 fn command_from_call(call: &ToolCall) -> Option<String> {
     match call {
-        ToolCall::ShellExec { command, .. } => Some(command.clone()),
+        ToolCall::ShellExec { command, .. } => Some(redact_sensitive_text("command", command).text),
         _ => None,
     }
 }
@@ -2743,14 +2869,6 @@ fn build_write_diff_preview(path: &str, previous: Option<&str>, next: &str) -> O
         };
     }
 
-    if should_redact_write_preview(path, previous, next) {
-        return OptionalPreview {
-            text: Some("[redacted: secret-like path or content]".to_string()),
-            truncated: false,
-            redacted: true,
-        };
-    }
-
     let before_lines = previous.unwrap_or("").lines().collect::<Vec<_>>();
     let after_lines = next.lines().collect::<Vec<_>>();
     let max_len = before_lines.len().max(after_lines.len());
@@ -2790,10 +2908,11 @@ fn build_write_diff_preview(path: &str, previous: Option<&str>, next: &str) -> O
         truncated = true;
     }
 
+    let redaction = redact_sensitive_text(path, &preview);
     OptionalPreview {
-        text: Some(preview),
+        text: Some(redaction.text),
         truncated,
-        redacted: false,
+        redacted: redaction.redacted,
     }
 }
 
@@ -2801,36 +2920,6 @@ fn push_diff_line(preview: &mut String, prefix: char, line: &str) {
     preview.push(prefix);
     preview.push_str(line);
     preview.push('\n');
-}
-
-fn should_redact_write_preview(path: &str, previous: Option<&str>, next: &str) -> bool {
-    should_redact_tool_output(path, previous.unwrap_or_default())
-        || should_redact_tool_output(path, next)
-}
-
-fn should_redact_tool_output(locator: &str, content: &str) -> bool {
-    let haystack = format!(
-        "{}\n{}",
-        locator.to_ascii_lowercase(),
-        content.to_ascii_lowercase()
-    );
-    contains_any(
-        &haystack,
-        &[
-            ".env",
-            "id_rsa",
-            "id_ed25519",
-            "api_key",
-            "apikey",
-            "access_token",
-            "refresh_token",
-            "secret",
-            "password",
-            "passwd",
-            "private_key",
-            "client_secret",
-        ],
-    )
 }
 
 fn truncate_text_with_flag(value: &str, max_len: usize) -> TruncatedText {

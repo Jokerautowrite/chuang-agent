@@ -19,6 +19,9 @@ db_path = "./tmp/chuang.db"
 recall_limit = 7
 tool_max_rounds = 6
 tool_shell_timeout_ms = 45000
+permission_profile = "full_local_workspace"
+approval_policy = "auto_for_workspace"
+permission_workspace_root = "/home/user/projects/chuang-agent"
 identity_memory_root = "./tmp/identity"
 identity_root = "./tmp/bootstrap"
 soul_path = "./tmp/bootstrap/SOUL.md"
@@ -53,6 +56,12 @@ max_memory_segments = 3
     assert_eq!(config.recall_limit, 7);
     assert_eq!(config.tool_loop.max_rounds, 6);
     assert_eq!(config.tool_loop.shell_timeout_ms, 45_000);
+    assert_eq!(config.permission.profile, "full_local_workspace");
+    assert_eq!(config.permission.approval_policy, "auto_for_workspace");
+    assert_eq!(
+        config.permission.workspace_root,
+        PathBuf::from("/home/user/projects/chuang-agent")
+    );
     assert_eq!(config.subagent, SubagentConfig::QueuedExternal);
     assert_eq!(config.subagent_live_worker.enabled, true);
     assert_eq!(config.subagent_live_worker.adapter_kind, "command");

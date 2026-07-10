@@ -14,7 +14,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 
 ## 当前状态
 
-- `chuang`：首选终端入口，直接启动本地交互 REPL；真实 TTY 使用 OpenCode-inspired 紧凑对话流，依次显示 `user` 消息、连续 `thinking/tool` 进度、单一 `assistant` 答复和一行弱化元数据，不再堆叠 `DONE/TRACE/TOOL STREAM/ANSWER/REPORT` 大分区。任务运行中 composer 保持可用，每 5 秒显示工作状态，可用 `!你的补充` 注入当前任务，并在同一轮下一个安全点传给模型；运行中直接输入普通文本也会作为当前任务补充。空闲时输入 `!你的补充` 才会排队到下一次提交。REPL 会自动携带最近 8 轮对话作为下一轮上下文，可用 `/history` 查看；`/trace` 默认关闭但可随时开启。工具循环用满 `tool_max_rounds` 后会额外进行一次禁用工具的最终答复收口，不会重放或新增工具副作用。当前仍是 stdout/PTY transcript，不含完整历史会话列表和命令补全；终端只显示可审计 runtime/tool progress，不打印模型隐藏思考原文。
+- `chuang`：首选终端入口，直接启动本地交互 REPL；真实 TTY 默认显示“你 / 小创正在处理 / 中文工作进展 / 小创最终答复”，不再展示 `thinking round`、工具名、协议轮次、token、report id 等内部诊断。运行中可用 `!你的补充` 注入当前任务，并在同一轮下一个安全点传给模型；REPL 会自动携带最近 8 轮对话，可用 `/history` 查看。`/trace` 默认关闭，开启后才显示工具次数、协议错误和报告编号。工具循环用满 `tool_max_rounds` 后会额外进行一次禁用工具的最终答复收口，不会重放或新增工具副作用。当前仍是 stdout/PTY transcript，不打印模型隐藏思考原文；可见“思考过程”仅指可验证的工作进展。
 - `chuang ask "TEXT"`：用终端主线跑一次真实本地 runtime。
 - `chuang status --config config.toml --json`：查看当前终端主线状态。
 - `chuang mainchain-accept`：运行真实标准主链总验收，屏幕只显示阶段 OK/FAIL，详细日志写入 `/tmp/chuang-mainchain-acceptance-*`；会先跑 20 项矩阵和基础合同，再调用真实 provider 完成终端端到端验收和自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。

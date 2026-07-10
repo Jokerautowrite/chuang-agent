@@ -23,6 +23,7 @@ pub struct RuntimeConfig {
     pub identity_bootstrap: IdentityBootstrapConfig,
     pub rules: RulesConfig,
     pub governance: GovernanceConfig,
+    pub permission: PermissionRuntimeConfig,
     pub tool_loop: ToolLoopConfig,
     pub actuator: ActuatorConfig,
     pub subagent: SubagentConfig,
@@ -102,6 +103,13 @@ pub enum GovernanceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionRuntimeConfig {
+    pub profile: String,
+    pub approval_policy: String,
+    pub workspace_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolLoopConfig {
     pub max_rounds: usize,
     pub shell_timeout_ms: u64,
@@ -170,6 +178,9 @@ pub struct ConfigSummary {
     pub provider_reasoning_effort: Option<String>,
     pub provider_fallback_policy: Option<String>,
     pub governance_kind: String,
+    pub permission_profile: String,
+    pub approval_policy: String,
+    pub permission_workspace_root: String,
     pub actuator_kind: String,
     pub subagent_kind: String,
     pub subagent_live_worker: SubagentLiveWorkerSummary,
@@ -247,6 +258,11 @@ impl RuntimeConfig {
             identity_bootstrap: IdentityBootstrapConfig::new("./identity"),
             rules: RulesConfig::new("./rules"),
             governance: GovernanceConfig::StaticRule,
+            permission: PermissionRuntimeConfig {
+                profile: "full_local_workspace".to_string(),
+                approval_policy: "auto_for_workspace".to_string(),
+                workspace_root: PathBuf::from("/home/user/projects/chuang-agent"),
+            },
             tool_loop: ToolLoopConfig {
                 max_rounds: 4,
                 shell_timeout_ms: 120_000,
@@ -269,6 +285,26 @@ impl RuntimeConfig {
             return Err(ConfigError {
                 field: "recall_limit".to_string(),
                 message: "recall_limit must be greater than zero".to_string(),
+            });
+        }
+        if self.permission.profile != "full_local_workspace" {
+            return Err(ConfigError {
+                field: "permission.profile".to_string(),
+                message: "permission profile must be full_local_workspace".to_string(),
+            });
+        }
+        if self.permission.approval_policy != "auto_for_workspace" {
+            return Err(ConfigError {
+                field: "permission.approval_policy".to_string(),
+                message: "approval policy must be auto_for_workspace".to_string(),
+            });
+        }
+        if self.permission.workspace_root != PathBuf::from("/home/user/projects/chuang-agent")
+        {
+            return Err(ConfigError {
+                field: "permission.workspace_root".to_string(),
+                message: "permission workspace_root must be /home/user/projects/chuang-agent"
+                    .to_string(),
             });
         }
 
@@ -312,6 +348,9 @@ impl RuntimeConfig {
             provider_reasoning_effort: provider.reasoning_effort,
             provider_fallback_policy: provider.fallback_policy,
             governance_kind: self.governance.kind().to_string(),
+            permission_profile: self.permission.profile.clone(),
+            approval_policy: self.permission.approval_policy.clone(),
+            permission_workspace_root: self.permission.workspace_root.display().to_string(),
             actuator_kind: self.actuator.kind().to_string(),
             subagent_kind: self.subagent.kind().to_string(),
             subagent_live_worker: self.subagent_live_worker.summary(),
@@ -529,8 +568,9 @@ impl ToolLoopConfig {
 
     pub fn shell_risk_rule_counts(&self) -> String {
         format!(
-            "delete_or_cleanup={},service_change={},network_change={},secret_access={}",
+            "delete_or_cleanup={},privilege_escalation={},service_change={},network_change={},secret_access={}",
             self.shell_risk_rules.delete_or_cleanup.len(),
+            self.shell_risk_rules.privilege_escalation.len(),
             self.shell_risk_rules.service_change.len(),
             self.shell_risk_rules.network_change.len(),
             self.shell_risk_rules.secret_access.len()

@@ -357,7 +357,7 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::Wait { .. } => "wait",
         ToolCall::HumanSuspend { .. } => "human_suspend",
         ToolCall::ApplyPatch { .. } => "apply_patch",
-        ToolCall::ShellExec { .. } => "shell_exec",
+        ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
     }
 }

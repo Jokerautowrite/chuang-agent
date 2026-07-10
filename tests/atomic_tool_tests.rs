@@ -153,7 +153,7 @@ fn atomic_tool_registry_maps_mvp_calls_without_promoting_list_dir() {
         command: "cargo test".to_string(),
         cwd: Some(".".to_string()),
     });
-    assert_eq!(execute.protocol_tool_name, "shell_exec");
+    assert_eq!(execute.protocol_tool_name, "code_execute");
     assert_eq!(execute.atomic_tool_name, Some("code_execute"));
     assert_eq!(execute.audit_operation, "tool.code_execute");
     assert_eq!(

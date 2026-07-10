@@ -16,13 +16,13 @@ use crate::cli_output::{print_json, ControlOutputFormat};
 const OPERATOR_APPROVAL_TRUST_ANCHOR_PATH: &str = "/etc/chuang-agent/operator-approval.pub";
 
 #[derive(Debug, Serialize)]
-struct ApprovalResumeOutput {
-    approval_id: String,
-    decision: String,
-    ok: bool,
-    approval_consumed: bool,
-    record: ToolExecutionRecord,
-    runtime_events: Vec<chuang_agent::runtime_event_ledger::RuntimeEvent>,
+pub(crate) struct ApprovalResumeOutput {
+    pub(crate) approval_id: String,
+    pub(crate) decision: String,
+    pub(crate) ok: bool,
+    pub(crate) approval_consumed: bool,
+    pub(crate) record: ToolExecutionRecord,
+    pub(crate) runtime_events: Vec<chuang_agent::runtime_event_ledger::RuntimeEvent>,
 }
 
 pub(crate) fn approval_command(args: &[String]) -> Result<(), String> {
@@ -163,6 +163,72 @@ fn resume_approval(
     let outcome = slots.execution.resume_approved_with_ledger(
         &mut ledger,
         "approval-resume",
+        pending.call_id.clone(),
+        &workspace_root,
+        &mut slots.governance,
+        pending.clone(),
+        &receipt,
+    )?;
+    let runtime_events = ledger
+        .list()
+        .map_err(|error| format!("approval_event_ledger_read_failed: {error}"))?;
+
+    Ok(ApprovalResumeOutput {
+        approval_id: pending.approval_id,
+        decision: risk_decision_label(&outcome.decision),
+        ok: outcome.record.ok,
+        approval_consumed: true,
+        record: outcome.record,
+        runtime_events,
+    })
+}
+
+pub(crate) fn resume_local_tty_approval(
+    runtime: &chuang_agent::runtime_config::RuntimeConfig,
+    workspace_root: &Path,
+    pending_file: &Path,
+) -> Result<ApprovalResumeOutput, String> {
+    let pending = read_pending_approval(workspace_root, pending_file)?;
+    let workspace_root = fs::canonicalize(workspace_root).map_err(|error| {
+        format!(
+            "approval_workspace_invalid path={} error={error}",
+            workspace_root.display()
+        )
+    })?;
+    let active_identity = crate::cli_runtime::load_identity_bootstrap_snapshot(runtime)?
+        .active_identity
+        .ok_or_else(|| "approval_active_identity_unavailable".to_string())?;
+    if pending.agent_id != active_identity.agent_id {
+        return Err("approval_agent_identity_mismatch".to_string());
+    }
+
+    let operator_ref = "operator:local-tty".to_string();
+    let evidence_ref = format!("local-tty://approval/{}", pending.approval_id);
+    let receipt = OperatorApprovalReceipt {
+        approval_id: pending.approval_id.clone(),
+        call_id: pending.call_id.clone(),
+        call_fingerprint: pending.call_fingerprint.clone(),
+        target_fingerprint: pending.target_fingerprint.clone(),
+        workspace_fingerprint: pending.workspace_fingerprint.clone(),
+        policy_marker: pending.policy_marker.clone(),
+        approved: true,
+        operator_ref: operator_ref.clone(),
+        evidence_ref: evidence_ref.clone(),
+    };
+    let mut slots = build_runtime_slots(runtime)
+        .map_err(|error| format!("config_invalid: {}: {}", error.field, error.message))?;
+    slots
+        .governance
+        .register_operator_approval(OperatorApprovalEvidence {
+            approval_id: pending.approval_id.clone(),
+            operator_ref,
+            evidence_ref,
+        })
+        .map_err(|error| format!("operator_approval_register_failed: {}", error.message))?;
+    let mut ledger = InMemoryRuntimeEventLedger::new();
+    let outcome = slots.execution.resume_approved_with_ledger(
+        &mut ledger,
+        "repl-local-approval",
         pending.call_id.clone(),
         &workspace_root,
         &mut slots.governance,
@@ -402,6 +468,67 @@ mod tests {
 
         let duplicate = resume_approval(&runtime, &workspace, &pending_file, &ticket, &public_key)
             .expect_err("consumed approval must not replay");
+        assert_eq!(duplicate, "approval_already_consumed");
+    }
+
+    #[test]
+    fn local_tty_resume_executes_exact_pending_once() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!(
+            "chuang-local-tty-approval-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&workspace).expect("workspace should create");
+        let runtime = chuang_agent::runtime_config::RuntimeConfig::new(workspace.join("memory.db"));
+        let active_agent_id = crate::cli_runtime::load_identity_bootstrap_snapshot(&runtime)
+            .expect("identity snapshot should load")
+            .active_identity
+            .expect("active identity should exist")
+            .agent_id;
+        let mut slots =
+            build_runtime_slots(&runtime).expect("runtime slots should build for approval test");
+        let mut ledger = InMemoryRuntimeEventLedger::new();
+        let pending = slots
+            .execution
+            .execute_or_reject_with_governance_and_ledger(
+                &mut ledger,
+                "thread",
+                "turn",
+                &workspace,
+                &mut slots.governance,
+                &ToolCall::ShellExec {
+                    command: "printf 'tty-approved\\n' > tty-approved.txt; # rm -rf notes"
+                        .to_string(),
+                    cwd: Some(".".to_string()),
+                },
+                active_agent_id,
+                "turn:tool:1",
+            )
+            .expect("approval request should return")
+            .pending_approval
+            .expect("pending approval should exist");
+        let pending_file = workspace.join("pending.json");
+        fs::write(
+            &pending_file,
+            serde_json::to_vec_pretty(&pending).expect("pending should serialize"),
+        )
+        .expect("pending file should write");
+
+        let result = resume_local_tty_approval(&runtime, &workspace, &pending_file)
+            .expect("local tty approval should resume");
+        assert!(result.ok);
+        assert_eq!(
+            fs::read_to_string(workspace.join("tty-approved.txt")).expect("output should exist"),
+            "tty-approved\n"
+        );
+        assert!(result.runtime_events.iter().any(|event| event.event_type
+            == chuang_agent::runtime_event_ledger::RuntimeEventKind::ApprovalResolved));
+
+        let duplicate = resume_local_tty_approval(&runtime, &workspace, &pending_file)
+            .expect_err("local tty approval must remain one-shot");
         assert_eq!(duplicate, "approval_already_consumed");
     }
 

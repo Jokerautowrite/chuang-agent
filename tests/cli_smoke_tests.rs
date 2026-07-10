@@ -67,7 +67,8 @@ fn second_test_smoke_wrapper_reuses_safe_mvp_smoke() {
     assert!(feishu_turn_summary_smoke.contains("!process.includes(\"raw current text\")"));
     assert!(mvp_smoke.contains("policy_tool_status = data[\"policy_tool_status\"]"));
     assert!(mvp_smoke.contains("policy_tool_status = status[\"policy_tool_status\"]"));
-    assert!(mvp_smoke.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
+    assert!(mvp_smoke
+        .contains("policy_tool_status[\"active_permission_profile\"] == \"full_local_workspace\""));
     assert!(mvp_smoke.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
     assert!(mvp_smoke.contains("file_write[\"external_commit\"] is False"));
     assert!(mvp_smoke.contains("file_write[\"requires_approval\"] is False"));
@@ -159,7 +160,8 @@ fn complete_local_smoke_wrapper_reuses_safe_local_acceptance() {
     assert!(wrapper.contains("policy_tool_status = data[\"policy_tool_status\"]"));
     assert!(wrapper.contains("policy_tool_status = data[\"status\"][\"policy_tool_status\"]"));
     assert!(wrapper.contains("policy_tool_status = status[\"policy_tool_status\"]"));
-    assert!(wrapper.contains("policy_tool_status[\"active_permission_profile\"] == \"local_ga\""));
+    assert!(wrapper
+        .contains("policy_tool_status[\"active_permission_profile\"] == \"full_local_workspace\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
     assert!(wrapper.contains("file_write[\"external_commit\"] is False"));
     assert!(wrapper.contains("file_write[\"requires_approval\"] is False"));
@@ -1871,7 +1873,7 @@ fn cli_repl_interactive_path_carries_recent_history_and_unique_temp_files() {
     assert!(main_rs.contains("conversation_history,"));
     assert!(main_rs.contains("record_repl_conversation_turn("));
     assert!(main_rs.contains("REPL_TURN_SEQUENCE.fetch_add"));
-    assert!(main_rs.contains("/history   show recent REPL conversation context"));
+    assert!(main_rs.contains("/history   查看最近对话"));
     assert!(!main_rs.contains("started_at.elapsed().as_nanos()"));
 }
 

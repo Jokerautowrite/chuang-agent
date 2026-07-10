@@ -499,7 +499,7 @@ transport = "stub"
         turn_response["result"]["turn"]["runtimeObservability"]["governance_reason"]
             .as_str()
             .expect("governance reason should be string")
-            .contains("read-only or draft action")
+            .contains("action=read-only or draft")
     );
     assert_eq!(
         turn_response["result"]["turn"]["runtimeObservability"]["session_memory_scope"],
@@ -1984,7 +1984,7 @@ transport = "stub"
     assert_eq!(parsed["goal_run"]["goal_id"], "mainline-mvp");
     assert_eq!(
         parsed["policy_tool_status"]["active_permission_profile"],
-        "local_ga"
+        "full_local_workspace"
     );
     let health_tool_descriptors = parsed["policy_tool_status"]["ga_tool_descriptors"]
         .as_array()
@@ -2809,7 +2809,7 @@ transport = "stub"
     assert!(stdout.contains(
         "atomic_tools_self_check_entrypoints: status --json,doctor --json,app-server health --diagnostic --json"
     ));
-    assert!(stdout.contains("policy_tool_status: active_profile=local_ga normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"));
+    assert!(stdout.contains("policy_tool_status: active_profile=full_local_workspace normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
     assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
     assert!(stdout.contains(

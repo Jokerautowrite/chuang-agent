@@ -40,7 +40,7 @@ assert data["connects_real_feishu"] is False
 assert runtime_surface["ok"] is True
 assert runtime_surface["artifact_count"] == 11
 assert runtime_surface["observability_field_count"] == 26
-assert policy_tool_status["active_permission_profile"] == "local_ga"
+assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
 assert policy_tool_status["tool_descriptor_count"] == 12
 assert live_readiness["ok"] is True

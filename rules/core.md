@@ -11,3 +11,6 @@ These rules are the minimal governance constitution for Chuang.
 7. No autonomous deletion: do not delete, purge, uninstall, reset, clean, or destructively roll back unless the exact target was approved.
 8. Prefer plugin slots: provider, Feishu, desktop, browser, service control, and subagents must stay replaceable adapters.
 9. Report truthfully: fake or placeholder adapters must be labeled as placeholders, not presented as real capability.
+10. Full local workspace: inside `/home/user/projects/chuang-agent`, normal read, write, patch, build, test, scan, report, screenshot, locate, app, mouse, and keyboard actions execute without repeated approval.
+11. Secret intent, not keywords: source scans and diagnostics may mention token, key, password, or secret; redact actual values as `[REDACTED]` while preserving paths, line numbers, risk labels, and non-sensitive context.
+12. High-risk pause: deletion, cleanup, reset, uninstall, payment, verification codes, privilege escalation, system services, network configuration, and real secret material access or transfer require explicit approval.

@@ -47,7 +47,13 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.tool_shell_timeout_ms, 120_000);
     assert_eq!(
         summary.tool_shell_risk_rule_counts,
-        "delete_or_cleanup=13,service_change=7,network_change=8,secret_access=7"
+        "delete_or_cleanup=14,privilege_escalation=5,service_change=7,network_change=9,secret_access=7"
+    );
+    assert_eq!(summary.permission_profile, "full_local_workspace");
+    assert_eq!(summary.approval_policy, "auto_for_workspace");
+    assert_eq!(
+        summary.permission_workspace_root,
+        "/home/user/projects/chuang-agent"
     );
     assert_eq!(summary.api_key_state, None);
 }

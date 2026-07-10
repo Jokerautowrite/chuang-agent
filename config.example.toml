@@ -13,13 +13,17 @@ first_wake_path = "./identity/FIRST_WAKE.md"
 agents_registry_path = "./identity/agents.toml"
 rules_root = "./rules"
 rules_core_path = "./rules/core.md"
+permission_profile = "full_local_workspace"
+approval_policy = "auto_for_workspace"
+permission_workspace_root = "/home/user/projects/chuang-agent"
 
 # Optional shell risk overrides. Leave unset to use built-in safe defaults.
 # [tool_loop.risk]
 # delete_or_cleanup = " rm , git reset --hard"
+# privilege_escalation = " sudo , chmod -R 777"
 # service_change = " systemctl , service "
-# network_change = " curl , wget , ssh "
-# secret_access = " .env, token, secret, password"
+# network_change = " nmcli , ip route , iptables "
+# secret_access = " .env, auth.json, credentials.json"
 
 provider = "openai_compatible"
 provider_id = "local-openai-compatible"

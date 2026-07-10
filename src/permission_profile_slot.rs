@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionProfileId {
+    FullLocalWorkspace,
     LocalGa,
     SafeDefault,
 }
@@ -28,6 +29,7 @@ pub enum PermissionTag {
     Reset,
     Uninstall,
     Purge,
+    PrivilegeEscalation,
     ServiceControl,
     NetworkChange,
     SecretAccess,
@@ -158,6 +160,10 @@ const LOCAL_GA_RULES: &[PermissionRule] = &[
         decision: PermissionDecision::RequireExplicitTargetApproval,
     },
     PermissionRule {
+        tag: PermissionTag::PrivilegeEscalation,
+        decision: PermissionDecision::RequireApprovalOrDeny,
+    },
+    PermissionRule {
         tag: PermissionTag::ServiceControl,
         decision: PermissionDecision::RequireApprovalOrDeny,
     },
@@ -170,6 +176,8 @@ const LOCAL_GA_RULES: &[PermissionRule] = &[
         decision: PermissionDecision::RequireApprovalOrDeny,
     },
 ];
+
+const FULL_LOCAL_WORKSPACE_RULES: &[PermissionRule] = LOCAL_GA_RULES;
 
 const SAFE_DEFAULT_RULES: &[PermissionRule] = &[
     PermissionRule {
@@ -253,6 +261,10 @@ const SAFE_DEFAULT_RULES: &[PermissionRule] = &[
         decision: PermissionDecision::RequireExplicitTargetApproval,
     },
     PermissionRule {
+        tag: PermissionTag::PrivilegeEscalation,
+        decision: PermissionDecision::RequireApprovalOrDeny,
+    },
+    PermissionRule {
         tag: PermissionTag::ServiceControl,
         decision: PermissionDecision::RequireApprovalOrDeny,
     },
@@ -271,6 +283,15 @@ pub fn local_ga_profile() -> PermissionProfile {
         id: PermissionProfileId::LocalGa,
         name: "local_ga",
         rules: LOCAL_GA_RULES,
+        default_decision: PermissionDecision::RequireApproval,
+    }
+}
+
+pub fn full_local_workspace_profile() -> PermissionProfile {
+    PermissionProfile {
+        id: PermissionProfileId::FullLocalWorkspace,
+        name: "full_local_workspace",
+        rules: FULL_LOCAL_WORKSPACE_RULES,
         default_decision: PermissionDecision::RequireApproval,
     }
 }
@@ -313,6 +334,7 @@ pub fn classify_tag(raw: &str) -> Option<PermissionTag> {
         "reset" => Some(PermissionTag::Reset),
         "uninstall" => Some(PermissionTag::Uninstall),
         "purge" => Some(PermissionTag::Purge),
+        "privilege_escalation" | "sudo" | "root" => Some(PermissionTag::PrivilegeEscalation),
         "service_control" | "service_change" | "systemctl" => Some(PermissionTag::ServiceControl),
         "network_change" | "network" => Some(PermissionTag::NetworkChange),
         "secret_access" | "secret" | "credential_access" => Some(PermissionTag::SecretAccess),

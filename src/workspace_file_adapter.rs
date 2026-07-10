@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::path_utils::resolve_candidate_preserving_existing_symlinks;
+use crate::secret_redaction::redact_sensitive_text;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceListResult {
@@ -109,13 +110,8 @@ impl WorkspaceFileAdapter {
         let file = self.resolve_workspace_path(path)?;
         let content = fs::read_to_string(&file)
             .map_err(|error| format!("read_file_failed path={} error={error}", file.display()))?;
-        let redacted = should_redact_tool_output(path, &content);
-        let display_content = if redacted {
-            "[redacted: secret-like path or content]".to_string()
-        } else {
-            content.clone()
-        };
-        let truncated = truncate_text(&display_content, 10_000);
+        let redaction = redact_sensitive_text(path, &content);
+        let truncated = truncate_text(&redaction.text, 10_000);
 
         Ok(WorkspaceReadResult {
             path: path.trim().to_string(),
@@ -123,7 +119,7 @@ impl WorkspaceFileAdapter {
             content: truncated.text,
             bytes: content.len(),
             lines: count_lines(&content),
-            redacted,
+            redacted: redaction.redacted,
             truncated: truncated.truncated,
         })
     }
@@ -610,14 +606,6 @@ fn build_write_diff_preview(path: &str, previous: Option<&str>, next: &str) -> D
         };
     }
 
-    if should_redact_write_preview(path, previous, next) {
-        return DiffPreview {
-            text: "[redacted: secret-like path or content]".to_string(),
-            truncated: false,
-            redacted: true,
-        };
-    }
-
     let before_lines = previous.unwrap_or("").lines().collect::<Vec<_>>();
     let after_lines = next.lines().collect::<Vec<_>>();
     let max_len = before_lines.len().max(after_lines.len());
@@ -650,10 +638,11 @@ fn build_write_diff_preview(path: &str, previous: Option<&str>, next: &str) -> D
         truncated = true;
     }
 
+    let redaction = redact_sensitive_text(path, &preview);
     DiffPreview {
-        text: preview,
+        text: redaction.text,
         truncated,
-        redacted: false,
+        redacted: redaction.redacted,
     }
 }
 
@@ -661,40 +650,6 @@ fn push_diff_line(preview: &mut String, prefix: char, line: &str) {
     preview.push(prefix);
     preview.push_str(line);
     preview.push('\n');
-}
-
-fn should_redact_write_preview(path: &str, previous: Option<&str>, next: &str) -> bool {
-    should_redact_tool_output(path, previous.unwrap_or_default())
-        || should_redact_tool_output(path, next)
-}
-
-fn should_redact_tool_output(locator: &str, content: &str) -> bool {
-    let haystack = format!(
-        "{}\n{}",
-        locator.to_ascii_lowercase(),
-        content.to_ascii_lowercase()
-    );
-    contains_any(
-        &haystack,
-        &[
-            ".env",
-            "id_rsa",
-            "id_ed25519",
-            "api_key",
-            "apikey",
-            "access_token",
-            "refresh_token",
-            "secret",
-            "password",
-            "passwd",
-            "private_key",
-            "client_secret",
-        ],
-    )
-}
-
-fn contains_any(value: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| value.contains(needle))
 }
 
 fn truncate_text(value: &str, max_len: usize) -> TruncatedText {

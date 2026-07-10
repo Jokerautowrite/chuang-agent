@@ -19,6 +19,7 @@ pub enum ActionKind {
     VerificationCodeInput,
     DeleteOrCleanup,
     SecretAccess,
+    PrivilegeEscalation,
     ServiceChange,
     NetworkChange,
 }

@@ -142,10 +142,10 @@ fn cli_status_prints_mvp_health_summary() {
     ));
     assert!(stdout.contains("governance_rules: path=./rules/core.md rule_count="));
     assert!(stdout.contains(
-        "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=draft_only"
+        "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=needs_approval"
     ));
     assert!(stdout.contains(
-        "policy_tool_status: active_profile=local_ga normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
+        "policy_tool_status: active_profile=full_local_workspace normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
     assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
@@ -590,7 +590,10 @@ fn cli_status_can_render_json_without_secret_leak() {
         parsed["governance"]["dangerous_shell_decision"],
         "needs_approval"
     );
-    assert_eq!(parsed["governance"]["secret_shell_decision"], "draft_only");
+    assert_eq!(
+        parsed["governance"]["secret_shell_decision"],
+        "needs_approval"
+    );
     assert_eq!(parsed["governance"]["goal_run_executes"], false);
     assert_eq!(parsed["goal_mode"]["ok"], true);
     assert_eq!(
