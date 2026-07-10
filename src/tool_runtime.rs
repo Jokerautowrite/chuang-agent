@@ -371,7 +371,7 @@ pub struct ExecutionSlot {
 impl Default for ToolExecutionConfig {
     fn default() -> Self {
         Self {
-            shell_timeout_ms: 30_000,
+            shell_timeout_ms: 120_000,
             shell_risk_rules: ShellRiskRules::default(),
             memory: None,
             actuator: None,
@@ -1652,7 +1652,7 @@ fn execute_shell_exec(
         }
         _ => workspace_root.to_path_buf(),
     };
-    let child = match Command::new("sh")
+    let child = match Command::new("bash")
         .arg("-lc")
         .arg(command)
         .current_dir(&cwd_path)

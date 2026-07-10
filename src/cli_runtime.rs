@@ -522,8 +522,8 @@ where
                         raw: final_answer,
                     };
                     transcript.push(format!(
-                        "protocol_error code={} message={} raw={}",
-                        error.code, error.message, error.raw
+                        "protocol_error code={} message={} rejected_unverified_answer=true",
+                        error.code, error.message
                     ));
                     tool_events.push(ToolLoopEvent {
                         round: round_index + 1,
@@ -604,12 +604,9 @@ where
                 )?;
                 let pending_approval = outcome.pending_approval.clone();
                 let record = outcome.record;
-                transcript.push(format!(
-                    "call={} decision={} ok={} summary={}",
-                    tool_call_name(&record.call),
-                    risk_decision_label(&outcome.decision),
-                    record.ok,
-                    record.summary
+                transcript.push(tool_evidence_for_model(
+                    &record,
+                    &risk_decision_label(&outcome.decision),
                 ));
                 tool_events.push(ToolLoopEvent {
                     round: round_index + 1,
@@ -736,24 +733,42 @@ where
                 continue;
             }
             ToolModelOutput::PlainText(_) => {
+                let requires_local_action =
+                    should_require_action_for_local_task(&original_input) && tool_calls.is_empty();
                 if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
-                    if !should_require_action_for_local_task(&original_input) {
+                    if !requires_local_action {
                         insert_tool_surface_metadata(&mut turn, workspace_root)?;
                         return Ok(turn);
                     }
                 }
-                last_plain_text_answer = Some(body.clone());
+                if !requires_local_action {
+                    last_plain_text_answer = Some(body.clone());
+                }
                 let raw = body.clone();
                 let error = ToolProtocolError {
-                    code: "plain_text_response".to_string(),
-                    message: "tool loop requires ACTION or FINAL; plain text is not accepted"
-                        .to_string(),
+                    code: if requires_local_action {
+                        "missing_required_action".to_string()
+                    } else {
+                        "plain_text_response".to_string()
+                    },
+                    message: if requires_local_action {
+                        "local task requires at least one ACTION tool call before FINAL".to_string()
+                    } else {
+                        "tool loop requires ACTION or FINAL; plain text is not accepted".to_string()
+                    },
                     raw,
                 };
-                transcript.push(format!(
-                    "protocol_error code={} message={} raw={}",
-                    error.code, error.message, error.raw
-                ));
+                if requires_local_action {
+                    transcript.push(format!(
+                        "protocol_error code={} message={} rejected_unverified_answer=true",
+                        error.code, error.message
+                    ));
+                } else {
+                    transcript.push(format!(
+                        "protocol_error code={} message={} raw={}",
+                        error.code, error.message, error.raw
+                    ));
+                }
                 tool_events.push(ToolLoopEvent {
                     round: round_index + 1,
                     kind: "protocol_error".to_string(),
@@ -829,6 +844,24 @@ where
     }
 
     if let Some(mut turn) = last_turn {
+        if should_require_action_for_local_task(&original_input) && tool_calls.is_empty() {
+            turn.result.response.body =
+                missing_required_action_exhausted_answer(&original_input, max_tool_rounds);
+            turn.user_input = original_input;
+            insert_tool_surface_metadata(&mut turn, workspace_root)?;
+            insert_tool_metadata_with_status(
+                &mut turn,
+                workspace_root,
+                max_tool_rounds,
+                &tool_calls,
+                &protocol_errors,
+                &tool_events,
+                &transcript,
+                "missing_required_action",
+            )?;
+            insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+            return Ok(turn);
+        }
         if let Some(record) = tool_calls
             .last()
             .filter(|record| terminal_tool_failure(record))
@@ -849,6 +882,131 @@ where
             insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
             return Ok(turn);
         }
+
+        if let Some(guidance) =
+            read_new_live_guidance(live_guidance_path, &mut live_guidance_cursor)?
+        {
+            transcript.push(format!(
+                "operator_guidance {}",
+                guidance.replace('\n', " | ")
+            ));
+            write_terminal_event(
+                progress_path,
+                &TerminalEvent::GuidanceInjected {
+                    round: max_tool_rounds + 1,
+                    chars: guidance.chars().count(),
+                },
+            )?;
+        }
+
+        write_terminal_event(
+            progress_path,
+            &TerminalEvent::StepStarted {
+                title: "finalize answer".to_string(),
+                detail: Some("tool execution disabled after round limit".to_string()),
+            },
+        )?;
+        match attempt_tool_loop_finalization(
+            kernel,
+            governance,
+            &original_input,
+            &turn_context,
+            &transcript,
+            max_tool_rounds + 1,
+            progress_path,
+        ) {
+            Ok(ToolLoopFinalization::Completed {
+                mut turn,
+                answer,
+                response_kind,
+            }) => {
+                turn.result.response.body = answer;
+                turn.user_input = original_input;
+                insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                insert_tool_metadata_with_status(
+                    &mut turn,
+                    workspace_root,
+                    max_tool_rounds,
+                    &tool_calls,
+                    &protocol_errors,
+                    &tool_events,
+                    &transcript,
+                    "completed_after_tool_limit",
+                )?;
+                insert_tool_finalization_metadata(
+                    &mut turn,
+                    "succeeded",
+                    response_kind,
+                    false,
+                    max_tool_rounds + 1,
+                );
+                insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::StepFinished {
+                        title: "finalize answer".to_string(),
+                        status: StepStatus::Ok,
+                        detail: Some(format!("accepted {response_kind} response")),
+                    },
+                )?;
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::AnswerReady {
+                        chars: turn.result.response.body.chars().count(),
+                        truncated: false,
+                        snapshot_path: None,
+                    },
+                )?;
+                return Ok(turn);
+            }
+            Ok(ToolLoopFinalization::Rejected {
+                final_turn,
+                status,
+                detail,
+                blocked_tool_call,
+            }) => {
+                turn = final_turn;
+                insert_tool_finalization_metadata(
+                    &mut turn,
+                    status,
+                    "rejected",
+                    blocked_tool_call,
+                    max_tool_rounds + 1,
+                );
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::StepFinished {
+                        title: "finalize answer".to_string(),
+                        status: StepStatus::Failed,
+                        detail: Some(detail),
+                    },
+                )?;
+            }
+            Err(error) => {
+                insert_tool_finalization_metadata(
+                    &mut turn,
+                    "provider_error",
+                    "unavailable",
+                    false,
+                    max_tool_rounds + 1,
+                );
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::StepFinished {
+                        title: "finalize answer".to_string(),
+                        status: StepStatus::Failed,
+                        detail: Some(
+                            "provider call failed; preserved prior tool evidence".to_string(),
+                        ),
+                    },
+                )?;
+                turn.result.response.meta.extra.insert(
+                    "tool_finalization_error".to_string(),
+                    truncate_history_text(&error, 240),
+                );
+            }
+        }
+
         turn.result.response.body = tool_loop_exhausted_answer(
             &original_input,
             max_tool_rounds,
@@ -868,10 +1026,119 @@ where
             "tool_loop_exhausted",
         )?;
         insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+        write_terminal_event(
+            progress_path,
+            &TerminalEvent::AnswerReady {
+                chars: turn.result.response.body.chars().count(),
+                truncated: false,
+                snapshot_path: None,
+            },
+        )?;
         return Ok(turn);
     }
 
     Err("tool_loop_exhausted: model did not produce FINAL response".to_string())
+}
+
+enum ToolLoopFinalization {
+    Completed {
+        turn: ChuangKernelTurn,
+        answer: String,
+        response_kind: &'static str,
+    },
+    Rejected {
+        final_turn: ChuangKernelTurn,
+        status: &'static str,
+        detail: String,
+        blocked_tool_call: bool,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attempt_tool_loop_finalization<S, R, G>(
+    kernel: &mut ChuangKernel<S, R>,
+    governance: &mut G,
+    original_input: &str,
+    turn_context: &[ContextSegment],
+    transcript: &[String],
+    model_round: usize,
+    progress_path: Option<&Path>,
+) -> Result<ToolLoopFinalization, String>
+where
+    S: MemoryStore,
+    R: chuang_agent::responder::Responder,
+    G: Governance,
+{
+    let mut finalization_context = turn_context
+        .iter()
+        .filter(|segment| segment.id != "tool-instructions")
+        .cloned()
+        .collect::<Vec<_>>();
+    finalization_context.push(tool_finalization_context_segment());
+    let finalization_input = tool_finalization_prompt(original_input, transcript);
+
+    write_terminal_event(
+        progress_path,
+        &TerminalEvent::ModelStarted { round: model_round },
+    )?;
+    let turn = kernel
+        .run_governed_turn_with_extra_context(finalization_input, governance, finalization_context)
+        .map_err(|error| format!("tool_finalization_provider_failed: {error:?}"))?;
+    let body = turn.result.response.body.trim().to_string();
+    write_terminal_event(
+        progress_path,
+        &TerminalEvent::ModelFinished {
+            round: model_round,
+            finish: turn
+                .result
+                .response
+                .meta
+                .finish_reason
+                .clone()
+                .unwrap_or_else(|| "none".to_string()),
+            chars: body.chars().count(),
+        },
+    )?;
+
+    match parse_tool_model_output(&body) {
+        ToolModelOutput::FinalAnswer(answer) if !answer.trim().is_empty() => {
+            Ok(ToolLoopFinalization::Completed {
+                turn,
+                answer: answer.trim().to_string(),
+                response_kind: "final",
+            })
+        }
+        ToolModelOutput::PlainText(answer) if !answer.trim().is_empty() => {
+            Ok(ToolLoopFinalization::Completed {
+                turn,
+                answer: answer.trim().to_string(),
+                response_kind: "plain_text",
+            })
+        }
+        ToolModelOutput::ToolCall(call) => Ok(ToolLoopFinalization::Rejected {
+            final_turn: turn,
+            status: "rejected_tool_call",
+            detail: format!(
+                "blocked unexpected {} request; no additional tool was executed",
+                tool_call_name(&call)
+            ),
+            blocked_tool_call: true,
+        }),
+        ToolModelOutput::ProtocolError(error) => Ok(ToolLoopFinalization::Rejected {
+            final_turn: turn,
+            status: "protocol_error",
+            detail: format!("invalid final response: {}", error.code),
+            blocked_tool_call: false,
+        }),
+        ToolModelOutput::FinalAnswer(_) | ToolModelOutput::PlainText(_) => {
+            Ok(ToolLoopFinalization::Rejected {
+                final_turn: turn,
+                status: "empty_response",
+                detail: "model returned an empty final response".to_string(),
+                blocked_tool_call: false,
+            })
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1125,6 +1392,20 @@ fn should_auto_observe_desktop(user_input: &str) -> bool {
 
 fn should_require_action_for_local_task(user_input: &str) -> bool {
     let text = user_input.to_lowercase();
+    let asks_runtime_health_check = [
+        "体检",
+        "自检",
+        "健康检查",
+        "健康度",
+        "诊断自己",
+        "检查自己",
+        "self-check",
+        "self check",
+        "health check",
+        "diagnose yourself",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
     let asks_local_surface = [
         "桌面",
         "文件夹",
@@ -1216,7 +1497,7 @@ fn should_require_action_for_local_task(user_input: &str) -> bool {
     .iter()
     .any(|needle| text.contains(needle));
 
-    asks_local_surface && asks_local_action
+    asks_runtime_health_check || (asks_local_surface && asks_local_action)
 }
 
 fn tool_protocol_repair_prompt(
@@ -1255,7 +1536,7 @@ fn tool_loop_exhausted_answer(
     protocol_error_count: usize,
 ) -> String {
     format!(
-        "本轮没有拿到最终答复：模型已经跑满 {max_tool_rounds} 轮工具循环，但没有输出 FINAL。\n\n已执行工具：{tool_call_count} 次。协议修复：{protocol_error_count} 次。\n原始请求：{original_input}\n\n建议：把目标拆小后重试，或提高 tool_max_rounds；如果反复出现，说明模型需要更强的 FINAL 输出约束。"
+        "本轮工具执行已经停止，但最终总结仍未生成。\n\n模型跑满了 {max_tool_rounds} 轮工具预算，系统随后额外进行了一次禁用工具的强制收口，仍没有得到可用答复。\n已执行工具：{tool_call_count} 次。协议修复：{protocol_error_count} 次。\n原始请求：{original_input}\n\n建议：直接重试本轮。系统不会自动重复执行已经完成的工具动作。"
     )
 }
 
@@ -1668,6 +1949,74 @@ fn tool_instruction_segment(workspace_root: &Path) -> ContextSegment {
         )]),
         content,
     }
+}
+
+fn tool_finalization_context_segment() -> ContextSegment {
+    let content = "TOOL FINALIZATION MODE\n\
+This is a one-shot answer finalization pass after the tool round budget was exhausted.\n\
+All tools are disabled. Do not output ACTION, TOOL_CALL, commands, or requests for another tool.\n\
+Use the supplied original request and completed tool evidence to answer the user now.\n\
+Return either FINAL: <answer>, ACTION with type=final, or a direct plain-text final answer.\n\
+Do not claim an action succeeded unless the supplied evidence says it succeeded."
+        .to_string();
+    let now = chrono::Utc::now();
+    ContextSegment {
+        id: "tool-finalization-instructions".to_string(),
+        source: SegmentSource::Identity,
+        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+        priority: 255,
+        created_at: now,
+        last_accessed: now,
+        metadata: std::collections::HashMap::from([(
+            "kind".to_string(),
+            "tool_finalization".to_string(),
+        )]),
+        content,
+    }
+}
+
+fn tool_finalization_prompt(original_input: &str, transcript: &[String]) -> String {
+    let evidence = if transcript.is_empty() {
+        "none".to_string()
+    } else {
+        truncate_history_text(&transcript.join("\n"), 8_000)
+    };
+    format!(
+        "[tool-finalization]\n\
+工具预算已经耗尽，工具现已禁用。你不能再调用、重放或建议系统自动执行任何工具。\n\
+请仅根据下面的原始请求和已完成证据，立即给用户最终答复。\n\
+如果任务已经完成，简洁报告结果；如果证据显示未完成，明确说明未完成项。不要要求再增加工具轮次。\n\n\
+原始请求:\n{original_input}\n\n\
+已完成工具证据:\n{evidence}\n\n\
+现在只输出最终答复。"
+    )
+}
+
+fn insert_tool_finalization_metadata(
+    turn: &mut ChuangKernelTurn,
+    status: &str,
+    response_kind: &str,
+    blocked_tool_call: bool,
+    model_call_count: usize,
+) {
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert(
+        "tool_finalization_attempted".to_string(),
+        "true".to_string(),
+    );
+    extra.insert("tool_finalization_status".to_string(), status.to_string());
+    extra.insert(
+        "tool_finalization_response_kind".to_string(),
+        response_kind.to_string(),
+    );
+    extra.insert(
+        "tool_finalization_tool_call_blocked".to_string(),
+        blocked_tool_call.to_string(),
+    );
+    extra.insert(
+        "tool_model_call_count".to_string(),
+        model_call_count.to_string(),
+    );
 }
 
 fn read_optional_identity_file(path: &PathBuf) -> Result<String, String> {
@@ -2766,6 +3115,59 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
     }
 }
 
+fn tool_evidence_for_model(record: &ToolExecutionRecord, decision: &str) -> String {
+    let mut fields = vec![
+        format!("call={}", tool_call_name(&record.call)),
+        format!(
+            "atomic={}",
+            record.atomic_tool_name.as_deref().unwrap_or("auxiliary")
+        ),
+        format!("decision={decision}"),
+        format!("execution_succeeded={}", record.ok),
+        format!("duration_ms={}", record.duration_ms),
+        format!(
+            "failure_class={}",
+            record.failure_class.as_deref().unwrap_or("none")
+        ),
+    ];
+    if let Some(exit_code) = record.exit_code {
+        fields.push(format!("exit_code={exit_code}"));
+    }
+    if let Some(bytes) = record.output_bytes {
+        fields.push(format!("output_bytes={bytes}"));
+    }
+    if let Some(lines) = record.output_lines {
+        fields.push(format!("output_lines={lines}"));
+    }
+    if let Some(bytes) = record.stderr_bytes {
+        fields.push(format!("stderr_bytes={bytes}"));
+    }
+    if let Some(lines) = record.stderr_lines {
+        fields.push(format!("stderr_lines={lines}"));
+    }
+    fields.push(format!(
+        "content_redacted={}",
+        record.output_redacted || record.stdout_redacted || record.stderr_redacted
+    ));
+    fields.push(format!(
+        "content_truncated={}",
+        record.output_truncated || record.stdout_truncated || record.stderr_truncated
+    ));
+
+    let mut evidence = format!("tool_result {}", fields.join(" "));
+    if record.output_redacted || record.stdout_redacted || record.stderr_redacted {
+        evidence.push_str(
+            " note=content_was_protected_for_secret_safety; this does_not mean the tool was unavailable, empty, or failed; trust execution_succeeded, exit_code, and output statistics",
+        );
+    } else {
+        evidence.push_str(&format!(
+            " summary={}",
+            truncate_history_text(&record.summary.replace('\n', " | "), 2_000)
+        ));
+    }
+    evidence
+}
+
 fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), String> {
     let existing = store
         .search(&chuang_agent::memory_store::MemoryQuery {
@@ -2797,6 +3199,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -5596,7 +5999,7 @@ allowed_channels = ["app-server"]
             .extra
             .get("tool_protocol_errors_json")
             .expect("tool protocol errors json should exist")
-            .contains("plain_text_response"));
+            .contains("missing_required_action"));
         assert!(turn
             .result
             .response
@@ -5669,6 +6072,76 @@ allowed_channels = ["app-server"]
             .expect("tool calls json should exist");
         assert!(tool_calls_json.contains("\"atomic_tool_name\":\"code_execute\""));
         assert!(tool_calls_json.contains("git status --short"));
+    }
+
+    #[test]
+    fn run_with_options_forces_evidence_for_self_health_check() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-self-health-check-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            r#"ACTION: {"schema_version":1,"type":"final","answer":"健康度约 70%，工具不可用。"}"#,
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"printf health-ok","cwd":"."}}"#,
+            r#"ACTION: {"schema_version":1,"type":"final","answer":"体检完成，工具链正常。"}"#,
+        ]);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "给自己做个体检".to_string(),
+            Vec::new(),
+        )
+        .expect("self health check should require real tool evidence");
+
+        assert_eq!(turn.result.response.body, "体检完成，工具链正常。");
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_protocol_errors_json")
+            .expect("tool protocol errors json should exist")
+            .contains("missing_required_action"));
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_calls_json")
+            .expect("tool calls json should exist")
+            .contains("health-ok"));
+        let captured = captured.lock().expect("capture lock should succeed");
+        assert_eq!(captured.len(), 3);
+        assert!(!captured[1].prompt.contains("健康度约 70%"));
+        assert!(captured[1]
+            .prompt
+            .contains("rejected_unverified_answer=true"));
+        assert!(captured[2].prompt.contains("execution_succeeded=true"));
+        assert!(captured[2].prompt.contains("exit_code=0"));
     }
 
     #[test]
@@ -5854,13 +6327,291 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
+    fn tool_loop_uses_one_no_tool_finalization_call_after_round_limit() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-tool-finalization-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let responder = SequenceResponder::new(vec![
+            r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/health.txt","content":"healthy"}}"#,
+            r#"ACTION: {"type":"tool_call","call":{"tool":"file_read","path":"notes/health.txt"}}"#,
+            r#"ACTION: {"schema_version":1,"type":"final","answer":"体检完成，检查结果正常。"}"#,
+        ]);
+        let remaining_outputs = responder.outputs.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "给自己做个体检".to_string(),
+            Vec::new(),
+        )
+        .expect("finalization should return a final answer");
+
+        assert_eq!(turn.result.response.body, "体检完成，检查结果正常。");
+        assert_eq!(
+            fs::read_to_string(workspace_root.join("notes/health.txt"))
+                .expect("health evidence should exist"),
+            "healthy"
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("completed_after_tool_limit")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_status")
+                .map(String::as_str),
+            Some("succeeded")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_response_kind")
+                .map(String::as_str),
+            Some("final")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_model_call_count")
+                .map(String::as_str),
+            Some("3")
+        );
+        assert!(remaining_outputs
+            .lock()
+            .expect("sequence lock should succeed")
+            .is_empty());
+    }
+
+    #[test]
+    fn tool_loop_finalization_blocks_another_tool_call_without_executing_it() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-tool-finalization-block-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/allowed.txt","content":"done"}}"#,
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_read","path":"notes/allowed.txt"}}"#,
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/must-not-run.txt","content":"unexpected"}}"#,
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "检查文件后总结".to_string(),
+            Vec::new(),
+        )
+        .expect("blocked finalization tool call should return a readable fallback");
+
+        assert!(workspace_root.join("notes/allowed.txt").is_file());
+        assert!(!workspace_root.join("notes/must-not-run.txt").exists());
+        assert!(turn.result.response.body.contains("额外进行了一次禁用工具"));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("tool_loop_exhausted")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_status")
+                .map(String::as_str),
+            Some("rejected_tool_call")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_tool_call_blocked")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn tool_loop_finalization_accepts_plain_text_after_real_tool_work() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-tool-finalization-plain-text-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/plain-final.txt","content":"done"}}"#,
+                "文件已经写入，任务完成。",
+            ]),
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            1,
+            ToolExecutionConfig::default(),
+            "写入 notes/plain-final.txt 后总结".to_string(),
+            Vec::new(),
+        )
+        .expect("plain text finalization should be accepted after real tool work");
+
+        assert_eq!(turn.result.response.body, "文件已经写入，任务完成。");
+        assert!(workspace_root.join("notes/plain-final.txt").is_file());
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("completed_after_tool_limit")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_response_kind")
+                .map(String::as_str),
+            Some("plain_text")
+        );
+    }
+
+    #[test]
+    fn tool_loop_finalization_provider_error_preserves_tool_evidence_and_falls_back() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-tool-finalization-provider-error-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            SequenceResponder::new(vec![
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_write","path":"notes/provider-error.txt","content":"done"}}"#,
+                r#"ACTION: {"type":"tool_call","call":{"tool":"file_read","path":"notes/provider-error.txt"}}"#,
+            ]),
+        );
+        let mut governance = FailOnClassifyGovernance::new(5);
+
+        let turn = run_governed_turn_with_tools(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            2,
+            ToolExecutionConfig::default(),
+            "写入并读取 notes/provider-error.txt 后总结".to_string(),
+            Vec::new(),
+        )
+        .expect("provider error during finalization should preserve the prior turn");
+
+        assert!(workspace_root.join("notes/provider-error.txt").is_file());
+        assert!(turn.result.response.body.contains("最终总结仍未生成"));
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_loop_status")
+                .map(String::as_str),
+            Some("tool_loop_exhausted")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_finalization_status")
+                .map(String::as_str),
+            Some("provider_error")
+        );
+        assert_eq!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("tool_call_count")
+                .map(String::as_str),
+            Some("2")
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("tool_finalization_error")
+            .is_some_and(|error| error.contains("governance unavailable")));
+    }
+
+    #[test]
     fn tool_loop_exhausted_answer_is_operator_readable() {
         let answer = tool_loop_exhausted_answer("给自己体检下", 4, 3, 1);
 
-        assert!(answer.contains("没有拿到最终答复"));
+        assert!(answer.contains("最终总结仍未生成"));
+        assert!(answer.contains("额外进行了一次禁用工具的强制收口"));
         assert!(answer.contains("已执行工具：3 次"));
         assert!(answer.contains("协议修复：1 次"));
-        assert!(answer.contains("提高 tool_max_rounds"));
+        assert!(answer.contains("不会自动重复执行"));
     }
 
     #[test]
@@ -6175,6 +6926,7 @@ allowed_channels = ["app-server"]
     #[derive(Debug, Clone)]
     struct SequenceResponder {
         outputs: Arc<Mutex<Vec<String>>>,
+        captured: Arc<Mutex<Vec<CapturedResponderRequest>>>,
     }
 
     impl SequenceResponder {
@@ -6183,6 +6935,7 @@ allowed_channels = ["app-server"]
                 outputs: Arc::new(Mutex::new(
                     outputs.into_iter().map(|value| value.to_string()).collect(),
                 )),
+                captured: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -6199,6 +6952,13 @@ allowed_channels = ["app-server"]
             &self,
             request: &chuang_agent::responder::ResponderRequest,
         ) -> chuang_agent::responder::ProviderAdapterResponse {
+            self.captured
+                .lock()
+                .expect("capture lock should succeed")
+                .push(CapturedResponderRequest {
+                    prompt: request.prompt.clone(),
+                    user_input: request.user_input.clone(),
+                });
             let mut outputs = self.outputs.lock().expect("sequence lock should succeed");
             let body = if outputs.is_empty() {
                 "FINAL: 默认结束".to_string()
@@ -6215,6 +6975,46 @@ allowed_channels = ["app-server"]
                 finish_reason: Some("sequence".to_string()),
                 extra_meta: std::collections::BTreeMap::new(),
             }
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailOnClassifyGovernance {
+        classify_count: AtomicUsize,
+        fail_on: usize,
+    }
+
+    impl FailOnClassifyGovernance {
+        fn new(fail_on: usize) -> Self {
+            Self {
+                classify_count: AtomicUsize::new(0),
+                fail_on,
+            }
+        }
+    }
+
+    impl chuang_agent::governance::Governance for FailOnClassifyGovernance {
+        fn classify(
+            &self,
+            _action: &chuang_agent::governance::ProposedAction,
+        ) -> Result<chuang_agent::governance::RiskDecision, chuang_agent::governance::GovernanceError>
+        {
+            let current = self.classify_count.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+            if current == self.fail_on {
+                return Err(chuang_agent::governance::GovernanceError {
+                    message: "governance unavailable during finalization".to_string(),
+                });
+            }
+            Ok(chuang_agent::governance::RiskDecision::Allowed {
+                reason: "test allows pre-finalization work".to_string(),
+            })
+        }
+
+        fn audit(
+            &mut self,
+            _record: chuang_agent::common::AuditRecord,
+        ) -> Result<(), chuang_agent::governance::GovernanceError> {
+            Ok(())
         }
     }
 

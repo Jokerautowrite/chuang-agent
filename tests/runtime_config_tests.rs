@@ -44,7 +44,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.context_max_tool_results, 5);
     assert_eq!(summary.context_max_memory_segments, 5);
     assert_eq!(summary.tool_loop_max_rounds, 4);
-    assert_eq!(summary.tool_shell_timeout_ms, 30_000);
+    assert_eq!(summary.tool_shell_timeout_ms, 120_000);
     assert_eq!(
         summary.tool_shell_risk_rule_counts,
         "delete_or_cleanup=13,service_change=7,network_change=8,secret_access=7"

@@ -52,8 +52,18 @@ use cli_types::*;
 const REPL_ANSWER_PREVIEW_CHARS: usize = 2400;
 const REPL_TEXT_WRAP_WIDTH: usize = 78;
 const REPL_HISTORY_MAX_TURNS: usize = 8;
-const REPL_BANNER_INNER_WIDTH: usize = 74;
+const REPL_META_WRAP_WIDTH: usize = 92;
 static REPL_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_BOLD: &str = "\x1b[1m";
+const ANSI_DIM: &str = "\x1b[2m";
+const ANSI_BLUE: &str = "\x1b[38;5;75m";
+const ANSI_RED: &str = "\x1b[38;5;203m";
+const ANSI_GREEN: &str = "\x1b[38;5;114m";
+const ANSI_YELLOW: &str = "\x1b[38;5;222m";
+const ANSI_CYAN: &str = "\x1b[38;5;117m";
+const ANSI_GRAY: &str = "\x1b[38;5;245m";
 
 fn main() {
     if let Err(message) = run_cli() {
@@ -123,7 +133,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let interactive = stdin.is_terminal() && stdout.is_terminal();
-    let show_trace = true;
+    let show_trace = false;
 
     if interactive {
         print_repl_banner(&mut stdout, &options)?;
@@ -341,26 +351,13 @@ fn process_repl_input(
 
     let user_input = merge_repl_guidance(input, pending_guidance);
     pending_guidance.clear();
-    print_repl_section_rule(stdout, "RUNNING")?;
-    writeln!(stdout, "task      {}", compact_preview(&user_input, 120))
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    let cwd = env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     writeln!(
         stdout,
-        "provider  {} / {}",
-        summary.provider_id, summary.model_name
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "workspace {}",
-        env::current_dir()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "input     type !text while running to inject guidance at the next safe point"
+        "{}",
+        render_user_message_block(&user_input, &summary.provider_id, &summary.model_name, &cwd)
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
@@ -597,18 +594,8 @@ fn print_progress_display_line(
     index: usize,
     display: &ProgressDisplay,
 ) -> Result<(), String> {
-    let (label, text) = match display {
-        ProgressDisplay::Step(text) => ("thinking / steps", text),
-        ProgressDisplay::Tool(text) => ("tool stream", text),
-    };
-    writeln!(
-        stdout,
-        "│ {:>3} │ {:<18} │ {}",
-        index,
-        label,
-        compact_preview(text, 80)
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))
+    writeln!(stdout, "{}", render_progress_display_line(index, display))
+        .map_err(|e| format!("stdout_write_failed: {e}"))
 }
 
 fn print_running_tick(
@@ -625,12 +612,8 @@ fn print_running_tick(
         return Ok(false);
     }
     *last_tick_second = Some(elapsed);
-    writeln!(
-        stdout,
-        "\n[working {:>3}s] still running; type !note to guide this turn",
-        elapsed
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+    writeln!(stdout, "\n{}", render_running_tick_line(elapsed))
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))?;
@@ -822,16 +805,7 @@ fn print_repl_failure(
     error: &str,
     progress_displays: &[ProgressDisplay],
 ) -> Result<(), String> {
-    print_repl_section_rule(stdout, "FAILED")?;
-    writeln!(stdout, "input     {input_preview}")
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "elapsed   {elapsed_ms}ms")
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "reason    {}", readable_runtime_error(error))
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-
-    print_repl_section_rule(stdout, "WHAT HAPPENED")?;
-    let mut count = 0usize;
+    let mut progress_lines = Vec::new();
     for display in progress_displays
         .iter()
         .rev()
@@ -840,28 +814,16 @@ fn print_repl_failure(
         .into_iter()
         .rev()
     {
-        count += 1;
         match display {
             ProgressDisplay::Step(text) | ProgressDisplay::Tool(text) => {
-                writeln!(stdout, "{}. {text}", count)
-                    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                progress_lines.push(text.clone())
             }
         }
     }
-    if count == 0 {
-        writeln!(stdout, "1. no visible runtime events were captured")
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
-
-    print_repl_section_rule(stdout, "NEXT")?;
     writeln!(
         stdout,
-        "- Ask again with a narrower goal, or type a correction with ! while the task is running."
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "- If this repeats, increase tool_max_rounds or improve the model's FINAL discipline."
+        "{}",
+        render_repl_failure_block(input_preview, elapsed_ms, error, &progress_lines)
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))
 }
@@ -912,17 +874,8 @@ fn print_repl_prompt(
     guidance_count: usize,
 ) -> Result<(), String> {
     writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
-    if running {
-        write!(stdout, "╭─ input [running: !guidance]")
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    } else {
-        write!(stdout, "╭─ input").map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
-    if guidance_count > 0 {
-        write!(stdout, " +{guidance_count}").map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
-    writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
-    write!(stdout, "╰─ chuang › ").map_err(|e| format!("stdout_write_failed: {e}"))?;
+    write!(stdout, "{}", render_repl_prompt(running, guidance_count))
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))
@@ -956,11 +909,6 @@ fn compact_preview(input: &str, max_chars: usize) -> String {
     preview
 }
 
-fn fixed_cell(input: &str, width: usize) -> String {
-    let preview = compact_preview(input, width);
-    format!("{preview:<width$}")
-}
-
 fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("guidance_dir_create_failed: {e}"))?;
@@ -976,88 +924,12 @@ fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
 fn print_repl_banner(stdout: &mut io::Stdout, options: &CliOptions) -> Result<(), String> {
     let summary = options.runtime.summary();
     write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "╭{}╮", "─".repeat(REPL_BANNER_INNER_WIDTH))
+    writeln!(stdout, "{}", render_repl_banner(&summary))
         .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    for line in CHUANG_BANNER_LINES {
-        writeln!(stdout, "{}", banner_center_row(line))
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
-    writeln!(
-        stdout,
-        "{}",
-        banner_center_row("local agent OS / terminal workspace")
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "├{}┤", "─".repeat(REPL_BANNER_INNER_WIDTH))
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "{}",
-        banner_row(&format!(
-            "provider: {}    model: {}",
-            summary.provider_id, summary.model_name
-        ))
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "{}",
-        banner_row("visible: thinking/steps    tools: live stream    answer: scrollback")
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "{}",
-        banner_row("commands: /help /status /history /trace /notrace /verbose /quiet /exit")
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "╰{}╯", "─".repeat(REPL_BANNER_INNER_WIDTH))
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "\nVisible thinking shows audited runtime/tool progress, not hidden model reasoning."
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))
 }
-
-fn banner_row(text: &str) -> String {
-    let text = banner_preview(text, REPL_BANNER_INNER_WIDTH.saturating_sub(2));
-    let padding = REPL_BANNER_INNER_WIDTH.saturating_sub(text.chars().count() + 1);
-    format!("│ {text}{}│", " ".repeat(padding))
-}
-
-fn banner_center_row(text: &str) -> String {
-    let text = banner_preview(text, REPL_BANNER_INNER_WIDTH);
-    let text_width = text.chars().count();
-    let total_padding = REPL_BANNER_INNER_WIDTH.saturating_sub(text_width);
-    let left = total_padding / 2;
-    let right = total_padding.saturating_sub(left);
-    format!("│{}{}{}│", " ".repeat(left), text, " ".repeat(right))
-}
-
-fn banner_preview(input: &str, max_chars: usize) -> String {
-    if input.chars().count() <= max_chars {
-        return input.to_string();
-    }
-    let mut preview = input
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    preview.push('…');
-    preview
-}
-
-const CHUANG_BANNER_LINES: &[&str] = &[
-    " ██████╗██╗  ██╗██╗   ██╗ █████╗ ███╗   ██╗ ██████╗ ",
-    "██╔════╝██║  ██║██║   ██║██╔══██╗████╗  ██║██╔════╝ ",
-    "██║     ███████║██║   ██║███████║██╔██╗ ██║██║  ███╗",
-    "██║     ██╔══██║██║   ██║██╔══██║██║╚██╗██║██║   ██║",
-    "╚██████╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║╚██████╔╝",
-    " ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ",
-];
 
 fn handle_repl_command(
     input: &str,
@@ -1071,7 +943,7 @@ fn handle_repl_command(
         "/help" | "/?" => {
             writeln!(
                 stdout,
-                "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /history   show recent REPL conversation context\n  /trace     show visible execution trace\n  /notrace   hide visible execution trace\n  /verbose   print full runtime metadata after each turn\n  /quiet     show concise answers only\n  /clear     clear the screen\n  /exit      leave the terminal\n\nMid-task guidance\n  !text      inject creator guidance into the current task at the next safe point\n  plain text while running is also injected into the current task\n  !text while idle is queued for the next submitted task\n\nDisplay\n  Recent REPL conversation is carried into the next turn for continuation prompts.\n  The input box stays visible between turns.\n  Running tasks show THINKING / STEPS and TOOL STREAM progress.\n  Results are split into trace, tool stream, answer, and report id.\n  Hidden model reasoning is not printed.\n"
+                "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /history   show recent REPL conversation context\n  /trace     show visible execution trace\n  /notrace   hide visible execution trace\n  /verbose   print full runtime metadata after each turn\n  /quiet     show concise answers only\n  /clear     clear the screen\n  /exit      leave the terminal\n\nMid-task guidance\n  !text      inject creator guidance into the current task at the next safe point\n  plain text while running is also injected into the current task\n  !text while idle is queued for the next submitted task\n\nDisplay\n  Recent REPL conversation is carried into the next turn for continuation prompts.\n  The composer stays visible between turns.\n  Running tasks emit compact thinking and tool lines in the transcript.\n  Completion renders one assistant block plus a muted metadata line.\n  Hidden model reasoning is not printed.\n"
             )
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
@@ -1145,7 +1017,7 @@ fn print_repl_result(
     elapsed_ms: u128,
     turn_count: usize,
     show_trace: bool,
-    input_preview: &str,
+    _input_preview: &str,
     pending_guidance_count: usize,
     progress_displays: &[ProgressDisplay],
 ) -> Result<(), String> {
@@ -1163,89 +1035,57 @@ fn print_repl_result(
         .get("runtime_report_id")
         .map(String::as_str)
         .unwrap_or("pending");
-    print_repl_section_rule(stdout, "DONE")?;
-    writeln!(
-        stdout,
-        "┌─ left status ─────────────┬─ center scrollback ───────────────┬─ right tool stream ───────┐\n│ turn      {:<15} │ elapsed   {:<20} │ tools     {:<14} │\n│ status    {:<15} │ protocol  {:<20} │ report    {:<14} │\n└───────────────────────────┴──────────────────────────────────┴──────────────────────────┘",
+    let trace_lines = if show_trace {
+        visible_trace_lines(result, elapsed_ms, &tool_meta, tool_status)
+    } else {
+        Vec::new()
+    };
+    let audit_line = render_completion_audit_line(progress_displays);
+    let answer = render_repl_answer_text(result.response.body.trim(), turn_count)?;
+    let metadata_line = render_completion_metadata_line(
         turn_count,
-        fixed_cell(&elapsed_cell, 20),
+        &elapsed_cell,
         tool_meta.tool_call_count,
-        fixed_cell(tool_status, 15),
         tool_meta.tool_protocol_error_count,
-        fixed_cell(report_id, 14)
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "input     {input_preview}")
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    if pending_guidance_count > 0 {
-        writeln!(
-            stdout,
-            "   queued idle guidance: {pending_guidance_count} note(s) will apply to the next submitted task"
-        )
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
-    if show_trace {
-        print_visible_trace(stdout, result, elapsed_ms, &tool_meta, tool_status)?;
-    }
-    print_repl_section_rule(stdout, "THINKING / STEPS")?;
-    let mut step_count = 0usize;
-    for display in progress_displays {
-        if let ProgressDisplay::Step(text) = display {
-            step_count += 1;
-            writeln!(stdout, "{}. {}", step_count, text)
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
-        }
-    }
-    if step_count == 0 {
-        writeln!(stdout, "1. runtime completed without visible step events")
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
+        tool_status,
+        report_id,
+        pending_guidance_count,
+    );
     writeln!(
         stdout,
-        "- hidden model reasoning is not printed; this is audited execution progress"
+        "{}",
+        render_assistant_completion_block(
+            result.response.model_name.as_str(),
+            &answer,
+            &metadata_line,
+            &trace_lines,
+            audit_line.as_deref(),
+        )
     )
     .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    if !tool_meta.tool_events.is_empty() {
-        print_repl_section_rule(stdout, "TOOL STREAM")?;
-    }
-    for event in &tool_meta.tool_events {
-        if let Some(line) = format_tool_event(event) {
-            writeln!(stdout, "- {line}").map_err(|e| format!("stdout_write_failed: {e}"))?;
-        }
-    }
-    print_repl_section_rule(stdout, "ANSWER")?;
-    print_repl_answer(stdout, result.response.body.trim(), turn_count)?;
-    if let Some(report_id) = meta.get("runtime_report_id") {
-        print_repl_section_rule(stdout, "REPORT")?;
-        writeln!(stdout, "{report_id}").map_err(|e| format!("stdout_write_failed: {e}"))?;
-    }
     stdout
         .flush()
         .map_err(|e| format!("stdout_flush_failed: {e}"))
 }
 
-fn print_repl_answer(
-    stdout: &mut io::Stdout,
-    answer: &str,
-    turn_count: usize,
-) -> Result<(), String> {
+fn render_repl_answer_text(answer: &str, turn_count: usize) -> Result<String, String> {
     let answer_chars = answer.chars().count();
     if answer_chars <= REPL_ANSWER_PREVIEW_CHARS {
-        print_wrapped_text(stdout, answer, REPL_TEXT_WRAP_WIDTH)?;
-        return Ok(());
+        return Ok(wrap_text_block(answer, REPL_TEXT_WRAP_WIDTH));
     }
 
     let snapshot_path = write_repl_answer_snapshot(answer, turn_count)?;
     let preview = multiline_preview(answer, REPL_ANSWER_PREVIEW_CHARS);
-    print_wrapped_text(stdout, &preview, REPL_TEXT_WRAP_WIDTH)?;
-    writeln!(
-        stdout,
-        "\n[answer truncated: showing {} of {} chars; full saved to {}]",
+    let mut rendered = wrap_text_block(&preview, REPL_TEXT_WRAP_WIDTH);
+    rendered.push_str(&format!(
+        "\n{}[answer truncated: showing {} of {} chars; full saved to {}]{}",
+        ANSI_DIM,
         REPL_ANSWER_PREVIEW_CHARS,
         answer_chars,
-        snapshot_path.display()
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))
+        snapshot_path.display(),
+        ANSI_RESET
+    ));
+    Ok(rendered)
 }
 
 fn write_repl_answer_snapshot(answer: &str, turn_count: usize) -> Result<PathBuf, String> {
@@ -1275,20 +1115,22 @@ fn multiline_preview(input: &str, max_chars: usize) -> String {
     preview
 }
 
-fn print_wrapped_text(stdout: &mut io::Stdout, text: &str, width: usize) -> Result<(), String> {
+fn wrap_text_block(text: &str, width: usize) -> String {
+    let mut output = String::new();
     for line in text.lines() {
         if line.is_empty() {
-            writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+            output.push('\n');
             continue;
         }
         for wrapped in wrap_line_by_chars(line, width) {
-            writeln!(stdout, "{wrapped}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            output.push_str(&wrapped);
+            output.push('\n');
         }
     }
     if text.ends_with('\n') {
-        writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
+        output.push('\n');
     }
-    Ok(())
+    output.trim_end_matches('\n').to_string()
 }
 
 fn wrap_line_by_chars(line: &str, width: usize) -> Vec<String> {
@@ -1311,84 +1153,244 @@ fn wrap_line_by_chars(line: &str, width: usize) -> Vec<String> {
     rows
 }
 
-fn print_visible_trace(
-    stdout: &mut io::Stdout,
+fn visible_trace_lines(
     result: &chuang_agent::agent_runtime::RuntimeResult,
     elapsed_ms: u128,
     tool_meta: &ToolLoopMeta,
     tool_status: &str,
-) -> Result<(), String> {
-    print_repl_section_rule(stdout, "TRACE")?;
-    writeln!(
-        stdout,
-        "context   engine={} tokens={} recall_hits={} dropped={}",
-        result.context_engine_kind,
-        result.packed_token_count,
-        result.recall_hit_count,
-        result.dropped_segment_ids.len()
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "model     {} finish={}",
-        result.response.model_name,
-        result
-            .response
-            .meta
-            .finish_reason
-            .as_deref()
-            .unwrap_or("none")
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(
-        stdout,
-        "runtime   elapsed={}ms tools={} protocol_errors={} status={}",
-        elapsed_ms, tool_meta.tool_call_count, tool_meta.tool_protocol_error_count, tool_status
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    Ok(())
+) -> Vec<String> {
+    vec![
+        format!(
+            "trace context={} tokens={} recall_hits={} dropped={}",
+            result.context_engine_kind,
+            result.packed_token_count,
+            result.recall_hit_count,
+            result.dropped_segment_ids.len()
+        ),
+        format!(
+            "trace model={} finish={}",
+            result.response.model_name,
+            result
+                .response
+                .meta
+                .finish_reason
+                .as_deref()
+                .unwrap_or("none")
+        ),
+        format!(
+            "trace runtime elapsed={}ms tools={} protocol_errors={} status={}",
+            elapsed_ms, tool_meta.tool_call_count, tool_meta.tool_protocol_error_count, tool_status
+        ),
+    ]
 }
 
 fn print_repl_section_rule(stdout: &mut io::Stdout, title: &str) -> Result<(), String> {
-    writeln!(
-        stdout,
-        "\n── {title} ─────────────────────────────────────────────"
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))
+    writeln!(stdout, "\n{}{}{} {}", ANSI_DIM, "·", ANSI_RESET, title)
+        .map_err(|e| format!("stdout_write_failed: {e}"))
 }
 
-fn format_tool_event(event: &serde_json::Value) -> Option<String> {
-    let kind = event.get("kind").and_then(|value| value.as_str())?;
-    match kind {
-        "tool_call" => {
-            let tool = event
-                .get("tool_name")
-                .and_then(|value| value.as_str())
-                .unwrap_or("tool");
-            let decision = event
-                .get("decision")
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown");
-            let ok = event
-                .get("ok")
-                .and_then(|value| value.as_bool())
-                .map(|value| if value { "ok" } else { "failed" })
-                .unwrap_or("unknown");
-            let summary = event
-                .get("summary")
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            Some(format!("tool {tool}: {ok} decision={decision} {summary}"))
-        }
-        "protocol_error" => {
-            let code = event
-                .get("protocol_error_code")
-                .and_then(|value| value.as_str())
-                .unwrap_or("protocol_error");
-            Some(format!("protocol: {code}"))
-        }
-        _ => Some(format!("event: {kind}")),
+fn render_repl_banner(summary: &chuang_agent::runtime_config::ConfigSummary) -> String {
+    let cwd = env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    [
+        format!(
+            "{}{}Chuang REPL{} {}{}{}",
+            ANSI_BOLD, ANSI_CYAN, ANSI_RESET, ANSI_DIM, summary.provider_id, ANSI_RESET
+        ),
+        format!(
+            "{}model{} {}  {}cwd{} {}",
+            ANSI_DIM, ANSI_RESET, summary.model_name, ANSI_DIM, ANSI_RESET, cwd
+        ),
+        format!(
+            "{}commands{} /help /status /history /trace /notrace /verbose /quiet /exit",
+            ANSI_DIM, ANSI_RESET
+        ),
+    ]
+    .join("\n")
+}
+
+fn render_user_message_block(
+    user_input: &str,
+    provider_id: &str,
+    model_name: &str,
+    cwd: &str,
+) -> String {
+    let mut lines = vec![format!(
+        "{}{}user{} {}{}{}",
+        ANSI_BOLD, ANSI_BLUE, ANSI_RESET, ANSI_DIM, provider_id, ANSI_RESET
+    )];
+    for line in wrap_text_block(user_input, REPL_TEXT_WRAP_WIDTH).lines() {
+        lines.push(format!("{}│{} {}", ANSI_BLUE, ANSI_RESET, line));
     }
+    lines.push(format!(
+        "{}│{} {}type !text while running to inject guidance{}",
+        ANSI_BLUE, ANSI_RESET, ANSI_DIM, ANSI_RESET
+    ));
+    lines.push(format!(
+        "{}model{} {}  {}cwd{} {}",
+        ANSI_DIM, ANSI_RESET, model_name, ANSI_DIM, ANSI_RESET, cwd
+    ));
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn render_progress_display_line(index: usize, display: &ProgressDisplay) -> String {
+    let (icon, color, text) = match display {
+        ProgressDisplay::Step(text) => ("thinking", ANSI_YELLOW, text),
+        ProgressDisplay::Tool(text) => ("tool", ANSI_GREEN, text),
+    };
+    format!(
+        "{}{} {:>2}{} {}",
+        color,
+        icon,
+        index,
+        ANSI_RESET,
+        compact_preview(text, REPL_META_WRAP_WIDTH)
+    )
+}
+
+fn render_running_tick_line(elapsed: u64) -> String {
+    format!(
+        "{}working {}s{} {}still running; type !note to guide this turn{}",
+        ANSI_DIM, elapsed, ANSI_RESET, ANSI_GRAY, ANSI_RESET
+    )
+}
+
+fn render_repl_prompt(running: bool, guidance_count: usize) -> String {
+    let mut status = if running {
+        format!("{}composer [running]{}", ANSI_DIM, ANSI_RESET)
+    } else {
+        format!("{}composer{}", ANSI_DIM, ANSI_RESET)
+    };
+    if guidance_count > 0 {
+        status.push_str(&format!(
+            " {}+{} queued{}",
+            ANSI_DIM, guidance_count, ANSI_RESET
+        ));
+    }
+    format!("{status}\n{}›{} ", ANSI_BLUE, ANSI_RESET)
+}
+
+fn render_repl_failure_block(
+    input_preview: &str,
+    elapsed_ms: u128,
+    error: &str,
+    progress_lines: &[String],
+) -> String {
+    let mut lines = vec![
+        format!(
+            "{}{}assistant error{} {}",
+            ANSI_BOLD, ANSI_RED, ANSI_RESET, input_preview
+        ),
+        format!(
+            "{}reason{} {}",
+            ANSI_RED,
+            ANSI_RESET,
+            readable_runtime_error(error)
+        ),
+        format!("{}elapsed {}ms{}", ANSI_DIM, elapsed_ms, ANSI_RESET),
+    ];
+    if progress_lines.is_empty() {
+        lines.push(format!(
+            "{}recent{} no visible runtime events were captured",
+            ANSI_DIM, ANSI_RESET
+        ));
+    } else {
+        for line in progress_lines.iter().take(4) {
+            lines.push(format!("{}recent{} {}", ANSI_DIM, ANSI_RESET, line));
+        }
+    }
+    lines.push(format!(
+        "{}ask again with a narrower goal, or use ! to correct a running turn.{}",
+        ANSI_GRAY, ANSI_RESET
+    ));
+    lines.join("\n")
+}
+
+fn render_assistant_completion_block(
+    model_name: &str,
+    answer: &str,
+    metadata_line: &str,
+    trace_lines: &[String],
+    audit_line: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "{}{}assistant{} {}{}{}",
+        ANSI_BOLD, ANSI_CYAN, ANSI_RESET, ANSI_DIM, model_name, ANSI_RESET
+    )];
+    for line in trace_lines {
+        lines.push(format!("{}{}{}", ANSI_DIM, line, ANSI_RESET));
+    }
+    if let Some(audit_line) = audit_line {
+        lines.push(format!("{}audit{} {}", ANSI_DIM, ANSI_RESET, audit_line));
+    }
+    lines.push(answer.to_string());
+    lines.push(metadata_line.to_string());
+    lines.join("\n")
+}
+
+fn render_completion_audit_line(progress_displays: &[ProgressDisplay]) -> Option<String> {
+    let mut selected = progress_displays
+        .iter()
+        .filter_map(|display| match display {
+            ProgressDisplay::Tool(text) => Some(text.as_str()),
+            ProgressDisplay::Step(text)
+                if text.starts_with("context ready")
+                    || text.starts_with("finalize answer")
+                    || text.contains("guidance injected") =>
+            {
+                Some(text.as_str())
+            }
+            ProgressDisplay::Step(_) => None,
+        })
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>();
+    selected.reverse();
+    if selected.is_empty() {
+        None
+    } else {
+        Some(
+            selected
+                .into_iter()
+                .map(|line| compact_preview(line, 44))
+                .collect::<Vec<_>>()
+                .join("  ·  "),
+        )
+    }
+}
+
+fn wrap_single_line(input: &str, width: usize) -> String {
+    compact_preview(input, width)
+}
+
+fn render_completion_metadata_line(
+    turn_count: usize,
+    elapsed: &str,
+    tool_calls: usize,
+    protocol_errors: usize,
+    tool_status: &str,
+    report_id: &str,
+    pending_guidance_count: usize,
+) -> String {
+    let mut parts = vec![
+        format!("turn {turn_count}"),
+        format!("elapsed {elapsed}"),
+        format!("tools {tool_calls}"),
+        format!("protocol {protocol_errors}"),
+        format!("status {tool_status}"),
+        format!("report {report_id}"),
+    ];
+    if pending_guidance_count > 0 {
+        parts.push(format!("queued_guidance {pending_guidance_count}"));
+    }
+    format!(
+        "{}{}{}",
+        ANSI_DIM,
+        wrap_single_line(&parts.join("  "), REPL_META_WRAP_WIDTH),
+        ANSI_RESET
+    )
 }
 
 fn parse_repl_options(args: &[String]) -> Result<(CliOptions, bool), String> {
@@ -1596,37 +1598,163 @@ mod tests {
     }
 
     #[test]
-    fn repl_banner_and_help_advertise_history_command() {
-        let help = "\nCommands\n  /help      show this help\n  /status    show runtime status summary\n  /history   show recent REPL conversation context\n";
-        let banner =
-            banner_row("commands: /help /status /history /trace /notrace /verbose /quiet /exit");
-        let title = banner_center_row("CHUANG");
+    fn repl_user_block_uses_accent_line_and_metadata() {
+        let rendered = render_user_message_block(
+            "请检查当前分支并总结\n不要省略第二行",
+            "openai_compatible",
+            "gpt-5.5",
+            "/tmp/work",
+        );
 
-        assert!(help.contains("/history"));
-        assert!(banner.contains("/history"));
-        assert!(title.contains("CHUANG"));
-        assert_eq!(banner.chars().count(), REPL_BANNER_INNER_WIDTH + 2);
-        assert_eq!(title.chars().count(), REPL_BANNER_INNER_WIDTH + 2);
+        assert!(rendered.contains("user"));
+        assert!(rendered.contains("│"));
+        assert!(rendered.contains("请检查当前分支并总结"));
+        assert!(rendered.contains("不要省略第二行"));
+        assert!(rendered.contains("model"));
+        assert!(rendered.contains("cwd"));
     }
 
     #[test]
-    fn repl_banner_rows_keep_fixed_width_for_variable_provider_names() {
-        let row = banner_row("provider: very-long-provider-name    model: gpt-5.5");
+    fn repl_progress_line_is_compact_transcript_style() {
+        let rendered = render_progress_display_line(
+            3,
+            &ProgressDisplay::Tool("shell_exec ok git status".to_string()),
+        );
 
-        assert!(row.starts_with('│'));
-        assert!(row.ends_with('│'));
-        assert_eq!(row.chars().count(), REPL_BANNER_INNER_WIDTH + 2);
+        assert!(rendered.contains("tool"));
+        assert!(rendered.contains("git status"));
+        assert!(!rendered.contains("TOOL STREAM"));
+        assert!(!rendered.contains("│"));
     }
 
     #[test]
-    fn repl_chuang_banner_art_keeps_fixed_width() {
-        for line in CHUANG_BANNER_LINES {
-            let row = banner_center_row(line);
+    fn repl_assistant_completion_has_answer_and_muted_metadata_without_old_wall_labels() {
+        let rendered = render_assistant_completion_block(
+            "gpt-5.5",
+            "answer body",
+            &render_completion_metadata_line(2, "120ms", 1, 0, "ok", "rpt_123", 0),
+            &["trace model=gpt-5.5 finish=stop".to_string()],
+            Some("code_execute: ok git status clean"),
+        );
 
-            assert!(row.starts_with('│'));
-            assert!(row.ends_with('│'));
-            assert_eq!(row.chars().count(), REPL_BANNER_INNER_WIDTH + 2);
-        }
+        assert!(rendered.contains("assistant"));
+        assert!(rendered.contains("answer body"));
+        assert!(rendered.contains("audit"));
+        assert!(rendered.contains("git status clean"));
+        assert!(rendered.contains("turn 2"));
+        assert!(!rendered.contains("DONE"));
+        assert!(!rendered.contains("TRACE"));
+        assert!(!rendered.contains("THINKING"));
+        assert!(!rendered.contains("TOOL STREAM"));
+        assert!(!rendered.contains("ANSWER"));
+    }
+
+    #[test]
+    fn repl_completion_audit_keeps_recent_tool_evidence_without_restoring_the_old_wall() {
+        let displays = vec![
+            ProgressDisplay::Step("started: inspect repo".to_string()),
+            ProgressDisplay::Step("context ready ok segments=2".to_string()),
+            ProgressDisplay::Tool("code_execute: ok git status clean".to_string()),
+            ProgressDisplay::Tool("file_read: ok Cargo.toml".to_string()),
+            ProgressDisplay::Step("model replied round 3 finish=stop".to_string()),
+        ];
+
+        let audit = render_completion_audit_line(&displays)
+            .expect("tool evidence should produce a compact audit line");
+
+        assert!(audit.contains("context ready"));
+        assert!(audit.contains("git status clean"));
+        assert!(audit.contains("Cargo.toml"));
+        assert!(!audit.contains("model replied"));
+        assert!(!audit.contains("TOOL STREAM"));
+    }
+
+    #[test]
+    fn repl_banner_is_compact_and_mentions_history() {
+        let summary = chuang_agent::runtime_config::ConfigSummary {
+            provider_kind: "openai_compatible".to_string(),
+            provider_id: "provider-x".to_string(),
+            model_name: "gpt-5.5".to_string(),
+            provider_tls_ca_cert_path: None,
+            provider_request_timeout_ms: Some(30_000),
+            provider_reasoning_effort: None,
+            provider_fallback_policy: None,
+            governance_kind: "rules".to_string(),
+            actuator_kind: "none".to_string(),
+            subagent_kind: "none".to_string(),
+            subagent_live_worker: chuang_agent::runtime_config::SubagentLiveWorkerSummary {
+                enabled: false,
+                adapter_kind: "none".to_string(),
+                status: "disabled".to_string(),
+                starts_worker: false,
+                available: false,
+                reason: "disabled".to_string(),
+            },
+            subagent_queue_root: "queue".to_string(),
+            evolution_kind: "none".to_string(),
+            control_plane_kind: "none".to_string(),
+            control_command_timeout_ms: None,
+            external_knowledge_wiki_endpoint: None,
+            external_knowledge_wiki_token_env: None,
+            external_knowledge_wiki_timeout_ms: None,
+            external_knowledge_gbrain_endpoint: None,
+            external_knowledge_gbrain_token_env: None,
+            external_knowledge_gbrain_timeout_ms: None,
+            actuator_command_timeout_ms: None,
+            identity_memory_kind: "fs".to_string(),
+            identity_memory_root: "mem".to_string(),
+            identity_experiences_path: "exp".to_string(),
+            identity_user_max_chars: 0,
+            identity_memory_max_chars: 0,
+            identity_root: "identity".to_string(),
+            soul_path: "soul".to_string(),
+            story_path: "story".to_string(),
+            first_wake_path: "first_wake".to_string(),
+            agents_registry_path: "agents.toml".to_string(),
+            rules_root: "rules".to_string(),
+            rules_core_path: "rules/core.toml".to_string(),
+            context_engine_kind: "deterministic".to_string(),
+            tool_loop_max_rounds: 4,
+            tool_shell_timeout_ms: 10_000,
+            tool_shell_risk_rule_counts: "0".to_string(),
+            db_path: "db.sqlite".to_string(),
+            recall_limit: 5,
+            context_max_tokens: 8192,
+            context_reserve_system_tokens: 512,
+            context_min_working_tokens: 1024,
+            context_max_tool_results: 8,
+            context_max_memory_segments: 8,
+            api_key_state: Some("set".to_string()),
+            placeholder_warnings: Vec::new(),
+        };
+        let rendered = render_repl_banner(&summary);
+
+        assert!(rendered.contains("Chuang REPL"));
+        assert!(rendered.contains("/history"));
+        assert!(!rendered.contains("████"));
+    }
+
+    #[test]
+    fn repl_metadata_line_is_wrapped_without_old_table() {
+        let rendered = render_completion_metadata_line(
+            12,
+            "999ms",
+            23,
+            4,
+            "tool_loop_exhausted",
+            "report_abcdefghijklmnopqrstuvwxyz",
+            7,
+        );
+
+        assert!(rendered.contains("turn 12"));
+        assert!(rendered.contains("elapsed 999ms"));
+        assert!(!rendered.contains("┌"));
+        assert!(
+            compact_preview(&rendered, REPL_META_WRAP_WIDTH + 20)
+                .chars()
+                .count()
+                <= REPL_META_WRAP_WIDTH + 20
+        );
     }
 
     #[test]

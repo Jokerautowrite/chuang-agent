@@ -279,6 +279,7 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     assert!(instructions.contains("辅助工具：list_dir, open_app"));
     assert!(instructions.contains("apply_patch"));
     assert!(instructions.contains("memory_recall"));
+    assert!(instructions.contains("code_execute 使用 Bash"));
     assert!(instructions.contains(r#""tool":"open_app""#));
     assert!(instructions.contains(r#""app_name":"Chrome""#));
     assert!(instructions.contains(r#""schema_version":1"#));
@@ -525,6 +526,24 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert!(!shell.stderr_redacted);
     assert!(!shell.stdout_truncated);
     assert!(!shell.stderr_truncated);
+}
+
+#[test]
+fn shell_exec_supports_bash_pipefail_commands() {
+    let root = temp_workspace("bash-pipefail");
+    fs::create_dir_all(&root).expect("workspace root should be created");
+
+    let result = execute_tool_call(
+        &root,
+        &ToolCall::ShellExec {
+            command: "set -o pipefail; printf bash-ok | cat".to_string(),
+            cwd: Some(".".to_string()),
+        },
+    );
+
+    assert!(result.ok, "bash command should succeed: {}", result.summary);
+    assert_eq!(result.stdout.as_deref(), Some("bash-ok"));
+    assert_eq!(result.exit_code, Some(0));
 }
 
 #[test]

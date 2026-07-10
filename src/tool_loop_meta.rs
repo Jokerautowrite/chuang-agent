@@ -172,7 +172,9 @@ fn is_unified_execution_failure_class(class: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_unified_execution_failure_classes, ToolLoopMeta};
+    use super::{
+        collect_unified_execution_failure_classes, derive_tool_protocol_typed_failure, ToolLoopMeta,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -207,6 +209,16 @@ mod tests {
         assert_eq!(meta.tool_calls.len(), 1);
         assert_eq!(meta.tool_protocol_errors.len(), 1);
         assert_eq!(meta.tool_events.len(), 2);
+    }
+
+    #[test]
+    fn completed_after_tool_limit_is_not_classified_as_missing_final() {
+        let extra = BTreeMap::from([(
+            "tool_loop_status".to_string(),
+            "completed_after_tool_limit".to_string(),
+        )]);
+
+        assert_eq!(derive_tool_protocol_typed_failure(&extra), None);
     }
 
     #[test]

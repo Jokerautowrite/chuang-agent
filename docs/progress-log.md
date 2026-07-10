@@ -1,3 +1,20 @@
+# 2026-07-10 OpenCode 风格终端与工具循环强制收口
+- 老爸实测发现两个主链问题：交互终端仍像内部诊断报表；模型连续使用工具达到 `tool_max_rounds=4` 后，没有额外机会生成最终答复，只返回“没有拿到 FINAL”的兜底文案。
+- 已只读取证本机 OpenCode `1.17.13` 的真实终端形态，并把 Chuang interactive TTY 改为紧凑 transcript：启动区收敛为 provider/model/cwd header；用户输入显示为蓝色左侧竖线消息块；thinking/tool 事件进入连续消息流；完成后只保留 assistant header、正文和一行 muted metadata，不再重复打印 `DONE / TRACE / THINKING / TOOL STREAM / ANSWER / REPORT` 大墙。`/trace` 仍保留，但默认关闭。
+- 工具循环现在把“工具预算”和“最终总结”分开：正常工具阶段仍最多执行 `tool_max_rounds` 轮；若最后一轮仍是工具调用，系统会额外发起一次工具已禁用的 finalization model call。该调用移除 tool instruction、只注入 finalization contract；即使模型再次返回 ACTION，也只记录并阻断，不会执行额外工具或重放已有副作用。
+- finalization 成功使用显式状态 `tool_loop_status=completed_after_tool_limit`，避免在监控/回放里伪装成预算内普通完成；同时新增 `tool_finalization_attempted/status/response_kind/tool_call_blocked` 与 `tool_model_call_count` 观测字段。provider 失败、非法协议或再次请求工具时保留原工具证据并返回可读 fallback。
+- 完成块不会恢复旧分区墙，但会保留一条最多 3 项的 compact audit，汇总最近 context/tool/finalization 证据，避免快任务结束后用户错过执行过程。
+- 新增回归覆盖：轮次耗尽后能拿到最终答复；finalization 再次请求工具时目标文件不会创建；终端 user/progress/assistant transcript 样式；长答案快照与历史续接继续保留。
+- 验证通过：`cargo fmt --all --check`、`cargo check -q`、`cargo test -q tool_loop_`、`cargo test -q repl_`、全量 `cargo test -q`、`git diff --check`；另用 `script` 伪 TTY 目检了真实启动、用户消息、进度流、assistant 答复和 composer。
+- 当前边界：这是 OpenCode-inspired stdout/PTY transcript，不是 alternate-screen 全屏 TUI；本轮优先修复真实可读性和 FINAL 收口，不引入新的终端框架依赖。
+- 用真实 provider 重跑“给自己做个体检”后，强制收口已成功返回最终答复，同时暴露 `code_execute` 原先经 `/bin/sh` 执行、无法接受模型常用的 `set -o pipefail`。执行器现统一使用 Bash login shell，并在工具说明和回归测试中锁定 `pipefail` 支持，避免健康检查类命令在第一个 shell 选项处提前退出。
+- 第二次真实体检确认 Bash 兼容问题已消失，但完整 `cargo check + test + clippy` 超过原先 30 秒单命令预算。默认和当前项目配置现提高到 120 秒，仍保留强制超时终止；该值足以覆盖本项目完整健康检查，又不会让异常命令无限运行。
+- 第三次真实体检中模型首轮直接给出“约 70%”且幻觉工具只有 `zz`，暴露“体检/自检/健康检查”未被本地任务识别器覆盖。现将这些意图显式列为必须真实工具取证：无工具的 FINAL 会按 `missing_required_action` 打回，新增回归锁定健康结论必须至少有一次 `code_execute` 等真实证据。
+- 第四次真实体检已真实执行 `cargo test` 且状态码 0，但模型仍被首轮被否决的“工具不可用”原文锚定，并把安全脱敏误读为执行失败。现在未验证 FINAL 的正文只保留在 `tool_protocol_errors_json` 审计中，不再回灌模型；工具回执改为结构化 `execution_succeeded/exit_code/duration/output statistics/content_redacted`，并明确脱敏仅保护内容、不代表工具不可用或失败。
+- 最终真实体检通过：`chuang ask "给自己做个体检"` 走 `gpt-5.6-sol/xhigh`，实际执行 Bash `pipefail`、`cargo check --workspace` 和 `cargo test --workspace`，工具退出码 0；最终回答承认检查成功，原始两个问题均未复现。
+- 同步修正本机真实命令 `/home/user/.local/bin/chuang` 的一次性任务临时配置：shell 超时从 30 秒对齐到 120 秒，模型从旧 `gpt-5.5` 对齐到 `gpt-5.6-sol/xhigh`。未改 provider URL、密钥、登录态或服务。
+- 最终验证通过：`cargo test -q`、`cargo check --all-targets`、`cargo fmt --all -- --check`、`git diff --check`、启动脚本语法检查，以及 stub 伪 TTY 终端样式目检。
+
 # 2026-07-10 Chuang 本地完成度收口
 - 本轮按项目目标对 provider、memory、governance、runtime events、subagent、identity/channel、lifecycle、session archive 和 acceptance 边界做并行审计；结论收敛为 `local_completion=100%`，同时保持 `global_real_live_ready=false`、`live_readiness.overall_state=local_ready_live_pending`、`real_external_acceptance_pending=true`。
 - provider reasoning effort 已从隐式默认变成受校验配置并透传；memory policy 已覆盖 reservation TTL、启动失败 rollback、幂等 reclaim 和原子 eviction rollback；governance 保持强制装配。

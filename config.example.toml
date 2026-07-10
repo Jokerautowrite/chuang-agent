@@ -4,7 +4,7 @@
 db_path = "./data/chuang-agent.db"
 recall_limit = 5
 tool_max_rounds = 4
-tool_shell_timeout_ms = 30000
+tool_shell_timeout_ms = 120000
 identity_memory_root = "./data/hermes-memory"
 identity_root = "./identity"
 soul_path = "./identity/SOUL.md"

@@ -137,6 +137,8 @@ shell_exec
 
 `code_execute` 的 shell 风险分类使用 `ShellRiskRules`，默认规则覆盖删除/清理、服务变更、网络调用、密钥访问四类。配置文件可覆盖这些模式：
 
+`code_execute` 通过 Bash login shell 执行，支持 `pipefail`、here-doc 等常见 Bash 语法。默认单次执行超时为 `120000ms`，仍会在超时后终止，不允许命令无限挂起；可通过 `tool_shell_timeout_ms` 或 `[tool_loop] shell_timeout_ms` 调整。
+
 ```toml
 [tool_loop.risk]
 delete_or_cleanup = " rm , git reset --hard"

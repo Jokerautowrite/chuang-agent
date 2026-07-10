@@ -265,6 +265,7 @@ impl AtomicToolRegistry {
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
 辅助工具：list_dir, open_app, apply_patch, memory_recall。兼容旧名：read_file, write_file, shell_exec。\n\
+code_execute 使用 Bash 登录 shell 执行命令；可以使用 pipefail、here-doc 和常见 Bash 语法。\n\
 桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面/浏览器只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面/浏览器动作按 adapter、gate、allowlist、治理和审计执行；普通打开应用、点击和输入默认直接执行，不要先要求人工审批，只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。\n\
 当用户要求查看当前屏幕、窗口标题、页面内容或界面状态时，优先调用 locate 或 screenshot 先取证，不要直接回复“无法读取”。\n\
 桌面/浏览器只读观察：screenshot, locate。locate / screenshot 是只读观察工具。交互操作：open_app, mouse, keyboard。\n\

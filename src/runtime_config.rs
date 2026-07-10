@@ -249,7 +249,7 @@ impl RuntimeConfig {
             governance: GovernanceConfig::StaticRule,
             tool_loop: ToolLoopConfig {
                 max_rounds: 4,
-                shell_timeout_ms: 30_000,
+                shell_timeout_ms: 120_000,
                 shell_risk_rules: ShellRiskRules::default(),
             },
             actuator: ActuatorConfig::Fake,
