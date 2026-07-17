@@ -12,6 +12,8 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 
 核心只保留身份、记忆、上下文、治理和报告。provider、子代理、桌面/浏览器、控制面、飞书等外部能力走 slot / adapter / plugin。
 
+**调度台原则（重要）**：创不是要处处最强，而是要 **调动最强的 agent 打工**。写代码等工人活默认调用 Codex（或当时最强编码 agent），不在创内核里对标 Claude Code / Codex / Grok 死磕体验；创握紧记忆、治理、编排与插槽。详见 `docs/blueprint-v1.md` §0.1。
+
 ## 当前状态
 
 - `chuang`：首选终端入口，直接启动本地交互 REPL；真实 TTY 分层显示「你 / 工作进展 / 小创最终答复」（编号+状态图标，答复在前）。运行中底部有实时状态行：`⏱总时长 · 阶段计时 · 模型 · 超时剩余 · 当前步骤`（约 200ms 刷新）；结束摘要含耗时/模型/思考/执行分段。默认不堆 report id 等内部诊断。`!补充` 可注入当前任务；最近 8 轮自动续聊，`/history` 可查。`/trace`：进行中多模型轮次+更长折叠，结束附技术汇总；`/notrace` 默认；`/verbose` 全量 runtime dump。仍是 stdout transcript，不打印隐藏思维链。

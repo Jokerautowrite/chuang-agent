@@ -1,3 +1,7 @@
+# 2026-07-18 架构钉死：调度台原则（防死磕）
+- 明确创是调度台 / 本地 Agent OS，不是全能最强工人：不求编码/搜索/通才处处第一，要求能调用最强 agent 打工并守住记忆、治理、编排、可替换插槽。
+- 写入 `docs/blueprint-v1.md` §0.1、`docs/core-boundary.md`、`docs/pluggable-architecture-v1.md` §0.1、`AGENTS.md` Core thesis、`README.md` 当前目标；禁止在 Codex/Claude Code/Grok 主业赛道重复造轮子死磕。
+
 # 2026-07-18 托管无头浏览器 + browser 工具接完
 - 补齐 `CdpBrowserReadAdapter`：`navigate_and_read`（Chrome 新版 `/json/new` 用 PUT）、通用 `ws_cdp_method`、DOM 截断、`resolve_cdp_browser_read_adapter`。
 - 新增 `scripts/chuang-headless-chrome.sh`（start/stop/restart/status/env），默认 CDP 9222。

@@ -5,10 +5,15 @@ This project builds a local agent operating system, not a chatbot.
 Core thesis:
 
 - Memory is the body; agent runtimes are shells.
-- Codex contributes the Rust/event-loop backbone.
+- **Chuang is a dispatcher / local agent OS, not an all-purpose strongest worker.** It does not need to beat Codex, Claude Code, or Grok at their primary games (coding UX, general chat/search). It needs to **orchestrate the strongest agents** under governance, memory, and replaceable slots.
+- When coding is the job: call Codex (or the current best coding agent)—do not rebuild that product inside Chuang.
+- Forbidden: death-marching on “be strongest at everything”; treating any single worker CLI/model as the irreplaceable body.
+- Codex contributes the Rust/event-loop backbone (and is a first-class coding worker to invoke).
 - Hermes contributes bounded memory and identity continuity.
 - OpenClaw contributes isolated full-capability subagents.
 - GenericAgent contributes desktop actuation and skill evolution.
+
+See `docs/blueprint-v1.md` §0.1 and `docs/core-boundary.md` (调度台原则).
 
 ## Required Reading
 
