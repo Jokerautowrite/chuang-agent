@@ -173,32 +173,89 @@ impl TuiApp {
         self.activity = message;
     }
 
-    fn set_idle_chrome(&mut self, model: &str, show_trace: bool) {
+    fn set_idle_chrome(&mut self, stats: &ReplSessionStats, effort: &str, show_trace: bool) {
         self.running = false;
-        self.chip = if show_trace {
-            format!("{model} · 就绪 · trace")
-        } else {
-            format!("{model} · 就绪")
-        };
+        self.chip = format_chip(stats, effort, "就绪", None, show_trace);
         self.footer = "Enter 发送 · /help · /stop · /exit · /trace".to_string();
         self.activity.clear();
     }
 
-    fn set_running_chrome(&mut self, model: &str, elapsed: &str, show_trace: bool) {
+    fn set_running_chrome(
+        &mut self,
+        stats: &ReplSessionStats,
+        effort: &str,
+        elapsed: &str,
+        show_trace: bool,
+    ) {
         self.running = true;
-        self.chip = if show_trace {
-            format!("{model} · 运行中 {elapsed} · trace")
-        } else {
-            format!("{model} · 运行中 {elapsed}")
-        };
+        self.chip = format_chip(stats, effort, &format!("运行中 {elapsed}"), None, show_trace);
         self.footer = "/stop 取消 · Enter 也可补充要求".to_string();
     }
 
-    fn set_approval_chrome(&mut self, model: &str) {
+    fn set_approval_chrome(&mut self, stats: &ReplSessionStats, effort: &str) {
         self.running = false;
-        self.chip = format!("{model} · 待确认");
+        self.chip = format_chip(stats, effort, "待确认", None, false);
         self.footer = "1 允许 · 2 拒绝 · 3 详情".to_string();
     }
+}
+
+/// Right-side chip: `model (max) · 就绪 · 12k/272k（4%）`
+fn format_chip(
+    stats: &ReplSessionStats,
+    effort: &str,
+    state: &str,
+    _extra: Option<&str>,
+    show_trace: bool,
+) -> String {
+    let model = stats.model_name.as_str();
+    let effort = effort.trim();
+    let head = if effort.is_empty() {
+        model.to_string()
+    } else {
+        format!("{model} ({effort})")
+    };
+    let ctx = format_context_progress(stats.context_tokens, stats.context_max_tokens);
+    let mut parts = vec![head, state.to_string(), ctx];
+    if show_trace {
+        parts.push("trace".to_string());
+    }
+    parts.join(" · ")
+}
+
+fn format_context_progress(used: u64, max: u64) -> String {
+    if max == 0 {
+        return "0/0（0%）".to_string();
+    }
+    let pct = used.saturating_mul(100) / max;
+    let pct = pct.min(100);
+    format!(
+        "{}/{}（{}%）",
+        format_token_short(used),
+        format_token_short(max),
+        pct
+    )
+}
+
+fn format_token_short(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 10_000 {
+        format!("{}k", n / 1_000)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+fn reasoning_effort_label(summary: &chuang_agent::runtime_config::ConfigSummary) -> String {
+    summary
+        .provider_reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn run_app(
@@ -208,6 +265,7 @@ fn run_app(
     show_trace: &mut bool,
 ) -> Result<(), String> {
     let summary = options.runtime.summary();
+    let effort = reasoning_effort_label(&summary);
     let mut turn_count = 0usize;
     let mut pending_guidance: Vec<String> = Vec::new();
     let mut conversation_history: Vec<ConversationHistoryItem> = Vec::new();
@@ -216,7 +274,7 @@ fn run_app(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
 
-    let mut app = TuiApp::new(format!("{} · 就绪", summary.model_name));
+    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false));
 
     loop {
         // --- progress / completion while turn runs ---
@@ -235,13 +293,13 @@ fn run_app(
             *show_trace,
         )? {
             if pending_approval.is_some() {
-                app.set_approval_chrome(&stats.model_name);
+                app.set_approval_chrome(&stats, &effort);
             } else {
-                app.set_idle_chrome(&stats.model_name, *show_trace);
+                app.set_idle_chrome(&stats, &effort, *show_trace);
             }
         } else if let Some(turn) = running.as_ref() {
             let elapsed = format_short_duration(turn.started_at.elapsed());
-            app.set_running_chrome(&stats.model_name, &elapsed, *show_trace);
+            app.set_running_chrome(&stats, &effort, &elapsed, *show_trace);
         }
 
         terminal
@@ -393,12 +451,14 @@ fn handle_submit(
                     recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
                 *running = Some(spawn_repl_turn(options.clone(), continuation, history));
                 stats.mark_turn_started();
-                app.set_running_chrome(&stats.model_name, "0s", *show_trace);
+                let effort = reasoning_effort_label(summary);
+                app.set_running_chrome(stats, &effort, "0s", *show_trace);
             }
             "2" | "n" | "N" | "no" | "NO" => {
                 app.push(LineKind::System, "× 已拒绝  该操作未执行。");
                 pending_approval.take();
-                app.set_idle_chrome(&stats.model_name, *show_trace);
+                let effort = reasoning_effort_label(summary);
+                app.set_idle_chrome(stats, &effort, *show_trace);
             }
             "3" => {
                 app.push(LineKind::Meta, render_approval_details(approval));
@@ -422,7 +482,8 @@ fn handle_submit(
         if !text.trim().is_empty() {
             app.push(LineKind::System, text.trim_end());
         }
-        app.set_idle_chrome(&stats.model_name, *show_trace);
+        let effort = reasoning_effort_label(summary);
+        app.set_idle_chrome(stats, &effort, *show_trace);
         return Ok(SubmitResult::Continue);
     }
 
@@ -461,8 +522,8 @@ fn handle_submit(
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
     *running = Some(spawn_repl_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
-    app.set_running_chrome(&stats.model_name, "0s", *show_trace);
-    let _ = summary;
+    let effort = reasoning_effort_label(summary);
+    app.set_running_chrome(stats, &effort, "0s", *show_trace);
     Ok(SubmitResult::Continue)
 }
 
