@@ -75,22 +75,32 @@ fn terminal_size() -> (u16, u16) {
 }
 
 /// Grok-style chrome: app owns input buffer + fixed bottom strip.
-/// Transcript scrolls in the region above; bottom 2 rows are always status + `❯ input`.
+///
+/// Layout (bottom 3 rows, matches right-side Grok TUI):
+/// ```text
+/// ────────────────────────────────────────  hairline
+/// > 输入消息…                               input box (primary)
+/// 就绪 · gpt-5.6-terra · /help              footer status
+/// ```
+/// Transcript scrolls only above the hairline (DECSTBM).
 struct ReplChrome {
     cols: u16,
     rows: u16,
-    /// Bottom rows reserved for status + input (fixed).
+    /// Bottom rows reserved: rule + input + status.
     reserve: u16,
     raw_active: bool,
 }
 
 impl ReplChrome {
+    /// Hairline + input + status footer.
+    const RESERVE_ROWS: u16 = 3;
+
     fn detect(_interactive: bool) -> Self {
         let (cols, rows) = terminal_size();
         Self {
             cols,
             rows,
-            reserve: 2,
+            reserve: Self::RESERVE_ROWS,
             raw_active: false,
         }
     }
@@ -98,19 +108,26 @@ impl ReplChrome {
     fn refresh_size(&mut self) {
         let (cols, rows) = terminal_size();
         self.cols = cols.max(40);
-        self.rows = rows.max(8);
+        self.rows = rows.max(10);
     }
 
     fn body_bottom_row(&self) -> u16 {
         self.rows.saturating_sub(self.reserve).max(1)
     }
 
+    /// Row indices (1-based): rule, input, status.
+    fn strip_rows(&self) -> (u16, u16, u16) {
+        let rule = self.rows.saturating_sub(self.reserve) + 1;
+        let input = rule + 1;
+        let status = rule + 2;
+        (rule, input, status)
+    }
+
     fn enable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
         self.refresh_size();
         enable_raw_mode().map_err(|e| format!("raw_mode_failed: {e}"))?;
         self.raw_active = true;
-        // Optional: don't use full alt-screen so OS scrollback still works for mouse wheel
-        // on some terminals; we still pin with DECSTBM + app-drawn input.
+        // Keep main scrollback; pin chrome with DECSTBM + app-drawn input.
         let bottom = self.body_bottom_row();
         write!(stdout, "\x1b[1;{bottom}r").map_err(|e| format!("stdout_write_failed: {e}"))?;
         execute!(stdout, Hide).map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -120,8 +137,9 @@ impl ReplChrome {
     }
 
     fn disable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
-        // Reset scroll region, show cursor, leave raw mode.
+        // Reset scroll region, clear strip, show cursor, leave raw mode.
         let _ = write!(stdout, "\x1b[r");
+        let _ = self.clear_prompt_strip(stdout);
         let _ = execute!(stdout, Show);
         let _ = stdout.flush();
         if self.raw_active {
@@ -148,7 +166,7 @@ impl ReplChrome {
             .map_err(|e| format!("stdout_flush_failed: {e}"))
     }
 
-    /// Paint fixed bottom strip (Grok-like): status row + input row.
+    /// Paint fixed bottom strip (Grok layout): hairline + input box + status footer.
     /// `input` is the live draft (app-owned, not terminal echo).
     fn pin_prompt(
         &mut self,
@@ -158,46 +176,77 @@ impl ReplChrome {
     ) -> Result<(), String> {
         self.refresh_size();
         let cols = self.cols as usize;
-        // reserve=2 → status on rows-1, input on last row.
-        let status_row = self.rows.saturating_sub(self.reserve) + 1;
-        let input_row = self.rows;
+        let (rule_row, input_row, status_row) = self.strip_rows();
 
-        // Dim hairline + status (truncate so it never wraps under the caret).
-        let rule = format!("{ANSI_DIM}{}{ANSI_RESET}", "─".repeat(cols.min(80).max(8)));
-        let status_plain = fit_display(status_line, cols.saturating_sub(1));
-        // Prefer one visual row: if status short, paint rule into status by replacing
-        // with compact status only (rule would need a 3rd reserved row).
-        let status = status_plain;
+        // 1) Full-width hairline — the visual top of the "input box".
+        let rule = format!(
+            "{ANSI_DIM}{}{ANSI_RESET}",
+            "─".repeat(cols.max(8))
+        );
 
-        // OpenCode/Grok-ish prompt glyph; keep single-cell where possible.
-        let prefix = "› ";
-        let avail = cols.saturating_sub(display_width(prefix) + 1);
-        // Show tail of long input so caret stays visible.
-        let mut visible = input.to_string();
+        // 2) Input row: Grok `> ` glyph + draft (or dim placeholder).
+        let prefix = "> ";
+        let prefix_w = display_width(prefix);
+        let avail = cols.saturating_sub(prefix_w + 1).max(8);
+        let empty = input.is_empty();
+        let mut visible = if empty {
+            String::new()
+        } else {
+            input.to_string()
+        };
         while display_width(&visible) > avail && !visible.is_empty() {
             let mut chars = visible.chars();
             chars.next();
             visible = chars.as_str().to_string();
         }
-        let input_line = format!("{ANSI_CYAN}{prefix}{ANSI_RESET}{visible}");
-
-        // Clear + paint each reserved row (never wrap).
-        // Status row: subtle left accent when idle-looking status contains 就绪.
-        let status_painted = if status.contains("运行中") || status.contains("确认") {
-            format!("{status}")
+        // Soft "box": dark bar behind the whole input row (Konsole / xterm-256).
+        // Re-apply BG after every SGR reset so the bar stays solid.
+        const BG: &str = "\x1b[48;5;236m";
+        const FG: &str = "\x1b[38;5;252m";
+        let placeholder = "输入消息…  Enter 发送  /help";
+        let used = prefix_w
+            + if empty {
+                display_width(placeholder)
+            } else {
+                display_width(&visible)
+            };
+        let pad = " ".repeat(cols.saturating_sub(used).min(cols));
+        let input_line = if empty {
+            format!(
+                "{BG}{ANSI_BOLD}{ANSI_CYAN}{prefix}{ANSI_RESET}{BG}{ANSI_DIM}{placeholder}{ANSI_RESET}{BG}{pad}{ANSI_RESET}"
+            )
         } else {
-            format!("{ANSI_DIM}{status}{ANSI_RESET}")
+            format!(
+                "{BG}{ANSI_BOLD}{ANSI_CYAN}{prefix}{ANSI_RESET}{BG}{FG}{visible}{ANSI_RESET}{BG}{pad}{ANSI_RESET}"
+            )
         };
-        let _ = rule; // reserved for future 3-row chrome; keep cols logic warm
+
+        // 3) Footer status (Grok puts model/mode under the input).
+        let status_plain = fit_display(&ansi_plain(status_line), cols.saturating_sub(1));
+        // Re-color: keep running/confirm bright; idle dim.
+        let status_painted = if status_line.contains("运行中") || status_line.contains("确认") {
+            // status_line already carries ANSI for 运行中/确认.
+            fit_display_ansi(status_line, cols.saturating_sub(1))
+        } else {
+            format!("{ANSI_DIM}{status_plain}{ANSI_RESET}")
+        };
+
+        // Paint three reserved rows (clear each, never wrap).
         write!(
             stdout,
-            "\x1b[{status_row};1H\x1b[2K{status_painted}\x1b[{input_row};1H\x1b[2K{input_line}"
+            "\x1b[{rule_row};1H\x1b[2K{rule}\
+             \x1b[{input_row};1H\x1b[2K{input_line}\
+             \x1b[{status_row};1H\x1b[2K{status_painted}"
         )
         .map_err(|e| format!("stdout_write_failed: {e}"))?;
-        // Place caret after visible input (account for ANSI in prefix via plain width).
-        let caret_col = (display_width(&format!("{prefix}{visible}")) as u16)
-            .saturating_add(1)
-            .min(self.cols);
+
+        // Caret sits in the input box after `> ` (+ typed text).
+        let caret_col = if empty {
+            (prefix_w as u16).saturating_add(1)
+        } else {
+            (display_width(&format!("{prefix}{visible}")) as u16).saturating_add(1)
+        }
+        .min(self.cols);
         write!(stdout, "\x1b[{input_row};{caret_col}H")
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         execute!(stdout, Show).map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -208,11 +257,24 @@ impl ReplChrome {
 
     fn clear_prompt_strip(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
         self.refresh_size();
-        let status_row = self.rows.saturating_sub(self.reserve) + 1;
-        write!(stdout, "\x1b[{status_row};1H\x1b[0J")
+        let (rule_row, _, _) = self.strip_rows();
+        // Clear from hairline through end of screen.
+        write!(stdout, "\x1b[{rule_row};1H\x1b[0J")
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         Ok(())
     }
+}
+
+/// Fit text that may already contain ANSI; width counted on plain text.
+fn fit_display_ansi(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
+    }
+    if display_width(s) <= max_cols {
+        return s.to_string();
+    }
+    // Fall back to plain fit + reset so we never leave half-open SGR.
+    format!("{}{ANSI_RESET}", fit_display(s, max_cols))
 }
 
 mod app_server;
@@ -1711,10 +1773,10 @@ fn render_sticky_status_line(
     show_trace: bool,
     turn_started: Option<Instant>,
 ) -> String {
-    // Keep short (Grok/OpenCode footer): mode · model · light metrics · hints.
+    // Grok footer under the input box: mode · model · light metrics · hints.
     if awaiting_approval {
         return format!(
-            "{ANSI_YELLOW}确认{ANSI_RESET} · {} · 1允许 2拒绝 3详情",
+            "{ANSI_YELLOW}确认{ANSI_RESET} · {} · 1允许  2拒绝  3详情",
             stats.model_name
         );
     }
@@ -1736,10 +1798,15 @@ fn render_sticky_status_line(
                 parts.push(format!("剩{}", format_ms_duration(u128::from(left))));
             }
         }
-        parts.push("/stop".to_string());
+        parts.push("/stop 取消".to_string());
         return parts.join(" · ");
     }
-    render_repl_status_line(stats, "就绪", show_trace, None)
+    // Idle: mirror Grok "model · mode · shortcuts".
+    let mut line = render_repl_status_line(stats, "就绪", show_trace, None);
+    if !line.contains("/help") {
+        line = format!("{line} · Enter发送 · /help");
+    }
+    line
 }
 
 fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
@@ -1794,7 +1861,7 @@ fn handle_repl_command(
         "/help" | "/?" => {
             writeln!(
                 out,
-                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /stop      在安全点停止当前任务\n  /trace     详细模式：显示准备步骤/思考轮次/技术汇总（排障用）\n  /notrace   对话默认：能快答就只出答复；有工具才显示在干嘛\n  /verbose   显示完整运行元数据\n  /quiet     关闭 verbose（不影响 /trace）\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n默认像正常聊天；底部固定输入条（应用自绘，支持中文）。不打印隐藏思维链和密钥。\n"
+                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /stop      在安全点停止当前任务\n  /trace     详细模式：显示准备步骤/思考轮次/技术汇总（排障用）\n  /notrace   对话默认：能快答就只出答复；有工具才显示在干嘛\n  /verbose   显示完整运行元数据\n  /quiet     关闭 verbose（不影响 /trace）\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n底部三行固定（对齐 Grok）：分隔线 · 输入框（> 打字）· 状态栏。\n应用自绘输入，支持中文；Enter 发送。不打印隐藏思维链和密钥。\n"
             )
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
@@ -2849,6 +2916,24 @@ mod tests {
         assert!(!rendered.contains("protocol"));
         assert!(!rendered.contains("report"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn repl_chrome_reserves_three_rows_like_grok() {
+        let mut chrome = ReplChrome {
+            cols: 80,
+            rows: 24,
+            reserve: ReplChrome::RESERVE_ROWS,
+            raw_active: false,
+        };
+        assert_eq!(chrome.reserve, 3);
+        assert_eq!(chrome.body_bottom_row(), 21);
+        let (rule, input, status) = chrome.strip_rows();
+        assert_eq!((rule, input, status), (22, 23, 24));
+        chrome.rows = 12;
+        assert_eq!(chrome.body_bottom_row(), 9);
+        let (rule, input, status) = chrome.strip_rows();
+        assert_eq!((rule, input, status), (10, 11, 12));
     }
 
     #[test]
