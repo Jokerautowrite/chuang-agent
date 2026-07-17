@@ -9,7 +9,7 @@
 //! Runtime stays in existing chuang paths; this module only paints.
 
 use std::io::{self, Stdout};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -35,6 +35,22 @@ use crate::{
     StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
 use chuang_agent::display_projector::DisplayState;
+
+// ── Razer-inspired palette (帅气高级：黑底 + 雷蛇绿) ─────────────────
+/// Signature Razer green (#44D62C).
+const RAZER: Color = Color::Rgb(68, 214, 44);
+/// Softer green for text accents.
+const RAZER_SOFT: Color = Color::Rgb(140, 230, 120);
+/// Dim green for tool / meta secondary.
+const RAZER_DIM: Color = Color::Rgb(55, 110, 50);
+/// Very subtle green wash under user messages.
+const USER_BG: Color = Color::Rgb(18, 42, 20);
+/// User text on the wash.
+const USER_FG: Color = Color::Rgb(200, 255, 190);
+/// Assistant body text.
+const ASSIST_FG: Color = Color::Rgb(228, 232, 230);
+/// Chip / footer muted.
+const MUTED: Color = Color::Rgb(100, 120, 100);
 
 /// Public entry used by `repl_interactive_loop`.
 pub fn run_ratatui_repl(
@@ -601,41 +617,48 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         (app.scroll as usize).min(max_scroll)
     };
 
+    let width = area.width;
     let visible = app
         .lines
         .iter()
         .skip(scroll)
         .take(height.max(1))
-        .map(|line| styled_line(line))
+        .map(|line| styled_line(line, width))
         .collect::<Vec<_>>();
 
     let para = Paragraph::new(visible).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 
-fn styled_line(line: &TranscriptLine) -> Line<'static> {
+fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
     match line.kind {
-        LineKind::User => Line::from(Span::styled(
-            line.text.clone(),
-            Style::default()
-                .fg(Color::Rgb(110, 200, 255))
-                .add_modifier(Modifier::BOLD),
-        )),
+        // 你的话：雷蛇绿字 + 淡淡绿底（整行 wash）
+        LineKind::User => {
+            let raw = format!(" {} ", line.text);
+            let padded = pad_line_bg(&raw, width as usize);
+            Line::from(Span::styled(
+                padded,
+                Style::default()
+                    .fg(USER_FG)
+                    .bg(USER_BG)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        }
         LineKind::Tool => Line::from(Span::styled(
             format!("  · {}", line.text),
-            Style::default().fg(Color::Rgb(120, 120, 130)),
+            Style::default().fg(RAZER_DIM),
         )),
         LineKind::ToolFail => Line::from(Span::styled(
             format!("  ✗ {}", line.text),
-            Style::default().fg(Color::Rgb(230, 100, 100)),
+            Style::default().fg(Color::Rgb(230, 90, 90)),
         )),
         LineKind::Assistant => Line::from(Span::styled(
             line.text.clone(),
-            Style::default().fg(Color::Rgb(230, 230, 235)),
+            Style::default().fg(ASSIST_FG),
         )),
         LineKind::System => Line::from(Span::styled(
             line.text.clone(),
-            Style::default().fg(Color::Rgb(210, 180, 80)),
+            Style::default().fg(RAZER_SOFT),
         )),
         LineKind::Meta => {
             if line.text.is_empty() {
@@ -643,23 +666,61 @@ fn styled_line(line: &TranscriptLine) -> Line<'static> {
             } else {
                 Line::from(Span::styled(
                     format!("  {}", line.text),
-                    Style::default().fg(Color::Rgb(90, 90, 100)),
+                    Style::default().fg(MUTED),
                 ))
             }
         }
     }
 }
 
-fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    // The one thing that must look like a real box (Grok bottom field).
-    let border = if app.running {
-        Color::Rgb(180, 140, 60)
-    } else {
-        Color::Rgb(80, 160, 200)
+fn pad_line_bg(s: &str, width: usize) -> String {
+    if width == 0 {
+        return s.to_string();
+    }
+    let w = display_width(s);
+    if w >= width {
+        return truncate_to_width(s, width);
+    }
+    format!("{s}{}", " ".repeat(width - w))
+}
+
+fn thinking_title() -> String {
+    // Animate dots so it feels alive while the model works.
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| (d.as_millis() / 400) % 4)
+        .unwrap_or(0) as usize;
+    let dots = match n {
+        0 => "·",
+        1 => "··",
+        2 => "···",
+        _ => "····",
     };
-    let block = Block::default()
+    format!(" thinking{dots} ")
+}
+
+fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
+    // 雷蛇绿边框；思考时左上角 thinking···
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border));
+        .border_style(
+            Style::default()
+                .fg(RAZER)
+                .add_modifier(if app.running {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        );
+    if app.running {
+        block = block
+            .title(thinking_title())
+            .title_style(
+                Style::default()
+                    .fg(RAZER)
+                    .add_modifier(Modifier::BOLD),
+            );
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -676,13 +737,13 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     let mut spans = vec![Span::styled(
         "> ",
         Style::default()
-            .fg(Color::Rgb(110, 200, 255))
+            .fg(RAZER)
             .add_modifier(Modifier::BOLD),
     )];
     if draft_vis.is_empty() {
         spans.push(Span::styled(
             "说点什么…",
-            Style::default().fg(Color::Rgb(90, 90, 100)),
+            Style::default().fg(MUTED),
         ));
     } else {
         spans.push(Span::styled(
@@ -703,10 +764,7 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         .saturating_sub(left_w)
         .saturating_sub(display_width(&chip));
     spans.push(Span::raw(" ".repeat(pad_w)));
-    spans.push(Span::styled(
-        chip,
-        Style::default().fg(Color::Rgb(130, 130, 145)),
-    ));
+    spans.push(Span::styled(chip, Style::default().fg(RAZER_DIM)));
 
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
@@ -724,15 +782,11 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
 fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     let mut text = app.footer.clone();
     if app.running && !app.activity.is_empty() {
-        text = format!(
-            "{}  ·  {}",
-            text,
-            compact_preview(&app.activity, 36)
-        );
+        text = format!("{}  ·  {}", text, compact_preview(&app.activity, 36));
     }
     let para = Paragraph::new(Line::from(Span::styled(
         text,
-        Style::default().fg(Color::Rgb(85, 85, 95)),
+        Style::default().fg(MUTED),
     )));
     frame.render_widget(para, area);
 }
