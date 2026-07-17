@@ -1,21 +1,15 @@
-//! Ratatui REPL shell (option A): clear 3-pane layout.
+//! Ratatui REPL shell — calm chat, not chrome theater.
 //!
-//! ```text
-//! ┌ conversation (scroll) ─────────────────────┐
-//! │ > user                                     │
-//! │   · tool                                   │
-//! │ answer                                     │
-//! ├ input ─────────────────────────────────────┤
-//! │ > draft_                                   │
-//! ├ status ────────────────────────────────────┤
-//! │ gpt · 就绪 · Enter发送 · /help             │
-//! └────────────────────────────────────────────┘
-//! ```
+//! What 老爸 wants (from side-by-side with Grok):
+//! - Open transcript (no heavy outer cage)
+//! - Clear turns: `> you` · dim tools · bare answer · quiet crumbs
+//! - One real input box at bottom: `> draft` left, model chip right
+//! - Shortcuts under the box, not competing with the chat
 //!
-//! Runtime / turns / tools stay in existing chuang paths; this module only paints.
+//! Runtime stays in existing chuang paths; this module only paints.
 
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -92,54 +86,48 @@ struct TuiApp {
     draft: String,
     scroll: u16,
     follow: bool,
-    status: String,
+    /// Right side of the input box (Grok-style model chip).
+    chip: String,
+    /// Dim footer under the input box (shortcuts only).
+    footer: String,
     activity: String,
+    running: bool,
 }
 
 impl TuiApp {
-    fn new(banner: String, status: String) -> Self {
-        let mut lines = Vec::new();
-        for part in banner.lines() {
-            if !part.trim().is_empty() {
-                lines.push(TranscriptLine {
-                    kind: LineKind::System,
-                    text: part.to_string(),
-                });
-            }
-        }
-        lines.push(TranscriptLine {
-            kind: LineKind::Meta,
-            text: "Ratatui 壳 · 对话在上 · 输入在下 · Enter 发送 · /help".to_string(),
-        });
+    fn new(chip: String) -> Self {
+        // Quiet open: no self-describing "how this shell works" spam.
         Self {
-            lines,
+            lines: Vec::new(),
             draft: String::new(),
             scroll: 0,
             follow: true,
-            status,
+            chip,
+            footer: "Enter 发送 · /help · /stop · /exit · /trace".to_string(),
             activity: String::new(),
+            running: false,
         }
     }
 
     fn push(&mut self, kind: LineKind, text: impl Into<String>) {
         let text = text.into();
-        for (i, line) in text.lines().enumerate() {
-            // Keep multi-line blocks as consecutive same-kind lines.
-            let prefix_blank = i > 0 && line.is_empty();
-            if prefix_blank {
-                self.lines.push(TranscriptLine {
-                    kind: LineKind::Meta,
-                    text: String::new(),
-                });
-            } else {
-                self.lines.push(TranscriptLine {
-                    kind,
-                    text: line.to_string(),
-                });
-            }
+        // Breathing room before user / assistant turns.
+        if matches!(kind, LineKind::User | LineKind::Assistant)
+            && self.lines.last().is_some_and(|l| !l.text.is_empty())
+        {
+            self.lines.push(TranscriptLine {
+                kind: LineKind::Meta,
+                text: String::new(),
+            });
+        }
+        for line in text.lines() {
+            self.lines.push(TranscriptLine {
+                kind,
+                text: line.to_string(),
+            });
         }
         if self.follow {
-            self.scroll = u16::MAX; // clamp later from viewport
+            self.scroll = u16::MAX;
         }
     }
 
@@ -149,6 +137,15 @@ impl TuiApp {
         } else {
             LineKind::ToolFail
         };
+        // Drop projector chrome like "正在…" noise length; keep human title.
+        let message = message
+            .trim()
+            .trim_start_matches('·')
+            .trim()
+            .to_string();
+        if message.is_empty() {
+            return;
+        }
         if self
             .lines
             .last()
@@ -156,8 +153,35 @@ impl TuiApp {
         {
             return;
         }
-        self.push(kind, message.to_string());
-        self.activity = message.to_string();
+        self.push(kind, message.clone());
+        self.activity = message;
+    }
+
+    fn set_idle_chrome(&mut self, model: &str, show_trace: bool) {
+        self.running = false;
+        self.chip = if show_trace {
+            format!("{model} · 就绪 · trace")
+        } else {
+            format!("{model} · 就绪")
+        };
+        self.footer = "Enter 发送 · /help · /stop · /exit · /trace".to_string();
+        self.activity.clear();
+    }
+
+    fn set_running_chrome(&mut self, model: &str, elapsed: &str, show_trace: bool) {
+        self.running = true;
+        self.chip = if show_trace {
+            format!("{model} · 运行中 {elapsed} · trace")
+        } else {
+            format!("{model} · 运行中 {elapsed}")
+        };
+        self.footer = "/stop 取消 · Enter 也可补充要求".to_string();
+    }
+
+    fn set_approval_chrome(&mut self, model: &str) {
+        self.running = false;
+        self.chip = format!("{model} · 待确认");
+        self.footer = "1 允许 · 2 拒绝 · 3 详情".to_string();
     }
 }
 
@@ -176,11 +200,7 @@ fn run_app(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
 
-    let banner = format!(
-        "chuang  {}  ·  {}  ·  /help /stop /exit /trace",
-        summary.model_name, summary.permission_profile
-    );
-    let mut app = TuiApp::new(banner, status_chip(false, &stats, false, *show_trace, None));
+    let mut app = TuiApp::new(format!("{} · 就绪", summary.model_name));
 
     loop {
         // --- progress / completion while turn runs ---
@@ -198,22 +218,14 @@ fn run_app(
             *verbose,
             *show_trace,
         )? {
-            app.status = status_chip(
-                false,
-                &stats,
-                pending_approval.is_some(),
-                *show_trace,
-                None,
-            );
-            app.activity.clear();
+            if pending_approval.is_some() {
+                app.set_approval_chrome(&stats.model_name);
+            } else {
+                app.set_idle_chrome(&stats.model_name, *show_trace);
+            }
         } else if let Some(turn) = running.as_ref() {
-            app.status = status_chip(
-                true,
-                &stats,
-                pending_approval.is_some(),
-                *show_trace,
-                Some(turn.started_at),
-            );
+            let elapsed = format_short_duration(turn.started_at.elapsed());
+            app.set_running_chrome(&stats.model_name, &elapsed, *show_trace);
         }
 
         terminal
@@ -365,10 +377,12 @@ fn handle_submit(
                     recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
                 *running = Some(spawn_repl_turn(options.clone(), continuation, history));
                 stats.mark_turn_started();
+                app.set_running_chrome(&stats.model_name, "0s", *show_trace);
             }
             "2" | "n" | "N" | "no" | "NO" => {
                 app.push(LineKind::System, "× 已拒绝  该操作未执行。");
                 pending_approval.take();
+                app.set_idle_chrome(&stats.model_name, *show_trace);
             }
             "3" => {
                 app.push(LineKind::Meta, render_approval_details(approval));
@@ -392,7 +406,7 @@ fn handle_submit(
         if !text.trim().is_empty() {
             app.push(LineKind::System, text.trim_end());
         }
-        app.status = status_chip(running.is_some(), stats, false, *show_trace, None);
+        app.set_idle_chrome(&stats.model_name, *show_trace);
         return Ok(SubmitResult::Continue);
     }
 
@@ -431,7 +445,7 @@ fn handle_submit(
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
     *running = Some(spawn_repl_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
-    app.status = status_chip(true, stats, false, *show_trace, Some(Instant::now()));
+    app.set_running_chrome(&stats.model_name, "0s", *show_trace);
     let _ = summary;
     Ok(SubmitResult::Continue)
 }
@@ -549,61 +563,36 @@ fn poll_finish_turn(
     Ok(true)
 }
 
-fn status_chip(
-    running: bool,
-    stats: &ReplSessionStats,
-    awaiting_approval: bool,
-    show_trace: bool,
-    started: Option<Instant>,
-) -> String {
-    if awaiting_approval {
-        return format!("确认中 · {} · 1/2/3", stats.model_name);
-    }
-    if running {
-        let elapsed = started
-            .map(|s| format_short_duration(s.elapsed()))
-            .unwrap_or_else(|| "0s".into());
-        let mut s = format!("{} · 运行中 {} · /stop", stats.model_name, elapsed);
-        if show_trace {
-            s.push_str(" · trace");
-        }
-        return s;
-    }
-    let mut s = format!(
-        "{} · 就绪 · Enter发送 · /help · /exit",
-        stats.model_name
-    );
-    if show_trace {
-        s.push_str(" · trace");
-    }
-    s
-}
-
 fn draw_ui(frame: &mut ratatui::Frame, app: &TuiApp) {
     let area = frame.area();
+    // Grok-like: open chat · one input box · thin shortcut footer.
+    // Padding left/right so it doesn't glue to the window edge.
+    let padded = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(area)[1];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(5),
-            Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Min(4),    // transcript — no cage
+            Constraint::Length(1), // gap
+            Constraint::Length(3), // the input box
+            Constraint::Length(1), // shortcuts
         ])
-        .split(area);
+        .split(padded);
 
     draw_transcript(frame, chunks[0], app);
-    draw_input(frame, chunks[1], app);
-    draw_status(frame, chunks[2], app);
+    draw_input(frame, chunks[2], app);
+    draw_footer(frame, chunks[3], app);
 }
 
 fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" chuang ")
-        .border_style(Style::default().fg(Color::DarkGray));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let height = inner.height as usize;
+    // No outer border — conversation should feel open, not caged.
+    let height = area.height as usize;
     let total = app.lines.len();
     let max_scroll = total.saturating_sub(height.max(1));
     let scroll = if app.follow {
@@ -621,89 +610,166 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         .collect::<Vec<_>>();
 
     let para = Paragraph::new(visible).wrap(Wrap { trim: false });
-    frame.render_widget(para, inner);
+    frame.render_widget(para, area);
 }
 
 fn styled_line(line: &TranscriptLine) -> Line<'static> {
-    let style = match line.kind {
-        LineKind::User => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-        LineKind::Tool => Style::default().fg(Color::Gray),
-        LineKind::ToolFail => Style::default().fg(Color::Red),
-        LineKind::Assistant => Style::default().fg(Color::White),
-        LineKind::System => Style::default().fg(Color::Yellow),
-        LineKind::Meta => Style::default().fg(Color::DarkGray),
-    };
-    let text = match line.kind {
-        LineKind::Tool => format!("  · {}", line.text),
-        LineKind::ToolFail => format!("  ✗ {}", line.text),
-        LineKind::Meta if !line.text.is_empty() => format!("  {}", line.text),
-        _ => line.text.clone(),
-    };
-    Line::from(Span::styled(text, style))
+    match line.kind {
+        LineKind::User => Line::from(Span::styled(
+            line.text.clone(),
+            Style::default()
+                .fg(Color::Rgb(110, 200, 255))
+                .add_modifier(Modifier::BOLD),
+        )),
+        LineKind::Tool => Line::from(Span::styled(
+            format!("  · {}", line.text),
+            Style::default().fg(Color::Rgb(120, 120, 130)),
+        )),
+        LineKind::ToolFail => Line::from(Span::styled(
+            format!("  ✗ {}", line.text),
+            Style::default().fg(Color::Rgb(230, 100, 100)),
+        )),
+        LineKind::Assistant => Line::from(Span::styled(
+            line.text.clone(),
+            Style::default().fg(Color::Rgb(230, 230, 235)),
+        )),
+        LineKind::System => Line::from(Span::styled(
+            line.text.clone(),
+            Style::default().fg(Color::Rgb(210, 180, 80)),
+        )),
+        LineKind::Meta => {
+            if line.text.is_empty() {
+                Line::from("")
+            } else {
+                Line::from(Span::styled(
+                    format!("  {}", line.text),
+                    Style::default().fg(Color::Rgb(90, 90, 100)),
+                ))
+            }
+        }
+    }
 }
 
 fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    let title = if app.draft.is_empty() {
-        " 输入 "
+    // The one thing that must look like a real box (Grok bottom field).
+    let border = if app.running {
+        Color::Rgb(180, 140, 60)
     } else {
-        " 输入 · Enter 发送 "
+        Color::Rgb(80, 160, 200)
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let shown = if app.draft.is_empty() {
-        Span::styled(
-            "> ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+    let chip = app.chip.clone();
+    let chip_w = display_width(&chip) as u16;
+    let gap = 2u16;
+    let left_budget = inner
+        .width
+        .saturating_sub(chip_w)
+        .saturating_sub(gap)
+        .saturating_sub(2); // "> "
+
+    let draft_vis = truncate_to_width(&app.draft, left_budget as usize);
+    let mut spans = vec![Span::styled(
+        "> ",
+        Style::default()
+            .fg(Color::Rgb(110, 200, 255))
+            .add_modifier(Modifier::BOLD),
+    )];
+    if draft_vis.is_empty() {
+        spans.push(Span::styled(
+            "说点什么…",
+            Style::default().fg(Color::Rgb(90, 90, 100)),
+        ));
     } else {
-        Span::styled(
-            format!("> {}", app.draft),
+        spans.push(Span::styled(
+            draft_vis.clone(),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        )
-    };
-    // Placeholder when empty
-    let line = if app.draft.is_empty() {
-        Line::from(vec![
-            Span::styled(
-                "> ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("说点什么…", Style::default().fg(Color::DarkGray)),
-        ])
-    } else {
-        Line::from(shown)
-    };
-    frame.render_widget(Paragraph::new(line), inner);
+        ));
+    }
 
-    // Caret: after `> ` + draft
-    let caret_x = inner.x + 2 + app.draft.chars().count() as u16;
+    // Pad so chip sits on the right edge of the input row.
+    let left_w = 2 + if app.draft.is_empty() {
+        display_width("说点什么…")
+    } else {
+        display_width(&draft_vis)
+    };
+    let pad_w = (inner.width as usize)
+        .saturating_sub(left_w)
+        .saturating_sub(display_width(&chip));
+    spans.push(Span::raw(" ".repeat(pad_w)));
+    spans.push(Span::styled(
+        chip,
+        Style::default().fg(Color::Rgb(130, 130, 145)),
+    ));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
+
+    // Caret after `> ` + visible draft (display columns, not char count).
+    let caret_cols = 2 + if app.draft.is_empty() {
+        0
+    } else {
+        display_width(&draft_vis)
+    };
+    let caret_x = (inner.x as usize + caret_cols) as u16;
     let caret_x = caret_x.min(inner.x + inner.width.saturating_sub(1));
     frame.set_cursor_position((caret_x, inner.y));
 }
 
-fn draw_status(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    let mut text = app.status.clone();
-    if !app.activity.is_empty() {
-        text = format!("{text}  ·  {}", compact_preview(&app.activity, 40));
+fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
+    let mut text = app.footer.clone();
+    if app.running && !app.activity.is_empty() {
+        text = format!(
+            "{}  ·  {}",
+            text,
+            compact_preview(&app.activity, 36)
+        );
     }
     let para = Paragraph::new(Line::from(Span::styled(
         text,
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(Color::Rgb(85, 85, 95)),
     )));
     frame.render_widget(para, area);
+}
+
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| {
+            if c <= '\u{1f}' {
+                0
+            } else if c <= '\u{7e}' {
+                1
+            } else {
+                2
+            }
+        })
+        .sum()
+}
+
+fn truncate_to_width(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if display_width(s) <= max {
+        return s.to_string();
+    }
+    let mut w = 0usize;
+    let mut out = String::new();
+    for c in s.chars() {
+        let cw = if c <= '\u{7e}' { 1 } else { 2 };
+        if w + cw > max.saturating_sub(1) {
+            out.push('…');
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out
 }
 
 fn strip_ansi(s: &str) -> String {
