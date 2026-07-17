@@ -293,6 +293,7 @@ mod cli_output;
 mod cli_plugin;
 mod cli_runtime;
 mod cli_browser;
+mod brand_theme;
 mod cli_repl_tui;
 mod cli_skill;
 mod cli_subagent;

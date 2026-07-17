@@ -2751,3 +2751,7 @@
 - 默认交互 REPL 改用 `src/cli_repl_tui.rs`（ratatui 0.30）：上对话 / 中输入框 / 下状态。
 - Runtime、turn、工具进度、审批路径复用原逻辑；旧壳 `CHUANG_REPL_LEGACY=1`。
 - 目标：清晰好看，不追求与 Grok 像素一致。
+
+# 2026-07-18 产品主色定稿：雷蛇绿
+- 主基调 Razer Green 写入 `src/brand_theme.rs`，TUI 全引用；文档 `docs/brand-color.md`。
+- 散落 RGB 收口；Figma 终稿只改 brand_theme 常量。

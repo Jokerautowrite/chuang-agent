@@ -16,7 +16,7 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 
 ## 当前状态
 
-- `chuang`：首选终端入口，**Ratatui 三分区 REPL**（对话区 / 固定输入框 / 状态栏）。用户行 `> …`，工具过程次要 `·`，答复在对话区滚动；底栏输入框钉死。Runtime 仍是 chuang 主链。旧壳：`CHUANG_REPL_LEGACY=1 chuang`。`!补充` 注入当前任务；最近 8 轮续聊；`/trace` 详细过程；`/help` `/stop` `/exit`。不打印隐藏思维链。
+- `chuang`：首选终端入口，**Ratatui REPL**。产品主色 **雷蛇绿**（见 `src/brand_theme.rs` / `docs/brand-color.md`）。对话区开敞；底栏输入框绿边 + 右侧 `model (effort) · 状态 · 上下文进度`；思考时左上角 `thinking···`。旧壳：`CHUANG_REPL_LEGACY=1 chuang`。
 - `chuang ask "TEXT"`：用终端主线跑一次真实本地 runtime。
 - `chuang status --config config.toml --json`：查看当前终端主线状态。
 - `chuang mainchain-accept`：运行真实标准主链总验收，屏幕只显示阶段 OK/FAIL，详细日志写入 `/tmp/chuang-mainchain-acceptance-*`；会先跑 20 项矩阵和基础合同，再调用真实 provider 完成终端端到端验收和自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。

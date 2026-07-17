@@ -1,12 +1,9 @@
-//! Ratatui REPL shell — calm chat, not chrome theater.
+//! Ratatui REPL shell — calm chat on **chuang brand green** (Razer green).
 //!
-//! What 老爸 wants (from side-by-side with Grok):
-//! - Open transcript (no heavy outer cage)
-//! - Clear turns: `> you` · dim tools · bare answer · quiet crumbs
-//! - One real input box at bottom: `> draft` left, model chip right
-//! - Shortcuts under the box, not competing with the chat
-//!
-//! Runtime stays in existing chuang paths; this module only paints.
+//! Product look (定稿):
+//! - 主基调雷蛇绿，见 `brand_theme`；禁止再散落其它主色
+//! - Open transcript · one green input box · quiet footer
+//! - Runtime stays in existing chuang paths; this module only paints.
 
 use std::io::{self, Stdout};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,11 +15,15 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Terminal;
 
+use crate::brand_theme::{
+    ASSIST_FG, BRAND, BRAND_DIM, BRAND_MUTED, BRAND_SOFT, DANGER, INPUT_FG, PLACEHOLDER, USER_BG,
+    USER_FG,
+};
 use crate::cli_approval::resume_local_tty_approval;
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::{
@@ -35,22 +36,6 @@ use crate::{
     StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
 use chuang_agent::display_projector::DisplayState;
-
-// ── Razer-inspired palette (帅气高级：黑底 + 雷蛇绿) ─────────────────
-/// Signature Razer green (#44D62C).
-const RAZER: Color = Color::Rgb(68, 214, 44);
-/// Softer green for text accents.
-const RAZER_SOFT: Color = Color::Rgb(140, 230, 120);
-/// Dim green for tool / meta secondary.
-const RAZER_DIM: Color = Color::Rgb(55, 110, 50);
-/// Very subtle green wash under user messages.
-const USER_BG: Color = Color::Rgb(18, 42, 20);
-/// User text on the wash.
-const USER_FG: Color = Color::Rgb(200, 255, 190);
-/// Assistant body text.
-const ASSIST_FG: Color = Color::Rgb(228, 232, 230);
-/// Chip / footer muted.
-const MUTED: Color = Color::Rgb(100, 120, 100);
 
 /// Public entry used by `repl_interactive_loop`.
 pub fn run_ratatui_repl(
@@ -693,7 +678,7 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
 
 fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
     match line.kind {
-        // 你的话：雷蛇绿字 + 淡淡绿底（整行 wash）
+        // 你的话：品牌绿字 + 淡绿底
         LineKind::User => {
             let raw = format!(" {} ", line.text);
             let padded = pad_line_bg(&raw, width as usize);
@@ -707,11 +692,11 @@ fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
         }
         LineKind::Tool => Line::from(Span::styled(
             format!("  · {}", line.text),
-            Style::default().fg(RAZER_DIM),
+            Style::default().fg(BRAND_DIM),
         )),
         LineKind::ToolFail => Line::from(Span::styled(
             format!("  ✗ {}", line.text),
-            Style::default().fg(Color::Rgb(230, 90, 90)),
+            Style::default().fg(DANGER),
         )),
         LineKind::Assistant => Line::from(Span::styled(
             line.text.clone(),
@@ -719,7 +704,7 @@ fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
         )),
         LineKind::System => Line::from(Span::styled(
             line.text.clone(),
-            Style::default().fg(RAZER_SOFT),
+            Style::default().fg(BRAND_SOFT),
         )),
         LineKind::Meta => {
             if line.text.is_empty() {
@@ -727,7 +712,7 @@ fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
             } else {
                 Line::from(Span::styled(
                     format!("  {}", line.text),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(BRAND_MUTED),
                 ))
             }
         }
@@ -761,12 +746,12 @@ fn thinking_title() -> String {
 }
 
 fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    // 雷蛇绿边框；思考时左上角 thinking···
+    // 产品主色边框；思考时左上角 thinking···
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(
             Style::default()
-                .fg(RAZER)
+                .fg(BRAND)
                 .add_modifier(if app.running {
                     Modifier::BOLD
                 } else {
@@ -774,13 +759,11 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
                 }),
         );
     if app.running {
-        block = block
-            .title(thinking_title())
-            .title_style(
-                Style::default()
-                    .fg(RAZER)
-                    .add_modifier(Modifier::BOLD),
-            );
+        block = block.title(thinking_title()).title_style(
+            Style::default()
+                .fg(BRAND)
+                .add_modifier(Modifier::BOLD),
+        );
     }
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -797,20 +780,15 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     let draft_vis = truncate_to_width(&app.draft, left_budget as usize);
     let mut spans = vec![Span::styled(
         "> ",
-        Style::default()
-            .fg(RAZER)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
     )];
     if draft_vis.is_empty() {
-        spans.push(Span::styled(
-            "说点什么…",
-            Style::default().fg(MUTED),
-        ));
+        spans.push(Span::styled("说点什么…", Style::default().fg(PLACEHOLDER)));
     } else {
         spans.push(Span::styled(
             draft_vis.clone(),
             Style::default()
-                .fg(Color::White)
+                .fg(INPUT_FG)
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -825,11 +803,11 @@ fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         .saturating_sub(left_w)
         .saturating_sub(display_width(&chip));
     spans.push(Span::raw(" ".repeat(pad_w)));
-    spans.push(Span::styled(chip, Style::default().fg(RAZER_DIM)));
+    // Chip：暗绿，不抢主色边框
+    spans.push(Span::styled(chip, Style::default().fg(BRAND_MUTED)));
 
     frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 
-    // Caret after `> ` + visible draft (display columns, not char count).
     let caret_cols = 2 + if app.draft.is_empty() {
         0
     } else {
@@ -847,7 +825,7 @@ fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     }
     let para = Paragraph::new(Line::from(Span::styled(
         text,
-        Style::default().fg(MUTED),
+        Style::default().fg(BRAND_MUTED),
     )));
     frame.render_widget(para, area);
 }
