@@ -2732,3 +2732,8 @@
 - 现象：REPL 答复泄漏 raw 工具 JSON +「拦截原因/治理决策」；体检走 spawn_subagent 因 SubagentToolContext 未装配失败，被误读成权限拦住。
 - 修：terminal_tool_failure_answer 人话化；sanitize FINAL JSON；protocol invalid_action_json 人话进度；工具目录引导 doctor/field-accept；spawn 失败文案标明非权限。
 - 未在本轮接上 spawn_subagent 完整 runtime（仍 None）；自检路径明确走本地 doctor/field-accept。
+
+# 2026-07-18 REPL 精装修分层（小k）
+- 对标右侧 Grok 终端：用户气泡顶栏 + 次要进展缩进 + 小创答复主体 + 页脚元信息。
+- 默认安静 banner；协议自愈默认不进 transcript（/trace 才看）；进展默认最多 8 条成功折叠。
+- 页脚改成 `2.1s · gpt · 思考 …`  crumbs，不再「耗时/模型」堆词。

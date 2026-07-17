@@ -91,12 +91,13 @@ impl DisplayProjectionOptions {
     /// Conversational REPL (default): tools visible, no step theater.
     ///
     /// Fast path = only final answer. Slow path = tools / optional thinking when enabled.
+    /// Protocol self-corrections stay off-transcript (bottom status /trace only).
     pub fn repl_default() -> Self {
         Self {
             show_successful_tool_events: true,
             show_successful_step_events: false,
             show_model_progress: false,
-            show_protocol_warnings: true,
+            show_protocol_warnings: false,
             show_final_ready_event: false,
             show_lifecycle_steps: false,
         }

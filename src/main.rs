@@ -271,7 +271,8 @@ const REPL_ANSWER_PREVIEW_CHARS: usize = 2400;
 const REPL_TEXT_WRAP_WIDTH: usize = 78;
 const REPL_HISTORY_MAX_TURNS: usize = 8;
 const REPL_META_WRAP_WIDTH: usize = 92;
-const REPL_ACTIVITY_VISIBLE_LIMIT: usize = 14;
+/// Default conversation: keep the live stream short (Grok-like secondary noise).
+const REPL_ACTIVITY_VISIBLE_LIMIT: usize = 8;
 /// With `/trace`, allow a longer live activity stream before folding successes.
 const REPL_ACTIVITY_TRACE_LIMIT: usize = 40;
 static REPL_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -1102,11 +1103,12 @@ fn poll_progress_events(
                 continue;
             }
             if !cursor.section_opened {
+                // No "过程" billboard in default chat — progress is indented secondary lines.
                 if show_trace {
                     chrome.write_body(
                         stdout,
                         &format!(
-                            "\n{ANSI_BOLD}{ANSI_CYAN}过程{ANSI_RESET} {ANSI_DIM}· {}{ANSI_RESET}\n",
+                            "{ANSI_DIM}  过程 · {}{ANSI_RESET}\n",
                             stats.model_name
                         ),
                     )?;
@@ -2047,13 +2049,17 @@ fn render_repl_banner(summary: &chuang_agent::runtime_config::ConfigSummary) -> 
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
     let cwd_short = short_path_for_display(&cwd, 48);
-    // Quieter startup: keep wordmark, fold meta into one dim line + thin rule.
-    let quiet = env::var("CHUANG_QUIET_BANNER")
+    // Default quiet (精装修). ASCII billboard only with CHUANG_FANCY_BANNER=1.
+    let fancy = env::var("CHUANG_FANCY_BANNER")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
-    if quiet {
+    // Legacy: CHUANG_QUIET_BANNER=0 also forces fancy for old muscle memory.
+    let force_quiet = env::var("CHUANG_QUIET_BANNER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if force_quiet || !fancy {
         return format!(
-            "{ANSI_BOLD}{ANSI_CYAN}chuang{ANSI_RESET}  {ANSI_DIM}{} · {} · {}{ANSI_RESET}\n{ANSI_DIM}/help · /stop · /exit{ANSI_RESET}\n",
+            "{ANSI_BOLD}{ANSI_CYAN}chuang{ANSI_RESET}  {ANSI_DIM}{} · {} · {}{ANSI_RESET}\n{ANSI_DIM}/help · /stop · /exit · /trace{ANSI_RESET}\n",
             summary.model_name, summary.permission_profile, cwd_short
         );
     }
@@ -2107,23 +2113,28 @@ fn render_user_message_block(
     model_name: &str,
     cwd: &str,
 ) -> String {
-    // Compact: one visual bubble. Meta stays light (no full path wall).
+    // Grok-like turn open: hairline + primary user line. Model lives on answer footer.
+    let _ = (provider_id, model_name, cwd);
     let text = user_input.trim();
-    let head = if text.chars().count() <= 80 && !text.contains('\n') {
-        format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}  {text}")
-    } else {
-        let mut lines = vec![format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}")];
-        for line in wrap_text_block(text, REPL_TEXT_WRAP_WIDTH).lines() {
-            lines.push(format!("{ANSI_BLUE}│{ANSI_RESET} {line}"));
-        }
-        lines.join("\n")
-    };
-    let _ = (provider_id, cwd); // keep signature stable for call sites
-    format!("{head}\n{ANSI_DIM}{model_name}{ANSI_RESET}\n")
+    let rule = format!("{ANSI_DIM}{}{ANSI_RESET}", "─".repeat(36));
+    if text.chars().count() <= 96 && !text.contains('\n') {
+        return format!("\n{rule}\n{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}  {text}\n");
+    }
+    let mut lines = vec![
+        String::new(),
+        rule,
+        format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}"),
+    ];
+    for line in wrap_text_block(text, REPL_TEXT_WRAP_WIDTH).lines() {
+        // Indent body under the label (no pipe theater).
+        lines.push(format!("  {line}"));
+    }
+    lines.push(String::new());
+    lines.join("\n")
 }
 
 fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) -> String {
-    // Grok/OpenCode-style: icon + human message, no noisy step numbers by default.
+    // Secondary stream: always indented under the turn so 小创 final owns the column.
     let (icon, color) = match (display.kind, display.state) {
         (DisplayEventKind::Warning, DisplayState::Blocked) => ("!", ANSI_YELLOW),
         (DisplayEventKind::Warning, _) | (_, DisplayState::Failed) => ("✗", ANSI_RED),
@@ -2133,16 +2144,19 @@ fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) ->
             ("●", ANSI_CYAN)
         }
         (_, DisplayState::Blocked) => ("…", ANSI_YELLOW),
-        (_, _) => ("·", ANSI_YELLOW),
+        (_, _) => ("·", ANSI_GRAY),
     };
-    let message = compact_preview(&display.message, REPL_META_WRAP_WIDTH);
-    let dim_success = display.state == DisplayState::Succeeded
-        && display.prominence == DisplayProminence::Secondary;
-    let _ = step_index; // reserved if /trace ever wants numbered steps again
-    if dim_success {
-        format!("{color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
+    let message = compact_preview(&display.message, REPL_META_WRAP_WIDTH.saturating_sub(4));
+    let _ = step_index;
+    let dim_body = display.state == DisplayState::Succeeded
+        || (display.kind == DisplayEventKind::Progress
+            && display.prominence == DisplayProminence::Secondary);
+    if dim_body {
+        format!("  {color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
+    } else if display.state == DisplayState::Failed || display.state == DisplayState::Blocked {
+        format!("  {color}{icon}{ANSI_RESET} {message}")
     } else {
-        format!("{color}{icon}{ANSI_RESET} {message}")
+        format!("  {color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
     }
 }
 
@@ -2293,58 +2307,37 @@ fn render_repl_failure_block(
     show_trace: bool,
     timing: &TurnTimingSummary,
 ) -> String {
-    let mut lines = vec![
-        format!("\n{}{}小创 · 未完成{}", ANSI_BOLD, ANSI_RED, ANSI_RESET),
-        String::new(),
-        format!(
-            "{}{}{}",
-            ANSI_RED,
-            readable_runtime_error(error),
-            ANSI_RESET
-        ),
-        format!(
-            "{}已用时 {}{}",
-            ANSI_DIM,
-            format_ms_duration(elapsed_ms),
-            ANSI_RESET
-        ),
-    ];
-    if timing.thinking_ms > 0 || timing.acting_ms > 0 {
-        lines.push(format!(
-            "{}其中 思考 {} · 执行 {}{}",
-            ANSI_DIM,
-            format_ms_duration(timing.thinking_ms),
-            format_ms_duration(timing.acting_ms),
-            ANSI_RESET
-        ));
+    let mut parts = vec![format_ms_duration(elapsed_ms)];
+    if timing.thinking_ms > 0 {
+        parts.push(format!("思考 {}", format_ms_duration(timing.thinking_ms)));
     }
-    if progress_lines.is_empty() {
-        lines.push(format!(
-            "{}没有捕获到可展示的工作进展。{}",
-            ANSI_DIM, ANSI_RESET
-        ));
-    } else {
-        lines.push(format!("{}── 最近进展 ──{}", ANSI_DIM, ANSI_RESET));
+    if timing.acting_ms > 0 {
+        parts.push(format!("执行 {}", format_ms_duration(timing.acting_ms)));
+    }
+    let mut lines = vec![
+        String::new(),
+        format!("{ANSI_BOLD}{ANSI_RED}小创{ANSI_RESET}"),
+        String::new(),
+        format!("{ANSI_RED}{}{ANSI_RESET}", readable_runtime_error(error)),
+        String::new(),
+        format!("{ANSI_DIM}  {}{ANSI_RESET}", parts.join(" · ")),
+    ];
+    if !progress_lines.is_empty() && show_trace {
+        lines.push(format!("{ANSI_DIM}  ── 最近进展 ──{ANSI_RESET}"));
         for line in progress_lines.iter().take(6) {
-            lines.push(format!("{}  · {}{}", ANSI_DIM, line, ANSI_RESET));
+            lines.push(format!("{ANSI_DIM}  · {line}{ANSI_RESET}"));
         }
     }
     if show_trace {
         lines.push(format!(
-            "{}── 技术细节 ──{}",
-            ANSI_DIM, ANSI_RESET
+            "{ANSI_DIM}  {}{ANSI_RESET}",
+            compact_preview(error, REPL_META_WRAP_WIDTH)
         ));
+    } else {
         lines.push(format!(
-            "{}{}{}",
-            ANSI_DIM,
-            compact_preview(error, REPL_META_WRAP_WIDTH),
-            ANSI_RESET
+            "{ANSI_GRAY}  可补充后重试；/trace 看技术细节{ANSI_RESET}"
         ));
     }
-    lines.push(format!(
-        "{}可以直接补充要求后重试；输入 /trace 可查看技术细节。{}",
-        ANSI_GRAY, ANSI_RESET
-    ));
     lines.join("\n")
 }
 
@@ -2355,23 +2348,24 @@ fn render_assistant_completion_block(
     trace_lines: &[String],
     audit_line: Option<&str>,
 ) -> String {
-    // Final answer first (Grok: Final owns attention). Trace/audit after, dim.
+    // Final owns attention: label → body → dim footer. Model only in footer (not dual).
+    let _ = model_name;
     let mut lines = vec![
-        format!("\n{ANSI_DIM}──{ANSI_RESET}"),
-        format!("{ANSI_BOLD}{ANSI_CYAN}小创{ANSI_RESET}  {ANSI_DIM}{model_name}{ANSI_RESET}"),
+        String::new(),
+        format!("{ANSI_BOLD}{ANSI_CYAN}小创{ANSI_RESET}"),
         String::new(),
         answer.to_string(),
         String::new(),
         metadata_line.to_string(),
     ];
     if !trace_lines.is_empty() || audit_line.is_some() {
-        lines.push(format!("{}── 技术细节 ──{}", ANSI_DIM, ANSI_RESET));
+        lines.push(format!("{ANSI_DIM}  ── /trace ──{ANSI_RESET}"));
     }
     for line in trace_lines {
-        lines.push(format!("{}{}{}", ANSI_DIM, line, ANSI_RESET));
+        lines.push(format!("{ANSI_DIM}  {line}{ANSI_RESET}"));
     }
     if let Some(audit_line) = audit_line {
-        lines.push(format!("{}{}{}", ANSI_DIM, audit_line, ANSI_RESET));
+        lines.push(format!("{ANSI_DIM}  {audit_line}{ANSI_RESET}"));
     }
     lines.join("\n")
 }
@@ -2407,10 +2401,8 @@ fn render_completion_metadata_line(
     timing: &TurnTimingSummary,
     model_name: &str,
 ) -> String {
-    let mut parts = vec![
-        format!("耗时 {elapsed}"),
-        format!("模型 {model_name}"),
-    ];
+    // Compact footer under the answer (Grok-style status crumbs).
+    let mut parts = vec![elapsed.to_string(), model_name.to_string()];
     if timing.thinking_ms > 0 {
         parts.push(format!("思考 {}", format_ms_duration(timing.thinking_ms)));
     }
@@ -2418,19 +2410,18 @@ fn render_completion_metadata_line(
         parts.push(format!("执行 {}", format_ms_duration(timing.acting_ms)));
     }
     match tool_status {
-        "human_input_required" => parts.push("等待你的确认".to_string()),
-        "completed_after_tool_limit" => parts.push("已在执行后整理答复".to_string()),
-        "tool_loop_exhausted" => parts.push("答复未完整收口".to_string()),
+        "human_input_required" => parts.push("等待确认".to_string()),
+        "completed_after_tool_limit" => parts.push("工具后收口".to_string()),
+        "tool_loop_exhausted" => parts.push("未完整收口".to_string()),
+        "terminal_tool_failure" => parts.push("动作未完成".to_string()),
         _ => {}
     }
     if pending_guidance_count > 0 {
-        parts.push(format!("已排队 {pending_guidance_count} 条补充要求"));
+        parts.push(format!("补充×{pending_guidance_count}"));
     }
     format!(
-        "{}{}{}",
-        ANSI_DIM,
-        wrap_single_line(&parts.join("  "), REPL_META_WRAP_WIDTH),
-        ANSI_RESET
+        "{ANSI_DIM}  {}{ANSI_RESET}",
+        wrap_single_line(&parts.join(" · "), REPL_META_WRAP_WIDTH)
     )
 }
 
@@ -2661,13 +2652,15 @@ mod tests {
         assert!(rendered.contains("你"));
         assert!(rendered.contains("请检查当前分支并总结"));
         assert!(rendered.contains("不要省略第二行"));
-        // Meta is model-only now (provider/cwd dropped to reduce noise).
-        assert!(rendered.contains("gpt-5.5"));
+        // Model stays on answer footer, not under the user bubble.
+        assert!(!rendered.contains("gpt-5.5"));
         assert!(!rendered.contains("type !text"));
+        assert!(!rendered.contains('│'));
 
         let short = render_user_message_block("哈喽小创", "p", "m", "/tmp");
         assert!(short.contains("你"));
         assert!(short.contains("哈喽小创"));
+        assert!(short.contains('─'));
         // Compact short messages: one line bubble, no pipe reprint theater.
         assert!(!short.contains('│'));
     }
@@ -2679,6 +2672,8 @@ mod tests {
 
         assert!(rendered.contains("检查 Git 状态"));
         assert!(rendered.contains("▸") || rendered.contains("·"));
+        // Secondary stream is indented under the turn.
+        assert!(rendered.starts_with("  "));
         assert!(!rendered.contains("tool"));
         assert!(!rendered.contains("thinking"));
         assert!(!rendered.contains("TOOL STREAM"));
@@ -2706,16 +2701,17 @@ mod tests {
 
         assert!(rendered.contains("小创"));
         assert!(rendered.contains("answer body"));
-        assert!(rendered.contains("技术细节"));
+        assert!(rendered.contains("/trace"));
         assert!(rendered.contains("rpt_123"));
-        assert!(rendered.contains("耗时 120ms"));
+        assert!(rendered.contains("120ms"));
         assert!(rendered.contains("思考"));
-        assert!(rendered.contains("模型 gpt-5.5"));
+        assert!(rendered.contains("gpt-5.5"));
         let answer_pos = rendered.find("answer body").expect("answer");
-        let trace_pos = rendered.find("技术细节").expect("trace section");
+        let footer_pos = rendered.find("120ms").expect("footer");
+        let trace_pos = rendered.find("/trace").expect("trace section");
         assert!(
-            answer_pos < trace_pos,
-            "final answer must appear before technical section"
+            answer_pos < footer_pos && answer_pos < trace_pos,
+            "final answer must appear before footer/trace"
         );
         assert!(!rendered.contains("DONE"));
         assert!(!rendered.contains("THINKING"));
@@ -2803,11 +2799,35 @@ mod tests {
         };
         let rendered = render_repl_banner(&summary);
 
-        assert!(rendered.contains("██████"));
-        assert!(rendered.contains("A G E N T"));
+        // Default banner is quiet (精装修); no ASCII billboard.
+        assert!(rendered.contains("chuang"));
+        assert!(!rendered.contains("██████"));
         assert!(rendered.contains("gpt-5.5"));
         assert!(rendered.contains("full_local_workspace"));
         assert!(rendered.contains("/stop"));
+        assert!(rendered.contains("/trace"));
+    }
+
+    #[test]
+    fn repl_metadata_footer_is_compact_crumbs() {
+        let line = render_completion_metadata_line(
+            "1.2s",
+            "terminal_tool_failure",
+            1,
+            &TurnTimingSummary {
+                thinking_ms: 800,
+                acting_ms: 400,
+            },
+            "gpt-5.6-terra",
+        );
+        assert!(line.contains("1.2s"));
+        assert!(line.contains("gpt-5.6-terra"));
+        assert!(line.contains("思考"));
+        assert!(line.contains("动作未完成"));
+        assert!(line.contains("补充×1"));
+        assert!(line.contains('·'));
+        assert!(!line.contains("耗时 "));
+        assert!(!line.contains("模型 "));
     }
 
     #[test]
@@ -2820,10 +2840,11 @@ mod tests {
             "gpt-5.5",
         );
 
-        assert!(rendered.contains("耗时 999ms"));
-        assert!(rendered.contains("模型 gpt-5.5"));
-        assert!(rendered.contains("答复未完整收口"));
-        assert!(rendered.contains("已排队 7 条补充要求"));
+        assert!(rendered.contains("999ms"));
+        assert!(rendered.contains("gpt-5.5"));
+        assert!(rendered.contains("未完整收口"));
+        assert!(rendered.contains("补充×7"));
+        assert!(rendered.contains('·'));
         assert!(!rendered.contains("tools"));
         assert!(!rendered.contains("protocol"));
         assert!(!rendered.contains("report"));

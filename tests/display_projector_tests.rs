@@ -127,14 +127,24 @@ fn projector_maps_progress_steps_to_deterministic_chinese_wording() {
 }
 
 #[test]
-fn protocol_invalid_action_json_is_human_progress_not_raw_code() {
-    let projector = DisplayProjector::new(DisplayProjectionOptions::repl_default());
-    let event = projector
+fn protocol_errors_hidden_in_default_repl_shown_human_in_trace() {
+    let quiet = DisplayProjector::new(DisplayProjectionOptions::repl_default());
+    assert_eq!(
+        quiet.project(&TerminalEvent::ProtocolError {
+            round: 2,
+            code: "invalid_action_json".to_string(),
+        }),
+        None,
+        "default chat keeps protocol self-heal off-transcript"
+    );
+
+    let trace = DisplayProjector::new(DisplayProjectionOptions::repl_trace());
+    let event = trace
         .project(&TerminalEvent::ProtocolError {
             round: 2,
             code: "invalid_action_json".to_string(),
         })
-        .expect("protocol warnings on by default in repl");
+        .expect("trace surfaces protocol recovery");
     assert_eq!(event.kind, DisplayEventKind::Progress);
     assert_eq!(event.message, "正在修正操作格式并继续");
     assert!(!event.message.contains("invalid_action_json"));
