@@ -5,7 +5,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::actuator::{
     Actuator, ClickTarget, CommandActuator, FakeActuator, InputTarget, ObserveTarget,
@@ -87,6 +87,17 @@ pub enum ToolCall {
         session_id: Option<String>,
         #[serde(default)]
         limit: Option<usize>,
+    },
+    SpawnSubagent {
+        task: String,
+        #[serde(default)]
+        agent_name: Option<String>,
+        #[serde(default)]
+        policy: Option<String>,
+        #[serde(default)]
+        token_budget: Option<u16>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
 }
 
@@ -260,6 +271,11 @@ pub const TOOL_ACTION_CALL_FIELDS: &[&str] = &[
     "query",
     "session_id",
     "limit",
+    "task",
+    "agent_name",
+    "policy",
+    "token_budget",
+    "timeout_ms",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,6 +369,7 @@ pub struct ToolExecutionConfig {
     pub shell_risk_rules: ShellRiskRules,
     pub memory: Option<MemoryToolContext>,
     pub actuator: Option<ActuatorConfig>,
+    pub subagent: Option<SubagentToolContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -361,6 +378,16 @@ pub struct MemoryToolContext {
     pub session_id: Option<String>,
     pub default_limit: usize,
     pub max_limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentToolContext {
+    pub executable_path: PathBuf,
+    pub config_path: PathBuf,
+    pub queue_root: PathBuf,
+    pub runner_command: PathBuf,
+    pub worker_model: String,
+    pub worker_capability: String,
 }
 
 #[derive(Debug, Clone)]
@@ -376,6 +403,7 @@ impl Default for ToolExecutionConfig {
             shell_risk_rules: ShellRiskRules::default(),
             memory: None,
             actuator: None,
+            subagent: None,
         }
     }
 }
@@ -620,6 +648,7 @@ impl ToolSurfaceStatus {
         callable_tools.push("open_app".to_string());
         callable_tools.push("apply_patch".to_string());
         callable_tools.push("memory_recall".to_string());
+        callable_tools.push("spawn_subagent".to_string());
 
         Self {
             available: true,
@@ -875,6 +904,23 @@ fn execute_tool_call_with_registry_and_config(
             session_id,
             limit,
         } => execute_memory_recall(registry, call, query, session_id, *limit, &config.memory),
+        ToolCall::SpawnSubagent {
+            task,
+            agent_name,
+            policy,
+            token_budget,
+            timeout_ms,
+        } => execute_spawn_subagent(
+            workspace_root,
+            registry,
+            call,
+            task,
+            agent_name.as_deref(),
+            policy.as_deref(),
+            *token_budget,
+            *timeout_ms,
+            &config.subagent,
+        ),
     };
     record.duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     record.retryable = record
@@ -1463,6 +1509,7 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ApplyPatch { .. } => "apply_patch",
         ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
+        ToolCall::SpawnSubagent { .. } => "spawn_subagent",
     }
 }
 
@@ -1841,6 +1888,253 @@ fn execute_memory_recall(
     record
 }
 
+#[allow(clippy::too_many_arguments)]
+fn execute_spawn_subagent(
+    workspace_root: &Path,
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    task: &str,
+    agent_name: Option<&str>,
+    policy: Option<&str>,
+    token_budget: Option<u16>,
+    timeout_ms: Option<u64>,
+    subagent: &Option<SubagentToolContext>,
+) -> ToolExecutionRecord {
+    let Some(subagent) = subagent else {
+        return failed_record(registry, call, "subagent_runtime_unavailable".to_string());
+    };
+    if task.trim().is_empty() {
+        return failed_record(registry, call, "subagent_task_empty".to_string());
+    }
+
+    let policy = policy.unwrap_or("analyze").trim().to_ascii_lowercase();
+    if !matches!(policy.as_str(), "analyze" | "execute") {
+        return failed_record(
+            registry,
+            call,
+            format!("subagent_policy_unsupported policy={policy}"),
+        );
+    }
+    let agent_name = sanitize_subagent_name(agent_name.unwrap_or("worker"));
+    let token_budget = token_budget.unwrap_or(2048).clamp(256, 16_384);
+    let timeout_ms = timeout_ms.unwrap_or(300_000).clamp(30_000, 900_000);
+    let run_suffix = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => format!("{}-{}", std::process::id(), duration.as_nanos()),
+        Err(error) => {
+            return failed_record(registry, call, format!("subagent_clock_failed: {error}"))
+        }
+    };
+    let task_id = format!("tool-subagent-{run_suffix}");
+    let queue_root = subagent.queue_root.join(&run_suffix);
+    let config_path = subagent.config_path.display().to_string();
+    let queue_root_text = queue_root.display().to_string();
+    let runner_command = subagent.runner_command.display().to_string();
+    let token_budget_text = token_budget.to_string();
+    let timeout_text = timeout_ms.to_string();
+
+    let dispatch_args = vec![
+        "subagent",
+        "dispatch",
+        "--config",
+        config_path.as_str(),
+        "--subagent-queue-root",
+        queue_root_text.as_str(),
+        "--task",
+        task.trim(),
+        "--task-id",
+        task_id.as_str(),
+        "--agent-name",
+        agent_name.as_str(),
+        "--policy",
+        policy.as_str(),
+        "--token-budget",
+        token_budget_text.as_str(),
+        "--idle-timeout-ms",
+        timeout_text.as_str(),
+        "--requires-capability",
+        subagent.worker_capability.as_str(),
+        "--json",
+    ];
+    let dispatch = match run_subagent_cli_json(workspace_root, &dispatch_args, timeout_ms, subagent)
+    {
+        Ok(value) => value,
+        Err(error) => return failed_record(registry, call, error),
+    };
+    let run_id = dispatch
+        .get("run_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if run_id.is_empty() {
+        return failed_record(
+            registry,
+            call,
+            "subagent_dispatch_missing_run_id".to_string(),
+        );
+    }
+
+    let run_args = vec![
+        "subagent",
+        "run-loop",
+        "--config",
+        config_path.as_str(),
+        "--subagent-queue-root",
+        queue_root_text.as_str(),
+        "--runner",
+        "command",
+        "--runner-command",
+        runner_command.as_str(),
+        "--allow-runner-command",
+        runner_command.as_str(),
+        "--capability",
+        subagent.worker_capability.as_str(),
+        "--max-runs",
+        "1",
+        "--max-concurrency",
+        "1",
+        "--approve-exec",
+        "--json",
+    ];
+    let run = match run_subagent_cli_json(
+        workspace_root,
+        &run_args,
+        timeout_ms.saturating_add(30_000),
+        subagent,
+    ) {
+        Ok(value) => value,
+        Err(error) => return failed_record(registry, call, error),
+    };
+    if run.get("ran_count").and_then(serde_json::Value::as_u64) != Some(1) {
+        return failed_record(
+            registry,
+            call,
+            format!("subagent_runner_did_not_run run_id={run_id}"),
+        );
+    }
+
+    let collect_args = vec![
+        "subagent",
+        "collect",
+        "--config",
+        config_path.as_str(),
+        "--subagent-queue-root",
+        queue_root_text.as_str(),
+        "--run-id",
+        run_id.as_str(),
+        "--json",
+    ];
+    let collected = match run_subagent_cli_json(workspace_root, &collect_args, 30_000, subagent) {
+        Ok(value) => value,
+        Err(error) => return failed_record(registry, call, error),
+    };
+    let accepted = collected
+        .pointer("/report_admission/status")
+        .and_then(enum_json_name)
+        .as_deref()
+        == Some("Accepted");
+    let report_status = collected
+        .pointer("/report/status")
+        .and_then(enum_json_name)
+        .unwrap_or_else(|| "missing".to_string());
+    let summary = collected
+        .pointer("/report/summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("subagent returned no summary");
+    let stdout_preview = collected
+        .pointer("/report/stdout_preview")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !accepted || report_status != "Success" {
+        return failed_record(
+            registry,
+            call,
+            format!(
+                "subagent_failed run_id={run_id} status={report_status} admission_accepted={accepted} summary={}",
+                redact_sensitive_text("subagent_summary", summary).text
+            ),
+        );
+    }
+
+    let output = serde_json::json!({
+        "run_id": run_id,
+        "agent_id": dispatch.get("agent_id"),
+        "task_id": task_id,
+        "status": report_status,
+        "admission": "accepted",
+        "summary": redact_sensitive_text("subagent_summary", summary).text,
+        "result_preview": redact_sensitive_text("subagent_output", stdout_preview).text,
+        "worker_model": subagent.worker_model,
+        "workspace_root": workspace_root.display().to_string(),
+    })
+    .to_string();
+    success_record(
+        registry,
+        call,
+        format!("subagent_completed run_id={run_id} admission=accepted"),
+        Some(output),
+        false,
+    )
+}
+
+fn enum_json_name(value: &serde_json::Value) -> Option<String> {
+    value.as_str().map(ToString::to_string).or_else(|| {
+        value
+            .as_object()
+            .and_then(|object| object.keys().next().cloned())
+    })
+}
+
+fn run_subagent_cli_json(
+    workspace_root: &Path,
+    args: &[&str],
+    timeout_ms: u64,
+    subagent: &SubagentToolContext,
+) -> Result<serde_json::Value, String> {
+    let child = Command::new(&subagent.executable_path)
+        .args(args)
+        .current_dir(workspace_root)
+        .env("CHUANG_CODEX_RUNNER_ENABLE", "1")
+        .env("CHUANG_CODEX_RUNNER_WORKSPACE", workspace_root)
+        .env("CHUANG_CODEX_RUNNER_MODEL", &subagent.worker_model)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("subagent_cli_spawn_failed: {error}"))?;
+    let output = wait_with_timeout(child, timeout_ms)
+        .map_err(|error| format!("subagent_cli_wait_failed: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        return Err(format!(
+            "subagent_cli_failed exit_code={:?} stderr={}",
+            output.status.code(),
+            redact_sensitive_text("subagent_stderr", &stderr).text
+        ));
+    }
+    serde_json::from_str(stdout.trim())
+        .map_err(|error| format!("subagent_cli_json_invalid: {error}"))
+}
+
+fn sanitize_subagent_name(raw: &str) -> String {
+    let name = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let name = name.trim_matches('-');
+    if name.is_empty() {
+        "worker".to_string()
+    } else {
+        name.chars().take(48).collect()
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct MemoryRecallToolOutput {
     scope: String,
@@ -1984,11 +2278,46 @@ fn redacted_tool_call(call: &ToolCall) -> ToolCall {
             command: redact_sensitive_text("command", command).text,
             cwd: cwd.clone(),
         },
+        ToolCall::SpawnSubagent {
+            task,
+            agent_name,
+            policy,
+            token_budget,
+            timeout_ms,
+        } => ToolCall::SpawnSubagent {
+            task: redact_sensitive_text("subagent_task", task).text,
+            agent_name: agent_name.clone(),
+            policy: policy.clone(),
+            token_budget: *token_budget,
+            timeout_ms: *timeout_ms,
+        },
         _ => call.clone(),
     }
 }
 
 impl ToolExecutionRecord {
+    pub fn auxiliary_success(
+        call: &ToolCall,
+        summary: impl Into<String>,
+        output: Option<String>,
+    ) -> Self {
+        success_record(
+            &AtomicToolRegistry::generic_agent_mvp(),
+            call,
+            summary.into(),
+            output,
+            false,
+        )
+    }
+
+    pub fn auxiliary_failure(call: &ToolCall, summary: impl Into<String>) -> Self {
+        failed_record(
+            &AtomicToolRegistry::generic_agent_mvp(),
+            call,
+            summary.into(),
+        )
+    }
+
     fn with_paths(mut self, target_path: &str, resolved_path: &Path) -> Self {
         self.target_path = Some(target_path.to_string());
         self.resolved_path = Some(resolved_path.display().to_string());
@@ -2226,6 +2555,14 @@ fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> Actio
         ToolCall::ShellExec { command, .. } => {
             classify_shell_action_kind(command, shell_risk_rules)
         }
+        ToolCall::SpawnSubagent { task, .. } => {
+            let nested_kind = classify_shell_action_kind(task, shell_risk_rules);
+            if nested_kind == ActionKind::ShellCommand {
+                ActionKind::SubagentDispatch
+            } else {
+                nested_kind
+            }
+        }
     }
 }
 
@@ -2407,6 +2744,18 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
             session_id.as_deref().unwrap_or("<configured>"),
             redact_sensitive_text("memory_query", query).text.trim()
         ),
+        ToolCall::SpawnSubagent {
+            task,
+            agent_name,
+            policy,
+            ..
+        } => format!(
+            "{}::subagent name={} policy={} task={}",
+            workspace_root.display(),
+            agent_name.as_deref().unwrap_or("worker"),
+            policy.as_deref().unwrap_or("analyze"),
+            redact_sensitive_text("subagent_task", task).text.trim()
+        ),
     }
 }
 
@@ -2450,6 +2799,24 @@ fn tool_summary(call: &ToolCall) -> String {
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "default".to_string())
         ),
+        ToolCall::SpawnSubagent {
+            task,
+            agent_name,
+            policy,
+            token_budget,
+            timeout_ms,
+        } => format!(
+            "spawn_subagent name={} policy={} token_budget={} timeout_ms={} task={}",
+            agent_name.as_deref().unwrap_or("worker"),
+            policy.as_deref().unwrap_or("analyze"),
+            token_budget
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "2048".to_string()),
+            timeout_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "300000".to_string()),
+            redact_sensitive_text("subagent_task", task).text.trim()
+        ),
     }
 }
 
@@ -2467,7 +2834,8 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         | ToolCall::HumanSuspend { .. }
         | ToolCall::ApplyPatch { .. }
         | ToolCall::ShellExec { .. }
-        | ToolCall::MemoryRecall { .. } => None,
+        | ToolCall::MemoryRecall { .. }
+        | ToolCall::SpawnSubagent { .. } => None,
     }
 }
 

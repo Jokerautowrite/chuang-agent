@@ -171,6 +171,12 @@ fn parse_structured_action_accepts_ga_atomic_tool_names() {
     ));
     assert!(matches!(
         parse_tool_model_output(
+            r#"ACTION: {"type":"tool_call","call":{"tool":"spawn_subagent","task":"review tests","agent_name":"reviewer","policy":"analyze","timeout_ms":300000}}"#
+        ),
+        ToolModelOutput::ToolCall(ToolCall::SpawnSubagent { .. })
+    ));
+    assert!(matches!(
+        parse_tool_model_output(
             r#"ACTION: {"type":"tool_call","call":{"tool":"open_app","app_name":"Chrome"}}"#
         ),
         ToolModelOutput::ToolCall(ToolCall::OpenApp { .. })
@@ -311,6 +317,10 @@ fn tool_surface_status_exposes_read_only_desktop_browser_tools() {
         surface_json["desktop_browser_read_only_atomic_tools"],
         serde_json::json!(["screenshot", "locate"])
     );
+    assert!(surface
+        .callable_tools
+        .iter()
+        .any(|tool| tool == "spawn_subagent"));
 }
 
 #[test]
@@ -386,6 +396,11 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"query"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"session_id"));
     assert!(ToolActionEnvelope::call_schema_fields().contains(&"limit"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"task"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"agent_name"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"policy"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"token_budget"));
+    assert!(ToolActionEnvelope::call_schema_fields().contains(&"timeout_ms"));
 }
 
 #[test]
@@ -1475,6 +1490,7 @@ fn execution_slot_uses_configured_shell_risk_rules() {
         },
         memory: None,
         actuator: None,
+        subagent: None,
     });
 
     let error = slot
@@ -1495,6 +1511,81 @@ fn execution_slot_uses_configured_shell_risk_rules() {
         governance.audit_records()[0].operation,
         "tool.code_execute.rejected"
     );
+}
+
+#[test]
+fn spawn_subagent_tool_runs_existing_dispatch_runner_collect_chain() {
+    let root = temp_workspace("spawn-subagent");
+    fs::create_dir_all(root.join("scripts")).expect("scripts dir should be created");
+    fs::write(root.join("config.toml"), "subagent = \"queued_external\"\n")
+        .expect("config should write");
+    let executable = root.join("fake-chuang");
+    let runner = root.join("scripts/fake-runner");
+    fs::write(
+        &executable,
+        r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+queue = args[args.index("--subagent-queue-root") + 1]
+os.makedirs(queue, exist_ok=True)
+if args[:2] == ["subagent", "dispatch"]:
+    json.dump({"run_id":"run-1","agent_id":"worker-1"}, sys.stdout)
+elif args[:2] == ["subagent", "run-loop"]:
+    json.dump({"ran_count":1}, sys.stdout)
+elif args[:2] == ["subagent", "collect"]:
+    json.dump({
+        "report_admission":{"status":"Accepted"},
+        "report":{"status":"Success","summary":"worker completed","stdout_preview":"verified"}
+    }, sys.stdout)
+else:
+    raise SystemExit(2)
+"#,
+    )
+    .expect("fake executable should write");
+    fs::write(&runner, "#!/bin/sh\nexit 0\n").expect("runner should write");
+    let mut permissions = fs::metadata(&executable)
+        .expect("fake executable metadata")
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).expect("fake executable should chmod");
+        let mut runner_permissions = fs::metadata(&runner)
+            .expect("runner metadata")
+            .permissions();
+        runner_permissions.set_mode(0o755);
+        fs::set_permissions(&runner, runner_permissions).expect("runner should chmod");
+    }
+
+    let record = chuang_agent::tool_runtime::execute_tool_call_with_config(
+        &root,
+        &ToolCall::SpawnSubagent {
+            task: "inspect the workspace".to_string(),
+            agent_name: Some("reviewer".to_string()),
+            policy: Some("analyze".to_string()),
+            token_budget: Some(1024),
+            timeout_ms: Some(60_000),
+        },
+        &ToolExecutionConfig {
+            subagent: Some(chuang_agent::tool_runtime::SubagentToolContext {
+                executable_path: executable,
+                config_path: root.join("config.toml"),
+                queue_root: root.join("queue"),
+                runner_command: runner,
+                worker_model: "gpt-5.6-luna".to_string(),
+                worker_capability: "workspace".to_string(),
+            }),
+            ..ToolExecutionConfig::default()
+        },
+    );
+
+    assert!(record.ok, "spawn should succeed: {}", record.summary);
+    assert_eq!(record.tool_name, "spawn_subagent");
+    assert!(record.summary.contains("admission=accepted"));
+    let output = record.output.expect("subagent output should exist");
+    assert!(output.contains("\"result_preview\":\"verified\""));
+    assert!(output.contains("\"worker_model\":\"gpt-5.6-luna\""));
 }
 
 #[test]

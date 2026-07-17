@@ -70,6 +70,8 @@ const KEYBOARD_SCHEMA_FIELDS: &[&str] = &["text", "secret"];
 const WAIT_SCHEMA_FIELDS: &[&str] = &["millis"];
 const HUMAN_SUSPEND_SCHEMA_FIELDS: &[&str] = &["reason", "prompt"];
 const MEMORY_RECALL_SCHEMA_FIELDS: &[&str] = &["query", "session_id", "limit"];
+const SPAWN_SUBAGENT_SCHEMA_FIELDS: &[&str] =
+    &["task", "agent_name", "policy", "token_budget", "timeout_ms"];
 
 const READ_ONLY_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "read_only"];
 const WRITE_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "write", "audit"];
@@ -81,8 +83,9 @@ const KEYBOARD_RISK_TAGS: &[&str] = &["desktop", "interaction", "input", "audit"
 const RUNTIME_WAIT_RISK_TAGS: &[&str] = &["runtime", "delay", "read_only"];
 const HUMAN_SUSPEND_RISK_TAGS: &[&str] = &["runtime", "human_in_loop", "read_only"];
 const MEMORY_RECALL_RISK_TAGS: &[&str] = &["memory", "recall", "read_only"];
+const SPAWN_SUBAGENT_RISK_TAGS: &[&str] = &["workspace", "subagent", "code_execution", "audit"];
 
-const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 12] = [
+const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 13] = [
     ToolDescriptor {
         name: "file_read",
         namespace: "workspace",
@@ -238,6 +241,19 @@ const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 12] = [
         concurrent_safe: true,
         requires_approval: false,
         risk_tags: MEMORY_RECALL_RISK_TAGS,
+    },
+    ToolDescriptor {
+        name: "spawn_subagent",
+        namespace: "subagent",
+        title: "Run a governed local subagent",
+        schema_fields: SPAWN_SUBAGENT_SCHEMA_FIELDS,
+        read_only: false,
+        mutating: true,
+        destructive: false,
+        external_commit: false,
+        concurrent_safe: false,
+        requires_approval: false,
+        risk_tags: SPAWN_SUBAGENT_RISK_TAGS,
     },
 ];
 

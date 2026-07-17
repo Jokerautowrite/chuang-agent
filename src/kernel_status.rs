@@ -300,6 +300,9 @@ pub struct SubagentReadinessStatus {
     pub ok: bool,
     pub overall_state: String,
     pub mode: String,
+    pub model_tool_worker_available: bool,
+    pub model_tool_worker_state: String,
+    pub model_tool_worker_reason: String,
     pub live_worker_available: bool,
     pub worker_runtime_state: String,
     pub worker_runtime_reason: String,
@@ -2343,6 +2346,35 @@ fn build_subagent_readiness(
     config: &ConfigSummary,
 ) -> SubagentReadinessStatus {
     let queued = slots.subagent == "queued_external";
+    let model_tool_runner =
+        Path::new(&config.permission_workspace_root).join("scripts/chuang-codex-runner.py");
+    let model_tool_runner_ready = model_tool_runner.is_file();
+    let model_tool_codex_ready = command_available_on_path("codex");
+    let model_tool_worker_available = queued && model_tool_runner_ready && model_tool_codex_ready;
+    let model_tool_worker_state = if model_tool_worker_available {
+        "available"
+    } else if !queued {
+        "not_configured"
+    } else if !model_tool_runner_ready {
+        "runner_missing"
+    } else {
+        "codex_unavailable"
+    };
+    let model_tool_worker_reason = if model_tool_worker_available {
+        format!(
+            "spawn_subagent can execute the governed local Codex worker through {}; this does not imply every external worker pool or live adapter is ready",
+            model_tool_runner.display()
+        )
+    } else if !queued {
+        "spawn_subagent requires the queued_external subagent slot".to_string()
+    } else if !model_tool_runner_ready {
+        format!(
+            "spawn_subagent runner is missing at {}",
+            model_tool_runner.display()
+        )
+    } else {
+        "spawn_subagent runner is present, but codex is unavailable on PATH".to_string()
+    };
     let live_runner_rehearsal_ready = Path::new("docs/subagent-runner-protocol.md").exists()
         && Path::new("src/live_subagent_rehearsal.rs").exists();
     let layers =
@@ -2504,6 +2536,9 @@ fn build_subagent_readiness(
         ok: blocked_count == 0,
         overall_state: overall_state.to_string(),
         mode: slots.subagent.clone(),
+        model_tool_worker_available,
+        model_tool_worker_state: model_tool_worker_state.to_string(),
+        model_tool_worker_reason,
         live_worker_available,
         worker_runtime_state: worker_runtime_state.to_string(),
         worker_runtime_reason,
@@ -2536,6 +2571,15 @@ fn build_subagent_readiness(
         blocked_count,
         layers,
     }
+}
+
+fn command_available_on_path(command: &str) -> bool {
+    env::var_os("PATH").is_some_and(|paths| {
+        env::split_paths(&paths).any(|directory| {
+            let candidate = directory.join(command);
+            candidate.is_file()
+        })
+    })
 }
 
 fn subagent_layer(

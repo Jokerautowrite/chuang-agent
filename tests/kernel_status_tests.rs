@@ -327,7 +327,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             .local_ga_normal_local_action_default,
         "file_write/code_execute/open_app/click/input=allow_with_audit"
     );
-    assert_eq!(status.policy_tool_status.tool_descriptor_count, 12);
+    assert_eq!(status.policy_tool_status.tool_descriptor_count, 13);
     assert_eq!(status.policy_tool_status.ga_tool_descriptor_mapped_count, 9);
     assert!(status
         .policy_tool_status

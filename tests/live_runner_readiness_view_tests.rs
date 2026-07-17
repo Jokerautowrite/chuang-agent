@@ -228,6 +228,9 @@ fn live_runner_readiness_view_status_json_exposes_blocked_reason_and_next_action
         "local_contract_reason".to_string(),
         "local_contract_state".to_string(),
         "mode".to_string(),
+        "model_tool_worker_available".to_string(),
+        "model_tool_worker_reason".to_string(),
+        "model_tool_worker_state".to_string(),
         "ok".to_string(),
         "overall_state".to_string(),
         "partial_count".to_string(),
@@ -380,7 +383,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         "full_local_workspace"
     );
     assert_eq!(policy_tool_status["ga_tool_descriptor_mapped_count"], 9);
-    assert_eq!(policy_tool_status["tool_descriptor_count"], 12);
+    assert_eq!(policy_tool_status["tool_descriptor_count"], 13);
     let tool_descriptors = policy_tool_status["ga_tool_descriptors"]
         .as_array()
         .expect("policy tool descriptors should be array");
@@ -587,7 +590,7 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     assert!(stdout.contains("runtime_report_surface.artifact_locators="));
     assert!(stdout.contains("runtime_report_surface.observability_fields="));
     assert!(stdout.contains("policy_tool_status.active_permission_profile=full_local_workspace"));
-    assert!(stdout.contains("policy_tool_status.ga_tool_descriptors=9/12"));
+    assert!(stdout.contains("policy_tool_status.ga_tool_descriptors=9/13"));
     assert!(stdout.contains("policy_tool_status.missing=none"));
     assert!(stdout.contains("live_readiness.ok=true"));
     assert!(stdout.contains("live_readiness.state=local_ready_live_pending"));

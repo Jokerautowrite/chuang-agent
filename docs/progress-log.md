@@ -1,3 +1,10 @@
+# 2026-07-11 满血工作区权限与模型子代理工具
+- `full_local_workspace` 现在同时校验实际 turn workspace 与 permission workspace；不再出现策略显示根和真实读写根静默不一致。项目内普通读写、补丁、构建、测试、扫描、桌面交互继续自动执行并审计，高危删除/清理/reset/卸载、提权、系统服务、网络、支付、验证码、密钥和外部提交仍要求审批。
+- 新增正式模型工具 `spawn_subagent`，进入 ACTION schema、tool surface、descriptor、Atomic auxiliary mapping、治理和终端活动流。模型可选择 `analyze` 或 `execute`，默认禁用递归派发。
+- 工具复用现有 `dispatch -> command runner -> report admission -> collect` 链，不新增第二套队列协议。子代理使用 `gpt-5.6-luna`、ephemeral Codex、项目工作区；Analyze 为 read-only，Execute 为 workspace-write，普通动作不弹审批。
+- `scripts/chuang-codex-runner.py` 显式传入 model、workspace、sandbox 和 `approval_policy=never`，并在提示中保留硬边界：不得删除、清理、reset、卸载、提权、改服务/网络、处理支付/验证码、导出密钥、外部推送、写 core memory 或递归派发。
+- 已通过真实 smoke：主模型调用 `spawn_subagent`，Luna 子代理读取根目录 `Cargo.toml`，report admission accepted，并回传 package name `chuang-agent`。工具回执显示 `worker_model=gpt-5.6-luna`、`status=Success`、`admission=accepted`。
+
 # 2026-07-11 满血本地终端工作台
 - 交互 REPL 启动页升级为粗体大型 `CHUANG AGENT` ANSI 字样，并紧凑显示当前模型、`full_local_workspace` profile、工作目录及 `/stop` 控制。输入区改为固定边框 composer，状态栏稳定放在输入框下方。
 - 新增会话级状态统计：显示当前模型、packed context / context max / 百分比、上一轮聚合 input/output token 和本次 REPL 累计 token。工具循环包含多次模型调用时会聚合 usage，不再只显示最后一次调用。
@@ -2654,3 +2661,10 @@
 - 新增共享 `secret_redaction`，文件读取、shell stdout/stderr、命令预览、工具记录和 diff 预览均局部替换真实值为 `[REDACTED]`，保留路径、行号、键名、状态和非敏感上下文。
 - 已生成 `diagnostics/core_health_report.md`，真实 `status --json` 与 `doctor --json` 均确认 profile/workspace/approval policy 正确，governance healthy，secret access 为 `needs_approval`。
 - 最终验收已通过：`cargo fmt --all -- --check`、`git diff --check`、`cargo check --all-targets`、完整 `cargo test -q`、`sh scripts/chuang-mvp-smoke.sh`、`sh scripts/chuang-candidate-verify.sh`。
+
+# 2026-07-11 Chuang 满血工作区与模型子代理接通
+
+- Chuang 运行配置继续固定为 `full_local_workspace`、`auto_for_workspace` 和 `/home/user/projects/chuang-agent`；普通工作区读写、补丁、构建、测试和扫描自动执行，高危边界继续由 governance 审批。
+- 新增模型可调用的 `spawn_subagent` 工具，复用 queued dispatch、command runner、ReportAdmission 和 collect 主链；默认 worker 为 `gpt-5.6-luna`，分析任务只读，执行任务限工作区写入。
+- 状态面新增独立 `model_tool_worker_*` 字段，真实表达模型工具 worker 是否可用，同时保留 `live_worker_available` 对完整外部 worker/live-adapter 聚合的严格语义，避免把单 worker 成功误报成全局 live ready。
+- 子代理 runner 明确禁止删除、清理、reset、提权、服务/网络修改、支付/验证码、密钥导出、外部推送、递归派发和核心记忆直写。

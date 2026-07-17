@@ -23,6 +23,7 @@ def run_dispatch(dispatch: dict) -> dict:
     enabled = os.environ.get("CHUANG_CODEX_RUNNER_ENABLE") == "1"
     codex_bin = os.environ.get("CHUANG_CODEX_BIN", "codex")
     workspace = os.environ.get("CHUANG_CODEX_RUNNER_WORKSPACE", os.getcwd())
+    model = os.environ.get("CHUANG_CODEX_RUNNER_MODEL", "gpt-5.6-luna")
     timeout_ms = int(dispatch.get("idle_timeout_ms") or 30000)
 
     if not enabled:
@@ -38,9 +39,24 @@ def run_dispatch(dispatch: dict) -> dict:
         )
 
     prompt = build_prompt(dispatch)
+    sandbox = "read-only" if str(dispatch.get("tool_policy")) == "Analyze" else "workspace-write"
     try:
         completed = subprocess.run(
-            [codex_bin, "exec", prompt],
+            [
+                codex_bin,
+                "exec",
+                "--model",
+                model,
+                "--cd",
+                workspace,
+                "--sandbox",
+                sandbox,
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "-c",
+                'approval_policy="never"',
+                prompt,
+            ],
             cwd=workspace,
             text=True,
             capture_output=True,
@@ -88,6 +104,9 @@ def build_prompt(dispatch: dict) -> str:
         [
             "You are a Chuang queued subagent runner.",
             "Follow the dispatch exactly and keep changes scoped.",
+            "Work autonomously inside the provided workspace. Read, write, patch, build, test, and scan when the assigned policy permits.",
+            "Never delete, clean, reset, uninstall, use sudo/root, alter system services or network settings, handle payments or verification codes, export secrets, or push externally.",
+            "Do not spawn another subagent. Do not write Chuang core memory.",
             f"task_id: {dispatch.get('task_id', '')}",
             f"tool_policy: {dispatch.get('tool_policy', '')}",
             f"required_capabilities: {metadata.get('required_capabilities', '')}",

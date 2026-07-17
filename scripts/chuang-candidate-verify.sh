@@ -42,7 +42,7 @@ assert runtime_surface["artifact_count"] == 11
 assert runtime_surface["observability_field_count"] == 26
 assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
-assert policy_tool_status["tool_descriptor_count"] == 12
+assert policy_tool_status["tool_descriptor_count"] == 13
 assert live_readiness["ok"] is True
 global_real_live_ready = live_readiness["overall_state"] == "global_real_live_ready"
 assert live_readiness["overall_state"] in ("local_ready_live_pending", "global_real_live_ready")

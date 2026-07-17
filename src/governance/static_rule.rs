@@ -113,6 +113,7 @@ fn permission_decision_for_action(profile: &PermissionProfile, kind: &ActionKind
         }
         ActionKind::LocalFileWrite => (PermissionTag::FileWrite, "local file write"),
         ActionKind::ShellCommand => (PermissionTag::CodeExecute, "local code execution"),
+        ActionKind::SubagentDispatch => (PermissionTag::CodeExecute, "local subagent dispatch"),
         ActionKind::ExternalSend => (PermissionTag::ExternalSend, "external send"),
         ActionKind::PublicPost => (PermissionTag::PublicPost, "public post"),
         ActionKind::Payment => (PermissionTag::Payment, "payment"),

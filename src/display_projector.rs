@@ -68,9 +68,13 @@ pub struct DisplayProjectionOptions {
     pub show_model_progress: bool,
     pub show_protocol_warnings: bool,
     pub show_final_ready_event: bool,
+    /// Lifecycle theater: TurnStarted「理解要求」、准备上下文 step 等。
+    /// 对话默认应关闭——能快答就只出答复，不要 1/2/3 流水账。
+    pub show_lifecycle_steps: bool,
 }
 
 impl Default for DisplayProjectionOptions {
+    /// Quiet / library default: hide successful noise; failures still project.
     fn default() -> Self {
         Self {
             show_successful_tool_events: false,
@@ -78,6 +82,35 @@ impl Default for DisplayProjectionOptions {
             show_model_progress: false,
             show_protocol_warnings: false,
             show_final_ready_event: false,
+            show_lifecycle_steps: false,
+        }
+    }
+}
+
+impl DisplayProjectionOptions {
+    /// Conversational REPL (default): tools visible, no step theater.
+    ///
+    /// Fast path = only final answer. Slow path = tools / optional thinking when enabled.
+    pub fn repl_default() -> Self {
+        Self {
+            show_successful_tool_events: true,
+            show_successful_step_events: false,
+            show_model_progress: false,
+            show_protocol_warnings: true,
+            show_final_ready_event: false,
+            show_lifecycle_steps: false,
+        }
+    }
+
+    /// `/trace`: lifecycle + model rounds + final-ready (for operators).
+    pub fn repl_trace() -> Self {
+        Self {
+            show_successful_tool_events: true,
+            show_successful_step_events: true,
+            show_model_progress: true,
+            show_protocol_warnings: true,
+            show_final_ready_event: true,
+            show_lifecycle_steps: true,
         }
     }
 }
@@ -94,20 +127,30 @@ impl DisplayProjector {
 
     pub fn project(&self, event: &TerminalEvent) -> Option<DisplayEvent> {
         match event {
-            TerminalEvent::TurnStarted { .. } => Some(DisplayEvent::new(
-                DisplayEventKind::Progress,
-                DisplayState::Running,
-                DisplayProminence::Primary,
-                false,
-                "正在理解你的要求".to_string(),
-            )),
-            TerminalEvent::StepStarted { title, .. } => Some(DisplayEvent::new(
-                DisplayEventKind::Progress,
-                DisplayState::Running,
-                DisplayProminence::Primary,
-                false,
-                format!("正在{}", humanize_step_title(title)),
-            )),
+            TerminalEvent::TurnStarted { .. } => {
+                self.options.show_lifecycle_steps.then(|| {
+                    DisplayEvent::new(
+                        DisplayEventKind::Progress,
+                        DisplayState::Running,
+                        DisplayProminence::Secondary,
+                        true,
+                        "正在理解你的要求".to_string(),
+                    )
+                })
+            }
+            TerminalEvent::StepStarted { title, .. } => {
+                // 机械 step（准备上下文 / 整理答复）默认不进对话流。
+                if !self.options.show_lifecycle_steps && !self.options.show_successful_step_events {
+                    return None;
+                }
+                Some(DisplayEvent::new(
+                    DisplayEventKind::Progress,
+                    DisplayState::Running,
+                    DisplayProminence::Secondary,
+                    true,
+                    format!("正在{}", humanize_step_title(title)),
+                ))
+            }
             TerminalEvent::StepFinished {
                 title,
                 status,
@@ -119,7 +162,7 @@ impl DisplayProjector {
                     DisplayState::Running,
                     DisplayProminence::Secondary,
                     true,
-                    "正在判断下一步".to_string(),
+                    "思考中…".to_string(),
                 )
             }),
             TerminalEvent::ModelFinished { .. } => None,
@@ -229,15 +272,18 @@ fn project_step_finished(
     options: &DisplayProjectionOptions,
 ) -> Option<DisplayEvent> {
     match status {
-        StepStatus::Ok => options.show_successful_step_events.then(|| {
-            DisplayEvent::new(
+        StepStatus::Ok => {
+            if !(options.show_successful_step_events || options.show_lifecycle_steps) {
+                return None;
+            }
+            Some(DisplayEvent::new(
                 DisplayEventKind::Progress,
                 DisplayState::Succeeded,
                 DisplayProminence::Secondary,
                 true,
                 format!("{}已完成", humanize_step_title(title)),
-            )
-        }),
+            ))
+        }
         StepStatus::Failed => Some(DisplayEvent::new(
             DisplayEventKind::Warning,
             DisplayState::Failed,
@@ -245,13 +291,18 @@ fn project_step_finished(
             false,
             format!("{}失败", humanize_step_title(title)),
         )),
-        StepStatus::Skipped => Some(DisplayEvent::new(
-            DisplayEventKind::Progress,
-            DisplayState::Blocked,
-            DisplayProminence::Secondary,
-            true,
-            format!("{}已跳过", humanize_step_title(title)),
-        )),
+        StepStatus::Skipped => {
+            if !(options.show_successful_step_events || options.show_lifecycle_steps) {
+                return None;
+            }
+            Some(DisplayEvent::new(
+                DisplayEventKind::Progress,
+                DisplayState::Blocked,
+                DisplayProminence::Secondary,
+                true,
+                format!("{}已跳过", humanize_step_title(title)),
+            ))
+        }
     }
 }
 

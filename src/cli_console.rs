@@ -178,6 +178,15 @@ fn print_console_snapshot(snapshot: &ConsoleSnapshot) {
         snapshot.status.subagent_readiness.worker_runtime_reason
     );
     println!(
+        "subagent_model_tool_worker: available={} state={} reason={}",
+        snapshot
+            .status
+            .subagent_readiness
+            .model_tool_worker_available,
+        snapshot.status.subagent_readiness.model_tool_worker_state,
+        snapshot.status.subagent_readiness.model_tool_worker_reason
+    );
+    println!(
         "subagent_capability_mismatch_reason: {}",
         snapshot
             .status

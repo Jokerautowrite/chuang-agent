@@ -194,6 +194,7 @@ fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
         shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
         memory: None,
         actuator: None,
+        subagent: None,
     })
 }
 

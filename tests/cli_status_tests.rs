@@ -148,7 +148,7 @@ fn cli_status_prints_mvp_health_summary() {
         "policy_tool_status: active_profile=full_local_workspace normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
-    assert!(stdout.contains("ga_tool_descriptors=9/12 missing=0"));
+    assert!(stdout.contains("ga_tool_descriptors=9/13 missing=0"));
     assert!(stdout.contains("runtime_report_surface: ok=true artifacts=11 observability_fields=26"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
@@ -1287,6 +1287,18 @@ fn cli_status_can_select_queued_external_subagent_slot() {
         queue_root.display().to_string()
     );
     assert_eq!(parsed["slots"]["subagent"], "queued_external");
+    assert_eq!(
+        parsed["subagent_readiness"]["model_tool_worker_available"],
+        true
+    );
+    assert_eq!(
+        parsed["subagent_readiness"]["model_tool_worker_state"],
+        "available"
+    );
+    assert!(parsed["subagent_readiness"]["model_tool_worker_reason"]
+        .as_str()
+        .expect("model tool worker reason")
+        .contains("spawn_subagent can execute"));
     assert_eq!(parsed["subagent_readiness"]["live_worker_available"], false);
     assert_eq!(
         parsed["subagent_readiness"]["worker_runtime_state"],

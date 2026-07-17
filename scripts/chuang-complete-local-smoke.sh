@@ -104,7 +104,7 @@ assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
-assert policy_tool_status["tool_descriptor_count"] == 12
+assert policy_tool_status["tool_descriptor_count"] == 13
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False
 assert file_write["requires_approval"] is False
@@ -195,7 +195,7 @@ assert_live_readiness(data["status"]["live_readiness"])
 policy_tool_status = data["status"]["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
-assert policy_tool_status["tool_descriptor_count"] == 12
+assert policy_tool_status["tool_descriptor_count"] == 13
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False
 assert file_write["requires_approval"] is False
@@ -270,7 +270,7 @@ assert_live_readiness(data["live_readiness"])
 policy_tool_status = data["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
-assert policy_tool_status["tool_descriptor_count"] == 12
+assert policy_tool_status["tool_descriptor_count"] == 13
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False
 assert file_write["requires_approval"] is False
@@ -347,7 +347,7 @@ assert_live_readiness(status["live_readiness"])
 policy_tool_status = status["policy_tool_status"]
 assert policy_tool_status["active_permission_profile"] == "full_local_workspace"
 assert policy_tool_status["ga_tool_descriptor_mapped_count"] == 9
-assert policy_tool_status["tool_descriptor_count"] == 12
+assert policy_tool_status["tool_descriptor_count"] == 13
 file_write = next(item for item in policy_tool_status["ga_tool_descriptors"] if item["name"] == "file_write")
 assert file_write["external_commit"] is False
 assert file_write["requires_approval"] is False

@@ -13,6 +13,7 @@ pub enum ActionKind {
     LocalDesktopInteraction,
     LocalFileWrite,
     ShellCommand,
+    SubagentDispatch,
     ExternalSend,
     PublicPost,
     Payment,

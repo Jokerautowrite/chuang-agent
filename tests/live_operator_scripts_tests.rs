@@ -1069,7 +1069,7 @@ fn candidate_verify_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper
         .contains("policy_tool_status[\"active_permission_profile\"] == \"full_local_workspace\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
-    assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 12"));
+    assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 13"));
     assert!(wrapper
         .contains("live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"));
     assert!(wrapper.contains(
@@ -1164,7 +1164,7 @@ fn third_test_smoke_wrapper_includes_live_runner_readiness_view_before_operator_
     assert!(wrapper
         .contains("policy_tool_status[\"active_permission_profile\"] == \"full_local_workspace\""));
     assert!(wrapper.contains("policy_tool_status[\"ga_tool_descriptor_mapped_count\"] == 9"));
-    assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 12"));
+    assert!(wrapper.contains("policy_tool_status[\"tool_descriptor_count\"] == 13"));
     assert!(wrapper
         .contains("live_readiness[\"overall_state\"] in (\"local_ready_live_pending\", \"global_real_live_ready\")"));
     assert!(wrapper.contains(

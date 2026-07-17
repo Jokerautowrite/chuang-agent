@@ -299,12 +299,10 @@ impl RuntimeConfig {
                 message: "approval policy must be auto_for_workspace".to_string(),
             });
         }
-        if self.permission.workspace_root != PathBuf::from("/home/user/projects/chuang-agent")
-        {
+        if self.permission.workspace_root.as_os_str().is_empty() {
             return Err(ConfigError {
                 field: "permission.workspace_root".to_string(),
-                message: "permission workspace_root must be /home/user/projects/chuang-agent"
-                    .to_string(),
+                message: "permission workspace_root must not be empty".to_string(),
             });
         }
 

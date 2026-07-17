@@ -5,50 +5,121 @@ use chuang_agent::display_projector::{
 use chuang_agent::terminal_event::{StepStatus, TerminalEvent};
 
 #[test]
+fn repl_default_options_show_tools_but_hide_model_round_spam() {
+    let projector = DisplayProjector::new(DisplayProjectionOptions::repl_default());
+
+    let tool = projector
+        .project(&TerminalEvent::ToolStarted {
+            round: 1,
+            tool: "read_file".to_string(),
+            summary: None,
+            activity_title: Some("读取文件".to_string()),
+            activity_detail: Some("src/main.rs".to_string()),
+        })
+        .expect("repl should show tool starts");
+    assert_eq!(tool.kind, DisplayEventKind::Tool);
+    assert!(tool.message.contains("读取文件"));
+
+    let model = projector.project(&TerminalEvent::ModelStarted { round: 2 });
+    assert_eq!(
+        model, None,
+        "repl_default hides per-round model progress to reduce noise"
+    );
+}
+
+#[test]
+fn repl_trace_options_surface_model_and_final_ready() {
+    let projector = DisplayProjector::new(DisplayProjectionOptions::repl_trace());
+
+    let model = projector
+        .project(&TerminalEvent::ModelStarted { round: 2 })
+        .expect("trace mode shows model progress");
+    assert_eq!(model.message, "思考中…");
+
+    let ready = projector
+        .project(&TerminalEvent::AnswerReady {
+            chars: 12,
+            truncated: false,
+            snapshot_path: None,
+        })
+        .expect("trace mode shows final-ready marker");
+    assert_eq!(ready.kind, DisplayEventKind::Final);
+}
+
+#[test]
 fn display_event_shape_is_explicit_and_serializable() {
-    let projector = DisplayProjector::default();
+    // Lifecycle lines only with explicit option (not default conversation).
+    let projector = DisplayProjector::new(DisplayProjectionOptions {
+        show_lifecycle_steps: true,
+        ..DisplayProjectionOptions::default()
+    });
     let event = projector
         .project(&TerminalEvent::TurnStarted {
             input_preview: "看一下当前状态".to_string(),
             max_tool_rounds: 4,
         })
-        .expect("turn started should produce display event");
+        .expect("lifecycle option should project turn started");
 
     assert_eq!(event.schema_version, DisplayEvent::schema_version());
     assert_eq!(event.kind, DisplayEventKind::Progress);
     assert_eq!(event.state, DisplayState::Running);
-    assert_eq!(event.prominence, DisplayProminence::Primary);
     assert_eq!(event.message, "正在理解你的要求");
 
     let serialized = serde_json::to_value(&event).expect("display event should serialize");
     assert_eq!(serialized["schema_version"], 1);
     assert_eq!(serialized["kind"], "progress");
     assert_eq!(serialized["state"], "running");
-    assert_eq!(serialized["prominence"], "primary");
-    assert_eq!(serialized["suppressible"], false);
     assert_eq!(serialized["message"], "正在理解你的要求");
 }
 
 #[test]
+fn conversational_default_hides_lifecycle_theater() {
+    let projector = DisplayProjector::new(DisplayProjectionOptions::repl_default());
+    assert_eq!(
+        projector.project(&TerminalEvent::TurnStarted {
+            input_preview: "hi".into(),
+            max_tool_rounds: 4,
+        }),
+        None
+    );
+    assert_eq!(
+        projector.project(&TerminalEvent::StepStarted {
+            title: "准备上下文".into(),
+            detail: None,
+        }),
+        None
+    );
+    assert_eq!(
+        projector.project(&TerminalEvent::StepFinished {
+            title: "准备上下文".into(),
+            status: StepStatus::Ok,
+            detail: None,
+        }),
+        None
+    );
+}
+
+#[test]
 fn projector_maps_progress_steps_to_deterministic_chinese_wording() {
-    let projector = DisplayProjector::default();
+    let projector = DisplayProjector::new(DisplayProjectionOptions {
+        show_lifecycle_steps: true,
+        show_successful_step_events: true,
+        ..DisplayProjectionOptions::default()
+    });
 
     let started = projector
         .project(&TerminalEvent::StepStarted {
             title: "prepare context".to_string(),
             detail: Some("segments=3".to_string()),
         })
-        .expect("step started should project");
-    let finished = DisplayProjector::new(DisplayProjectionOptions {
-        show_successful_step_events: true,
-        ..DisplayProjectionOptions::default()
-    })
-    .project(&TerminalEvent::StepFinished {
-        title: "prepare context".to_string(),
-        status: StepStatus::Ok,
-        detail: Some("segments=3".to_string()),
-    })
-    .expect("step finished should project");
+        .expect("step started should project when lifecycle enabled");
+    let finished = projector
+        .project(&TerminalEvent::StepFinished {
+            title: "prepare context".to_string(),
+            status: StepStatus::Ok,
+            detail: Some("segments=3".to_string()),
+        })
+        .expect("step finished should project");
 
     assert_eq!(started.message, "正在准备上下文");
     assert_eq!(finished.message, "准备上下文已完成");
@@ -206,6 +277,7 @@ fn project_all_keeps_human_readable_sequence() {
         show_model_progress: true,
         show_protocol_warnings: false,
         show_final_ready_event: true,
+        show_lifecycle_steps: true,
     });
     let events = vec![
         TerminalEvent::TurnStarted {
@@ -243,7 +315,7 @@ fn project_all_keeps_human_readable_sequence() {
         messages,
         vec![
             "正在理解你的要求",
-            "正在判断下一步",
+            "思考中…",
             "已接收新的补充要求",
             "答复已准备完成"
         ]

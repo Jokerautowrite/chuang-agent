@@ -526,6 +526,12 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             status.subagent_readiness.worker_runtime_reason
         );
         println!(
+            "subagent_model_tool_worker: available={} state={} reason={}",
+            status.subagent_readiness.model_tool_worker_available,
+            status.subagent_readiness.model_tool_worker_state,
+            status.subagent_readiness.model_tool_worker_reason
+        );
+        println!(
             "subagent_readiness_local_contract_reason: {}",
             status.subagent_readiness.local_contract_reason
         );
@@ -1222,6 +1228,12 @@ fn build_runtime_for_workspace_with_options(
     };
 
     normalize_runtime_paths(&mut runtime, &base_dir);
+    if !config_path.exists()
+        || runtime.permission.workspace_root
+            == PathBuf::from("/home/user/projects/chuang-agent")
+    {
+        runtime.permission.workspace_root = base_dir.clone();
+    }
     Ok(runtime)
 }
 
@@ -1263,6 +1275,8 @@ fn override_runtime_model(mut runtime: RuntimeConfig, params: &Value) -> Runtime
 
 fn normalize_runtime_paths(runtime: &mut RuntimeConfig, base_dir: &Path) {
     runtime.db_path = resolve_path_if_relative(base_dir, runtime.db_path.clone());
+    runtime.permission.workspace_root =
+        resolve_path_if_relative(base_dir, runtime.permission.workspace_root.clone());
     runtime.identity_memory = match runtime.identity_memory.clone() {
         IdentityMemoryConfig::HermesDualFile {
             root,

@@ -3,9 +3,217 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
+use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+/// Display width helpers (ASCII=1, most CJK=2).
+fn ansi_plain(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for x in chars.by_ref() {
+                    if x.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn display_width(s: &str) -> usize {
+    ansi_plain(s)
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\r' || c <= '\u{1f}' {
+                0
+            } else if c <= '\u{7e}' {
+                1
+            } else {
+                2
+            }
+        })
+        .sum()
+}
+
+fn fit_display(s: &str, max_cols: usize) -> String {
+    if max_cols == 0 {
+        return String::new();
+    }
+    if display_width(s) <= max_cols {
+        return s.to_string();
+    }
+    let plain = ansi_plain(s);
+    let mut w = 0usize;
+    let mut out = String::new();
+    for c in plain.chars() {
+        let cw = if c <= '\u{7e}' { 1 } else { 2 };
+        if w + cw > max_cols.saturating_sub(1) {
+            out.push('…');
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out
+}
+
+fn terminal_size() -> (u16, u16) {
+    crossterm::terminal::size().unwrap_or((80, 24))
+}
+
+/// Grok-style chrome: app owns input buffer + fixed bottom strip.
+/// Transcript scrolls in the region above; bottom 2 rows are always status + `❯ input`.
+struct ReplChrome {
+    cols: u16,
+    rows: u16,
+    /// Bottom rows reserved for status + input (fixed).
+    reserve: u16,
+    raw_active: bool,
+}
+
+impl ReplChrome {
+    fn detect(_interactive: bool) -> Self {
+        let (cols, rows) = terminal_size();
+        Self {
+            cols,
+            rows,
+            reserve: 2,
+            raw_active: false,
+        }
+    }
+
+    fn refresh_size(&mut self) {
+        let (cols, rows) = terminal_size();
+        self.cols = cols.max(40);
+        self.rows = rows.max(8);
+    }
+
+    fn body_bottom_row(&self) -> u16 {
+        self.rows.saturating_sub(self.reserve).max(1)
+    }
+
+    fn enable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
+        self.refresh_size();
+        enable_raw_mode().map_err(|e| format!("raw_mode_failed: {e}"))?;
+        self.raw_active = true;
+        // Optional: don't use full alt-screen so OS scrollback still works for mouse wheel
+        // on some terminals; we still pin with DECSTBM + app-drawn input.
+        let bottom = self.body_bottom_row();
+        write!(stdout, "\x1b[1;{bottom}r").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        execute!(stdout, Hide).map_err(|e| format!("stdout_write_failed: {e}"))?;
+        stdout
+            .flush()
+            .map_err(|e| format!("stdout_flush_failed: {e}"))
+    }
+
+    fn disable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
+        // Reset scroll region, show cursor, leave raw mode.
+        let _ = write!(stdout, "\x1b[r");
+        let _ = execute!(stdout, Show);
+        let _ = stdout.flush();
+        if self.raw_active {
+            let _ = disable_raw_mode();
+            self.raw_active = false;
+        }
+        Ok(())
+    }
+
+    fn write_body(&mut self, stdout: &mut io::Stdout, text: &str) -> Result<(), String> {
+        self.refresh_size();
+        let bottom = self.body_bottom_row();
+        // Ensure scroll region still correct after resize.
+        write!(stdout, "\x1b[1;{bottom}r").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        write!(stdout, "\x1b[{bottom};1H").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        // In raw mode, need explicit \r\n for newline.
+        let normalized = text.replace('\n', "\r\n");
+        write!(stdout, "{normalized}").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        if !normalized.ends_with("\r\n") {
+            write!(stdout, "\r\n").map_err(|e| format!("stdout_write_failed: {e}"))?;
+        }
+        stdout
+            .flush()
+            .map_err(|e| format!("stdout_flush_failed: {e}"))
+    }
+
+    /// Paint fixed bottom strip (Grok-like): status row + input row.
+    /// `input` is the live draft (app-owned, not terminal echo).
+    fn pin_prompt(
+        &mut self,
+        stdout: &mut io::Stdout,
+        status_line: &str,
+        input: &str,
+    ) -> Result<(), String> {
+        self.refresh_size();
+        let cols = self.cols as usize;
+        // reserve=2 → status on rows-1, input on last row.
+        let status_row = self.rows.saturating_sub(self.reserve) + 1;
+        let input_row = self.rows;
+
+        // Dim hairline + status (truncate so it never wraps under the caret).
+        let rule = format!("{ANSI_DIM}{}{ANSI_RESET}", "─".repeat(cols.min(80).max(8)));
+        let status_plain = fit_display(status_line, cols.saturating_sub(1));
+        // Prefer one visual row: if status short, paint rule into status by replacing
+        // with compact status only (rule would need a 3rd reserved row).
+        let status = status_plain;
+
+        // OpenCode/Grok-ish prompt glyph; keep single-cell where possible.
+        let prefix = "› ";
+        let avail = cols.saturating_sub(display_width(prefix) + 1);
+        // Show tail of long input so caret stays visible.
+        let mut visible = input.to_string();
+        while display_width(&visible) > avail && !visible.is_empty() {
+            let mut chars = visible.chars();
+            chars.next();
+            visible = chars.as_str().to_string();
+        }
+        let input_line = format!("{ANSI_CYAN}{prefix}{ANSI_RESET}{visible}");
+
+        // Clear + paint each reserved row (never wrap).
+        // Status row: subtle left accent when idle-looking status contains 就绪.
+        let status_painted = if status.contains("运行中") || status.contains("确认") {
+            format!("{status}")
+        } else {
+            format!("{ANSI_DIM}{status}{ANSI_RESET}")
+        };
+        let _ = rule; // reserved for future 3-row chrome; keep cols logic warm
+        write!(
+            stdout,
+            "\x1b[{status_row};1H\x1b[2K{status_painted}\x1b[{input_row};1H\x1b[2K{input_line}"
+        )
+        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        // Place caret after visible input (account for ANSI in prefix via plain width).
+        let caret_col = (display_width(&format!("{prefix}{visible}")) as u16)
+            .saturating_add(1)
+            .min(self.cols);
+        write!(stdout, "\x1b[{input_row};{caret_col}H")
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        execute!(stdout, Show).map_err(|e| format!("stdout_write_failed: {e}"))?;
+        stdout
+            .flush()
+            .map_err(|e| format!("stdout_flush_failed: {e}"))
+    }
+
+    fn clear_prompt_strip(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
+        self.refresh_size();
+        let status_row = self.rows.saturating_sub(self.reserve) + 1;
+        write!(stdout, "\x1b[{status_row};1H\x1b[0J")
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+        Ok(())
+    }
+}
 
 mod app_server;
 mod cli_approval;
@@ -59,6 +267,8 @@ const REPL_TEXT_WRAP_WIDTH: usize = 78;
 const REPL_HISTORY_MAX_TURNS: usize = 8;
 const REPL_META_WRAP_WIDTH: usize = 92;
 const REPL_ACTIVITY_VISIBLE_LIMIT: usize = 14;
+/// With `/trace`, allow a longer live activity stream before folding successes.
+const REPL_ACTIVITY_TRACE_LIMIT: usize = 40;
 static REPL_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 const ANSI_RESET: &str = "\x1b[0m";
@@ -142,7 +352,6 @@ fn repl_command(args: &[String]) -> Result<(), String> {
     let show_trace = false;
 
     if interactive {
-        print_repl_banner(&mut stdout, &options)?;
         return repl_interactive_loop(options, verbose, show_trace, &mut stdout);
     }
 
@@ -214,88 +423,243 @@ fn repl_interactive_loop(
     let mut progress_cursor = ProgressCursor::default();
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
-    let (input_sender, input_receiver) = mpsc::channel::<Option<String>>();
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(line) => {
-                    if input_sender.send(Some(line)).is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    let _ = input_sender.send(None);
-                    return;
-                }
-            }
-        }
-        let _ = input_sender.send(None);
-    });
+    let mut chrome = ReplChrome::detect(true);
+    // App-owned draft buffer (Grok-style). Terminal does NOT echo.
+    let mut draft = String::new();
+
+    chrome.enable(stdout)?;
+    chrome.write_body(
+        stdout,
+        &format!("{}\n", render_repl_banner(&options.runtime.summary())),
+    )?;
     print_repl_prompt(
         stdout,
+        &mut chrome,
         false,
         pending_guidance.len(),
         &stats,
         pending_approval.is_some(),
+        show_trace,
+        None,
+        &draft,
     )?;
 
-    loop {
-        poll_progress_events(stdout, running.as_ref(), &mut progress_cursor)?;
-        if poll_running_turn(
-            stdout,
-            &mut running,
-            &mut turn_count,
-            &mut conversation_history,
-            &progress_cursor.displays,
-            show_trace,
-            verbose,
-            &mut pending_guidance,
-            &mut stats,
-            &mut pending_approval,
-        )? {
-            print_repl_prompt(
+    let result = (|| -> Result<(), String> {
+        loop {
+            // Background turn progress while idle for keys.
+            let had_progress = poll_progress_events(
                 stdout,
-                running.is_some(),
-                pending_guidance.len(),
+                &mut chrome,
+                running.as_ref(),
+                &mut progress_cursor,
                 &stats,
-                pending_approval.is_some(),
+                show_trace,
             )?;
-        }
-
-        let input = match input_receiver.recv_timeout(Duration::from_millis(200)) {
-            Ok(Some(line)) => line,
-            Ok(None) => break,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-        match process_repl_input(
-            &input,
-            &options,
-            &summary,
-            &mut verbose,
-            &mut show_trace,
-            &mut running,
-            &conversation_history,
-            &mut pending_guidance,
-            &mut pending_approval,
-            &mut stats,
-            stdout,
-        )? {
-            InputAction::Continue => {
+            let turn_finished = poll_running_turn(
+                stdout,
+                &mut chrome,
+                &mut running,
+                &mut turn_count,
+                &mut conversation_history,
+                &mut progress_cursor,
+                show_trace,
+                verbose,
+                &mut pending_guidance,
+                &mut stats,
+                &mut pending_approval,
+            )?;
+            if had_progress || turn_finished {
                 print_repl_prompt(
                     stdout,
+                    &mut chrome,
                     running.is_some(),
                     pending_guidance.len(),
                     &stats,
                     pending_approval.is_some(),
+                    show_trace,
+                    running.as_ref().map(|turn| turn.started_at),
+                    &draft,
                 )?;
             }
-            InputAction::Exit => break,
+
+            if !event::poll(Duration::from_millis(200))
+                .map_err(|e| format!("event_poll_failed: {e}"))?
+            {
+                // Keep timer on bottom strip while a turn runs (safe: we own buffer).
+                if running.is_some() {
+                    print_repl_prompt(
+                        stdout,
+                        &mut chrome,
+                        true,
+                        pending_guidance.len(),
+                        &stats,
+                        pending_approval.is_some(),
+                        show_trace,
+                        running.as_ref().map(|turn| turn.started_at),
+                        &draft,
+                    )?;
+                }
+                continue;
+            }
+
+            match event::read().map_err(|e| format!("event_read_failed: {e}"))? {
+                Event::Resize(_, _) => {
+                    chrome.refresh_size();
+                    let bottom = chrome.body_bottom_row();
+                    write!(stdout, "\x1b[1;{bottom}r")
+                        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                    print_repl_prompt(
+                        stdout,
+                        &mut chrome,
+                        running.is_some(),
+                        pending_guidance.len(),
+                        &stats,
+                        pending_approval.is_some(),
+                        show_trace,
+                        running.as_ref().map(|turn| turn.started_at),
+                        &draft,
+                    )?;
+                }
+                Event::Key(key) => {
+                    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        continue;
+                    }
+                    match handle_sticky_key(key, &mut draft)? {
+                        StickyKeyAction::None => {
+                            print_repl_prompt(
+                                stdout,
+                                &mut chrome,
+                                running.is_some(),
+                                pending_guidance.len(),
+                                &stats,
+                                pending_approval.is_some(),
+                                show_trace,
+                                running.as_ref().map(|turn| turn.started_at),
+                                &draft,
+                            )?;
+                        }
+                        StickyKeyAction::Redraw => {
+                            print_repl_prompt(
+                                stdout,
+                                &mut chrome,
+                                running.is_some(),
+                                pending_guidance.len(),
+                                &stats,
+                                pending_approval.is_some(),
+                                show_trace,
+                                running.as_ref().map(|turn| turn.started_at),
+                                &draft,
+                            )?;
+                        }
+                        StickyKeyAction::Submit(line) => {
+                            draft.clear();
+                            match process_repl_input(
+                                &line,
+                                &options,
+                                &summary,
+                                &mut verbose,
+                                &mut show_trace,
+                                &mut running,
+                                &conversation_history,
+                                &mut pending_guidance,
+                                &mut pending_approval,
+                                &mut stats,
+                                stdout,
+                                &mut chrome,
+                            )? {
+                                InputAction::Continue => {
+                                    print_repl_prompt(
+                                        stdout,
+                                        &mut chrome,
+                                        running.is_some(),
+                                        pending_guidance.len(),
+                                        &stats,
+                                        pending_approval.is_some(),
+                                        show_trace,
+                                        running.as_ref().map(|turn| turn.started_at),
+                                        &draft,
+                                    )?;
+                                }
+                                InputAction::Exit => {
+                                    chrome.write_body(stdout, "bye.\r\n")?;
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        StickyKeyAction::Exit => {
+                            chrome.write_body(stdout, "bye.\r\n")?;
+                            return Ok(());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    })();
+
+    let _ = chrome.disable(stdout);
+    result
+}
+
+enum StickyKeyAction {
+    None,
+    Redraw,
+    Submit(String),
+    Exit,
+}
+
+fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<StickyKeyAction, String> {
+    // Ctrl+C / Ctrl+D
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('c') => {
+                if draft.is_empty() {
+                    return Ok(StickyKeyAction::Exit);
+                }
+                draft.clear();
+                return Ok(StickyKeyAction::Redraw);
+            }
+            KeyCode::Char('d') if draft.is_empty() => return Ok(StickyKeyAction::Exit),
+            KeyCode::Char('u') => {
+                draft.clear();
+                return Ok(StickyKeyAction::Redraw);
+            }
+            _ => {}
         }
     }
 
-    Ok(())
+    match key.code {
+        KeyCode::Enter => {
+            let line = draft.trim().to_string();
+            if line.is_empty() {
+                return Ok(StickyKeyAction::Redraw);
+            }
+            Ok(StickyKeyAction::Submit(line))
+        }
+        KeyCode::Backspace => {
+            draft.pop(); // pops one Unicode scalar (one Chinese char)
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::Delete => {
+            // No cursor motion yet — treat like backspace for simplicity.
+            draft.pop();
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::Esc => {
+            draft.clear();
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::Char(c) => {
+            // Crossterm delivers composed IME characters as Char events.
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+            {
+                draft.push(c);
+            }
+            Ok(StickyKeyAction::Redraw)
+        }
+        _ => Ok(StickyKeyAction::None),
+    }
 }
 
 enum InputAction {
@@ -315,6 +679,7 @@ fn process_repl_input(
     pending_approval: &mut Option<ReplPendingApproval>,
     stats: &mut ReplSessionStats,
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
 ) -> Result<InputAction, String> {
     let input = raw_input.trim();
     if input.eq_ignore_ascii_case("exit")
@@ -323,14 +688,12 @@ fn process_repl_input(
         || input.eq_ignore_ascii_case("/quit")
     {
         if running.is_some() {
-            writeln!(
+            chrome.write_body(
                 stdout,
-                "task still running; close the terminal to force quit, or wait for completion."
-            )
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                "task still running; close the terminal to force quit, or wait for completion.\n",
+            )?;
             return Ok(InputAction::Continue);
         }
-        writeln!(stdout, "bye.").map_err(|e| format!("stdout_write_failed: {e}"))?;
         return Ok(InputAction::Exit);
     }
     if input.is_empty() {
@@ -340,15 +703,15 @@ fn process_repl_input(
     if input.eq_ignore_ascii_case("/stop") {
         if let Some(turn) = running.as_ref() {
             append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
-            writeln!(
+            chrome.write_body(
                 stdout,
-                "{}■{} 已请求停止，将在当前安全点结束任务。",
-                ANSI_YELLOW, ANSI_RESET
-            )
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                &format!("{ANSI_YELLOW}■{ANSI_RESET} 已请求停止，将在当前安全点结束任务。\n"),
+            )?;
         } else {
-            writeln!(stdout, "{}当前没有运行中的任务。{}", ANSI_DIM, ANSI_RESET)
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            chrome.write_body(
+                stdout,
+                &format!("{ANSI_DIM}当前没有运行中的任务。{ANSI_RESET}\n"),
+            )?;
         }
         return Ok(InputAction::Continue);
     }
@@ -361,14 +724,13 @@ fn process_repl_input(
                     &approval.workspace_root,
                     &approval.pending_file,
                 )?;
-                writeln!(
+                chrome.write_body(
                     stdout,
-                    "{}✓ 已批准一次{}  {}",
-                    ANSI_GREEN,
-                    ANSI_RESET,
-                    humanize_approval_record(&outcome.record)
-                )
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                    &format!(
+                        "{ANSI_GREEN}✓ 已批准一次{ANSI_RESET}  {}\n",
+                        humanize_approval_record(&outcome.record)
+                    ),
+                )?;
                 pending_approval.take();
                 let continuation = format!(
                     "继续刚才的任务。用户已在本地终端明确批准并完成了待审批操作。安全回执：{}。请基于这个结果继续，不要重复执行同一操作。",
@@ -379,51 +741,57 @@ fn process_repl_input(
                 *running = Some(spawn_repl_turn(options.clone(), continuation, history));
             }
             "2" | "n" | "N" | "no" | "NO" => {
-                writeln!(
+                chrome.write_body(
                     stdout,
-                    "{}× 已拒绝{}  该操作没有执行，可以输入新要求调整方案。",
-                    ANSI_RED, ANSI_RESET
-                )
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                    &format!(
+                        "{ANSI_RED}× 已拒绝{ANSI_RESET}  该操作没有执行，可以输入新要求调整方案。\n"
+                    ),
+                )?;
                 pending_approval.take();
             }
             "3" => {
-                writeln!(stdout, "{}", render_approval_details(approval))
-                    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                chrome.write_body(
+                    stdout,
+                    &format!("{}\n", render_approval_details(approval)),
+                )?;
             }
             _ => {
-                writeln!(stdout, "请输入 1、2 或 3。")
-                    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                chrome.write_body(stdout, "请输入 1、2 或 3。\n")?;
             }
         }
         return Ok(InputAction::Continue);
     }
 
     if input.starts_with('/') {
+        let mut buf: Vec<u8> = Vec::new();
         handle_repl_command(
             input,
             verbose,
             show_trace,
             options,
             conversation_history,
-            stdout,
+            &mut buf,
         )?;
+        let text = String::from_utf8_lossy(&buf);
+        if !text.trim().is_empty() {
+            chrome.write_body(stdout, &format!("{text}\n"))?;
+        }
         return Ok(InputAction::Continue);
     }
 
     if let Some(note) = input.strip_prefix('!') {
         let note = note.trim();
         if note.is_empty() {
-            writeln!(stdout, "guidance ignored: empty note")
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            chrome.write_body(stdout, "guidance ignored: empty note\n")?;
         } else if let Some(turn) = running.as_ref() {
             append_live_guidance(&turn.guidance_path, note)?;
-            writeln!(stdout, "guidance injected into current turn")
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            chrome.write_body(stdout, "guidance injected into current turn\n")?;
         } else {
             pending_guidance.push(note.to_string());
-            writeln!(stdout, "guidance queued: {}", pending_guidance.len())
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            chrome.write_body(
+                stdout,
+                &format!("guidance queued: {}\n", pending_guidance.len()),
+            )?;
         }
         return Ok(InputAction::Continue);
     }
@@ -432,11 +800,10 @@ fn process_repl_input(
         if let Some(turn) = running.as_ref() {
             append_live_guidance(&turn.guidance_path, input)?;
         }
-        writeln!(
+        chrome.write_body(
             stdout,
-            "guidance injected into current turn. Prefix with ! next time to make this explicit."
-        )
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            "guidance injected into current turn. Prefix with ! next time to make this explicit.\n",
+        )?;
         return Ok(InputAction::Continue);
     }
 
@@ -445,19 +812,45 @@ fn process_repl_input(
     let cwd = env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
-    writeln!(
+    // App-owned input: no terminal echo. Clear bottom strip, print「你」once in body.
+    chrome.clear_prompt_strip(stdout)?;
+    chrome.write_body(
         stdout,
-        "{}",
-        render_user_message_block(&user_input, &summary.provider_id, &summary.model_name, &cwd)
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))?;
+        &render_user_message_block(&user_input, &summary.provider_id, &summary.model_name, &cwd),
+    )?;
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
     *running = Some(spawn_repl_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
     Ok(InputAction::Continue)
+}
+
+/// What the agent is doing right now (for Grok-like status HUD).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LivePhase {
+    #[default]
+    Idle,
+    Understanding,
+    Thinking,
+    Acting,
+    Finalizing,
+}
+
+impl LivePhase {
+    fn label_zh(self) -> &'static str {
+        match self {
+            Self::Idle => "就绪",
+            Self::Understanding => "理解中",
+            Self::Thinking => "思考中",
+            Self::Acting => "执行中",
+            Self::Finalizing => "整理答复",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TurnTimingSummary {
+    thinking_ms: u128,
+    acting_ms: u128,
 }
 
 #[derive(Default)]
@@ -466,63 +859,297 @@ struct ProgressCursor {
     visible_count: usize,
     displays: Vec<ProgressDisplay>,
     last_message: Option<String>,
+    collapsed_notice_shown: bool,
+    section_opened: bool,
+    phase: LivePhase,
+    phase_started: Option<Instant>,
+    current_activity: String,
+    thinking_ms: u128,
+    acting_ms: u128,
+}
+
+impl ProgressCursor {
+    fn reset_for_idle(&mut self) {
+        self.bytes_read = 0;
+        self.visible_count = 0;
+        self.displays.clear();
+        self.last_message = None;
+        self.collapsed_notice_shown = false;
+        self.section_opened = false;
+        self.phase = LivePhase::Idle;
+        self.phase_started = None;
+        self.current_activity.clear();
+        self.thinking_ms = 0;
+        self.acting_ms = 0;
+    }
+
+    fn set_phase(&mut self, phase: LivePhase, activity: impl Into<String>) {
+        if self.phase == phase && self.phase_started.is_some() {
+            let activity = activity.into();
+            if !activity.is_empty() {
+                self.current_activity = activity;
+            }
+            return;
+        }
+        self.accumulate_phase_time();
+        self.phase = phase;
+        self.phase_started = Some(Instant::now());
+        let activity = activity.into();
+        if !activity.is_empty() {
+            self.current_activity = activity;
+        } else if self.current_activity.is_empty() {
+            self.current_activity = phase.label_zh().to_string();
+        }
+    }
+
+    fn accumulate_phase_time(&mut self) {
+        let Some(started) = self.phase_started.take() else {
+            return;
+        };
+        let ms = started.elapsed().as_millis();
+        match self.phase {
+            LivePhase::Thinking => self.thinking_ms = self.thinking_ms.saturating_add(ms),
+            LivePhase::Acting => self.acting_ms = self.acting_ms.saturating_add(ms),
+            _ => {}
+        }
+    }
+
+    fn finish_timing(&mut self) -> TurnTimingSummary {
+        self.accumulate_phase_time();
+        TurnTimingSummary {
+            thinking_ms: self.thinking_ms,
+            acting_ms: self.acting_ms,
+        }
+    }
+
+    fn note_display(&mut self, display: &ProgressDisplay) {
+        // Infer phase from projected human message / kind.
+        match (display.kind, display.state) {
+            (DisplayEventKind::Tool, DisplayState::Running) => {
+                self.set_phase(LivePhase::Acting, display.message.clone());
+            }
+            (DisplayEventKind::Tool, DisplayState::Succeeded | DisplayState::Failed) => {
+                self.set_phase(LivePhase::Thinking, "判断下一步".to_string());
+            }
+            (DisplayEventKind::Progress, DisplayState::Running)
+                if display.message.contains("判断下一步")
+                    || display.message.contains("理解你的要求") =>
+            {
+                if display.message.contains("理解") {
+                    self.set_phase(LivePhase::Understanding, display.message.clone());
+                } else {
+                    self.set_phase(LivePhase::Thinking, display.message.clone());
+                }
+            }
+            (DisplayEventKind::Progress, DisplayState::Running)
+                if display.message.contains("整理最终答复") =>
+            {
+                self.set_phase(LivePhase::Finalizing, display.message.clone());
+            }
+            (DisplayEventKind::Progress, DisplayState::Running) => {
+                if self.phase == LivePhase::Idle {
+                    self.set_phase(LivePhase::Understanding, display.message.clone());
+                } else {
+                    self.current_activity = display.message.clone();
+                }
+            }
+            (DisplayEventKind::Final, _) => {
+                self.set_phase(LivePhase::Finalizing, "答复就绪".to_string());
+            }
+            _ => {
+                if !display.message.is_empty() {
+                    self.current_activity = display.message.clone();
+                }
+            }
+        }
+    }
+}
+
+fn format_short_duration(duration: Duration) -> String {
+    let secs = duration.as_secs_f64();
+    if secs < 10.0 {
+        format!("{secs:.1}s")
+    } else if secs < 60.0 {
+        format!("{secs:.0}s")
+    } else {
+        let mins = (secs / 60.0).floor() as u64;
+        let rem = secs - (mins as f64 * 60.0);
+        format!("{mins}m{rem:02.0}s")
+    }
+}
+
+fn format_ms_duration(ms: u128) -> String {
+    format_short_duration(Duration::from_millis(ms as u64))
+}
+
+fn activity_visible_limit(show_trace: bool) -> usize {
+    if show_trace {
+        REPL_ACTIVITY_TRACE_LIMIT
+    } else {
+        REPL_ACTIVITY_VISIBLE_LIMIT
+    }
 }
 
 fn poll_progress_events(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     running: Option<&RunningTurn>,
     cursor: &mut ProgressCursor,
+    stats: &ReplSessionStats,
+    show_trace: bool,
 ) -> Result<bool, String> {
     let Some(turn) = running else {
-        cursor.bytes_read = 0;
-        cursor.visible_count = 0;
-        cursor.displays.clear();
-        cursor.last_message = None;
+        cursor.reset_for_idle();
         return Ok(false);
     };
     let content = match fs::read_to_string(&turn.progress_path) {
         Ok(content) => content,
-        Err(_) => return Ok(false),
+        Err(_) => {
+            // Timer lives in pinned bottom strip now; skip body HUD spam.
+            let _ = (chrome, stats, show_trace);
+            return Ok(false);
+        }
     };
     let start = cursor.bytes_read.min(content.len() as u64) as usize;
     let new_content = &content[start..];
-    if new_content.trim().is_empty() {
-        return Ok(false);
-    }
-    for line in new_content.lines().filter(|line| !line.trim().is_empty()) {
-        if let Some(display) = format_progress_event(line) {
+    let limit = activity_visible_limit(show_trace);
+    let mut wrote_progress = false;
+    if !new_content.trim().is_empty() {
+        for line in new_content.lines().filter(|line| !line.trim().is_empty()) {
+            // Always update phase/HUD from raw events; only some become printed lines.
+            note_raw_progress_line(cursor, line);
+            let Some(display) = format_progress_event(line, show_trace) else {
+                continue;
+            };
             if cursor.last_message.as_deref() == Some(display.message.as_str()) {
                 continue;
             }
-            if cursor.visible_count >= REPL_ACTIVITY_VISIBLE_LIMIT && display.suppressible {
+            if cursor.visible_count >= limit && display.suppressible {
+                if !cursor.collapsed_notice_shown {
+                    let hint = if show_trace {
+                        format!("{ANSI_DIM}  … 后续成功步骤已折叠（失败仍会显示）{ANSI_RESET}\n")
+                    } else {
+                        format!(
+                            "{ANSI_DIM}  … 后续成功步骤已折叠（失败仍会显示；/trace 可看更多过程）{ANSI_RESET}\n"
+                        )
+                    };
+                    chrome.write_body(stdout, &hint)?;
+                    cursor.collapsed_notice_shown = true;
+                    wrote_progress = true;
+                }
                 continue;
             }
-            if cursor.visible_count == 0 {
-                writeln!(
-                    stdout,
-                    "\n{}{}小创正在处理{}",
-                    ANSI_BOLD, ANSI_CYAN, ANSI_RESET
-                )
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            if !cursor.section_opened {
+                if show_trace {
+                    chrome.write_body(
+                        stdout,
+                        &format!(
+                            "\n{ANSI_BOLD}{ANSI_CYAN}过程{ANSI_RESET} {ANSI_DIM}· {}{ANSI_RESET}\n",
+                            stats.model_name
+                        ),
+                    )?;
+                }
+                cursor.section_opened = true;
             }
             cursor.visible_count += 1;
-            print_progress_display_line(stdout, &display)?;
+            let line = format!(
+                "{}\n",
+                render_progress_display_line(&display, cursor.visible_count)
+            );
+            chrome.write_body(stdout, &line)?;
+            cursor.note_display(&display);
             cursor.last_message = Some(display.message.clone());
             cursor.displays.push(display);
+            wrote_progress = true;
         }
     }
     cursor.bytes_read = content.len() as u64;
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))?;
-    Ok(true)
+    // Bottom strip is refreshed by the interactive loop (running prompt + timer).
+    let _ = (turn, show_trace, wrote_progress);
+    Ok(wrote_progress)
 }
 
-fn format_progress_event(line: &str) -> Option<ProgressDisplay> {
+fn note_raw_progress_line(cursor: &mut ProgressCursor, line: &str) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    if let Some(event_value) = value.get("event") {
+        if let Ok(event) = serde_json::from_value::<TerminalEvent>(event_value.clone()) {
+            note_raw_terminal_event(cursor, &event);
+            return;
+        }
+    }
+    let Some(kind) = value.get("kind").and_then(|value| value.as_str()) else {
+        return;
+    };
+    match kind {
+        "turn_started" => cursor.set_phase(LivePhase::Understanding, "处理中"),
+        "model_started" => cursor.set_phase(LivePhase::Thinking, "思考中…"),
+        "tool_started" => {
+            let title = value
+                .get("details")
+                .and_then(|details| details.get("activity_title"))
+                .and_then(|title| title.as_str())
+                .unwrap_or("执行中");
+            cursor.set_phase(LivePhase::Acting, format!("正在{title}"));
+        }
+        "answer_ready" => cursor.set_phase(LivePhase::Finalizing, "整理答复"),
+        _ => {}
+    }
+}
+
+fn note_raw_terminal_event(cursor: &mut ProgressCursor, event: &TerminalEvent) {
+    match event {
+        TerminalEvent::TurnStarted { .. } => {
+            cursor.set_phase(LivePhase::Understanding, "处理中");
+        }
+        TerminalEvent::StepStarted { title, .. } => {
+            if title.contains("最终") || title.contains("finalize") {
+                cursor.set_phase(LivePhase::Finalizing, "整理答复");
+            } else {
+                cursor.set_phase(LivePhase::Understanding, "处理中");
+            }
+        }
+        TerminalEvent::ModelStarted { .. } => {
+            cursor.set_phase(LivePhase::Thinking, "思考中…");
+        }
+        TerminalEvent::ToolStarted {
+            activity_title,
+            activity_detail,
+            tool,
+            ..
+        } => {
+            let title = activity_title
+                .clone()
+                .unwrap_or_else(|| format!("执行{tool}"));
+            let detail = activity_detail.clone().unwrap_or_default();
+            let activity = if detail.is_empty() {
+                format!("正在{title}")
+            } else {
+                format!("正在{title} · {detail}")
+            };
+            cursor.set_phase(LivePhase::Acting, activity);
+        }
+        TerminalEvent::ToolFinished { ok, .. } => {
+            if *ok {
+                cursor.set_phase(LivePhase::Thinking, "思考中…");
+            }
+        }
+        TerminalEvent::AnswerReady { .. } => {
+            cursor.set_phase(LivePhase::Finalizing, "整理答复");
+        }
+        TerminalEvent::TurnCancelled { .. } => {
+            cursor.set_phase(LivePhase::Idle, "已停止");
+        }
+        _ => {}
+    }
+}
+
+fn format_progress_event(line: &str, show_trace: bool) -> Option<ProgressDisplay> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     if let Some(event) = value.get("event") {
         let event: TerminalEvent = serde_json::from_value(event.clone()).ok()?;
-        return repl_display_projector().project(&event);
+        return repl_display_projector(show_trace).project(&event);
     }
     let kind = value.get("kind").and_then(|value| value.as_str())?;
     let details = value
@@ -530,8 +1157,19 @@ fn format_progress_event(line: &str) -> Option<ProgressDisplay> {
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     match kind {
-        "turn_started" => Some(display_progress("正在理解你的要求")),
-        "model_started" | "model_finished" | "protocol_error" | "answer_ready" => None,
+        // Default conversation: no lifecycle theater.
+        "turn_started" | "step_started" | "step_finished" if !show_trace => None,
+        "turn_started" if show_trace => Some(display_progress("正在理解你的要求")),
+        "model_started" if show_trace => Some(display_progress("思考中…")),
+        "model_started" | "model_finished" | "answer_ready" => None,
+        "protocol_error" if show_trace => {
+            let code = details
+                .get("code")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown");
+            Some(display_progress(&format!("协议提示：{}", compact_preview(code, 24))))
+        }
+        "protocol_error" => None,
         "tool_started" => Some(display_tool(
             details
                 .get("activity_title")
@@ -552,14 +1190,12 @@ fn format_progress_event(line: &str) -> Option<ProgressDisplay> {
     }
 }
 
-fn repl_display_projector() -> DisplayProjector {
-    DisplayProjector::new(DisplayProjectionOptions {
-        show_successful_tool_events: true,
-        show_successful_step_events: true,
-        show_model_progress: true,
-        show_protocol_warnings: true,
-        show_final_ready_event: false,
-    })
+fn repl_display_projector(show_trace: bool) -> DisplayProjector {
+    if show_trace {
+        DisplayProjector::new(DisplayProjectionOptions::repl_trace())
+    } else {
+        DisplayProjector::new(DisplayProjectionOptions::repl_default())
+    }
 }
 
 type ProgressDisplay = DisplayEvent;
@@ -601,7 +1237,13 @@ fn parse_meta_u64(meta: &std::collections::BTreeMap<String, String>, key: &str) 
     meta.get(key).and_then(|value| value.parse::<u64>().ok())
 }
 
-fn render_repl_status_line(stats: &ReplSessionStats, state: &str) -> String {
+fn render_repl_status_line(
+    stats: &ReplSessionStats,
+    state: &str,
+    show_trace: bool,
+    turn_started: Option<Instant>,
+) -> String {
+    // Keep SHORT so the line never wraps under the input caret (wrap → stack/half-cell).
     let percent = if stats.context_max_tokens == 0 {
         0
     } else {
@@ -612,45 +1254,29 @@ fn render_repl_status_line(stats: &ReplSessionStats, state: &str) -> String {
             .unwrap_or(0)
             .min(100)
     };
-    format!(
-        "{}{} · {} · context {} / {} ({}%) · ↑ {} · ↓ {} · total {}{}",
-        ANSI_DIM,
-        state,
-        stats.model_name,
-        compact_token_count(stats.context_tokens),
-        compact_token_count(stats.context_max_tokens),
-        percent,
-        compact_token_count(stats.last_input_tokens),
-        compact_token_count(stats.last_output_tokens),
-        compact_token_count(stats.session_total_tokens),
-        ANSI_RESET
-    )
-}
-
-fn compact_token_count(tokens: u64) -> String {
-    if tokens >= 1_000_000 {
-        format!("{:.1}m", tokens as f64 / 1_000_000.0)
-    } else if tokens >= 1_000 {
-        format!("{:.1}k", tokens as f64 / 1_000.0)
-    } else {
-        tokens.to_string()
+    let mut parts = vec![
+        state.to_string(),
+        stats.model_name.clone(),
+        format!("ctx {percent}%"),
+    ];
+    if show_trace {
+        parts.push("详细".to_string());
     }
-}
-
-fn print_progress_display_line(
-    stdout: &mut io::Stdout,
-    display: &ProgressDisplay,
-) -> Result<(), String> {
-    writeln!(stdout, "{}", render_progress_display_line(display))
-        .map_err(|e| format!("stdout_write_failed: {e}"))
+    if let Some(started) = turn_started {
+        parts.push(format!("⏱{}", format_short_duration(started.elapsed())));
+    }
+    // Quiet footer hints (like OpenCode ctrl+p line, but local slash commands).
+    parts.push("/help".to_string());
+    format!("{}", parts.join(" · "))
 }
 
 fn poll_running_turn(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     running: &mut Option<RunningTurn>,
     turn_count: &mut usize,
     conversation_history: &mut Vec<ConversationHistoryItem>,
-    progress_displays: &[ProgressDisplay],
+    progress_cursor: &mut ProgressCursor,
     show_trace: bool,
     verbose: bool,
     pending_guidance: &mut Vec<String>,
@@ -663,10 +1289,11 @@ fn poll_running_turn(
                 turn.result = Some(result);
                 finish_running_turn(
                     stdout,
+                    chrome,
                     turn,
                     turn_count,
                     conversation_history,
-                    progress_displays,
+                    progress_cursor,
                     show_trace,
                     verbose,
                     pending_guidance,
@@ -682,10 +1309,11 @@ fn poll_running_turn(
                 turn.result = Some(Err("repl_turn_disconnected".to_string()));
                 finish_running_turn(
                     stdout,
+                    chrome,
                     turn,
                     turn_count,
                     conversation_history,
-                    progress_displays,
+                    progress_cursor,
                     show_trace,
                     verbose,
                     pending_guidance,
@@ -719,6 +1347,8 @@ struct ReplSessionStats {
     last_output_tokens: u64,
     session_total_tokens: u64,
     turn_running: bool,
+    /// Provider HTTP timeout (for remaining-time countdown while running).
+    request_timeout_ms: Option<u64>,
 }
 
 impl ReplSessionStats {
@@ -726,6 +1356,7 @@ impl ReplSessionStats {
         Self {
             model_name: summary.model_name.clone(),
             context_max_tokens: u64::from(summary.context_max_tokens),
+            request_timeout_ms: summary.provider_request_timeout_ms,
             ..Self::default()
         }
     }
@@ -835,10 +1466,11 @@ fn repl_turn_nonce() -> String {
 
 fn finish_running_turn(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     turn: RunningTurn,
     turn_count: &mut usize,
     conversation_history: &mut Vec<ConversationHistoryItem>,
-    progress_displays: &[ProgressDisplay],
+    progress_cursor: &mut ProgressCursor,
     show_trace: bool,
     verbose: bool,
     pending_guidance: &mut [String],
@@ -846,6 +1478,8 @@ fn finish_running_turn(
     pending_approval: &mut Option<ReplPendingApproval>,
 ) -> Result<(), String> {
     let elapsed_ms = turn.started_at.elapsed().as_millis();
+    let timing = progress_cursor.finish_timing();
+    let progress_displays = progress_cursor.displays.clone();
     let result = match turn.result {
         Some(result) => result,
         None => turn
@@ -865,17 +1499,18 @@ fn finish_running_turn(
             );
             print_repl_result(
                 stdout,
+                chrome,
                 &result,
                 elapsed_ms,
                 *turn_count,
                 show_trace,
                 &turn.input_preview,
                 pending_guidance.len(),
-                progress_displays,
+                &progress_displays,
+                &timing,
             )?;
             if let Some(approval) = pending_approval_from_result(&result) {
-                writeln!(stdout, "{}", render_approval_prompt(&approval))
-                    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                chrome.write_body(stdout, &format!("{}\n", render_approval_prompt(&approval)))?;
                 *pending_approval = Some(approval);
             }
             if verbose {
@@ -886,26 +1521,28 @@ fn finish_running_turn(
             stats.mark_turn_finished();
             print_repl_failure(
                 stdout,
+                chrome,
                 &turn.input_preview,
                 elapsed_ms,
                 &error,
-                progress_displays,
+                &progress_displays,
                 show_trace,
+                &timing,
             )?;
         }
     }
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))
+    Ok(())
 }
 
 fn print_repl_failure(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     input_preview: &str,
     elapsed_ms: u128,
     error: &str,
     progress_displays: &[ProgressDisplay],
     show_trace: bool,
+    timing: &TurnTimingSummary,
 ) -> Result<(), String> {
     let mut progress_lines = Vec::new();
     for display in progress_displays
@@ -918,18 +1555,20 @@ fn print_repl_failure(
     {
         progress_lines.push(display.message.clone());
     }
-    writeln!(
+    chrome.write_body(
         stdout,
-        "{}",
-        render_repl_failure_block(
-            input_preview,
-            elapsed_ms,
-            error,
-            &progress_lines,
-            show_trace,
-        )
+        &format!(
+            "{}\n",
+            render_repl_failure_block(
+                input_preview,
+                elapsed_ms,
+                error,
+                &progress_lines,
+                show_trace,
+                timing,
+            )
+        ),
     )
-    .map_err(|e| format!("stdout_write_failed: {e}"))
 }
 
 fn readable_runtime_error(error: &str) -> String {
@@ -980,21 +1619,63 @@ fn record_repl_conversation_turn(
 
 fn print_repl_prompt(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     running: bool,
     guidance_count: usize,
     stats: &ReplSessionStats,
     awaiting_approval: bool,
+    show_trace: bool,
+    turn_started: Option<Instant>,
+    draft: &str,
 ) -> Result<(), String> {
-    writeln!(stdout).map_err(|e| format!("stdout_write_failed: {e}"))?;
-    write!(
-        stdout,
-        "{}",
-        render_repl_prompt(running, guidance_count, stats, awaiting_approval)
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))
+    let status = render_sticky_status_line(
+        running,
+        guidance_count,
+        stats,
+        awaiting_approval,
+        show_trace,
+        turn_started,
+    );
+    chrome.pin_prompt(stdout, &status, draft)
+}
+
+fn render_sticky_status_line(
+    running: bool,
+    guidance_count: usize,
+    stats: &ReplSessionStats,
+    awaiting_approval: bool,
+    show_trace: bool,
+    turn_started: Option<Instant>,
+) -> String {
+    // Keep short (Grok/OpenCode footer): mode · model · light metrics · hints.
+    if awaiting_approval {
+        return format!(
+            "{ANSI_YELLOW}确认{ANSI_RESET} · {} · 1允许 2拒绝 3详情",
+            stats.model_name
+        );
+    }
+    if running {
+        let elapsed = turn_started
+            .map(|started| format_short_duration(started.elapsed()))
+            .unwrap_or_else(|| "0s".to_string());
+        let mut parts = vec![
+            format!("{ANSI_YELLOW}运行中{ANSI_RESET}"),
+            format!("⏱{elapsed}"),
+            stats.model_name.clone(),
+        ];
+        if guidance_count > 0 {
+            parts.push(format!("排队{guidance_count}"));
+        }
+        if let (Some(timeout_ms), Some(started)) = (stats.request_timeout_ms, turn_started) {
+            if timeout_ms > 0 {
+                let left = timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
+                parts.push(format!("剩{}", format_ms_duration(u128::from(left))));
+            }
+        }
+        parts.push("/stop".to_string());
+        return parts.join(" · ");
+    }
+    render_repl_status_line(stats, "就绪", show_trace, None)
 }
 
 fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
@@ -1037,41 +1718,31 @@ fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
     writeln!(file, "{}", note.trim()).map_err(|e| format!("guidance_write_failed: {e}"))
 }
 
-fn print_repl_banner(stdout: &mut io::Stdout, options: &CliOptions) -> Result<(), String> {
-    let summary = options.runtime.summary();
-    write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
-    writeln!(stdout, "{}", render_repl_banner(&summary))
-        .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))
-}
-
 fn handle_repl_command(
     input: &str,
     verbose: &mut bool,
     show_trace: &mut bool,
     options: &CliOptions,
     conversation_history: &[ConversationHistoryItem],
-    stdout: &mut io::Stdout,
+    out: &mut dyn Write,
 ) -> Result<(), String> {
     match input {
         "/help" | "/?" => {
             writeln!(
-                stdout,
-                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /stop      在安全点停止当前任务\n  /trace     显示技术细节\n  /notrace   隐藏技术细节\n  /verbose   显示完整运行元数据\n  /quiet     恢复简洁模式\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n默认展示可读的判断进展、操作目的和结果；不会展示模型隐藏的原始思维链，也不会打印原始密钥或完整命令。\n"
+                out,
+                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /stop      在安全点停止当前任务\n  /trace     详细模式：显示准备步骤/思考轮次/技术汇总（排障用）\n  /notrace   对话默认：能快答就只出答复；有工具才显示在干嘛\n  /verbose   显示完整运行元数据\n  /quiet     关闭 verbose（不影响 /trace）\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n默认像正常聊天；底部固定输入条（应用自绘，支持中文）。不打印隐藏思维链和密钥。\n"
             )
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/history" => {
-            print_repl_section_rule(stdout, "HISTORY")?;
+            writeln!(out, "· HISTORY").map_err(|e| format!("stdout_write_failed: {e}"))?;
             if conversation_history.is_empty() {
-                writeln!(stdout, "no completed REPL turns yet")
+                writeln!(out, "no completed REPL turns yet")
                     .map_err(|e| format!("stdout_write_failed: {e}"))?;
             } else {
                 for item in conversation_history {
                     writeln!(
-                        stdout,
+                        out,
                         "{}: {}",
                         item.role,
                         compact_preview(&item.text, 160)
@@ -1085,7 +1756,7 @@ fn handle_repl_command(
             let status = build_chuang_mvp_status(&options.runtime, &kernel)
                 .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
             writeln!(
-                stdout,
+                out,
                 "\nStatus\n  provider: {} / {}\n  readiness: {}\n  tools: mapped={} executable={}\n  subagent: {}\n  memory: {}\n",
                 status.config.provider_id,
                 status.config.model_name,
@@ -1099,37 +1770,44 @@ fn handle_repl_command(
         }
         "/verbose" => {
             *verbose = true;
-            writeln!(stdout, "完整元数据已开启")
-                .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(out, "完整元数据已开启").map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/trace" => {
             *show_trace = true;
-            writeln!(stdout, "技术细节已开启").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(
+                out,
+                "详细模式已开启：后续工作进展会显示模型轮次等过程；回合结束也会附技术汇总。"
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/notrace" => {
             *show_trace = false;
-            writeln!(stdout, "技术细节已隐藏").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(
+                out,
+                "已恢复默认显示：过程保持人话；结束不再附技术汇总。"
+            )
+            .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/quiet" => {
             *verbose = false;
-            writeln!(stdout, "已恢复简洁模式").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(out, "已恢复简洁模式").map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/clear" => {
-            write!(stdout, "\x1b[2J\x1b[H").map_err(|e| format!("stdout_write_failed: {e}"))?;
+            // Caller paints body; send a form-feed style note.
+            writeln!(out, "(clear)").map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/exit" | "/quit" => {}
         _ => {
-            writeln!(stdout, "无法识别这个命令，请输入 /help 查看可用命令。")
+            writeln!(out, "无法识别这个命令，请输入 /help 查看可用命令。")
                 .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
     }
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))
+    Ok(())
 }
 
 fn print_repl_result(
     stdout: &mut io::Stdout,
+    chrome: &mut ReplChrome,
     result: &chuang_agent::agent_runtime::RuntimeResult,
     elapsed_ms: u128,
     turn_count: usize,
@@ -1137,6 +1815,7 @@ fn print_repl_result(
     _input_preview: &str,
     pending_guidance_count: usize,
     progress_displays: &[ProgressDisplay],
+    timing: &TurnTimingSummary,
 ) -> Result<(), String> {
     let meta = &result.response.meta.extra;
     let tool_meta = ToolLoopMeta::from_extra(meta)?;
@@ -1144,7 +1823,7 @@ fn print_repl_result(
         .get("tool_loop_status")
         .map(String::as_str)
         .unwrap_or("none");
-    let elapsed_cell = format!("{elapsed_ms}ms");
+    let elapsed_cell = format_ms_duration(elapsed_ms);
     let report_id = result
         .response
         .meta
@@ -1158,30 +1837,28 @@ fn print_repl_result(
         Vec::new()
     };
     let answer = render_repl_answer_text(result.response.body.trim(), turn_count)?;
-    let metadata_line =
-        render_completion_metadata_line(&elapsed_cell, tool_status, pending_guidance_count);
-    writeln!(
-        stdout,
-        "{}",
-        render_assistant_completion_block(
-            result.response.model_name.as_str(),
-            &answer,
-            &metadata_line,
-            &trace_lines,
-            render_completion_audit_line(
-                show_trace,
-                progress_displays,
-                tool_meta.tool_call_count,
-                tool_meta.tool_protocol_error_count,
-                report_id,
-            )
-            .as_deref(),
+    let metadata_line = render_completion_metadata_line(
+        &elapsed_cell,
+        tool_status,
+        pending_guidance_count,
+        timing,
+        result.response.model_name.as_str(),
+    );
+    let block = render_assistant_completion_block(
+        result.response.model_name.as_str(),
+        &answer,
+        &metadata_line,
+        &trace_lines,
+        render_completion_audit_line(
+            show_trace,
+            progress_displays,
+            tool_meta.tool_call_count,
+            tool_meta.tool_protocol_error_count,
+            report_id,
         )
-    )
-    .map_err(|e| format!("stdout_write_failed: {e}"))?;
-    stdout
-        .flush()
-        .map_err(|e| format!("stdout_flush_failed: {e}"))
+        .as_deref(),
+    );
+    chrome.write_body(stdout, &format!("{block}\n"))
 }
 
 fn render_repl_answer_text(answer: &str, turn_count: usize) -> Result<String, String> {
@@ -1300,40 +1977,63 @@ fn visible_trace_lines(
     ]
 }
 
-fn print_repl_section_rule(stdout: &mut io::Stdout, title: &str) -> Result<(), String> {
-    writeln!(stdout, "\n{}{}{} {}", ANSI_DIM, "·", ANSI_RESET, title)
-        .map_err(|e| format!("stdout_write_failed: {e}"))
-}
-
 fn render_repl_banner(summary: &chuang_agent::runtime_config::ConfigSummary) -> String {
     let cwd = env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
+    let cwd_short = short_path_for_display(&cwd, 48);
+    // Quieter startup: keep wordmark, fold meta into one dim line + thin rule.
+    let quiet = env::var("CHUANG_QUIET_BANNER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if quiet {
+        return format!(
+            "{ANSI_BOLD}{ANSI_CYAN}chuang{ANSI_RESET}  {ANSI_DIM}{} · {} · {}{ANSI_RESET}\n{ANSI_DIM}/help · /stop · /exit{ANSI_RESET}\n",
+            summary.model_name, summary.permission_profile, cwd_short
+        );
+    }
     [
-        format!("{}{}", ANSI_BOLD, ANSI_CYAN),
+        format!("{ANSI_BOLD}{ANSI_CYAN}"),
         " ██████╗██╗  ██╗██╗   ██╗ █████╗ ███╗   ██╗ ██████╗ ".to_string(),
         "██╔════╝██║  ██║██║   ██║██╔══██╗████╗  ██║██╔════╝ ".to_string(),
         "██║     ███████║██║   ██║███████║██╔██╗ ██║██║  ███╗".to_string(),
         "██║     ██╔══██║██║   ██║██╔══██║██║╚██╗██║██║   ██║".to_string(),
         "╚██████╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║╚██████╔╝".to_string(),
         " ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ".to_string(),
-        format!("                  A G E N T{}", ANSI_RESET),
+        format!("                  A G E N T{ANSI_RESET}"),
         format!(
-            "\n{}model{} {}  {}profile{} {}",
-            ANSI_DIM,
-            ANSI_RESET,
-            summary.model_name,
-            ANSI_DIM,
-            ANSI_RESET,
-            summary.permission_profile
+            "{ANSI_DIM}{} · {} · {}{ANSI_RESET}",
+            summary.model_name, summary.permission_profile, cwd_short
         ),
-        format!("{}workspace{} {}", ANSI_DIM, ANSI_RESET, cwd),
-        format!(
-            "{}help{} /help   {}stop{} /stop   {}exit{} /exit",
-            ANSI_DIM, ANSI_RESET, ANSI_DIM, ANSI_RESET, ANSI_DIM, ANSI_RESET
-        ),
+        format!("{ANSI_DIM}/help · /stop · /exit · /trace{ANSI_RESET}"),
+        String::new(),
     ]
     .join("\n")
+}
+
+fn short_path_for_display(path: &str, max_chars: usize) -> String {
+    if path.chars().count() <= max_chars {
+        return path.to_string();
+    }
+    let home = env::var("HOME").unwrap_or_default();
+    let condensed = if !home.is_empty() && path.starts_with(&home) {
+        format!("~{}", &path[home.len()..])
+    } else {
+        path.to_string()
+    };
+    if condensed.chars().count() <= max_chars {
+        return condensed;
+    }
+    // keep tail (usually project name)
+    let tail: String = condensed
+        .chars()
+        .rev()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("…{tail}")
 }
 
 fn render_user_message_block(
@@ -1342,84 +2042,43 @@ fn render_user_message_block(
     model_name: &str,
     cwd: &str,
 ) -> String {
-    let mut lines = vec![format!("{}{}你{}", ANSI_BOLD, ANSI_BLUE, ANSI_RESET)];
-    for line in wrap_text_block(user_input, REPL_TEXT_WRAP_WIDTH).lines() {
-        lines.push(format!("{}│{} {}", ANSI_BLUE, ANSI_RESET, line));
-    }
-    lines.push(format!(
-        "{}{}{} · {}{}{} · {}{}{}",
-        ANSI_DIM,
-        provider_id,
-        ANSI_RESET,
-        ANSI_DIM,
-        model_name,
-        ANSI_RESET,
-        ANSI_DIM,
-        cwd,
-        ANSI_RESET
-    ));
-    lines.push(String::new());
-    lines.join("\n")
+    // Compact: one visual bubble. Meta stays light (no full path wall).
+    let text = user_input.trim();
+    let head = if text.chars().count() <= 80 && !text.contains('\n') {
+        format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}  {text}")
+    } else {
+        let mut lines = vec![format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}")];
+        for line in wrap_text_block(text, REPL_TEXT_WRAP_WIDTH).lines() {
+            lines.push(format!("{ANSI_BLUE}│{ANSI_RESET} {line}"));
+        }
+        lines.join("\n")
+    };
+    let _ = (provider_id, cwd); // keep signature stable for call sites
+    format!("{head}\n{ANSI_DIM}{model_name}{ANSI_RESET}\n")
 }
 
-fn render_progress_display_line(display: &ProgressDisplay) -> String {
+fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) -> String {
+    // Grok/OpenCode-style: icon + human message, no noisy step numbers by default.
     let (icon, color) = match (display.kind, display.state) {
         (DisplayEventKind::Warning, DisplayState::Blocked) => ("!", ANSI_YELLOW),
-        (DisplayEventKind::Warning, _) => ("!", ANSI_RED),
+        (DisplayEventKind::Warning, _) | (_, DisplayState::Failed) => ("✗", ANSI_RED),
         (_, DisplayState::Succeeded) => ("✓", ANSI_GREEN),
+        (DisplayEventKind::Tool, DisplayState::Running) => ("▸", ANSI_CYAN),
+        (_, DisplayState::Running) if display.prominence == DisplayProminence::Primary => {
+            ("●", ANSI_CYAN)
+        }
+        (_, DisplayState::Blocked) => ("…", ANSI_YELLOW),
         (_, _) => ("·", ANSI_YELLOW),
     };
-    format!(
-        "{}{}{} {}",
-        color,
-        icon,
-        ANSI_RESET,
-        compact_preview(&display.message, REPL_META_WRAP_WIDTH)
-    )
-}
-
-fn render_repl_prompt(
-    running: bool,
-    guidance_count: usize,
-    stats: &ReplSessionStats,
-    awaiting_approval: bool,
-) -> String {
-    if awaiting_approval {
-        return format!(
-            "{}╭─ 审批选择{}\n{}╰─ 请选择 1 / 2 / 3{}\n{}\n",
-            ANSI_YELLOW,
-            ANSI_RESET,
-            ANSI_YELLOW,
-            ANSI_RESET,
-            render_repl_status_line(stats, "等待确认")
-        );
+    let message = compact_preview(&display.message, REPL_META_WRAP_WIDTH);
+    let dim_success = display.state == DisplayState::Succeeded
+        && display.prominence == DisplayProminence::Secondary;
+    let _ = step_index; // reserved if /trace ever wants numbered steps again
+    if dim_success {
+        format!("{color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
+    } else {
+        format!("{color}{icon}{ANSI_RESET} {message}")
     }
-    if running {
-        let hint = if guidance_count > 0 {
-            format!("已排队 {guidance_count} 条补充要求")
-        } else {
-            "可输入补充要求，/stop 停止".to_string()
-        };
-        return format!(
-            "{}╭─ 当前任务{}\n{}╰─ {}{}\n{}\n",
-            ANSI_YELLOW,
-            ANSI_RESET,
-            ANSI_YELLOW,
-            hint,
-            ANSI_RESET,
-            render_repl_status_line(stats, "运行中")
-        );
-    }
-    format!(
-        "{}╭─ 输入{}\n{}│{} \n{}╰─{}\n{}\n\x1b[3A\x1b[3C",
-        ANSI_BLUE,
-        ANSI_RESET,
-        ANSI_BLUE,
-        ANSI_RESET,
-        ANSI_BLUE,
-        ANSI_RESET,
-        render_repl_status_line(stats, "就绪")
-    )
 }
 
 fn pending_approval_from_result(
@@ -1466,6 +2125,13 @@ fn approval_action_summary(call: &chuang_agent::tool_runtime::ToolCall) -> Strin
             format!("执行高风险终端操作 {}", safe_preview(command))
         }
         ToolCall::MemoryRecall { query, .. } => format!("检索记忆 {}", safe_preview(query)),
+        ToolCall::SpawnSubagent {
+            task, agent_name, ..
+        } => format!(
+            "派发子代理 {}：{}",
+            agent_name.as_deref().unwrap_or("worker"),
+            safe_preview(task)
+        ),
     }
 }
 
@@ -1537,38 +2203,54 @@ fn render_repl_failure_block(
     error: &str,
     progress_lines: &[String],
     show_trace: bool,
+    timing: &TurnTimingSummary,
 ) -> String {
     let mut lines = vec![
-        format!("{}{}小创{}", ANSI_BOLD, ANSI_RED, ANSI_RESET),
+        format!("\n{}{}小创 · 未完成{}", ANSI_BOLD, ANSI_RED, ANSI_RESET),
+        String::new(),
         format!(
-            "{}本轮没有完成：{}{}",
+            "{}{}{}",
             ANSI_RED,
-            ANSI_RESET,
-            readable_runtime_error(error)
+            readable_runtime_error(error),
+            ANSI_RESET
         ),
         format!(
-            "{}已用时 {:.1} 秒{}",
+            "{}已用时 {}{}",
             ANSI_DIM,
-            elapsed_ms as f64 / 1000.0,
+            format_ms_duration(elapsed_ms),
             ANSI_RESET
         ),
     ];
+    if timing.thinking_ms > 0 || timing.acting_ms > 0 {
+        lines.push(format!(
+            "{}其中 思考 {} · 执行 {}{}",
+            ANSI_DIM,
+            format_ms_duration(timing.thinking_ms),
+            format_ms_duration(timing.acting_ms),
+            ANSI_RESET
+        ));
+    }
     if progress_lines.is_empty() {
         lines.push(format!(
             "{}没有捕获到可展示的工作进展。{}",
             ANSI_DIM, ANSI_RESET
         ));
     } else {
-        for line in progress_lines.iter().take(4) {
-            lines.push(format!("{}· {}{}", ANSI_DIM, line, ANSI_RESET));
+        lines.push(format!("{}── 最近进展 ──{}", ANSI_DIM, ANSI_RESET));
+        for line in progress_lines.iter().take(6) {
+            lines.push(format!("{}  · {}{}", ANSI_DIM, line, ANSI_RESET));
         }
     }
     if show_trace {
         lines.push(format!(
-            "{}技术细节{} {}",
+            "{}── 技术细节 ──{}",
+            ANSI_DIM, ANSI_RESET
+        ));
+        lines.push(format!(
+            "{}{}{}",
             ANSI_DIM,
-            ANSI_RESET,
-            compact_preview(error, REPL_META_WRAP_WIDTH)
+            compact_preview(error, REPL_META_WRAP_WIDTH),
+            ANSI_RESET
         ));
     }
     lines.push(format!(
@@ -1585,18 +2267,24 @@ fn render_assistant_completion_block(
     trace_lines: &[String],
     audit_line: Option<&str>,
 ) -> String {
-    let mut lines = vec![format!(
-        "{}{}小创{} {}{}{}",
-        ANSI_BOLD, ANSI_CYAN, ANSI_RESET, ANSI_DIM, model_name, ANSI_RESET
-    )];
+    // Final answer first (Grok: Final owns attention). Trace/audit after, dim.
+    let mut lines = vec![
+        format!("\n{ANSI_DIM}──{ANSI_RESET}"),
+        format!("{ANSI_BOLD}{ANSI_CYAN}小创{ANSI_RESET}  {ANSI_DIM}{model_name}{ANSI_RESET}"),
+        String::new(),
+        answer.to_string(),
+        String::new(),
+        metadata_line.to_string(),
+    ];
+    if !trace_lines.is_empty() || audit_line.is_some() {
+        lines.push(format!("{}── 技术细节 ──{}", ANSI_DIM, ANSI_RESET));
+    }
     for line in trace_lines {
         lines.push(format!("{}{}{}", ANSI_DIM, line, ANSI_RESET));
     }
     if let Some(audit_line) = audit_line {
-        lines.push(format!("{}技术细节{} {}", ANSI_DIM, ANSI_RESET, audit_line));
+        lines.push(format!("{}{}{}", ANSI_DIM, audit_line, ANSI_RESET));
     }
-    lines.push(answer.to_string());
-    lines.push(metadata_line.to_string());
     lines.join("\n")
 }
 
@@ -1628,8 +2316,19 @@ fn render_completion_metadata_line(
     elapsed: &str,
     tool_status: &str,
     pending_guidance_count: usize,
+    timing: &TurnTimingSummary,
+    model_name: &str,
 ) -> String {
-    let mut parts = vec![format!("耗时 {elapsed}")];
+    let mut parts = vec![
+        format!("耗时 {elapsed}"),
+        format!("模型 {model_name}"),
+    ];
+    if timing.thinking_ms > 0 {
+        parts.push(format!("思考 {}", format_ms_duration(timing.thinking_ms)));
+    }
+    if timing.acting_ms > 0 {
+        parts.push(format!("执行 {}", format_ms_duration(timing.acting_ms)));
+    }
     match tool_status {
         "human_input_required" => parts.push("等待你的确认".to_string()),
         "completed_after_tool_limit" => parts.push("已在执行后整理答复".to_string()),
@@ -1712,12 +2411,17 @@ mod tests {
         })
         .to_string();
 
+        // Conversation default: no lifecycle theater.
+        assert_eq!(format_progress_event(&started, false), None);
+        assert_eq!(format_progress_event(&tool_done, false), None);
+        assert_eq!(format_progress_event(&protocol, false), None);
         assert_eq!(
-            format_progress_event(&started),
-            Some(display_progress("正在理解你的要求"))
+            format_progress_event(
+                &serde_json::json!({"kind":"model_started","details":{}}).to_string(),
+                true
+            ),
+            Some(display_progress("思考中…"))
         );
-        assert_eq!(format_progress_event(&tool_done), None);
-        assert_eq!(format_progress_event(&protocol), None);
     }
 
     #[test]
@@ -1743,14 +2447,37 @@ mod tests {
             }
         })
         .to_string();
+        let model = serde_json::json!({
+            "schema_version": 2,
+            "event": {
+                "kind": "model_started",
+                "round": 2
+            }
+        })
+        .to_string();
 
         assert_eq!(
-            format_progress_event(&step).unwrap().message,
-            "正在准备上下文"
+            format_progress_event(&step, false),
+            None,
+            "default conversation hides prepare-context theater"
         );
         assert_eq!(
-            format_progress_event(&tool).unwrap().message,
+            format_progress_event(&tool, false).unwrap().message,
             "正在检查 Git 状态 · 查看版本库当前状态"
+        );
+        assert_eq!(
+            format_progress_event(&model, false),
+            None,
+            "default hides model-round spam"
+        );
+        assert_eq!(
+            format_progress_event(&model, true).unwrap().message,
+            "思考中…"
+        );
+        assert!(
+            format_progress_event(&step, true)
+                .is_some_and(|d| d.message.contains("准备上下文")),
+            "trace still shows lifecycle steps"
         );
     }
 
@@ -1844,33 +2571,47 @@ mod tests {
         );
 
         assert!(rendered.contains("你"));
-        assert!(rendered.contains("│"));
         assert!(rendered.contains("请检查当前分支并总结"));
         assert!(rendered.contains("不要省略第二行"));
-        assert!(rendered.contains("openai_compatible"));
+        // Meta is model-only now (provider/cwd dropped to reduce noise).
         assert!(rendered.contains("gpt-5.5"));
-        assert!(rendered.contains("/tmp/work"));
         assert!(!rendered.contains("type !text"));
+
+        let short = render_user_message_block("哈喽小创", "p", "m", "/tmp");
+        assert!(short.contains("你"));
+        assert!(short.contains("哈喽小创"));
+        // Compact short messages: one line bubble, no pipe reprint theater.
+        assert!(!short.contains('│'));
     }
 
     #[test]
     fn repl_progress_line_is_compact_transcript_style() {
-        let rendered = render_progress_display_line(&display_tool("正在检查 Git 状态".to_string()));
+        let rendered =
+            render_progress_display_line(&display_tool("正在检查 Git 状态".to_string()), 1);
 
         assert!(rendered.contains("检查 Git 状态"));
+        assert!(rendered.contains("▸") || rendered.contains("·"));
         assert!(!rendered.contains("tool"));
         assert!(!rendered.contains("thinking"));
-        assert!(!rendered.contains(" 3"));
         assert!(!rendered.contains("TOOL STREAM"));
         assert!(!rendered.contains("│"));
     }
 
     #[test]
-    fn repl_assistant_completion_has_answer_and_muted_metadata_without_old_wall_labels() {
+    fn repl_assistant_completion_puts_answer_before_trace() {
         let rendered = render_assistant_completion_block(
             "gpt-5.5",
             "answer body",
-            &render_completion_metadata_line("120ms", "ok", 0),
+            &render_completion_metadata_line(
+                "120ms",
+                "ok",
+                0,
+                &TurnTimingSummary {
+                    thinking_ms: 5000,
+                    acting_ms: 2000,
+                },
+                "gpt-5.5",
+            ),
             &["trace model=gpt-5.5 finish=stop".to_string()],
             Some("最近进展=正在检查 Git 状态  tools=1  protocol=0  report=rpt_123"),
         );
@@ -1880,8 +2621,15 @@ mod tests {
         assert!(rendered.contains("技术细节"));
         assert!(rendered.contains("rpt_123"));
         assert!(rendered.contains("耗时 120ms"));
+        assert!(rendered.contains("思考"));
+        assert!(rendered.contains("模型 gpt-5.5"));
+        let answer_pos = rendered.find("answer body").expect("answer");
+        let trace_pos = rendered.find("技术细节").expect("trace section");
+        assert!(
+            answer_pos < trace_pos,
+            "final answer must appear before technical section"
+        );
         assert!(!rendered.contains("DONE"));
-        assert!(!rendered.contains("TRACE"));
         assert!(!rendered.contains("THINKING"));
         assert!(!rendered.contains("TOOL STREAM"));
         assert!(!rendered.contains("ANSWER"));
@@ -1975,21 +2723,47 @@ mod tests {
 
     #[test]
     fn repl_metadata_line_is_wrapped_without_old_table() {
-        let rendered = render_completion_metadata_line("999ms", "tool_loop_exhausted", 7);
+        let rendered = render_completion_metadata_line(
+            "999ms",
+            "tool_loop_exhausted",
+            7,
+            &TurnTimingSummary::default(),
+            "gpt-5.5",
+        );
 
         assert!(rendered.contains("耗时 999ms"));
+        assert!(rendered.contains("模型 gpt-5.5"));
         assert!(rendered.contains("答复未完整收口"));
         assert!(rendered.contains("已排队 7 条补充要求"));
         assert!(!rendered.contains("tools"));
         assert!(!rendered.contains("protocol"));
         assert!(!rendered.contains("report"));
         assert!(!rendered.contains("┌"));
-        assert!(
-            compact_preview(&rendered, REPL_META_WRAP_WIDTH + 20)
-                .chars()
-                .count()
-                <= REPL_META_WRAP_WIDTH + 20
-        );
+    }
+
+    #[test]
+    fn format_short_duration_is_human_readable() {
+        assert_eq!(format_short_duration(Duration::from_millis(1500)), "1.5s");
+        assert_eq!(format_short_duration(Duration::from_secs(12)), "12s");
+        assert!(format_short_duration(Duration::from_secs(75)).contains('m'));
+    }
+
+    #[test]
+    fn sticky_status_shows_model_timer_and_remaining() {
+        let started = Instant::now() - Duration::from_secs(3);
+        let stats = ReplSessionStats {
+            model_name: "gpt-5.5".into(),
+            context_tokens: 1000,
+            context_max_tokens: 10000,
+            request_timeout_ms: Some(30_000),
+            ..ReplSessionStats::default()
+        };
+        let line = render_sticky_status_line(true, 0, &stats, false, false, Some(started));
+        assert!(line.contains("gpt-5.5"));
+        assert!(line.contains("运行中"));
+        assert!(line.contains("⏱"));
+        assert!(line.contains("剩"));
+        assert!(line.contains("/stop"));
     }
 
     #[test]
@@ -2012,15 +2786,26 @@ mod tests {
             last_output_tokens: 684,
             session_total_tokens: 9_200,
             turn_running: false,
+            request_timeout_ms: None,
         };
 
-        let rendered = render_repl_prompt(false, 0, &stats, false);
+        let rendered = render_sticky_status_line(false, 0, &stats, false, false, None);
 
-        assert!(rendered.contains("╭─ 输入"));
-        assert!(rendered.contains("context 27.2k / 272.0k (10%)"));
-        assert!(rendered.contains("↑ 2.1k"));
-        assert!(rendered.contains("↓ 684"));
+        assert!(rendered.contains("就绪"));
+        assert!(rendered.contains("ctx 10%"));
         assert!(rendered.contains("gpt-5.6-terra"));
+        assert!(!rendered.contains("╭"));
+
+        let detailed = render_sticky_status_line(false, 0, &stats, false, true, None);
+        assert!(detailed.contains("详细"));
+    }
+
+    #[test]
+    fn display_width_counts_cjk_as_double() {
+        assert_eq!(display_width("ab"), 2);
+        assert_eq!(display_width("你好"), 4);
+        assert_eq!(display_width("a中"), 3);
+        assert!(fit_display("你好世界测试超长", 5).chars().count() <= 4);
     }
 
     #[test]
@@ -2032,11 +2817,13 @@ mod tests {
             ..ReplSessionStats::default()
         };
 
-        let rendered = render_repl_prompt(true, 0, &stats, false);
+        let started = Instant::now() - Duration::from_secs(2);
+        let rendered = render_sticky_status_line(true, 0, &stats, false, false, Some(started));
 
-        assert!(rendered.contains("当前任务"));
-        assert!(rendered.contains("/stop 停止"));
         assert!(rendered.contains("运行中"));
+        assert!(rendered.contains("/stop"));
+        assert!(rendered.contains("⏱"));
+        assert!(!rendered.contains("╭"));
     }
 
     #[test]

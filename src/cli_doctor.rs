@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -466,6 +467,11 @@ fn run_atomic_tool_manifest_check() -> Result<(), String> {
                 "query",
                 "session_id",
                 "limit",
+                "task",
+                "agent_name",
+                "policy",
+                "token_budget",
+                "timeout_ms",
             ]
     {
         return Err("doctor_atomic_tools_failed invalid tool action schema".to_string());
@@ -591,7 +597,10 @@ fn run_identity_experiences_check(runtime: &RuntimeConfig) -> Result<(), String>
 fn run_isolated_runtime_smoke(runtime: &RuntimeConfig) -> Result<(), String> {
     let mut smoke_runtime = runtime.clone();
     let root = unique_doctor_root()?;
+    fs::create_dir_all(&root)
+        .map_err(|error| format!("doctor_workspace_create_failed: {error}"))?;
     smoke_runtime.db_path = root.join("memory.db");
+    smoke_runtime.permission.workspace_root = root.clone();
     smoke_runtime.identity_memory =
         chuang_agent::runtime_config::IdentityMemoryConfig::HermesDualFile {
             root: root.join("identity"),
@@ -1016,6 +1025,12 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     println!(
         "subagent_worker_runtime_reason: {}",
         doctor.status.subagent_readiness.worker_runtime_reason
+    );
+    println!(
+        "subagent_model_tool_worker: available={} state={} reason={}",
+        doctor.status.subagent_readiness.model_tool_worker_available,
+        doctor.status.subagent_readiness.model_tool_worker_state,
+        doctor.status.subagent_readiness.model_tool_worker_reason
     );
     println!(
         "subagent_capability_mismatch_reason: {}",

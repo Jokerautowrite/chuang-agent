@@ -620,6 +620,12 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.subagent_readiness.worker_runtime_reason
     );
     println!(
+        "subagent_model_tool_worker: available={} state={} reason={}",
+        status.subagent_readiness.model_tool_worker_available,
+        status.subagent_readiness.model_tool_worker_state,
+        status.subagent_readiness.model_tool_worker_reason
+    );
+    println!(
         "subagent_capability_mismatch_reason: {}",
         status.subagent_readiness.capability_mismatch_reason
     );
