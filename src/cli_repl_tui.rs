@@ -773,90 +773,37 @@ fn center_line(s: &str, width: usize) -> String {
     format!("{}{s}", " ".repeat(left))
 }
 
-/// 字母间距：2 个半角格 ≈ 终端里约 10px（随字号略变）。
+/// 字母间距：2 半角格 ≈ 10px（用户认可够用）。
 const LETTER_GAP: &str = "  ";
 
-/// 实心 7×7 字模（OpenCode/CLI 常见 block 体），对齐不歪。
-/// 每行等宽，用 █ 填实，空位用空格。
+/// OpenCode 同款扁字：3 行 × 4 列，█/▀/▄/_ 半块拼字（实体但扁，不是 7 行厚方块）。
+/// 参考 anomalyco/opencode `packages/tui/src/logo.ts`。
 fn letter_glyphs() -> [&'static [&'static str]; 6] {
-    // C H U A N G — 每字 7 列 × 7 行
+    // C H U A N G — 每字 4 列 × 3 行
     [
-        // C
-        &[
-            " █████ ",
-            "██   ██",
-            "██     ",
-            "██     ",
-            "██     ",
-            "██   ██",
-            " █████ ",
-        ],
+        // C  （同 OpenCode 的 C/O 系：顶框、中空、底框）
+        &["█▀▀█", "█___", "▀▀▀▀"],
         // H
-        &[
-            "██   ██",
-            "██   ██",
-            "██   ██",
-            "███████",
-            "██   ██",
-            "██   ██",
-            "██   ██",
-        ],
+        &["█__█", "█▀▀█", "█__█"],
         // U
-        &[
-            "██   ██",
-            "██   ██",
-            "██   ██",
-            "██   ██",
-            "██   ██",
-            "██   ██",
-            " █████ ",
-        ],
+        &["█__█", "█__█", "▀▀▀▀"],
         // A
-        &[
-            "  ███  ",
-            " ██ ██ ",
-            "██   ██",
-            "███████",
-            "██   ██",
-            "██   ██",
-            "██   ██",
-        ],
+        &["█▀▀█", "█▀▀█", "█__█"],
         // N
-        &[
-            "██   ██",
-            "███  ██",
-            "████ ██",
-            "██ ████",
-            "██  ███",
-            "██   ██",
-            "██   ██",
-        ],
+        &["█__█", "█▀▄█", "█__█"],
         // G
-        &[
-            " █████ ",
-            "██   ██",
-            "██     ",
-            "██ ████",
-            "██   ██",
-            "██   ██",
-            " █████ ",
-        ],
+        &["█▀▀█", "█_▄█", "▀▀▀▀"],
     ]
 }
 
 fn compose_chuang_banner() -> Vec<String> {
     let glyphs = letter_glyphs();
     let rows = glyphs[0].len();
-    // 校验字模等高、等宽，避免「歪」
     let width = glyphs[0][0].chars().count();
     for (li, letter) in glyphs.iter().enumerate() {
-        assert_eq!(letter.len(), rows, "letter {li} row count");
+        debug_assert_eq!(letter.len(), rows, "letter {li} row count");
         for (ri, line) in letter.iter().enumerate() {
-            assert_eq!(
-                line.chars().count(),
-                width,
-                "letter {li} row {ri} width"
-            );
+            debug_assert_eq!(line.chars().count(), width, "letter {li} row {ri} width");
         }
     }
     let mut out = Vec::with_capacity(rows);
