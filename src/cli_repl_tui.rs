@@ -98,7 +98,7 @@ struct TuiApp {
 }
 
 impl TuiApp {
-    fn new(chip: String, subtitle: &str) -> Self {
+    fn new(chip: String) -> Self {
         let mut app = Self {
             lines: Vec::new(),
             draft: String::new(),
@@ -109,19 +109,20 @@ impl TuiApp {
             activity: String::new(),
             running: false,
         };
-        app.push_startup_banner(subtitle);
+        app.push_startup_banner();
         app
     }
 
-    /// Gemini / OpenCode 风格开场：斜体大字 + 一行产品副标。
-    fn push_startup_banner(&mut self, subtitle: &str) {
-        // slant-ish "chuang" wordmark (hand-tuned, ~50 cols)
+    /// 启动横幅：大号方块字 chuang，雷蛇绿，无副标题。
+    fn push_startup_banner(&mut self) {
+        // Big / block style "CHUANG" (figlet-like, ~70 cols)
         const LOGO: &[&str] = &[
-            r"       __                          ",
-            r"  ____/ /_  __  ______ _____  ____ ",
-            r" / __  / / / / / __  / __  / / __ \",
-            r"/ /_/ / /_/ / / /_/ / /_/ / / / / /",
-            r"\__,_/\__,_/  \__,_/\__,_/_/ /_/  ",
+            r"  ██████╗██╗  ██╗██╗   ██╗ █████╗ ███╗   ██╗ ██████╗ ",
+            r" ██╔════╝██║  ██║██║   ██║██╔══██╗████╗  ██║██╔════╝ ",
+            r" ██║     ███████║██║   ██║███████║██╔██╗ ██║██║  ███╗",
+            r" ██║     ██╔══██║██║   ██║██╔══██║██║╚██╗██║██║   ██║",
+            r" ╚██████╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║╚██████╔╝",
+            r"  ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ",
         ];
         self.lines.push(TranscriptLine {
             kind: LineKind::Meta,
@@ -133,15 +134,6 @@ impl TuiApp {
                 text: (*row).to_string(),
             });
         }
-        self.lines.push(TranscriptLine {
-            kind: LineKind::Meta,
-            text: String::new(),
-        });
-        // Subtitle under logo — product identity, not how-to spam.
-        self.lines.push(TranscriptLine {
-            kind: LineKind::System,
-            text: format!("  {subtitle}"),
-        });
         self.lines.push(TranscriptLine {
             kind: LineKind::Meta,
             text: String::new(),
@@ -297,16 +289,7 @@ fn run_app(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
 
-    let subtitle = format!(
-        "agent  ·  {} ({})  ·  /help",
-        summary.model_name,
-        if effort.is_empty() {
-            "—"
-        } else {
-            effort.as_str()
-        }
-    );
-    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false), &subtitle);
+    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false));
 
     loop {
         // --- progress / completion while turn runs ---
