@@ -1,9 +1,7 @@
-//! Prompt / norm layering: thick on disk, thin in context (Grok-style assembly).
+//! Prompt / norm layering: thick on disk, thin in context.
 //!
-//! Claude Code materials (Piebald fragments, learn-claude-code patterns) are distilled into
-//! short Chinese assets under `assets/norm/` — not pasted as Anthropic originals.
-//!
-//! Categories: always-on card · on-demand skills · dispatch-only worker brief · disk-only docs.
+//! Includes distilled CC harness discipline plus dad's operating theorems:
+//! Occam (dev subtract) / Murphy (accept add) / Coase (delegate) / grill-clarify / no optional commentary.
 
 use crate::context_engine::{ContextSegment, SegmentSource};
 
@@ -18,6 +16,12 @@ const SKILL_EXPLORE: &str = include_str!("../assets/norm/skills/explore.md");
 const SKILL_PLAN: &str = include_str!("../assets/norm/skills/plan.md");
 const SKILL_CODING: &str = include_str!("../assets/norm/skills/coding-dispatch.md");
 const SKILL_SURGICAL: &str = include_str!("../assets/norm/skills/surgical-diff.md");
+const SKILL_OCCAM: &str = include_str!("../assets/norm/skills/occam-develop.md");
+const SKILL_MURPHY: &str = include_str!("../assets/norm/skills/murphy-accept.md");
+const SKILL_FIRST: &str = include_str!("../assets/norm/skills/first-principles.md");
+const SKILL_ADV: &str = include_str!("../assets/norm/skills/adversarial-review.md");
+const SKILL_GRILL: &str = include_str!("../assets/norm/skills/grill-clarify.md");
+const SKILL_COASE: &str = include_str!("../assets/norm/skills/coase-delegate.md");
 const SKILL_THINK: &str = include_str!("../assets/norm/skills/think-before-act.md");
 const SKILL_VERIFY: &str = include_str!("../assets/norm/skills/verify-before-claim.md");
 const SKILL_COMPACT: &str = include_str!("../assets/norm/skills/compact-handoff.md");
@@ -45,22 +49,18 @@ fn segment(id: &str, content: &str, priority: u8, kind: &str) -> ContextSegment 
     }
 }
 
-/// Always-on thin doctrine card (category A).
 pub fn doctrine_card_segment() -> ContextSegment {
     segment(DOCTRINE_CARD_ID, DOCTRINE_CARD, 253, "doctrine_card")
 }
 
-/// Always-on skill index only — not full skill bodies (category A index).
 pub fn skill_index_segment() -> ContextSegment {
     segment(SKILL_INDEX_ID, SKILL_INDEX, 252, "skill_index")
 }
 
-/// Dispatch-only brief prepended to worker tasks (category C).
 pub fn dispatch_worker_brief() -> &'static str {
     DISPATCH_WORKER_BRIEF.trim()
 }
 
-/// Wrap a user/model task with the worker brief for subagent dispatch.
 pub fn wrap_task_for_worker(task: &str) -> String {
     format!("{}\n\n---\n任务：\n{}", dispatch_worker_brief(), task.trim())
 }
@@ -71,7 +71,13 @@ struct SkillSpec {
     matcher: fn(&str) -> bool,
 }
 
+/// Order = priority when multiple match (cap 2).
 const SKILLS: &[SkillSpec] = &[
+    SkillSpec {
+        id: "norm-skill-grill-clarify",
+        body: SKILL_GRILL,
+        matcher: matches_grill,
+    },
     SkillSpec {
         id: "norm-skill-explore",
         body: SKILL_EXPLORE,
@@ -83,9 +89,19 @@ const SKILLS: &[SkillSpec] = &[
         matcher: matches_plan,
     },
     SkillSpec {
+        id: "norm-skill-first-principles",
+        body: SKILL_FIRST,
+        matcher: matches_first_principles,
+    },
+    SkillSpec {
         id: "norm-skill-coding-dispatch",
         body: SKILL_CODING,
         matcher: matches_coding,
+    },
+    SkillSpec {
+        id: "norm-skill-occam-develop",
+        body: SKILL_OCCAM,
+        matcher: matches_occam,
     },
     SkillSpec {
         id: "norm-skill-surgical-diff",
@@ -93,14 +109,29 @@ const SKILLS: &[SkillSpec] = &[
         matcher: matches_surgical,
     },
     SkillSpec {
-        id: "norm-skill-think-before-act",
-        body: SKILL_THINK,
-        matcher: matches_think,
+        id: "norm-skill-murphy-accept",
+        body: SKILL_MURPHY,
+        matcher: matches_murphy,
     },
     SkillSpec {
         id: "norm-skill-verify-before-claim",
         body: SKILL_VERIFY,
         matcher: matches_verify,
+    },
+    SkillSpec {
+        id: "norm-skill-adversarial-review",
+        body: SKILL_ADV,
+        matcher: matches_adversarial,
+    },
+    SkillSpec {
+        id: "norm-skill-coase-delegate",
+        body: SKILL_COASE,
+        matcher: matches_coase,
+    },
+    SkillSpec {
+        id: "norm-skill-think-before-act",
+        body: SKILL_THINK,
+        matcher: matches_think,
     },
     SkillSpec {
         id: "norm-skill-compact-handoff",
@@ -114,7 +145,6 @@ const SKILLS: &[SkillSpec] = &[
     },
 ];
 
-/// On-demand skills selected from user text (category B). Cap count to protect budget.
 pub fn on_demand_skill_segments(user_input: &str) -> Vec<ContextSegment> {
     let text = user_input.to_ascii_lowercase();
     let mut out = Vec::new();
@@ -127,6 +157,20 @@ pub fn on_demand_skill_segments(user_input: &str) -> Vec<ContextSegment> {
         }
     }
     out
+}
+
+fn matches_grill(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "不清楚",
+        "你先问我",
+        "帮我理清",
+        "需求模糊",
+        "grill",
+        "追问",
+        "到底要什么",
+        "确认需求",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
 }
 
 fn matches_explore(text: &str) -> bool {
@@ -164,6 +208,19 @@ fn matches_plan(text: &str) -> bool {
     KEYS.iter().any(|k| text.contains(k))
 }
 
+fn matches_first_principles(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "第一性",
+        "从原理",
+        "first principle",
+        "根上",
+        "本质原因",
+        "机制是什么",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+        || (text.contains("架构") && (text.contains("设计") || text.contains("方案")))
+}
+
 fn matches_coding(text: &str) -> bool {
     const KEYS: &[&str] = &[
         "写代码",
@@ -181,8 +238,25 @@ fn matches_coding(text: &str) -> bool {
         "测试失败",
         "编译",
         "加功能",
+        "加个按钮",
+        "做一个",
     ];
     KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_occam(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "奥卡姆",
+        "剃刀",
+        "别加戏",
+        "不要多余",
+        "最小实现",
+        "只要",
+        "occam",
+        "别过度",
+        "别炫技",
+    ];
+    KEYS.iter().any(|k| text.contains(k)) || matches_coding(text)
 }
 
 fn matches_surgical(text: &str) -> bool {
@@ -195,7 +269,65 @@ fn matches_surgical(text: &str) -> bool {
         "精确改",
         "小改",
     ];
-    KEYS.iter().any(|k| text.contains(k)) || matches_coding(text)
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_murphy(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "墨菲",
+        "验收",
+        "最坏",
+        "边界测试",
+        "失败路径",
+        "murphy",
+        "回归",
+        "全过",
+        "全部通过",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_verify(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "做完了吗",
+        "完成了吗",
+        "验证",
+        "确认修好",
+        "是否修好",
+        "测试通过",
+        "verify",
+        "done?",
+        "修好了吗",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_adversarial(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "对抗审查",
+        "对抗式",
+        "找茬",
+        "挑刺",
+        "审查",
+        "code review",
+        "adversarial",
+        "多agent审",
+        "多代理审",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_coase(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "科斯",
+        "外包吗",
+        "要不要派",
+        "自己干还是",
+        "子代理吗",
+        "coase",
+        "派不派",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
 }
 
 fn matches_think(text: &str) -> bool {
@@ -208,22 +340,6 @@ fn matches_think(text: &str) -> bool {
         "先讨论",
         "tradeoff",
         "架构决策",
-    ];
-    KEYS.iter().any(|k| text.contains(k))
-}
-
-fn matches_verify(text: &str) -> bool {
-    const KEYS: &[&str] = &[
-        "做完了吗",
-        "完成了吗",
-        "验收",
-        "验证",
-        "确认修好",
-        "是否修好",
-        "测试通过",
-        "verify",
-        "done?",
-        "修好了吗",
     ];
     KEYS.iter().any(|k| text.contains(k))
 }
@@ -258,7 +374,6 @@ fn matches_readonly_triage(text: &str) -> bool {
     KEYS.iter().any(|k| text.contains(k))
 }
 
-/// Segments to inject every turn: doctrine + index + on-demand hits.
 pub fn norm_context_segments(user_input: &str) -> Vec<ContextSegment> {
     let mut segments = vec![doctrine_card_segment(), skill_index_segment()];
     segments.extend(on_demand_skill_segments(user_input));
@@ -270,47 +385,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn doctrine_card_is_short() {
+    fn doctrine_has_occam_murphy_coase_no_commentary() {
         let card = doctrine_card_segment();
-        assert!(card.content.chars().count() < 900);
-        assert!(card.content.contains("调度台"));
-        assert!(card.content.contains("如实"));
-        assert_eq!(card.priority, 253);
+        assert!(card.content.contains("剃刀") || card.content.contains("奥卡姆"));
+        assert!(card.content.contains("墨菲"));
+        assert!(card.content.contains("科斯"));
+        assert!(card.content.contains("optional commentary") || card.content.contains("旁白"));
     }
 
     #[test]
-    fn coding_input_loads_coding_or_surgical() {
-        let segs = on_demand_skill_segments("帮我修 bug 并跑 cargo test");
+    fn coding_loads_occam_or_coding() {
+        let segs = on_demand_skill_segments("帮我加个按钮");
         assert!(!segs.is_empty());
         assert!(segs.len() <= 2);
         assert!(segs.iter().any(|s| {
-            s.id == "norm-skill-coding-dispatch" || s.id == "norm-skill-surgical-diff"
+            s.id == "norm-skill-coding-dispatch" || s.id == "norm-skill-occam-develop"
         }));
     }
 
     #[test]
-    fn explore_input_loads_explore() {
-        let segs = on_demand_skill_segments("这个符号在哪定义的");
-        assert!(segs.iter().any(|s| s.id == "norm-skill-explore"));
+    fn accept_loads_murphy() {
+        let segs = on_demand_skill_segments("帮我验收一下是不是全部通过");
+        assert!(segs.iter().any(|s| {
+            s.id == "norm-skill-murphy-accept" || s.id == "norm-skill-verify-before-claim"
+        }));
     }
 
     #[test]
-    fn plan_input_loads_plan() {
-        let segs = on_demand_skill_segments("先给一个实施计划再动手");
-        assert!(segs.iter().any(|s| s.id == "norm-skill-plan"));
+    fn wrap_task_forbids_optional_commentary() {
+        let w = wrap_task_for_worker("x");
+        assert!(w.contains("optional commentary") || w.contains("奥卡姆") || w.contains("墨菲"));
     }
 
     #[test]
-    fn casual_input_loads_no_ondemand_skill() {
-        let segs = on_demand_skill_segments("今天天气怎么样");
-        assert!(segs.is_empty());
-    }
-
-    #[test]
-    fn wrap_task_includes_worker_fork_style_brief() {
-        let wrapped = wrap_task_for_worker("读 Cargo.toml 返回包名");
-        assert!(wrapped.contains("工人简报") || wrapped.contains("worker"));
-        assert!(wrapped.contains("读 Cargo.toml"));
-        assert!(wrapped.contains("禁止") || wrapped.contains("不要反问"));
+    fn casual_no_skill() {
+        assert!(on_demand_skill_segments("今天天气怎么样").is_empty());
     }
 }

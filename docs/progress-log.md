@@ -1,3 +1,8 @@
+# 2026-07-18 老爸定理入 norm：剃刀/墨菲/科斯/第一性/对抗/禁旁白/grill
+- 开发奥卡姆、验收墨菲、派工科斯写进 doctrine-card；旁白禁令常驻。
+- 新增 skill：occam-develop、murphy-accept、first-principles、adversarial-review、grill-clarify（去 95%）、coase-delegate。
+- grill 仅歧义触发；对抗审查非默认；编码默认 coding+occam 优先序。
+
 # 2026-07-18 CC 五片纪律蒸馏进 norm（Explore/Plan/Worker/Safety/Compact）
 - 对照 Piebald `claude-code-system-prompts` 与 learn-claude-code 机制，**中文改写**进 `assets/norm/`（非原文粘贴）。
 - 新增/加厚 skill：explore、plan、surgical-diff、think-before-act、compact-handoff；加强 verify 与工人 brief（worker-fork 风）。

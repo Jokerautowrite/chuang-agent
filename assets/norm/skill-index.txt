@@ -1,9 +1,9 @@
-【按需 skill 索引·非全文】命中意图才注入正文；完整架构见 docs/prompt-doctrine.md。
-- explore：只读广搜定位「在哪」；回结论不回文件海；policy=analyze 派工人
-- plan：只读出实施计划+关键文件；再 tasks[] 并行执行
-- coding-dispatch：写/改/测 → 拆 tasks 并行派工人，不主会话死磕手感
-- surgical-diff：最小 diff，禁无关重构
-- verify-before-claim：无命令/测试证据不宣称完成
-- think-before-act：先假设/歧义/更简方案
-- compact-handoff：长会话腾上下文时写交接摘要结构
-磁盘：docs/blueprint-v1.md、docs/core-boundary.md、docs/prompt-doctrine.md
+【按需 skill 索引】命中才注入正文；详见 docs/prompt-doctrine.md。
+- explore / plan：只读探路与规划
+- coding-dispatch + coase-delegate：写码派工与自干边界
+- occam-develop / surgical-diff：开发减法
+- murphy-accept / verify-before-claim：验收加法与如实
+- first-principles：修 bug/方案/架构从机制推
+- adversarial-review：复杂收尾对抗审查（非默认）
+- think-before-act / grill-clarify：想清楚；歧义时一次一问（无「95%」）
+- compact-handoff / readonly-triage：交接与只读排查
