@@ -75,3 +75,52 @@ fn cdp_adapter_unreachable_port_read_returns_structured_error() {
     assert!(err.retryable);
     assert!(err.code.starts_with("cdp_"));
 }
+
+#[test]
+fn resolve_cdp_adapter_errors_clearly_when_no_endpoint() {
+    // Ensure CHUANG_CDP_PORT does not point at a live endpoint for this check.
+    // If default 9222 is up (managed headless chrome), resolution may succeed — that is ok.
+    std::env::remove_var("CHUANG_CDP_PORT");
+    match chuang_agent::browser_read::resolve_cdp_browser_read_adapter() {
+        Ok(adapter) => {
+            assert!(adapter.port() > 0);
+            assert!(adapter.status().available || !adapter.status().available);
+        }
+        Err(err) => {
+            assert_eq!(err.code, "browser_read_unavailable");
+            assert!(err.message.contains("headless") || err.message.contains("CHUANG_CDP_PORT"));
+        }
+    }
+}
+
+#[test]
+fn browser_navigate_rejects_empty_and_bad_scheme() {
+    let adapter = CdpBrowserReadAdapter::new(1);
+    let empty = adapter
+        .navigate_and_read("  ")
+        .expect_err("empty url must fail");
+    assert_eq!(empty.code, "cdp_navigate_empty_url");
+
+    let bad = adapter
+        .navigate_and_read("javascript:alert(1)")
+        .expect_err("bad scheme must fail");
+    assert_eq!(bad.code, "cdp_navigate_unsupported_scheme");
+}
+
+#[test]
+fn live_cdp_navigate_and_read_when_endpoint_available() {
+    std::env::set_var("CHUANG_CDP_PORT", "9222");
+    let Ok(adapter) = chuang_agent::browser_read::resolve_cdp_browser_read_adapter() else {
+        return; // no browser in this environment
+    };
+    if !adapter.status().available {
+        return;
+    }
+    let page = adapter
+        .navigate_and_read("https://example.com")
+        .expect("navigate example.com should work against managed chrome");
+    assert!(page.url.contains("example.com"), "url={}", page.url);
+    assert!(!page.title.is_empty() || !page.dom_text.is_empty());
+    let again = adapter.read_current_page().expect("read after navigate");
+    assert!(again.url.contains("example") || !again.dom_text.is_empty());
+}

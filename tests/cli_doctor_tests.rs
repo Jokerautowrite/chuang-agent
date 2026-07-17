@@ -84,7 +84,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
         "policy_tool_status: active_profile=full_local_workspace normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
-    assert!(stdout.contains("ga_tool_descriptors=9/13 missing=0"));
+    assert!(stdout.contains("ga_tool_descriptors=9/15 missing=0"));
     assert!(stdout.contains("runtime_report_surface: ok=true artifacts=11 observability_fields=26"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));

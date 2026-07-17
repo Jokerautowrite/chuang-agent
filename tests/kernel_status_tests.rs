@@ -21,7 +21,25 @@ fn cdp_env_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("cdp env guard should lock")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Isolate status from any managed headless chrome state on the machine.
+fn isolate_managed_headless_state() -> (EnvVarRestore, EnvVarRestore, PathBuf) {
+    let cdp = EnvVarRestore::capture("CHUANG_CDP_PORT");
+    let state = EnvVarRestore::capture("CHUANG_HEADLESS_STATE_DIR");
+    std::env::remove_var("CHUANG_CDP_PORT");
+    let dir = std::env::temp_dir().join(format!(
+        "chuang-kernel-status-no-headless-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::create_dir_all(&dir);
+    std::env::set_var("CHUANG_HEADLESS_STATE_DIR", &dir);
+    (cdp, state, dir)
 }
 
 fn kernel_test_config_and_snapshot() -> (RuntimeConfig, ChuangKernelConfig) {
@@ -66,7 +84,7 @@ impl Drop for EnvVarRestore {
 #[test]
 fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     let _guard = cdp_env_guard();
-    std::env::remove_var("CHUANG_CDP_PORT");
+    let (_cdp_env, _headless_env, _headless_dir) = isolate_managed_headless_state();
     let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     let kernel = ChuangKernelConfig {
         agent_id: "chuang-cli".to_string(),
@@ -327,7 +345,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             .local_ga_normal_local_action_default,
         "file_write/code_execute/open_app/click/input=allow_with_audit"
     );
-    assert_eq!(status.policy_tool_status.tool_descriptor_count, 13);
+    assert_eq!(status.policy_tool_status.tool_descriptor_count, 15);
     assert_eq!(status.policy_tool_status.ga_tool_descriptor_mapped_count, 9);
     assert!(status
         .policy_tool_status
@@ -906,7 +924,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
 #[test]
 fn kernel_status_marks_global_ready_with_verified_real_live_receipt_file() {
     let _guard = cdp_env_guard();
-    std::env::remove_var("CHUANG_CDP_PORT");
+    let (_cdp_env, _headless_env, _headless_dir) = isolate_managed_headless_state();
     let _global_env = EnvVarRestore::capture("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE");
     let _alias_env = EnvVarRestore::capture("CHUANG_REAL_LIVE_RECEIPT_FILE");
     std::env::remove_var("CHUANG_REAL_LIVE_RECEIPT_FILE");
@@ -1047,7 +1065,7 @@ fn kernel_status_marks_global_ready_with_verified_real_live_receipt_file() {
 #[test]
 fn kernel_status_blocks_global_ready_when_receipt_evidence_is_not_canonical() {
     let _guard = cdp_env_guard();
-    std::env::remove_var("CHUANG_CDP_PORT");
+    let (_cdp_env, _headless_env, _headless_dir) = isolate_managed_headless_state();
     let _global_env = EnvVarRestore::capture("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE");
     let _alias_env = EnvVarRestore::capture("CHUANG_REAL_LIVE_RECEIPT_FILE");
     std::env::remove_var("CHUANG_REAL_LIVE_RECEIPT_FILE");
@@ -1144,7 +1162,7 @@ fn kernel_status_blocks_global_ready_when_receipt_evidence_is_not_canonical() {
 #[test]
 fn kernel_status_marks_knowledge_read_preflight_ready_when_env_and_endpoints_are_set() {
     let _guard = cdp_env_guard();
-    std::env::remove_var("CHUANG_CDP_PORT");
+    let (_cdp_env, _headless_env, _headless_dir) = isolate_managed_headless_state();
     std::env::set_var("CHUANG_TEST_WIKI_TOKEN", "wiki-token");
 
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
@@ -1225,6 +1243,7 @@ fn spawn_cdp_status_server() -> (SocketAddr, JoinHandle<()>) {
 #[test]
 fn kernel_status_surfaces_live_ready_browser_read_adapter_when_cdp_port_is_reachable() {
     let _guard = cdp_env_guard();
+    let (_cdp_env, _headless_env, _headless_dir) = isolate_managed_headless_state();
     let (address, server) = spawn_cdp_status_server();
     std::env::set_var("CHUANG_CDP_PORT", address.port().to_string());
 

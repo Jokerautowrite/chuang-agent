@@ -1327,6 +1327,8 @@ fn human_tool_activity_title(call: &ToolCall) -> &'static str {
         ToolCall::ShellExec { command, .. } => human_shell_activity_title(command),
         ToolCall::MemoryRecall { .. } => "检索记忆",
         ToolCall::SpawnSubagent { .. } => "派生子代理",
+        ToolCall::BrowserRead { .. } => "读取网页",
+        ToolCall::BrowserNavigate { .. } => "打开网页",
     }
 }
 
@@ -1350,6 +1352,10 @@ fn human_tool_activity_detail(call: &ToolCall) -> Option<String> {
         ToolCall::ShellExec { command, .. } => Some(human_shell_activity_detail(command)),
         ToolCall::MemoryRecall { .. } => Some("检索相关记忆和历史线索".to_string()),
         ToolCall::SpawnSubagent { .. } => Some("把子任务派给独立子代理执行".to_string()),
+        ToolCall::BrowserRead { .. } => Some("通过无头浏览器读取当前页 URL/标题/正文".to_string()),
+        ToolCall::BrowserNavigate { url } => {
+            Some(format!("打开网页并读取内容：{}", url.trim()))
+        }
     }
 }
 
@@ -3400,6 +3406,8 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
         ToolCall::SpawnSubagent { .. } => "spawn_subagent",
+        ToolCall::BrowserRead { .. } => "browser_read",
+        ToolCall::BrowserNavigate { .. } => "browser_navigate",
     }
 }
 

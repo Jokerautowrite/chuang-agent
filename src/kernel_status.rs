@@ -2068,16 +2068,13 @@ fn live_readiness_term(
 }
 
 fn build_browser_readiness(atomic_tools: &AtomicToolSurfaceStatus) -> BrowserReadinessStatus {
-    let browser_read = cdp_port_from_env()
-        .map(|port| CdpBrowserReadAdapter::new(port).status())
-        .unwrap_or_else(|| unavailable_browser_read_status("real_adapter_missing"));
+    // Prefer CHUANG_CDP_PORT; else managed headless state file from chuang-headless-chrome.sh.
+    let browser_read = if let Some(port) = crate::browser_read::resolve_cdp_port() {
+        CdpBrowserReadAdapter::new(port).status()
+    } else {
+        unavailable_browser_read_status("real_adapter_missing")
+    };
     browser_readiness_from_status(&browser_read, atomic_tools)
-}
-
-fn cdp_port_from_env() -> Option<u16> {
-    std::env::var("CHUANG_CDP_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
 }
 
 fn build_knowledge_readiness(config: &KnowledgeReadConfig) -> KnowledgeReadinessStatus {

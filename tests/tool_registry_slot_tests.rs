@@ -19,6 +19,8 @@ const REQUIRED_TOOL_NAMES: &[&str] = &[
     "human_suspend",
     "memory_recall",
     "spawn_subagent",
+    "browser_read",
+    "browser_navigate",
 ];
 
 #[test]
@@ -115,6 +117,7 @@ fn mutating_descriptors_are_local_non_destructive_operations() {
         "mouse",
         "keyboard",
         "spawn_subagent",
+        "browser_navigate",
     ] {
         let descriptor = descriptor_for_tool(tool_name).expect("mutating tool should resolve");
 
@@ -158,6 +161,8 @@ fn descriptor_namespaces_and_schema_fields_match_the_tool_surface() {
         "subagent",
         &["task", "agent_name", "policy", "token_budget", "timeout_ms"],
     );
+    assert_descriptor_shape("browser_read", "browser", &[]);
+    assert_descriptor_shape("browser_navigate", "browser", &["url"]);
 }
 
 #[test]
@@ -168,7 +173,7 @@ fn registry_slot_is_a_serializable_description_only_surface() {
 
     let json = serde_json::to_value(slot).expect("slot should serialize");
     assert!(json.get("descriptors").is_some());
-    assert_eq!(json["descriptors"].as_array().expect("array").len(), 13);
+    assert_eq!(json["descriptors"].as_array().expect("array").len(), 15);
 
     let keyboard = json["descriptors"]
         .as_array()

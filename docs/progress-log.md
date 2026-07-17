@@ -1,3 +1,10 @@
+# 2026-07-18 托管无头浏览器 + browser 工具接完
+- 补齐 `CdpBrowserReadAdapter`：`navigate_and_read`（Chrome 新版 `/json/new` 用 PUT）、通用 `ws_cdp_method`、DOM 截断、`resolve_cdp_browser_read_adapter`。
+- 新增 `scripts/chuang-headless-chrome.sh`（start/stop/restart/status/env），默认 CDP 9222。
+- 模型工具 `browser_read` / `browser_navigate` 进入 schema、descriptor、治理（Observe / LocalDesktopInteraction）、指令块与活动流人话。
+- status：显式 `CHUANG_CDP_PORT` 或本机 9222 可达时 `browser_readiness` 可 live。
+- 与桌面 `screenshot/locate` 边界保持分离：网页 DOM 走 CDP，屏幕像素走 actuator。
+
 # 2026-07-18 run 子命令默认人话输出
 - `chuang run` 默认不再打 model_name/body/trace/context 字段墙：先 `小创 + 模型`，再正文，再一行 `模型 · provider · 引擎 · 召回`；`*_json` 大块默认隐藏，短 operational meta 仍保留。
 - `run --verbose` 与 REPL `/verbose` 仍输出完整字段墙，兼容脚本与排障。

@@ -78,6 +78,7 @@ fn write_knowledge_preflight_status_config(root: &std::path::Path, token_env: &s
 fn cli_status_prints_mvp_health_summary() {
     let root = temp_identity_root("status-text");
     let config_path = write_fake_status_config(&root);
+    let headless_empty = temp_identity_root("status-text-no-headless");
     let output = Command::new("cargo")
         .args([
             "run",
@@ -87,6 +88,8 @@ fn cli_status_prints_mvp_health_summary() {
             "--config",
             config_path.to_str().expect("config path should be utf8"),
         ])
+        .env_remove("CHUANG_CDP_PORT")
+        .env("CHUANG_HEADLESS_STATE_DIR", &headless_empty)
         .output()
         .expect("cargo run should execute");
 
@@ -148,7 +151,7 @@ fn cli_status_prints_mvp_health_summary() {
         "policy_tool_status: active_profile=full_local_workspace normal_local_action_default=file_write/code_execute/open_app/click/input=allow_with_audit"
     ));
     assert!(stdout.contains("high_risk_boundary=external_send=require_approval"));
-    assert!(stdout.contains("ga_tool_descriptors=9/13 missing=0"));
+    assert!(stdout.contains("ga_tool_descriptors=9/15 missing=0"));
     assert!(stdout.contains("runtime_report_surface: ok=true artifacts=11 observability_fields=26"));
     assert!(stdout.contains("runtime_meta.tool_protocol_errors_json"));
     assert!(stdout.contains("tool_protocol_error_count"));
@@ -314,6 +317,7 @@ fn cli_status_prints_mvp_health_summary() {
 fn cli_status_can_render_json_without_secret_leak() {
     let config_root = temp_identity_root("status-provider-json");
     let config_path = write_fake_status_config(&config_root);
+    let headless_empty = temp_identity_root("status-provider-json-no-headless");
     let output = Command::new("cargo")
         .args([
             "run",
@@ -332,6 +336,8 @@ fn cli_status_can_render_json_without_secret_leak() {
             "--provider-id",
             "custom-openai",
         ])
+        .env_remove("CHUANG_CDP_PORT")
+        .env("CHUANG_HEADLESS_STATE_DIR", &headless_empty)
         .output()
         .expect("cargo run should execute");
 

@@ -121,18 +121,83 @@ fn browser_read_capabilities() -> Vec<String> {
 
 // -- CDP adapter --
 
+const DOM_TEXT_CHAR_LIMIT: usize = 12_000;
+
 #[derive(Debug, Deserialize)]
 struct CdpTabJson {
+    #[serde(rename = "type")]
+    target_type: Option<String>,
     url: Option<String>,
     title: Option<String>,
     #[serde(rename = "webSocketDebuggerUrl")]
     web_socket_debugger_url: Option<String>,
 }
 
+/// Resolve the live CDP adapter.
+///
+/// Order:
+/// 1. `CHUANG_CDP_PORT` if set and parseable
+/// 2. managed headless port file from `scripts/chuang-headless-chrome.sh`
+/// 3. structured unavailable error otherwise
+pub fn resolve_cdp_browser_read_adapter() -> Result<CdpBrowserReadAdapter, BrowserReadError> {
+    if let Some(port) = resolve_cdp_port() {
+        return Ok(CdpBrowserReadAdapter::new(port));
+    }
+    Err(BrowserReadError {
+        code: "browser_read_unavailable".to_string(),
+        message: "no headless browser CDP endpoint; start with `scripts/chuang-headless-chrome.sh start` or set CHUANG_CDP_PORT".to_string(),
+        adapter_kind: "unavailable".to_string(),
+        retryable: true,
+    })
+}
+
+pub fn cdp_port_from_env() -> Option<u16> {
+    std::env::var("CHUANG_CDP_PORT")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u16>().ok())
+        .filter(|port| *port > 0)
+}
+
+/// Explicit env port, or managed headless chrome state file port.
+pub fn resolve_cdp_port() -> Option<u16> {
+    if let Some(port) = cdp_port_from_env() {
+        return Some(port);
+    }
+    managed_headless_cdp_port()
+}
+
+fn managed_headless_cdp_port() -> Option<u16> {
+    let state_dir = std::env::var("CHUANG_HEADLESS_STATE_DIR")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let base = std::env::var("XDG_STATE_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| {
+                    std::env::var("HOME")
+                        .map(|home| std::path::PathBuf::from(home).join(".local/state"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+                });
+            base.join("chuang-agent/headless-chrome")
+        });
+    let port_path = state_dir.join("cdp.port");
+    let raw = std::fs::read_to_string(port_path).ok()?;
+    let port = raw.trim().parse::<u16>().ok().filter(|p| *p > 0)?;
+    // Only accept if the port is actually open.
+    let adapter = CdpBrowserReadAdapter::new(port);
+    if adapter.is_port_open() {
+        Some(port)
+    } else {
+        None
+    }
+}
+
 /// Live browser-read adapter that reads URL, title, and DOM text from a Chrome/Chromium
 /// instance running with `--remote-debugging-port=<port>`.
 ///
-/// Enable by setting `CHUANG_CDP_PORT=9222` (or another port).
+/// Enable by:
+/// - `scripts/chuang-headless-chrome.sh start` (default port 9222), or
+/// - setting `CHUANG_CDP_PORT=9222` against any Chrome with remote debugging.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CdpBrowserReadAdapter {
     port: u16,
@@ -141,6 +206,10 @@ pub struct CdpBrowserReadAdapter {
 impl CdpBrowserReadAdapter {
     pub fn new(port: u16) -> Self {
         Self { port }
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     fn cdp_error(code: &str, message: String) -> BrowserReadError {
@@ -160,8 +229,9 @@ impl CdpBrowserReadAdapter {
         .is_ok()
     }
 
-    /// Send a plain HTTP/1.0 GET over a fresh TCP connection and return the body.
-    fn http_get_body(&self, path: &str) -> Result<String, BrowserReadError> {
+    /// Send a plain HTTP/1.1 request over a fresh TCP connection and return the body.
+    /// Modern Chrome remote-debugging rejects empty/silent HTTP/1.0 replies.
+    fn http_request_body(&self, method: &str, path: &str) -> Result<String, BrowserReadError> {
         let addr = format!("127.0.0.1:{}", self.port);
         let mut stream = TcpStream::connect(&addr).map_err(|e| {
             Self::cdp_error(
@@ -173,17 +243,67 @@ impl CdpBrowserReadAdapter {
         stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
         let request = format!(
-            "GET {} HTTP/1.0\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
-            path, self.port
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            self.port
         );
         stream
             .write_all(request.as_bytes())
             .map_err(|e| Self::cdp_error("cdp_write_failed", format!("{}", e)))?;
 
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .map_err(|e| Self::cdp_error("cdp_read_failed", format!("{}", e)))?;
+        let mut raw = Vec::with_capacity(4096);
+        let mut buf = [0u8; 2048];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => raw.extend_from_slice(&buf[..n]),
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    // Content-Length may already be complete; stop if we have a full header/body.
+                    if raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                    return Err(Self::cdp_error(
+                        "cdp_read_timeout",
+                        format!("timed out reading CDP HTTP response for {method} {path}"),
+                    ));
+                }
+                Err(e) => {
+                    return Err(Self::cdp_error("cdp_read_failed", format!("{}", e)));
+                }
+            }
+            // Early exit when Content-Length body is fully buffered.
+            if let Some(header_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                let header = String::from_utf8_lossy(&raw[..header_end]);
+                if let Some(cl) = header
+                    .lines()
+                    .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string()))
+                {
+                    if let Ok(len) = cl.parse::<usize>() {
+                        let body_start = header_end + 4;
+                        if raw.len() >= body_start + len {
+                            break;
+                        }
+                    }
+                }
+            }
+            if raw.len() > 8 * 1024 * 1024 {
+                return Err(Self::cdp_error(
+                    "cdp_response_too_large",
+                    "CDP HTTP response exceeded 8MiB".to_string(),
+                ));
+            }
+        }
+
+        let response = String::from_utf8_lossy(&raw);
+        let status_line = response.lines().next().unwrap_or("");
+        if status_line.contains(" 4") || status_line.contains(" 5") {
+            return Err(Self::cdp_error(
+                "cdp_http_error",
+                format!("CDP HTTP error for {method} {path}: {status_line}"),
+            ));
+        }
 
         let body = response
             .splitn(2, "\r\n\r\n")
@@ -195,11 +315,193 @@ impl CdpBrowserReadAdapter {
         Ok(body)
     }
 
+    fn http_get_body(&self, path: &str) -> Result<String, BrowserReadError> {
+        self.http_request_body("GET", path)
+    }
+
+    fn http_put_body(&self, path: &str) -> Result<String, BrowserReadError> {
+        self.http_request_body("PUT", path)
+    }
+
+    fn list_tabs(&self) -> Result<Vec<CdpTabJson>, BrowserReadError> {
+        let body = self.http_get_body("/json/list")?;
+        serde_json::from_str(&body).map_err(|e| {
+            Self::cdp_error("cdp_json_parse", format!("cannot parse /json/list: {}", e))
+        })
+    }
+
+    fn pick_any_page_tab(tabs: Vec<CdpTabJson>) -> Result<CdpTabJson, BrowserReadError> {
+        let ranked = |prefer_content: bool| {
+            tabs.iter().find(|t| {
+                let is_page = t
+                    .target_type
+                    .as_deref()
+                    .map(|ty| ty == "page")
+                    .unwrap_or(true);
+                let has_ws = t
+                    .web_socket_debugger_url
+                    .as_deref()
+                    .map(|u| !u.is_empty())
+                    .unwrap_or(false);
+                if !is_page || !has_ws {
+                    return false;
+                }
+                if !prefer_content {
+                    return true;
+                }
+                t.url
+                    .as_deref()
+                    .map(|u| {
+                        !u.starts_with("chrome-extension://")
+                            && !u.starts_with("devtools://")
+                            && u != "about:blank"
+                    })
+                    .unwrap_or(false)
+            })
+        };
+        ranked(true)
+            .or_else(|| ranked(false))
+            .map(|tab| CdpTabJson {
+                target_type: tab.target_type.clone(),
+                url: tab.url.clone(),
+                title: tab.title.clone(),
+                web_socket_debugger_url: tab.web_socket_debugger_url.clone(),
+            })
+            .ok_or_else(|| {
+                Self::cdp_error(
+                    "cdp_no_target_tab",
+                    "no page target with websocket in /json/list".to_string(),
+                )
+            })
+    }
+
+    /// Navigate the managed browser to `url`, wait briefly for load, then read page state.
+    pub fn navigate_and_read(&self, url: &str) -> Result<BrowserPageRead, BrowserReadError> {
+        let url = url.trim();
+        if url.is_empty() {
+            return Err(Self::cdp_error(
+                "cdp_navigate_empty_url",
+                "browser_navigate requires a non-empty url".to_string(),
+            ));
+        }
+        if !(url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("file://")
+            || url.starts_with("about:"))
+        {
+            return Err(Self::cdp_error(
+                "cdp_navigate_unsupported_scheme",
+                format!("unsupported url scheme for browser_navigate: {url}"),
+            ));
+        }
+
+        // Prefer HTTP PUT /json/new?url=… (Chrome ≥ modern headless returns 405 for GET).
+        let encoded = url
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('#', "%23");
+        let new_path = format!("/json/new?{encoded}");
+        let new_body = self
+            .http_put_body(&new_path)
+            .or_else(|_| self.http_get_body(&new_path));
+        let ws_url = match new_body {
+            Ok(body) => {
+                if let Ok(tab) = serde_json::from_str::<CdpTabJson>(&body) {
+                    tab.web_socket_debugger_url
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        };
+
+        let ws_url = match ws_url {
+            Some(ws) if !ws.is_empty() => ws,
+            _ => {
+                // Fallback: navigate existing page tab via CDP Page.navigate.
+                let tab = Self::pick_any_page_tab(self.list_tabs()?)?;
+                let ws = tab.web_socket_debugger_url.ok_or_else(|| {
+                    Self::cdp_error(
+                        "cdp_no_ws",
+                        "selected tab has no webSocketDebuggerUrl".to_string(),
+                    )
+                })?;
+                let params = serde_json::json!({ "url": url });
+                self.ws_cdp_method(&ws, "Page.navigate", params)?;
+                ws
+            }
+        };
+
+        // Give the page a short chance to settle, then poll readyState.
+        std::thread::sleep(Duration::from_millis(400));
+        for _ in 0..20 {
+            let state = self
+                .ws_eval(&ws_url, "document.readyState")
+                .unwrap_or_default();
+            if state == "complete" || state == "interactive" {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+
+        self.read_page_via_ws(&ws_url)
+    }
+
+    fn read_page_via_ws(&self, ws_url: &str) -> Result<BrowserPageRead, BrowserReadError> {
+        let url = self
+            .ws_eval(ws_url, "location.href")
+            .unwrap_or_default();
+        let title = self.ws_eval(ws_url, "document.title").unwrap_or_default();
+        let mut dom_text = self
+            .ws_eval(
+                ws_url,
+                "document.body ? (document.body.innerText || '') : ''",
+            )
+            .unwrap_or_default();
+        if dom_text.chars().count() > DOM_TEXT_CHAR_LIMIT {
+            dom_text = dom_text
+                .chars()
+                .take(DOM_TEXT_CHAR_LIMIT)
+                .collect::<String>()
+                + "…";
+        }
+        Ok(BrowserPageRead {
+            url,
+            title,
+            dom_text,
+            source: format!("cdp_localhost_{}", self.port),
+            read_at: Utc::now().to_rfc3339(),
+        })
+    }
+
     /// Execute a JS expression via CDP WebSocket and return the string result.
-    /// Uses a minimal hand-rolled WebSocket client (no extra crate).
     fn ws_eval(&self, ws_url: &str, js_expr: &str) -> Result<String, BrowserReadError> {
+        let params = serde_json::json!({
+            "expression": js_expr,
+            "returnByValue": true,
+        });
+        let json = self.ws_cdp_method(ws_url, "Runtime.evaluate", params)?;
+        if let Some(val) = json.pointer("/result/result/value") {
+            return Ok(match val {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            });
+        }
+        Ok(String::new())
+    }
+
+    /// Send a CDP method over WebSocket and return the response JSON for id=1.
+    fn ws_cdp_method(
+        &self,
+        ws_url: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, BrowserReadError> {
         // Parse ws://host:port/path
-        let without_scheme = ws_url.trim_start_matches("ws://");
+        let without_scheme = ws_url
+            .trim_start_matches("ws://")
+            .trim_start_matches("wss://");
         let slash_pos = without_scheme.find('/').unwrap_or(without_scheme.len());
         let host_port = &without_scheme[..slash_pos];
         let path = if slash_pos < without_scheme.len() {
@@ -210,10 +512,9 @@ impl CdpBrowserReadAdapter {
 
         let mut stream = TcpStream::connect(host_port)
             .map_err(|e| Self::cdp_error("cdp_ws_connect_failed", format!("{}", e)))?;
-        stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
         stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
-        // WebSocket HTTP upgrade
         let handshake = format!(
             "GET {} HTTP/1.1\r\nHost: {}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
              Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
@@ -223,7 +524,6 @@ impl CdpBrowserReadAdapter {
             .write_all(handshake.as_bytes())
             .map_err(|e| Self::cdp_error("cdp_ws_upgrade_write", format!("{}", e)))?;
 
-        // Read until \r\n\r\n
         let mut hdr = Vec::with_capacity(256);
         let mut byte = [0u8; 1];
         loop {
@@ -252,17 +552,15 @@ impl CdpBrowserReadAdapter {
             ));
         }
 
-        // Build Runtime.evaluate command JSON
-        let cmd = format!(
-            "{{\"id\":1,\"method\":\"Runtime.evaluate\",\
-             \"params\":{{\"expression\":{},\"returnByValue\":true}}}}",
-            serde_json::to_string(js_expr)
-                .map_err(|e| Self::cdp_error("cdp_json_encode", format!("{}", e)))?
-        );
-        let payload = cmd.as_bytes();
+        let cmd = serde_json::json!({
+            "id": 1,
+            "method": method,
+            "params": params,
+        });
+        let payload = serde_json::to_vec(&cmd)
+            .map_err(|e| Self::cdp_error("cdp_json_encode", format!("{}", e)))?;
         let mask: [u8; 4] = [0x37, 0xfa, 0x21, 0x3d];
 
-        // Encode WebSocket frame (client must mask)
         let mut frame: Vec<u8> = Vec::new();
         frame.push(0x81); // FIN=1, opcode=1 (text)
         let plen = payload.len();
@@ -286,7 +584,6 @@ impl CdpBrowserReadAdapter {
             .write_all(&frame)
             .map_err(|e| Self::cdp_error("cdp_ws_send", format!("{}", e)))?;
 
-        // Read frames until we find id=1
         loop {
             let mut h2 = [0u8; 2];
             stream
@@ -332,21 +629,23 @@ impl CdpBrowserReadAdapter {
                     ))
                 }
                 0x9 => {
-                    // Ping — send pong
                     stream.write_all(&[0x8a, 0x00]).ok();
                     continue;
                 }
-                0x1 | 0x0 => {} // text / continuation
+                0x1 | 0x0 => {}
                 _ => continue,
             }
 
             let text = String::from_utf8_lossy(&data);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                 if json["id"].as_u64() == Some(1) {
-                    if let Some(val) = json.pointer("/result/result/value") {
-                        return Ok(val.as_str().unwrap_or("").to_string());
+                    if json.get("error").is_some() {
+                        return Err(Self::cdp_error(
+                            "cdp_method_error",
+                            format!("CDP {method} failed: {}", json["error"]),
+                        ));
                     }
-                    return Ok(String::new());
+                    return Ok(json);
                 }
             }
         }
@@ -392,45 +691,19 @@ impl BrowserReadAdapter for CdpBrowserReadAdapter {
     }
 
     fn read_current_page(&self) -> Result<BrowserPageRead, BrowserReadError> {
-        let body = self.http_get_body("/json/list")?;
-        let tabs: Vec<CdpTabJson> = serde_json::from_str(&body).map_err(|e| {
-            Self::cdp_error("cdp_json_parse", format!("cannot parse /json/list: {}", e))
-        })?;
-
-        // Pick first non-extension, non-blank tab
-        let tab = tabs
-            .into_iter()
-            .find(|t| {
-                t.url
-                    .as_deref()
-                    .map(|u| !u.starts_with("chrome-extension://") && u != "about:blank")
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| {
-                Self::cdp_error(
-                    "cdp_no_target_tab",
-                    "no suitable tab found in /json/list".to_string(),
-                )
-            })?;
-
-        let url = tab.url.unwrap_or_default();
-        let title = tab.title.unwrap_or_default();
-        let dom_text = tab
-            .web_socket_debugger_url
-            .as_deref()
-            .and_then(|ws| {
-                self.ws_eval(ws, "document.body ? document.body.innerText : ''")
-                    .ok()
-            })
-            .unwrap_or_default();
-
-        let now = Utc::now().to_rfc3339();
+        let tab = Self::pick_any_page_tab(self.list_tabs()?)?;
+        if let Some(ws) = tab.web_socket_debugger_url.as_deref() {
+            if let Ok(page) = self.read_page_via_ws(ws) {
+                return Ok(page);
+            }
+        }
+        // Fallback to HTTP metadata only when websocket evaluate fails.
         Ok(BrowserPageRead {
-            url,
-            title,
-            dom_text,
+            url: tab.url.unwrap_or_default(),
+            title: tab.title.unwrap_or_default(),
+            dom_text: String::new(),
             source: format!("cdp_localhost_{}", self.port),
-            read_at: now,
+            read_at: Utc::now().to_rfc3339(),
         })
     }
 }

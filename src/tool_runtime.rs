@@ -12,6 +12,9 @@ use crate::actuator::{
     OpenAppRequest, ScreenshotTarget, SecretOrPlainText,
 };
 use crate::atomic_tool::AtomicToolRegistry;
+use crate::browser_read::{
+    resolve_cdp_browser_read_adapter, BrowserReadAdapter, BrowserReadError,
+};
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
     risk_decision_label, risk_decision_reason, ActionKind, Governance, OperatorApprovalEvidence,
@@ -98,6 +101,12 @@ pub enum ToolCall {
         token_budget: Option<u16>,
         #[serde(default)]
         timeout_ms: Option<u64>,
+    },
+    /// Read current page URL/title/DOM via managed headless Chrome CDP.
+    BrowserRead {},
+    /// Navigate managed headless Chrome to a URL, then return page state.
+    BrowserNavigate {
+        url: String,
     },
 }
 
@@ -649,6 +658,8 @@ impl ToolSurfaceStatus {
         callable_tools.push("apply_patch".to_string());
         callable_tools.push("memory_recall".to_string());
         callable_tools.push("spawn_subagent".to_string());
+        callable_tools.push("browser_read".to_string());
+        callable_tools.push("browser_navigate".to_string());
 
         Self {
             available: true,
@@ -921,6 +932,8 @@ fn execute_tool_call_with_registry_and_config(
             *timeout_ms,
             &config.subagent,
         ),
+        ToolCall::BrowserRead {} => execute_browser_read(registry, call),
+        ToolCall::BrowserNavigate { url } => execute_browser_navigate(registry, call, url),
     };
     record.duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     record.retryable = record
@@ -1510,6 +1523,8 @@ fn tool_call_name(call: &ToolCall) -> &'static str {
         ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
         ToolCall::SpawnSubagent { .. } => "spawn_subagent",
+        ToolCall::BrowserRead { .. } => "browser_read",
+        ToolCall::BrowserNavigate { .. } => "browser_navigate",
     }
 }
 
@@ -1781,6 +1796,99 @@ fn execute_shell_exec(
         record.failure_class = Some("exit_nonzero".to_string());
     }
     record
+}
+
+fn execute_browser_read(registry: &AtomicToolRegistry, call: &ToolCall) -> ToolExecutionRecord {
+    match resolve_cdp_browser_read_adapter() {
+        Ok(adapter) => match adapter.read_current_page() {
+            Ok(page) => {
+                let output = format_browser_page_output(
+                    &page.url,
+                    &page.title,
+                    &page.dom_text,
+                    &page.source,
+                    &page.read_at,
+                );
+                success_record(
+                    registry,
+                    call,
+                    format!(
+                        "browser_read ok title={} url={}",
+                        compact_tool_preview(&page.title, 40),
+                        compact_tool_preview(&page.url, 80)
+                    ),
+                    Some(output),
+                    page.dom_text.chars().count() > 12_000,
+                )
+            }
+            Err(err) => browser_failed_record(registry, call, &err),
+        },
+        Err(err) => browser_failed_record(registry, call, &err),
+    }
+}
+
+fn execute_browser_navigate(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    url: &str,
+) -> ToolExecutionRecord {
+    match resolve_cdp_browser_read_adapter() {
+        Ok(adapter) => match adapter.navigate_and_read(url) {
+            Ok(page) => {
+                let output = format_browser_page_output(
+                    &page.url,
+                    &page.title,
+                    &page.dom_text,
+                    &page.source,
+                    &page.read_at,
+                );
+                success_record(
+                    registry,
+                    call,
+                    format!(
+                        "browser_navigate ok title={} url={}",
+                        compact_tool_preview(&page.title, 40),
+                        compact_tool_preview(&page.url, 80)
+                    ),
+                    Some(output),
+                    page.dom_text.chars().count() > 12_000,
+                )
+            }
+            Err(err) => browser_failed_record(registry, call, &err),
+        },
+        Err(err) => browser_failed_record(registry, call, &err),
+    }
+}
+
+fn format_browser_page_output(
+    url: &str,
+    title: &str,
+    dom_text: &str,
+    source: &str,
+    read_at: &str,
+) -> String {
+    format!("url: {url}\ntitle: {title}\nsource: {source}\nread_at: {read_at}\n\n{dom_text}")
+}
+
+fn browser_failed_record(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    err: &BrowserReadError,
+) -> ToolExecutionRecord {
+    let mut record = failed_record(registry, call, format!("{}: {}", err.code, err.message));
+    record.failure_class = Some(err.code.clone());
+    record.retryable = err.retryable;
+    record
+}
+
+fn compact_tool_preview(input: &str, max_chars: usize) -> String {
+    let trimmed = input.trim().replace('\n', " ");
+    if trimmed.chars().count() <= max_chars {
+        return trimmed;
+    }
+    let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn execute_memory_recall(
@@ -2539,13 +2647,16 @@ fn is_retryable_failure(failure_class: &str) -> bool {
 
 fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> ActionKind {
     match call {
-        ToolCall::ListDir { .. } | ToolCall::MemoryRecall { .. } => ActionKind::Observe,
+        ToolCall::ListDir { .. }
+        | ToolCall::MemoryRecall { .. }
+        | ToolCall::BrowserRead { .. } => ActionKind::Observe,
         ToolCall::ReadFile { path } if is_secret_material_path(path) => ActionKind::SecretAccess,
         ToolCall::ReadFile { .. } => ActionKind::Observe,
         ToolCall::Keyboard { secret: true, .. } => ActionKind::SecretAccess,
         ToolCall::Mouse { .. }
         | ToolCall::Keyboard { secret: false, .. }
-        | ToolCall::OpenApp { .. } => ActionKind::LocalDesktopInteraction,
+        | ToolCall::OpenApp { .. }
+        | ToolCall::BrowserNavigate { .. } => ActionKind::LocalDesktopInteraction,
         ToolCall::Screenshot { .. }
         | ToolCall::Locate { .. }
         | ToolCall::Wait { .. }
@@ -2756,6 +2867,8 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
             policy.as_deref().unwrap_or("analyze"),
             redact_sensitive_text("subagent_task", task).text.trim()
         ),
+        ToolCall::BrowserRead {} => "browser::read_current_page".to_string(),
+        ToolCall::BrowserNavigate { url } => format!("browser::navigate url={}", url.trim()),
     }
 }
 
@@ -2817,6 +2930,8 @@ fn tool_summary(call: &ToolCall) -> String {
                 .unwrap_or_else(|| "300000".to_string()),
             redact_sensitive_text("subagent_task", task).text.trim()
         ),
+        ToolCall::BrowserRead {} => "browser_read".to_string(),
+        ToolCall::BrowserNavigate { url } => format!("browser_navigate url={}", url.trim()),
     }
 }
 
@@ -2835,7 +2950,9 @@ fn target_path_from_call(call: &ToolCall) -> Option<String> {
         | ToolCall::ApplyPatch { .. }
         | ToolCall::ShellExec { .. }
         | ToolCall::MemoryRecall { .. }
-        | ToolCall::SpawnSubagent { .. } => None,
+        | ToolCall::SpawnSubagent { .. }
+        | ToolCall::BrowserRead { .. }
+        | ToolCall::BrowserNavigate { .. } => None,
     }
 }
 

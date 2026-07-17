@@ -72,6 +72,8 @@ const HUMAN_SUSPEND_SCHEMA_FIELDS: &[&str] = &["reason", "prompt"];
 const MEMORY_RECALL_SCHEMA_FIELDS: &[&str] = &["query", "session_id", "limit"];
 const SPAWN_SUBAGENT_SCHEMA_FIELDS: &[&str] =
     &["task", "agent_name", "policy", "token_budget", "timeout_ms"];
+const BROWSER_READ_SCHEMA_FIELDS: &[&str] = &[];
+const BROWSER_NAVIGATE_SCHEMA_FIELDS: &[&str] = &["url"];
 
 const READ_ONLY_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "read_only"];
 const WRITE_WORKSPACE_RISK_TAGS: &[&str] = &["workspace", "filesystem", "write", "audit"];
@@ -84,8 +86,10 @@ const RUNTIME_WAIT_RISK_TAGS: &[&str] = &["runtime", "delay", "read_only"];
 const HUMAN_SUSPEND_RISK_TAGS: &[&str] = &["runtime", "human_in_loop", "read_only"];
 const MEMORY_RECALL_RISK_TAGS: &[&str] = &["memory", "recall", "read_only"];
 const SPAWN_SUBAGENT_RISK_TAGS: &[&str] = &["workspace", "subagent", "code_execution", "audit"];
+const BROWSER_READ_RISK_TAGS: &[&str] = &["browser", "cdp", "observation", "read_only"];
+const BROWSER_NAVIGATE_RISK_TAGS: &[&str] = &["browser", "cdp", "navigation", "audit"];
 
-const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 13] = [
+const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 15] = [
     ToolDescriptor {
         name: "file_read",
         namespace: "workspace",
@@ -254,6 +258,32 @@ const BUILTIN_TOOL_DESCRIPTORS: [ToolDescriptor; 13] = [
         concurrent_safe: false,
         requires_approval: false,
         risk_tags: SPAWN_SUBAGENT_RISK_TAGS,
+    },
+    ToolDescriptor {
+        name: "browser_read",
+        namespace: "browser",
+        title: "Read current page via headless Chrome CDP",
+        schema_fields: BROWSER_READ_SCHEMA_FIELDS,
+        read_only: true,
+        mutating: false,
+        destructive: false,
+        external_commit: false,
+        concurrent_safe: true,
+        requires_approval: false,
+        risk_tags: BROWSER_READ_RISK_TAGS,
+    },
+    ToolDescriptor {
+        name: "browser_navigate",
+        namespace: "browser",
+        title: "Navigate headless Chrome and read the page",
+        schema_fields: BROWSER_NAVIGATE_SCHEMA_FIELDS,
+        read_only: false,
+        mutating: true,
+        destructive: false,
+        external_commit: false,
+        concurrent_safe: false,
+        requires_approval: false,
+        risk_tags: BROWSER_NAVIGATE_RISK_TAGS,
     },
 ];
 

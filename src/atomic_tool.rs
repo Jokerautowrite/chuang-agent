@@ -93,6 +93,8 @@ pub enum ToolCallAtomicKind {
     AuxiliaryMemoryRecall,
     AuxiliaryOpenApp,
     AuxiliarySpawnSubagent,
+    AuxiliaryBrowserRead,
+    AuxiliaryBrowserNavigate,
 }
 
 pub fn ga_atomic_tool_manifests() -> Vec<AtomicToolManifest> {
@@ -235,6 +237,20 @@ impl AtomicToolRegistry {
                 audit_operation: "tool.spawn_subagent",
                 callable_now: true,
             },
+            ToolCallAtomicKind::AuxiliaryBrowserRead => AtomicToolCallMapping {
+                protocol_tool_name: "browser_read",
+                kind: ToolCallAtomicKind::AuxiliaryBrowserRead,
+                atomic_tool_name: None,
+                audit_operation: "tool.browser_read",
+                callable_now: true,
+            },
+            ToolCallAtomicKind::AuxiliaryBrowserNavigate => AtomicToolCallMapping {
+                protocol_tool_name: "browser_navigate",
+                kind: ToolCallAtomicKind::AuxiliaryBrowserNavigate,
+                atomic_tool_name: None,
+                audit_operation: "tool.browser_navigate",
+                callable_now: true,
+            },
         }
     }
 
@@ -272,12 +288,13 @@ impl AtomicToolRegistry {
         format!(
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
-辅助工具：list_dir, open_app, apply_patch, memory_recall, spawn_subagent。兼容旧名：read_file, write_file, shell_exec。\n\
+辅助工具：list_dir, open_app, apply_patch, memory_recall, spawn_subagent, browser_read, browser_navigate。兼容旧名：read_file, write_file, shell_exec。\n\
 spawn_subagent 会启动隔离的本地 Codex 子代理，适合并行分析或工作区内实现；普通读写、构建、测试自动执行，高危动作仍由治理边界限制。子代理完成后会把经过 admission 的摘要回传本轮。\n\
 code_execute 使用 Bash 登录 shell 执行命令；可以使用 pipefail、here-doc 和常见 Bash 语法。\n\
-桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面/浏览器只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面/浏览器动作按 adapter、gate、allowlist、治理和审计执行；普通打开应用、点击和输入默认直接执行，不要先要求人工审批，只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。\n\
-当用户要求查看当前屏幕、窗口标题、页面内容或界面状态时，优先调用 locate 或 screenshot 先取证，不要直接回复“无法读取”。\n\
-桌面/浏览器只读观察：screenshot, locate。locate / screenshot 是只读观察工具。交互操作：open_app, mouse, keyboard。\n\
+无头浏览器：browser_navigate 打开 URL，browser_read 读取当前页 URL/标题/DOM 文本；依赖本机托管 headless Chrome（scripts/chuang-headless-chrome.sh 或 CHUANG_CDP_PORT）。这与桌面 screenshot/locate 不同，能拿到真实 DOM 文本。\n\
+桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面动作按 adapter、gate、allowlist、治理和审计执行；普通打开应用、点击和输入默认直接执行，不要先要求人工审批，只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。\n\
+当用户要求查看网页内容、抓取页面正文时，优先 browser_navigate + browser_read；当用户要求查看当前屏幕/窗口时，用 locate 或 screenshot。不要直接回复“无法读取”。\n\
+桌面只读观察：screenshot, locate。无头浏览器：browser_read, browser_navigate。交互操作：open_app, mouse, keyboard。\n\
 受治理只读记忆工具 memory_recall 可查当前会话记忆；wiki/GBrain live 未接通时，说明本地 knowledge preview/source-contract 边界，不要泛称没有任何工具。\n\
 如果 packed-context 里出现 identity/tool/session 缺口，先从 workspace/memory 复原，再继续回答。\n\
 人工暂停工具 human_suspend 可用于停止自动推进并返回需要人工介入的结构化结果。\n\
@@ -302,7 +319,9 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memo
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"spawn_subagent\",\"task\":\"审计测试覆盖并给出结论\",\"agent_name\":\"reviewer\",\"policy\":\"analyze\",\"timeout_ms\":300000}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"open_app\",\"app_name\":\"Chrome\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"locate\",\"target\":\"screen\"}}}}\n\
-ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"screenshot\",\"target\":\"screen\"}}}}",
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"screenshot\",\"target\":\"screen\"}}}}\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"browser_navigate\",\"url\":\"https://example.com\"}}}}\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"browser_read\"}}}}",
             workspace_root.display()
         )
     }
@@ -352,6 +371,8 @@ pub fn tool_call_atomic_kind(call: &ToolCall) -> ToolCallAtomicKind {
         ToolCall::ShellExec { .. } => ToolCallAtomicKind::Atomic(AtomicToolKind::CodeExecute),
         ToolCall::MemoryRecall { .. } => ToolCallAtomicKind::AuxiliaryMemoryRecall,
         ToolCall::SpawnSubagent { .. } => ToolCallAtomicKind::AuxiliarySpawnSubagent,
+        ToolCall::BrowserRead { .. } => ToolCallAtomicKind::AuxiliaryBrowserRead,
+        ToolCall::BrowserNavigate { .. } => ToolCallAtomicKind::AuxiliaryBrowserNavigate,
     }
 }
 
@@ -371,6 +392,8 @@ fn tool_call_protocol_name(call: &ToolCall) -> &'static str {
         ToolCall::ShellExec { .. } => "code_execute",
         ToolCall::MemoryRecall { .. } => "memory_recall",
         ToolCall::SpawnSubagent { .. } => "spawn_subagent",
+        ToolCall::BrowserRead { .. } => "browser_read",
+        ToolCall::BrowserNavigate { .. } => "browser_navigate",
     }
 }
 

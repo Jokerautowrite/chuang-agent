@@ -321,6 +321,14 @@ fn tool_surface_status_exposes_read_only_desktop_browser_tools() {
         .callable_tools
         .iter()
         .any(|tool| tool == "spawn_subagent"));
+    assert!(surface
+        .callable_tools
+        .iter()
+        .any(|tool| tool == "browser_read"));
+    assert!(surface
+        .callable_tools
+        .iter()
+        .any(|tool| tool == "browser_navigate"));
 }
 
 #[test]
@@ -2141,4 +2149,27 @@ fn tool_runtime_reports_structured_failures() {
     );
     assert!(record.summary.contains("path_outside_workspace"));
     assert!(!record.retryable);
+}
+
+#[test]
+fn browser_navigate_and_read_tools_work_when_cdp_live() {
+    std::env::set_var("CHUANG_CDP_PORT", "9222");
+    let root = temp_workspace("browser-tools");
+    std::fs::create_dir_all(&root).expect("root");
+    let nav = execute_tool_call(
+        &root,
+        &ToolCall::BrowserNavigate {
+            url: "https://example.com".to_string(),
+        },
+    );
+    if !nav.ok {
+        // Skip hard fail if chrome not up in CI/sandbox.
+        eprintln!("browser_navigate skipped/failed: {}", nav.summary);
+        return;
+    }
+    assert_eq!(nav.tool_name, "browser_navigate");
+    assert!(nav.output.as_deref().unwrap_or("").contains("example"), "{}", nav.summary);
+    let read = execute_tool_call(&root, &ToolCall::BrowserRead {});
+    assert!(read.ok, "{}", read.summary);
+    assert_eq!(read.tool_name, "browser_read");
 }

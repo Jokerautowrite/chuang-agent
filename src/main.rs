@@ -2153,6 +2153,8 @@ fn approval_action_summary(call: &chuang_agent::tool_runtime::ToolCall) -> Strin
             agent_name.as_deref().unwrap_or("worker"),
             safe_preview(task)
         ),
+        ToolCall::BrowserRead { .. } => "读取无头浏览器当前页".to_string(),
+        ToolCall::BrowserNavigate { url } => format!("打开网页 {}", safe_preview(url)),
     }
 }
 
