@@ -22,8 +22,9 @@ input -> identity/memory -> context -> runtime -> governance -> report -> memory
 - `chuang mainchain-accept`：运行真实标准主链总验收，屏幕只显示阶段 OK/FAIL，详细日志写入 `/tmp/chuang-mainchain-acceptance-*`；会先跑 20 项矩阵和基础合同，再调用真实 provider 完成终端端到端验收和自然语言任务验收，成功时输出 `chuang_mainchain_acceptance_ok`。
 - `chuang natural-accept`：单独运行真实自然语言任务验收，会让 Chuang 自己看 git、读日志、修测试失败、生成报告，成功时输出 `chuang_real_natural_acceptance_ok`。
 - `chuang accept`：运行终端版完整验收，覆盖入口、真实 provider 工具循环、记忆、子任务和 goal 流，成功时输出 `chuang_terminal_acceptance_ok`。
-- `chuang field-accept`（别名 `chuang field`）：**本机 15 项快速验收**（terra/RTK/规范/goal 硬预算/浏览器自动拉起/doctor 可见性）。成功输出 `chuang_field_accept_10_ok`。可 `SKIP_LIVE=1` / `SKIP_BROWSER=1`。
+- `chuang field-accept`（别名 `chuang field`）：**本机快速验收**（terra/RTK/规范/goal 硬预算/浏览器自动拉起/doctor 可见性/config materialize）。成功输出 `chuang_field_accept_10_ok`。可 `SKIP_LIVE=1` / `SKIP_BROWSER=1`。
 - `chuang browser status|start|stop`：managed headless Chrome（CDP）。`browser_read`/`browser_navigate` 默认也会自动拉起（`CHUANG_HEADLESS_AUTOSTART=0` 关闭）。
+- `chuang ask` / 自然语言入口：以 **`config.toml` 为唯一真相**，经 `scripts/chuang-materialize-runtime-config.py` 绝对化路径后运行，任意 cwd 不丢 permission/rules/db；优先用已编译二进制（`CHUANG_FORCE_CARGO=1` 可强制 cargo）。入口源：`scripts/chuang`（安装到 `~/.local/bin/chuang`）。
 - `cargo run -- doctor`：安全健康检查，校验配置、身份记忆、slot 装配和隔离 runtime smoke；摘要含 `browser_cdp` / `tool_shell_rtk_rewrite` 与 `field_accept_next` 提示。
 - `cargo run -- status`：查看核心状态（含 `browser_cdp` 与 RTK 开关）。
 - `cargo run -- run --config config.toml --input TEXT`：按项目配置跑一轮本地 runtime。

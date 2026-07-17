@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# 创 · 本机首选终端入口（仓库内源；可安装到 ~/.local/bin/chuang）
+set -euo pipefail
+ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+CALLER_CWD="$(pwd)"
+cd "$ROOT"
+
+export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-1}"
+export CHUANG_REAL_CONTROL_ENABLE="${CHUANG_REAL_CONTROL_ENABLE:-1}"
+export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-1}"
+
+load_provider_env() {
+  set -a
+  [[ -f "$HOME/.config/chuang-agent/provider.env" ]] && . "$HOME/.config/chuang-agent/provider.env"
+  set +a
+}
+
+# Prefer built binary; rebuild when sources newer. CHUANG_FORCE_CARGO=1 forces cargo run.
+resolve_chuang_bin() {
+  if [[ -n "${CHUANG_BIN:-}" && -x "${CHUANG_BIN}" ]]; then
+    printf '%s\n' "$CHUANG_BIN"
+    return 0
+  fi
+  local bin="$ROOT/target/debug/chuang-agent"
+  if [[ "${CHUANG_FORCE_CARGO:-0}" == "1" ]]; then
+    return 1
+  fi
+  if [[ -x "$bin" ]]; then
+    if find "$ROOT/src" "$ROOT/Cargo.toml" "$ROOT/Cargo.lock" -newer "$bin" 2>/dev/null | head -1 | grep -q .; then
+      cargo build --quiet --manifest-path "$ROOT/Cargo.toml" || return 1
+    fi
+    printf '%s\n' "$bin"
+    return 0
+  fi
+  cargo build --quiet --manifest-path "$ROOT/Cargo.toml" || return 1
+  printf '%s\n' "$bin"
+  return 0
+}
+
+run_chuang() {
+  local bin
+  if bin="$(resolve_chuang_bin)"; then
+    exec "$bin" "$@"
+  fi
+  exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- "$@"
+}
+
+# config.toml is source of truth; materialize abs paths so ask works from any cwd.
+write_abs_runtime_config() {
+  python3 "$ROOT/scripts/chuang-materialize-runtime-config.py" \
+    --root "$ROOT" \
+    --src "${CHUANG_CONFIG:-$ROOT/config.toml}"
+}
+
+show_usage() {
+  cat <<'EOF'
+用法:
+  chuang                         启动本地交互 REPL
+  chuang ask "你的问题"           直接问一次，走真实本地 runtime
+  chuang status --config config.toml [--json]
+  chuang doctor --config config.toml
+  chuang browser status|start|stop   无头 Chrome（CDP）；工具也可自动拉起
+  chuang field-accept            本机 15 项快速验收（RTK/规范/goal/浏览器…）
+  chuang stub                    启动 stub REPL，只验证本地链路
+  chuang mainchain-accept        跑真实标准主链总验收
+  chuang natural-accept          跑真实自然语言任务验收
+  chuang accept                  跑终端完整验收
+  chuang <任意自然语言任务>       作为一次本地任务执行
+
+说明:
+  默认项目: /home/user/projects/chuang-agent
+  配置真相: config.toml（ask 路径会 materialize 绝对路径，避免 cwd 漂移）
+  provider env: ~/.config/chuang-agent/provider.env
+  真实 provider 变量: CHUANG_PROXY_API_KEY=<set>
+  可选: SKIP_LIVE=1 SKIP_BROWSER=1 chuang field-accept
+  浏览器自动拉起关: CHUANG_HEADLESS_AUTOSTART=0
+  RTK 关: tool_shell_rtk_rewrite=false 或 CHUANG_SHELL_RTK_REWRITE=0
+  强制 cargo: CHUANG_FORCE_CARGO=1
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    show_usage
+    ;;
+  "")
+    exec ./scripts/launch-chuang-agent-repl.sh
+    ;;
+  stub)
+    shift
+    exec env CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh "$@"
+    ;;
+  mainchain-accept|mainchain|accept-mainchain)
+    shift
+    exec ./scripts/chuang-mainchain-acceptance.sh "$@"
+    ;;
+  natural-accept|real-natural-accept|accept-natural)
+    shift
+    exec ./scripts/chuang-real-natural-acceptance.sh "$@"
+    ;;
+  accept|acceptance|test-terminal)
+    shift
+    exec ./scripts/chuang-terminal-acceptance.sh "$@"
+    ;;
+  repl)
+    shift
+    exec ./scripts/launch-chuang-agent-repl.sh "$@"
+    ;;
+  ask)
+    shift
+    if [[ $# -eq 0 ]]; then
+      printf '%s\n' '用法: chuang ask "你的问题"' >&2
+      exit 2
+    fi
+    load_provider_env
+    runtime_config="$(write_abs_runtime_config)"
+    cd "$CALLER_CWD"
+    if bin="$(resolve_chuang_bin)"; then
+      exec "$bin" run --config "$runtime_config" --input "$*"
+    fi
+    exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
+    ;;
+  browser)
+    shift
+    run_chuang browser "$@"
+    ;;
+  field-accept|field)
+    shift
+    load_provider_env
+    if bin="$(resolve_chuang_bin)"; then
+      export CHUANG_BIN="$bin"
+    else
+      export CHUANG_BIN="${CHUANG_BIN:-$ROOT/target/debug/chuang-agent}"
+    fi
+    export CHUANG_FIELD_CONFIG="${CHUANG_FIELD_CONFIG:-$ROOT/config.toml}"
+    exec bash "$ROOT/scripts/chuang-field-accept-10.sh" "$@"
+    ;;
+  status|doctor|config|channel|console|control|subagent|genesis|goal|memory|plugin|skill|experiment|external-ai|app-server|run)
+    load_provider_env
+    # status/doctor with no --config: materialize so foreign-cwd installs still work
+    if [[ "${1}" == "status" || "${1}" == "doctor" ]]; then
+      has_config=0
+      for a in "$@"; do
+        if [[ "$a" == "--config" ]]; then has_config=1; break; fi
+      done
+      if [[ "$has_config" -eq 0 ]]; then
+        cmd="$1"
+        shift
+        runtime_config="$(write_abs_runtime_config)"
+        run_chuang "$cmd" --config "$runtime_config" "$@"
+      fi
+    fi
+    run_chuang "$@"
+    ;;
+  *)
+    load_provider_env
+    runtime_config="$(write_abs_runtime_config)"
+    cd "$CALLER_CWD"
+    if bin="$(resolve_chuang_bin)"; then
+      exec "$bin" run --config "$runtime_config" --input "$*"
+    fi
+    exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
+    ;;
+esac

@@ -2721,3 +2721,9 @@
 - doctor：`shell_rtk` 检查 + CDP 不可用时 `browser_cdp_next` / RTK 缺失时 `shell_rtk_next` / 常驻 `field_accept_next`。
 - README / usage 补 field-accept、browser 状态面。
 - 验收：SKIP_LIVE=1 field-accept → PASS=15 SKIP=1；doctor 露出 shell_rtk + field_accept_next。
+
+# 2026-07-18 ask 配置真相源 + 入口 materialize（小k）
+- 问题：`chuang ask` 曾手写临时 toml，与 `config.toml` 双轨；相对路径在非项目 cwd 下挂。
+- `scripts/chuang-materialize-runtime-config.py`：从 config.toml 物化绝对路径；保留 `program=sh` 等裸命令；保留 permission_profile。
+- `scripts/chuang`：仓库内入口源；binary-first；ask/status/doctor 默认 materialize；已装 `~/.local/bin/chuang`。
+- field-accept 增项 17：materialize + /tmp cwd status。

@@ -241,6 +241,24 @@ else
   bad "16 doctor" "$(tail -c 160 "$TMPDIR_RUN/doctor.err" | tr '\n' ' ')"
 fi
 
+# 17 config.toml materialize: abs paths + foreign cwd + bare program=sh untouched
+if [[ -f "$ROOT/scripts/chuang-materialize-runtime-config.py" ]]; then
+  MAT="$TMPDIR_RUN/mat.toml"
+  if python3 "$ROOT/scripts/chuang-materialize-runtime-config.py" \
+      --root "$ROOT" --src "$CFG" --out "$MAT" >/dev/null 2>"$TMPDIR_RUN/mat.err" \
+    && grep -q 'permission_profile = "full_local_workspace"' "$MAT" \
+    && grep -q 'program = "sh"' "$MAT" \
+    && grep -q "$ROOT/rules/core.md" "$MAT" \
+    && (cd /tmp && timeout 30 "$BIN" status --config "$MAT" >"$TMPDIR_RUN/mat-status.out" 2>"$TMPDIR_RUN/mat-status.err") \
+    && grep -q 'provider: openai_compatible' "$TMPDIR_RUN/mat-status.out"; then
+    ok "17 config materialize（cwd 无关 + permission 不丢）"
+  else
+    bad "17 config materialize" "$(tail -c 180 "$TMPDIR_RUN/mat.err" "$TMPDIR_RUN/mat-status.err" 2>/dev/null | tr '\n' ' ')"
+  fi
+else
+  skip "17 config materialize" "无 materialize 脚本"
+fi
+
 echo
 echo "=== 汇总 PASS=$PASS FAIL=$FAIL SKIP=$SKIP ==="
 cat "$LOG"
