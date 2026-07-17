@@ -1,3 +1,9 @@
+# 2026-07-18 CC 五片纪律蒸馏进 norm（Explore/Plan/Worker/Safety/Compact）
+- 对照 Piebald `claude-code-system-prompts` 与 learn-claude-code 机制，**中文改写**进 `assets/norm/`（非原文粘贴）。
+- 新增/加厚 skill：explore、plan、surgical-diff、think-before-act、compact-handoff；加强 verify 与工人 brief（worker-fork 风）。
+- doctrine-card 并入 act-when-ready / research-before-ask / truthful reporting。
+- `docs/prompt-doctrine.md` 写明资料源与四类映射；`norm_layer` 意图触发 + 每轮最多 2 条按需 skill。
+
 # 2026-07-18 规范分层 + 并行 spawn_subagent（抄 Grok 装配，不抄 Codex 手感）
 - 新增 `docs/prompt-doctrine.md` 与 `assets/norm/`：常驻 doctrine-card / skill-index、按需 skills、仅派工 dispatch-worker-brief。
 - `norm_layer` 注入 context（优先级 253/252/200）；派工 task 自动 wrap 工人简报。

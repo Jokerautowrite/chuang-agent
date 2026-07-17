@@ -5,38 +5,73 @@
 ```text
 仓库里可以厚；上下文里必须薄。
 创是调度台：常驻卡片 + 按需技能 + 派工说明书 + 磁盘全文。
-不抄 Codex 编码体验；写代码默认派工人（快的并行子代理优先）。
+不抄 Codex 编码体验；写代码默认并行派工人。
+Claude Code：抄 harness 纪律与分片组装，不 1:1 粘贴其 system prompt 全文。
 ```
+
+## 资料来源（研究用，落地已改写）
+
+| 源 | 用途 |
+|----|------|
+| [Piebald-AI/claude-code-system-prompts](https://github.com/Piebald-AI/claude-code-system-prompts) | Explore / Plan / Worker / Safety / Compact 分片结构与意图 |
+| [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) | 运行时拼装、按需 skill、子代理干净上下文 |
+| 本机 `~/.claude/CLAUDE.md` | Karpathy 行为纪律（最小改动、可验证目标） |
+| 2026-03 npm sourcemap 泄露相关镜像 | 仅作架构背景；**不**把泄露原文当产品依赖 |
+
+条文均为 **创自己的中文重写**，非 Anthropic 原文拷贝。
+
+## 五片 → 创映射
+
+| CC 公开分片意图 | 创落点 |
+|-----------------|--------|
+| Explore（只读快搜） | B `explore.md` + 派工 analyze |
+| Plan（只读架构计划） | B `plan.md` |
+| Worker fork（单指令、简报回报） | C `dispatch-worker-brief.txt` |
+| Action safety + truthful reporting | A 常驻卡 + B `verify-before-claim` |
+| Conversation summarization / compact | B `compact-handoff.md`（模板，宜落盘） |
+| Act when ready / research before ask | A 常驻卡两句 |
 
 ## 四类清单
 
-| 类 | 何时进主模型上下文 | 放哪 | 示例 |
-|----|-------------------|------|------|
-| **A 常驻** | 每轮 | `assets/norm/doctrine-card.txt` + skill 索引 | 身份一句、调度台、红线、如何派活 |
-| **B 按需 skill** | 用户意图命中时 | `assets/norm/skills/*.md` | 验证再声称、只读排查… |
-| **C 仅派工** | 不进主会话；塞进子代理 task | `assets/norm/dispatch-worker-brief.txt` | 工人边界、交付格式 |
-| **D 仅磁盘** | 默认不进；用 file_read | `docs/*`、完整架构 | blueprint、progress-log |
+| 类 | 何时进主模型上下文 | 放哪 |
+|----|-------------------|------|
+| **A 常驻** | 每轮 | `doctrine-card.txt` + `skill-index.txt` |
+| **B 按需** | 意图命中，最多 2 条 | `assets/norm/skills/*.md` |
+| **C 仅派工** | 不进主会话 | `dispatch-worker-brief.txt` 包进 worker task |
+| **D 仅磁盘** | 默认不进 | `docs/*`、完整架构 |
+
+## 按需 skill 列表
+
+| id | 触发（摘要） |
+|----|----------------|
+| explore | 在哪、定位、搜索代码、谁引用 |
+| plan | 方案、怎么改、实施计划、架构 |
+| coding-dispatch | 写代码、修 bug、重构、cargo test |
+| surgical-diff | 最小改动、别重构无关 |
+| think-before-act | 大改前想清楚、有歧义 |
+| verify-before-claim | 验收、是否修好、完成了吗 |
+| compact-handoff | 交接、总结会话、上下文满了 |
+| readonly-triage | 排查、为什么挂、诊断 |
 
 ## 优先级（context_engine）
 
-| segment id | priority | 裁剪时 |
-|------------|----------|--------|
-| system-core | 255 | 最后砍 |
-| capability primer | 254 | 很晚砍 |
-| doctrine-card | 253 | 很晚砍 |
-| skill-index | 252 | 较晚砍 |
-| on-demand skill | 200 | 可先于用户任务外资料砍 |
-| working user input | 220 | 高 |
+| segment | priority |
+|---------|----------|
+| system-core | 255 |
+| capability primer | 254 |
+| doctrine-card | 253 |
+| skill-index | 252 |
+| working user input | 220 |
+| on-demand skill | 200 |
 
 ## 多子代理并行
 
-- 工具 `spawn_subagent` 支持单任务，或 `tasks: ["…","…"]` 一次派多个。
-- `max_concurrency` 默认 `min(任务数, 4)`，上限 8。
-- 队列 `run-loop` 按并发跑工人；主模型只收各报告摘要（admission 后）。
-- **不追求** 自研最强编码壳；追求 **快派、快收、可并行**。
+- `spawn_subagent`：`task` 或 `tasks[]` + `max_concurrency`（默认 min(n,4)，上限 8）
+- 每个 task 自动 wrap 工人简报（C）
+- 主模型只收 admission 后摘要
 
 ## 禁止
 
-- 把完整 docs/ 每轮灌进 system。
-- 在创内核死磕 Codex/Claude Code 编码手感。
-- 子代理直写 core memory。
+- 把完整 docs/ 或 CC 万字 prompt 每轮灌进 system
+- 在创内核死磕 Codex/Claude Code 编码手感
+- 子代理直写 core memory / 递归乱派
