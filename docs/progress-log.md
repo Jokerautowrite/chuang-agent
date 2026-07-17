@@ -2715,3 +2715,9 @@
 - 工具面渐进披露：薄 catalog 常驻；detail 按意图注入；工具轮/协议纠偏后强制 full。
 - 验收：`scripts/chuang-field-accept-10.sh`（15 项，含 CDP browser live、curator、repin、budget）。
 - 提交：`99bb490` `70e7768` `81063ab` `e3a7a35` 及本轮 follow-up。
+
+# 2026-07-18 field-accept 正式 CLI 入口（小k）
+- `chuang field-accept` / `chuang field`：二进制入口转调 `scripts/chuang-field-accept-10.sh`，注入当前 exe 为 CHUANG_BIN。
+- doctor：`shell_rtk` 检查 + CDP 不可用时 `browser_cdp_next` / RTK 缺失时 `shell_rtk_next` / 常驻 `field_accept_next`。
+- README / usage 补 field-accept、browser 状态面。
+- 验收：SKIP_LIVE=1 field-accept → PASS=15 SKIP=1；doctor 露出 shell_rtk + field_accept_next。

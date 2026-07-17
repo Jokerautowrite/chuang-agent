@@ -311,11 +311,49 @@ fn run_cli() -> Result<(), String> {
         Some("plugin") => plugin_command(&args[2..]),
         Some("skill") => skill_command(&args[2..]),
         Some("browser") => browser_command(&args[2..]),
+        Some("field-accept") | Some("field") => field_accept_command(&args[2..]),
         Some("experiment") => experiment_command(&args[2..]),
         Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),
         Some("approval") => approval_command(&args[2..]),
         _ => Err(usage()),
+    }
+}
+
+fn field_accept_command(args: &[String]) -> Result<(), String> {
+    use std::process::Command;
+    let root = std::env::var("CHUANG_AGENT_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let script = root.join("scripts/chuang-field-accept-10.sh");
+    if !script.is_file() {
+        return Err(format!(
+            "field-accept script missing: {}",
+            script.display()
+        ));
+    }
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(args)
+        .env(
+            "CHUANG_BIN",
+            std::env::current_exe().unwrap_or_else(|_| root.join("target/debug/chuang-agent")),
+        )
+        .env(
+            "CHUANG_FIELD_CONFIG",
+            std::env::var("CHUANG_FIELD_CONFIG").unwrap_or_else(|_| {
+                root.join("config.toml").display().to_string()
+            }),
+        )
+        .status()
+        .map_err(|e| format!("field-accept spawn failed: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "field-accept failed exit={}",
+            status.code().unwrap_or(-1)
+        ))
     }
 }
 

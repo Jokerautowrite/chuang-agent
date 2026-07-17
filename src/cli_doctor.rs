@@ -235,6 +235,17 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
             status.browser_readiness.overall_state
         ),
     ));
+    let rtk_bin = which_rtk_for_doctor();
+    checks.push(pass(
+        "shell_rtk",
+        &format!(
+            "rewrite_enabled={} binary={}",
+            status.config.tool_shell_rtk_rewrite,
+            rtk_bin
+                .as_deref()
+                .unwrap_or("<missing — install rtk or set RTK_BIN>")
+        ),
+    ));
     if !status.governance.ok {
         return Err("doctor_governance_readiness_failed".to_string());
     }
@@ -724,6 +735,23 @@ fn print_doctor(doctor: &DoctorCliOutput) {
         doctor.status.browser_readiness.browser_read_reason_code,
         doctor.status.browser_readiness.browser_read_reason
     );
+    if !doctor
+        .status
+        .browser_readiness
+        .browser_read_adapter_available
+    {
+        println!(
+            "browser_cdp_next: chuang browser start   # 或依赖工具自动拉起；关自动: CHUANG_HEADLESS_AUTOSTART=0"
+        );
+    }
+    if doctor.status.config.tool_shell_rtk_rewrite && which_rtk_for_doctor().is_none() {
+        println!(
+            "shell_rtk_next: install rtk on PATH or set RTK_BIN; or set tool_shell_rtk_rewrite=false"
+        );
+    }
+    println!(
+        "field_accept_next: chuang field-accept   # 本机 15 项快速验收；SKIP_LIVE=1 可跳过模型"
+    );
     println!(
         "context_engine: {}",
         doctor.status.config.context_engine_kind
@@ -1194,4 +1222,25 @@ fn format_text_list(values: &[String]) -> String {
     } else {
         values.join(" | ")
     }
+}
+
+fn which_rtk_for_doctor() -> Option<String> {
+    if let Ok(path) = std::env::var("RTK_BIN") {
+        let p = std::path::PathBuf::from(&path);
+        if p.is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(output) = std::process::Command::new("sh")
+        .args(["-c", "command -v rtk"])
+        .output()
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
 }
