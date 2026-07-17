@@ -74,26 +74,28 @@ fn terminal_size() -> (u16, u16) {
     crossterm::terminal::size().unwrap_or((80, 24))
 }
 
-/// Grok-style chrome: app owns input buffer + fixed bottom strip.
+/// Grok TUI chrome (right-side terminal contract):
 ///
-/// Layout (bottom 3 rows, matches right-side Grok TUI):
 /// ```text
-/// ────────────────────────────────────────  hairline
-/// > 输入消息…                               input box (primary)
-/// 就绪 · gpt-5.6-terra · /help              footer status
+///  (scrollable transcript above)
+/// ╭─────────────────────────────────────────────────────╮
+/// │ > draft…                         gpt-5.6-terra · 就绪 │  ← input box
+/// ╰─────────────────────────────────────────────────────╯
+/// Enter发送 · /stop · /help · /trace                      ← shortcuts
 /// ```
-/// Transcript scrolls only above the hairline (DECSTBM).
+///
+/// Transcript scrolls only above the box (DECSTBM). App owns the draft buffer.
 struct ReplChrome {
     cols: u16,
     rows: u16,
-    /// Bottom rows reserved: rule + input + status.
+    /// Bottom rows: top border + input + bottom border + shortcuts.
     reserve: u16,
     raw_active: bool,
 }
 
 impl ReplChrome {
-    /// Hairline + input + status footer.
-    const RESERVE_ROWS: u16 = 3;
+    /// Grok box = 3 rows (╭─╮ / │>│ / ╰─╯) + 1 shortcuts row.
+    const RESERVE_ROWS: u16 = 4;
 
     fn detect(_interactive: bool) -> Self {
         let (cols, rows) = terminal_size();
@@ -108,26 +110,23 @@ impl ReplChrome {
     fn refresh_size(&mut self) {
         let (cols, rows) = terminal_size();
         self.cols = cols.max(40);
-        self.rows = rows.max(10);
+        self.rows = rows.max(12);
     }
 
     fn body_bottom_row(&self) -> u16 {
         self.rows.saturating_sub(self.reserve).max(1)
     }
 
-    /// Row indices (1-based): rule, input, status.
-    fn strip_rows(&self) -> (u16, u16, u16) {
-        let rule = self.rows.saturating_sub(self.reserve) + 1;
-        let input = rule + 1;
-        let status = rule + 2;
-        (rule, input, status)
+    /// Row indices (1-based): top border, input, bottom border, shortcuts.
+    fn strip_rows(&self) -> (u16, u16, u16, u16) {
+        let top = self.rows.saturating_sub(self.reserve) + 1;
+        (top, top + 1, top + 2, top + 3)
     }
 
     fn enable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
         self.refresh_size();
         enable_raw_mode().map_err(|e| format!("raw_mode_failed: {e}"))?;
         self.raw_active = true;
-        // Keep main scrollback; pin chrome with DECSTBM + app-drawn input.
         let bottom = self.body_bottom_row();
         write!(stdout, "\x1b[1;{bottom}r").map_err(|e| format!("stdout_write_failed: {e}"))?;
         execute!(stdout, Hide).map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -137,7 +136,6 @@ impl ReplChrome {
     }
 
     fn disable(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
-        // Reset scroll region, clear strip, show cursor, leave raw mode.
         let _ = write!(stdout, "\x1b[r");
         let _ = self.clear_prompt_strip(stdout);
         let _ = execute!(stdout, Show);
@@ -152,10 +150,8 @@ impl ReplChrome {
     fn write_body(&mut self, stdout: &mut io::Stdout, text: &str) -> Result<(), String> {
         self.refresh_size();
         let bottom = self.body_bottom_row();
-        // Ensure scroll region still correct after resize.
         write!(stdout, "\x1b[1;{bottom}r").map_err(|e| format!("stdout_write_failed: {e}"))?;
         write!(stdout, "\x1b[{bottom};1H").map_err(|e| format!("stdout_write_failed: {e}"))?;
-        // In raw mode, need explicit \r\n for newline.
         let normalized = text.replace('\n', "\r\n");
         write!(stdout, "{normalized}").map_err(|e| format!("stdout_write_failed: {e}"))?;
         if !normalized.ends_with("\r\n") {
@@ -166,8 +162,8 @@ impl ReplChrome {
             .map_err(|e| format!("stdout_flush_failed: {e}"))
     }
 
-    /// Paint fixed bottom strip (Grok layout): hairline + input box + status footer.
-    /// `input` is the live draft (app-owned, not terminal echo).
+    /// Paint Grok-clone bottom: bordered input box + shortcut footer.
+    /// `status_line` is shown on the RIGHT of the input row (like Grok model chip).
     fn pin_prompt(
         &mut self,
         stdout: &mut io::Stdout,
@@ -176,77 +172,81 @@ impl ReplChrome {
     ) -> Result<(), String> {
         self.refresh_size();
         let cols = self.cols as usize;
-        let (rule_row, input_row, status_row) = self.strip_rows();
+        let (top_row, input_row, bot_row, foot_row) = self.strip_rows();
 
-        // 1) Full-width hairline — the visual top of the "input box".
-        let rule = format!(
-            "{ANSI_DIM}{}{ANSI_RESET}",
-            "─".repeat(cols.max(8))
+        // Border box width = full terminal.
+        let inner = cols.saturating_sub(2).max(8); // between │ … │
+        let top_border = format!(
+            "{ANSI_DIM}╭{}╮{ANSI_RESET}",
+            "─".repeat(inner)
+        );
+        let bot_border = format!(
+            "{ANSI_DIM}╰{}╯{ANSI_RESET}",
+            "─".repeat(inner)
         );
 
-        // 2) Input row: Grok `> ` glyph + draft (or dim placeholder).
+        // Right chip (model · state), truncated.
+        let chip_plain = fit_display(&ansi_plain(status_line), (inner / 3).max(12).min(36));
+        let chip_w = display_width(&chip_plain);
+
+        // Left: `> draft` or placeholder.
         let prefix = "> ";
         let prefix_w = display_width(prefix);
-        let avail = cols.saturating_sub(prefix_w + 1).max(8);
         let empty = input.is_empty();
+        // Leave 1 space gap before chip.
+        let left_budget = inner
+            .saturating_sub(chip_w)
+            .saturating_sub(1)
+            .saturating_sub(prefix_w)
+            .max(4);
         let mut visible = if empty {
             String::new()
         } else {
             input.to_string()
         };
-        while display_width(&visible) > avail && !visible.is_empty() {
+        while display_width(&visible) > left_budget && !visible.is_empty() {
             let mut chars = visible.chars();
             chars.next();
             visible = chars.as_str().to_string();
         }
-        // Soft "box": dark bar behind the whole input row (Konsole / xterm-256).
-        // Re-apply BG after every SGR reset so the bar stays solid.
+        let left_text = if empty {
+            format!("{ANSI_DIM}输入…{ANSI_RESET}")
+        } else {
+            format!("{ANSI_BOLD}{visible}{ANSI_RESET}")
+        };
+        let left_plain_w = if empty {
+            display_width("输入…")
+        } else {
+            display_width(&visible)
+        };
+        let left_total = prefix_w + left_plain_w;
+        let gap = inner.saturating_sub(left_total).saturating_sub(chip_w);
+        let gap_spaces = " ".repeat(gap);
+
         const BG: &str = "\x1b[48;5;236m";
-        const FG: &str = "\x1b[38;5;252m";
-        let placeholder = "输入消息…  Enter 发送  /help";
-        let used = prefix_w
-            + if empty {
-                display_width(placeholder)
-            } else {
-                display_width(&visible)
-            };
-        let pad = " ".repeat(cols.saturating_sub(used).min(cols));
-        let input_line = if empty {
-            format!(
-                "{BG}{ANSI_BOLD}{ANSI_CYAN}{prefix}{ANSI_RESET}{BG}{ANSI_DIM}{placeholder}{ANSI_RESET}{BG}{pad}{ANSI_RESET}"
-            )
-        } else {
-            format!(
-                "{BG}{ANSI_BOLD}{ANSI_CYAN}{prefix}{ANSI_RESET}{BG}{FG}{visible}{ANSI_RESET}{BG}{pad}{ANSI_RESET}"
-            )
-        };
+        // │ BG > text … chip │  — re-apply BG after resets.
+        let input_line = format!(
+            "{ANSI_DIM}│{ANSI_RESET}{BG}{ANSI_BOLD}{ANSI_CYAN}{prefix}{ANSI_RESET}{BG}{left_text}{BG}{gap_spaces}{ANSI_DIM}{chip_plain}{ANSI_RESET}{BG}{ANSI_DIM}│{ANSI_RESET}"
+        );
 
-        // 3) Footer status (Grok puts model/mode under the input).
-        let status_plain = fit_display(&ansi_plain(status_line), cols.saturating_sub(1));
-        // Re-color: keep running/confirm bright; idle dim.
-        let status_painted = if status_line.contains("运行中") || status_line.contains("确认") {
-            // status_line already carries ANSI for 运行中/确认.
-            fit_display_ansi(status_line, cols.saturating_sub(1))
-        } else {
-            format!("{ANSI_DIM}{status_plain}{ANSI_RESET}")
-        };
+        // Shortcuts footer — Grok puts these under the box, left-aligned.
+        let foot = format!(
+            "{ANSI_DIM}{}{ANSI_RESET}",
+            fit_display("Enter发送 · /stop取消 · /help · /trace · /exit", cols.saturating_sub(1))
+        );
 
-        // Paint three reserved rows (clear each, never wrap).
         write!(
             stdout,
-            "\x1b[{rule_row};1H\x1b[2K{rule}\
+            "\x1b[{top_row};1H\x1b[2K{top_border}\
              \x1b[{input_row};1H\x1b[2K{input_line}\
-             \x1b[{status_row};1H\x1b[2K{status_painted}"
+             \x1b[{bot_row};1H\x1b[2K{bot_border}\
+             \x1b[{foot_row};1H\x1b[2K{foot}"
         )
         .map_err(|e| format!("stdout_write_failed: {e}"))?;
 
-        // Caret sits in the input box after `> ` (+ typed text).
-        let caret_col = if empty {
-            (prefix_w as u16).saturating_add(1)
-        } else {
-            (display_width(&format!("{prefix}{visible}")) as u16).saturating_add(1)
-        }
-        .min(self.cols);
+        // Layout: col1=│, then `> `, then draft. Caret = next cell after draft.
+        let caret_col = (1 + prefix_w + if empty { 0 } else { display_width(&visible) } + 1) as u16;
+        let caret_col = caret_col.min(self.cols.saturating_sub(1)).max(2);
         write!(stdout, "\x1b[{input_row};{caret_col}H")
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         execute!(stdout, Show).map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -257,9 +257,8 @@ impl ReplChrome {
 
     fn clear_prompt_strip(&mut self, stdout: &mut io::Stdout) -> Result<(), String> {
         self.refresh_size();
-        let (rule_row, _, _) = self.strip_rows();
-        // Clear from hairline through end of screen.
-        write!(stdout, "\x1b[{rule_row};1H\x1b[0J")
+        let (top_row, _, _, _) = self.strip_rows();
+        write!(stdout, "\x1b[{top_row};1H\x1b[0J")
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         Ok(())
     }
@@ -1773,40 +1772,32 @@ fn render_sticky_status_line(
     show_trace: bool,
     turn_started: Option<Instant>,
 ) -> String {
-    // Grok footer under the input box: mode · model · light metrics · hints.
+    // Right chip inside Grok input box (model · state). Keep short — drawn on the right.
     if awaiting_approval {
-        return format!(
-            "{ANSI_YELLOW}确认{ANSI_RESET} · {} · 1允许  2拒绝  3详情",
-            stats.model_name
-        );
+        return format!("确认 · {}", stats.model_name);
     }
     if running {
         let elapsed = turn_started
             .map(|started| format_short_duration(started.elapsed()))
             .unwrap_or_else(|| "0s".to_string());
         let mut parts = vec![
-            format!("{ANSI_YELLOW}运行中{ANSI_RESET}"),
-            format!("⏱{elapsed}"),
             stats.model_name.clone(),
+            format!("运行中 {elapsed}"),
         ];
         if guidance_count > 0 {
-            parts.push(format!("排队{guidance_count}"));
+            parts.push(format!("+{guidance_count}"));
         }
-        if let (Some(timeout_ms), Some(started)) = (stats.request_timeout_ms, turn_started) {
-            if timeout_ms > 0 {
-                let left = timeout_ms.saturating_sub(started.elapsed().as_millis() as u64);
-                parts.push(format!("剩{}", format_ms_duration(u128::from(left))));
-            }
+        if show_trace {
+            parts.push("trace".to_string());
         }
-        parts.push("/stop 取消".to_string());
         return parts.join(" · ");
     }
-    // Idle: mirror Grok "model · mode · shortcuts".
-    let mut line = render_repl_status_line(stats, "就绪", show_trace, None);
-    if !line.contains("/help") {
-        line = format!("{line} · Enter发送 · /help");
+    // Idle chip: "gpt-5.6-terra · 就绪" (Grok: "Grok 4.5 (high) · always-approve")
+    let mut parts = vec![stats.model_name.clone(), "就绪".to_string()];
+    if show_trace {
+        parts.push("trace".to_string());
     }
-    line
+    parts.join(" · ")
 }
 
 fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
@@ -2180,47 +2171,37 @@ fn render_user_message_block(
     model_name: &str,
     cwd: &str,
 ) -> String {
-    // Grok-like turn open: hairline + primary user line. Model lives on answer footer.
+    // Grok transcript: `> user text` (primary). No「你」label, no model under user.
     let _ = (provider_id, model_name, cwd);
     let text = user_input.trim();
-    let rule = format!("{ANSI_DIM}{}{ANSI_RESET}", "─".repeat(36));
     if text.chars().count() <= 96 && !text.contains('\n') {
-        return format!("\n{rule}\n{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}  {text}\n");
+        return format!("\n{ANSI_BOLD}> {text}{ANSI_RESET}\n");
     }
-    let mut lines = vec![
-        String::new(),
-        rule,
-        format!("{ANSI_BOLD}{ANSI_BLUE}你{ANSI_RESET}"),
-    ];
-    for line in wrap_text_block(text, REPL_TEXT_WRAP_WIDTH).lines() {
-        // Indent body under the label (no pipe theater).
-        lines.push(format!("  {line}"));
+    let mut lines = vec![String::new(), format!("{ANSI_BOLD}> {ANSI_RESET}")];
+    for line in wrap_text_block(text, REPL_TEXT_WRAP_WIDTH.saturating_sub(2)).lines() {
+        lines.push(format!("{ANSI_BOLD}  {line}{ANSI_RESET}"));
     }
     lines.push(String::new());
     lines.join("\n")
 }
 
 fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) -> String {
-    // Secondary stream: always indented under the turn so 小创 final owns the column.
+    // Grok secondary stream: dim bullets under the turn.
     let (icon, color) = match (display.kind, display.state) {
         (DisplayEventKind::Warning, DisplayState::Blocked) => ("!", ANSI_YELLOW),
         (DisplayEventKind::Warning, _) | (_, DisplayState::Failed) => ("✗", ANSI_RED),
-        (_, DisplayState::Succeeded) => ("✓", ANSI_GREEN),
-        (DisplayEventKind::Tool, DisplayState::Running) => ("▸", ANSI_CYAN),
+        (_, DisplayState::Succeeded) => ("·", ANSI_GREEN),
+        (DisplayEventKind::Tool, DisplayState::Running) => ("·", ANSI_CYAN),
         (_, DisplayState::Running) if display.prominence == DisplayProminence::Primary => {
-            ("●", ANSI_CYAN)
+            ("·", ANSI_CYAN)
         }
         (_, DisplayState::Blocked) => ("…", ANSI_YELLOW),
         (_, _) => ("·", ANSI_GRAY),
     };
     let message = compact_preview(&display.message, REPL_META_WRAP_WIDTH.saturating_sub(4));
     let _ = step_index;
-    let dim_body = display.state == DisplayState::Succeeded
-        || (display.kind == DisplayEventKind::Progress
-            && display.prominence == DisplayProminence::Secondary);
-    if dim_body {
-        format!("  {color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
-    } else if display.state == DisplayState::Failed || display.state == DisplayState::Blocked {
+    let failed = display.state == DisplayState::Failed || display.state == DisplayState::Blocked;
+    if failed {
         format!("  {color}{icon}{ANSI_RESET} {message}")
     } else {
         format!("  {color}{icon}{ANSI_RESET} {ANSI_DIM}{message}{ANSI_RESET}")
@@ -2381,16 +2362,14 @@ fn render_repl_failure_block(
     if timing.acting_ms > 0 {
         parts.push(format!("执行 {}", format_ms_duration(timing.acting_ms)));
     }
+    // Same bare-body style as success finals (Grok doesn't shout a brand label).
     let mut lines = vec![
-        String::new(),
-        format!("{ANSI_BOLD}{ANSI_RED}小创{ANSI_RESET}"),
         String::new(),
         format!("{ANSI_RED}{}{ANSI_RESET}", readable_runtime_error(error)),
         String::new(),
         format!("{ANSI_DIM}  {}{ANSI_RESET}", parts.join(" · ")),
     ];
     if !progress_lines.is_empty() && show_trace {
-        lines.push(format!("{ANSI_DIM}  ── 最近进展 ──{ANSI_RESET}"));
         for line in progress_lines.iter().take(6) {
             lines.push(format!("{ANSI_DIM}  · {line}{ANSI_RESET}"));
         }
@@ -2415,11 +2394,9 @@ fn render_assistant_completion_block(
     trace_lines: &[String],
     audit_line: Option<&str>,
 ) -> String {
-    // Final owns attention: label → body → dim footer. Model only in footer (not dual).
+    // Grok final: bare answer body (no「小创」billboard). Dim crumbs under it.
     let _ = model_name;
     let mut lines = vec![
-        String::new(),
-        format!("{ANSI_BOLD}{ANSI_CYAN}小创{ANSI_RESET}"),
         String::new(),
         answer.to_string(),
         String::new(),
@@ -2716,20 +2693,17 @@ mod tests {
             "/tmp/work",
         );
 
-        assert!(rendered.contains("你"));
+        // Grok: `> message`, no「你」label.
+        assert!(rendered.contains('>'));
         assert!(rendered.contains("请检查当前分支并总结"));
         assert!(rendered.contains("不要省略第二行"));
-        // Model stays on answer footer, not under the user bubble.
         assert!(!rendered.contains("gpt-5.5"));
         assert!(!rendered.contains("type !text"));
-        assert!(!rendered.contains('│'));
+        assert!(!rendered.contains("你"));
 
         let short = render_user_message_block("哈喽小创", "p", "m", "/tmp");
-        assert!(short.contains("你"));
-        assert!(short.contains("哈喽小创"));
-        assert!(short.contains('─'));
-        // Compact short messages: one line bubble, no pipe reprint theater.
-        assert!(!short.contains('│'));
+        assert!(short.contains("> 哈喽小创"));
+        assert!(!short.contains("你"));
     }
 
     #[test]
@@ -2738,13 +2712,11 @@ mod tests {
             render_progress_display_line(&display_tool("正在检查 Git 状态".to_string()), 1);
 
         assert!(rendered.contains("检查 Git 状态"));
-        assert!(rendered.contains("▸") || rendered.contains("·"));
-        // Secondary stream is indented under the turn.
+        assert!(rendered.contains('·') || rendered.contains('▸'));
         assert!(rendered.starts_with("  "));
         assert!(!rendered.contains("tool"));
         assert!(!rendered.contains("thinking"));
         assert!(!rendered.contains("TOOL STREAM"));
-        assert!(!rendered.contains("│"));
     }
 
     #[test]
@@ -2766,7 +2738,8 @@ mod tests {
             Some("最近进展=正在检查 Git 状态  tools=1  protocol=0  report=rpt_123"),
         );
 
-        assert!(rendered.contains("小创"));
+        // Grok final is bare prose — no brand label.
+        assert!(!rendered.contains("小创"));
         assert!(rendered.contains("answer body"));
         assert!(rendered.contains("/trace"));
         assert!(rendered.contains("rpt_123"));
@@ -2919,21 +2892,21 @@ mod tests {
     }
 
     #[test]
-    fn repl_chrome_reserves_three_rows_like_grok() {
+    fn repl_chrome_reserves_four_rows_like_grok_box() {
         let mut chrome = ReplChrome {
             cols: 80,
             rows: 24,
             reserve: ReplChrome::RESERVE_ROWS,
             raw_active: false,
         };
-        assert_eq!(chrome.reserve, 3);
-        assert_eq!(chrome.body_bottom_row(), 21);
-        let (rule, input, status) = chrome.strip_rows();
-        assert_eq!((rule, input, status), (22, 23, 24));
+        assert_eq!(chrome.reserve, 4);
+        assert_eq!(chrome.body_bottom_row(), 20);
+        let (top, input, bot, foot) = chrome.strip_rows();
+        assert_eq!((top, input, bot, foot), (21, 22, 23, 24));
         chrome.rows = 12;
-        assert_eq!(chrome.body_bottom_row(), 9);
-        let (rule, input, status) = chrome.strip_rows();
-        assert_eq!((rule, input, status), (10, 11, 12));
+        assert_eq!(chrome.body_bottom_row(), 8);
+        let (top, input, bot, foot) = chrome.strip_rows();
+        assert_eq!((top, input, bot, foot), (9, 10, 11, 12));
     }
 
     #[test]
@@ -2984,15 +2957,14 @@ mod tests {
             request_timeout_ms: None,
         };
 
+        // Chip inside Grok box (right side): model · 就绪
         let rendered = render_sticky_status_line(false, 0, &stats, false, false, None);
-
         assert!(rendered.contains("就绪"));
-        assert!(rendered.contains("ctx 10%"));
         assert!(rendered.contains("gpt-5.6-terra"));
         assert!(!rendered.contains("╭"));
 
         let detailed = render_sticky_status_line(false, 0, &stats, false, true, None);
-        assert!(detailed.contains("详细"));
+        assert!(detailed.contains("trace"));
     }
 
     #[test]
@@ -3013,11 +2985,10 @@ mod tests {
         };
 
         let started = Instant::now() - Duration::from_secs(2);
+        // Chip: model · 运行中 elapsed — /stop lives on the shortcuts footer row.
         let rendered = render_sticky_status_line(true, 0, &stats, false, false, Some(started));
-
         assert!(rendered.contains("运行中"));
-        assert!(rendered.contains("/stop"));
-        assert!(rendered.contains("⏱"));
+        assert!(rendered.contains("gpt-5.6-terra"));
         assert!(!rendered.contains("╭"));
     }
 
