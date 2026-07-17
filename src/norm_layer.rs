@@ -2,6 +2,7 @@
 //!
 //! Includes distilled CC harness discipline plus dad's operating theorems:
 //! Occam (dev subtract) / Murphy (accept add) / Coase (delegate) / grill-clarify / no optional commentary.
+//! Plus thin closed-loop control (engineering cybernetics) as on-demand skill only.
 
 use crate::context_engine::{ContextSegment, SegmentSource};
 
@@ -20,6 +21,8 @@ const SKILL_OCCAM: &str = include_str!("../assets/norm/skills/occam-develop.md")
 const SKILL_MURPHY: &str = include_str!("../assets/norm/skills/murphy-accept.md");
 const SKILL_FIRST: &str = include_str!("../assets/norm/skills/first-principles.md");
 const SKILL_CONTRADICTION: &str = include_str!("../assets/norm/skills/contradiction-analysis.md");
+const SKILL_CLOSED_LOOP: &str = include_str!("../assets/norm/skills/closed-loop-control.md");
+const SKILL_GEN_EVAL: &str = include_str!("../assets/norm/skills/gen-eval-separate.md");
 const SKILL_ADV: &str = include_str!("../assets/norm/skills/adversarial-review.md");
 const SKILL_GRILL: &str = include_str!("../assets/norm/skills/grill-clarify.md");
 const SKILL_COASE: &str = include_str!("../assets/norm/skills/coase-delegate.md");
@@ -98,6 +101,16 @@ const SKILLS: &[SkillSpec] = &[
         id: "norm-skill-contradiction-analysis",
         body: SKILL_CONTRADICTION,
         matcher: matches_contradiction,
+    },
+    SkillSpec {
+        id: "norm-skill-closed-loop-control",
+        body: SKILL_CLOSED_LOOP,
+        matcher: matches_closed_loop,
+    },
+    SkillSpec {
+        id: "norm-skill-gen-eval-separate",
+        body: SKILL_GEN_EVAL,
+        matcher: matches_gen_eval,
     },
     SkillSpec {
         id: "norm-skill-coding-dispatch",
@@ -241,6 +254,51 @@ fn matches_contradiction(text: &str) -> bool {
         "先做哪个",
         "根据地",
         "矛盾分析",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+/// Narrow — agent drift / oscillation / self-evolution, not daily coding.
+fn matches_closed_loop(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "闭环",
+        "开环",
+        "控制论",
+        "工程控制论",
+        "过程控制论",
+        "前馈",
+        "负反馈",
+        "积分控制",
+        "跑偏",
+        "震荡",
+        "反复修不好",
+        "修了又坏",
+        "总是跑飞",
+        "自进化",
+        "自我纠偏",
+        "cybernetic",
+        "closed loop",
+        "closed-loop",
+        "feedforward",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+/// Narrow — multi-pass quality loop, not daily one-shot coding.
+fn matches_gen_eval(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "生成评审",
+        "生成≠评审",
+        "生成不等于评审",
+        "generator evaluator",
+        "gen-eval",
+        "gan harness",
+        "gan-style",
+        "双环交付",
+        "生成器评审器",
+        "独立评审",
+        "别自己评自己",
+        "对抗生成",
     ];
     KEYS.iter().any(|k| text.contains(k))
 }
@@ -454,5 +512,27 @@ mod tests {
         // daily coding must not load it
         let code = on_demand_skill_segments("修一下编译错误");
         assert!(!code.iter().any(|s| s.id == "norm-skill-contradiction-analysis"));
+    }
+
+    #[test]
+    fn closed_loop_skill_is_short_and_narrow() {
+        assert!(SKILL_CLOSED_LOOP.chars().count() < 500);
+        let card = doctrine_card_segment();
+        assert!(card.content.contains("闭环"));
+        let segs = on_demand_skill_segments("agent 老是跑偏，需要闭环控制");
+        assert!(segs.iter().any(|s| s.id == "norm-skill-closed-loop-control"));
+        let code = on_demand_skill_segments("修一下编译错误");
+        assert!(!code.iter().any(|s| s.id == "norm-skill-closed-loop-control"));
+    }
+
+    #[test]
+    fn gen_eval_skill_is_short_and_narrow() {
+        assert!(SKILL_GEN_EVAL.chars().count() < 500);
+        let card = doctrine_card_segment();
+        assert!(card.content.contains("模型只提议") || card.content.contains("别只会改 prompt"));
+        let segs = on_demand_skill_segments("这次用生成评审双环交付，别自己评自己");
+        assert!(segs.iter().any(|s| s.id == "norm-skill-gen-eval-separate"));
+        let code = on_demand_skill_segments("修一下编译错误");
+        assert!(!code.iter().any(|s| s.id == "norm-skill-gen-eval-separate"));
     }
 }

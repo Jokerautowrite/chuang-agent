@@ -82,11 +82,17 @@ Claude Code：抄 harness 纪律与分片组装，不 1:1 粘贴其 system promp
 | **禁止可选旁白** | 全程 | DO NOT send optional commentary |
 | **Grill 澄清** | 仅歧义 | 一次一问；出口=目标+不做清单+验收，**不用 95%** |
 | **矛盾分析** | 仅复杂取舍 | 主要矛盾/阶段/力量；**非语录、非常驻**（`contradiction-analysis.md`） |
+| **闭环控制** | 仅跑偏/震荡/自进化 | 测量→偏差→再动作；积分防抖；**非原著、非常驻**（`closed-loop-control.md`） |
+| **生成≠评审** | 仅复杂交付/质量环 | 生成器不自证过关；独立测量有预算；**非默认**（`gen-eval-separate.md`） |
+
+常驻：闭环半句 +「模型只提议；挂了补 harness 别只会改 prompt」。  
+研究：`docs/research-agent-cybernetics-notes.md`、`docs/research-git-scan-valuable-2026-07-18.md`。
 
 ## 禁止
 
 - 把完整 docs/ 或 CC 万字 prompt 每轮灌进 system
+- 把《工程控制论》/小乖式厚 AGENTS 整段灌进 always-on
 - 在创内核死磕 Codex/Claude Code 编码手感
 - 子代理直写 core memory / 递归乱派
 - 用「95% 信心」当停问条件
-- 简单任务默认对抗审查或默认 grill
+- 简单任务默认对抗审查或默认 grill 或默认控制论 skill

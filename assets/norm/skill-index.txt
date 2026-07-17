@@ -5,6 +5,8 @@
 - murphy-accept / verify-before-claim：验收加法与如实
 - first-principles：修 bug/方案/架构从机制推
 - contradiction-analysis：复杂取舍锁主要矛盾/阶段/力量（非默认、非语录）
+- closed-loop-control：跑偏/震荡/自进化时闭环测量（工程控制论薄蒸馏，非默认）
+- gen-eval-separate：复杂交付生成≠评审双环（非默认；小改禁用）
 - adversarial-review：复杂收尾对抗审查（非默认）
 - think-before-act / grill-clarify：想清楚；歧义时一次一问（无「95%」）
 - compact-handoff / readonly-triage：交接与只读排查
