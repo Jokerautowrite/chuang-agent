@@ -127,6 +127,20 @@ fn projector_maps_progress_steps_to_deterministic_chinese_wording() {
 }
 
 #[test]
+fn protocol_invalid_action_json_is_human_progress_not_raw_code() {
+    let projector = DisplayProjector::new(DisplayProjectionOptions::repl_default());
+    let event = projector
+        .project(&TerminalEvent::ProtocolError {
+            round: 2,
+            code: "invalid_action_json".to_string(),
+        })
+        .expect("protocol warnings on by default in repl");
+    assert_eq!(event.kind, DisplayEventKind::Progress);
+    assert_eq!(event.message, "正在修正操作格式并继续");
+    assert!(!event.message.contains("invalid_action_json"));
+}
+
+#[test]
 fn successful_tools_are_low_prominence_and_suppressible() {
     let projector = DisplayProjector::new(DisplayProjectionOptions {
         show_successful_tool_events: true,

@@ -2727,3 +2727,8 @@
 - `scripts/chuang-materialize-runtime-config.py`：从 config.toml 物化绝对路径；保留 `program=sh` 等裸命令；保留 permission_profile。
 - `scripts/chuang`：仓库内入口源；binary-first；ask/status/doctor 默认 materialize；已装 `~/.local/bin/chuang`。
 - field-accept 增项 17：materialize + /tmp cwd status。
+
+# 2026-07-18 终端显示与体检「假拦截」修正（小k）
+- 现象：REPL 答复泄漏 raw 工具 JSON +「拦截原因/治理决策」；体检走 spawn_subagent 因 SubagentToolContext 未装配失败，被误读成权限拦住。
+- 修：terminal_tool_failure_answer 人话化；sanitize FINAL JSON；protocol invalid_action_json 人话进度；工具目录引导 doctor/field-accept；spawn 失败文案标明非权限。
+- 未在本轮接上 spawn_subagent 完整 runtime（仍 None）；自检路径明确走本地 doctor/field-accept。

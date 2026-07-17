@@ -575,7 +575,7 @@ where
                     last_turn = Some(turn);
                     continue;
                 }
-                turn.result.response.body = final_answer;
+                turn.result.response.body = sanitize_operator_facing_answer(&final_answer);
                 write_terminal_event(
                     progress_path,
                     &TerminalEvent::AnswerReady {
@@ -867,7 +867,7 @@ where
                 insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
                 return Ok(turn);
             }
-            turn.result.response.body = answer;
+            turn.result.response.body = sanitize_operator_facing_answer(&answer);
             turn.user_input = original_input;
             insert_tool_surface_metadata(&mut turn, workspace_root)?;
             insert_tool_metadata_with_status(
@@ -908,7 +908,8 @@ where
             .last()
             .filter(|record| terminal_tool_failure(record))
         {
-            turn.result.response.body = terminal_tool_failure_answer(record);
+            turn.result.response.body =
+                sanitize_operator_facing_answer(&terminal_tool_failure_answer(record));
             turn.user_input = original_input;
             insert_tool_surface_metadata(&mut turn, workspace_root)?;
             insert_tool_metadata_with_status(
@@ -1637,12 +1638,119 @@ fn inject_live_guidance_into_prompt(current_input: &str, guidance: &str) -> Stri
 
 fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
     let tool_name = tool_call_name(&record.call);
-    let decision = record.decision.as_deref().unwrap_or("unknown");
+    let decision = record.decision.as_deref().unwrap_or("");
     let failure_class = record.failure_class.as_deref().unwrap_or("tool_failed");
+    let summary = record.summary.as_str();
+    let needs_approval = failure_class == "governance_rejected"
+        || decision.contains("needs_approval")
+        || decision.contains("RequireExplicit");
+
+    // 子代理未接线：常见于「体检」误走 spawn_subagent；不是权限拦截。
+    if summary.contains("subagent_runtime_unavailable") {
+        return "本轮想派子代理，但子代理运行时还没接通（不是权限拦住你）。\n\n\
+自检/体检请改用本地命令，例如：\n\
+· chuang doctor\n\
+· SKIP_LIVE=1 chuang field-accept\n\n\
+你可以说「用本地 doctor 体检」，我会直接跑本地检查。".to_string();
+    }
+
+    if summary.contains("actuator_unconfigured") || failure_class == "actuator_unconfigured" {
+        return format!(
+            "本轮没有完成真实桌面动作（{tool_name}）：执行器还没配好。\n\
+普通打开应用/点击/输入在配好 actuator 后应直接执行，不需要人工审批；只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才会问你或拒绝。"
+        );
+    }
+
+    if needs_approval {
+        return format!(
+            "这一步需要你确认后再做（{tool_name}）。\n\
+这是高危边界审批，不是普通任务失败。按终端提示批准，或换一种不碰删除/密钥/服务变更的做法。"
+        );
+    }
+
     format!(
-        "本轮没有完成真实动作。\n动作：{tool_name}\n结果：未执行点击、输入或修改。\n拦截原因：{failure_class}; {summary}\n治理决策：{decision}\n下一步：如果这是普通桌面动作，补齐 actuator adapter、live gate 和 action allowlist 后应直接执行，不需要人工审批；只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问老爸或拒绝。",
-        summary = record.summary
+        "本轮「{tool_name}」没做完：{human_summary}\n\
+这不是权限拦截。可以说「继续本地检查」或换个做法；输入 /trace 看技术细节。",
+        human_summary = humanize_tool_failure_summary(summary, failure_class),
     )
+}
+
+fn humanize_tool_failure_summary(summary: &str, failure_class: &str) -> String {
+    let s = summary.trim();
+    if s.is_empty() {
+        return failure_class.to_string();
+    }
+    // Keep short; strip long governance blobs if they leaked into summary.
+    if s.contains("profile=full_local_workspace") && s.len() > 80 {
+        return failure_class.to_string();
+    }
+    if s.chars().count() > 160 {
+        return s.chars().take(160).collect::<String>() + "…";
+    }
+    s.to_string()
+}
+
+/// Drop raw tool-call JSON that models sometimes dump as FINAL.
+/// Also used by REPL display as a last-line defense.
+pub(crate) fn sanitize_operator_facing_answer_for_display(answer: &str) -> String {
+    sanitize_operator_facing_answer(answer)
+}
+
+fn sanitize_operator_facing_answer(answer: &str) -> String {
+    let trimmed = answer.trim();
+    if looks_like_raw_tool_payload(trimmed) {
+        return "内部把工具调用误当成最终答复了，这不是正常对话输出。\n\
+请再说一次你要我做什么；自检可说「用本地 doctor 体检」。输入 /trace 可看技术细节。"
+            .to_string();
+    }
+    // Strip accidental machine governance dump lines if model echoed them.
+    let cleaned: String = trimmed
+        .lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            !(t.starts_with("治理决策：")
+                || t.starts_with("治理决策:")
+                || t.starts_with("拦截原因：")
+                || t.starts_with("拦截原因:"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if cleaned.trim().is_empty() {
+        trimmed.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn looks_like_raw_tool_payload(text: &str) -> bool {
+    let t = text.trim();
+    if !(t.starts_with('{') && t.contains('}')) {
+        return false;
+    }
+    // Single-object tool payload (not a prose answer that happens to mention JSON).
+    let has_tool_shape = (t.contains("\"command\"") || t.contains("\"tool\""))
+        && (t.contains("timeout_ms")
+            || t.contains("max_output")
+            || t.contains("cwd")
+            || t.contains("\"type\"")
+            || t.contains("spawn_subagent")
+            || t.contains("code_execute"));
+    if !has_tool_shape {
+        return false;
+    }
+    // Mostly JSON: few prose newlines, or first non-ws is `{` and no Chinese sentence prefix.
+    let prose_lines = t
+        .lines()
+        .filter(|l| {
+            let s = l.trim();
+            !s.is_empty()
+                && !s.starts_with('{')
+                && !s.starts_with('}')
+                && !s.starts_with('"')
+                && !s.starts_with('[')
+        })
+        .count();
+    prose_lines <= 1
 }
 
 fn should_auto_observe_desktop(user_input: &str) -> bool {
@@ -7080,6 +7188,70 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
+    fn sanitize_operator_facing_answer_drops_raw_tool_json() {
+        let raw = r#"{"command":"cd /tmp && rg -n subagent_runtime_unavailable","timeout_ms":10000,"max_output_chars":12000}"#;
+        let cleaned = sanitize_operator_facing_answer(raw);
+        assert!(!cleaned.contains("timeout_ms"));
+        assert!(cleaned.contains("工具调用误当成最终答复") || cleaned.contains("本地 doctor"));
+    }
+
+    #[test]
+    fn terminal_tool_failure_answer_subagent_unavailable_is_not_permission_block() {
+        let answer = terminal_tool_failure_answer(&ToolExecutionRecord {
+            call: ToolCall::SpawnSubagent {
+                task: "体检".into(),
+                tasks: None,
+                agent_name: None,
+                policy: None,
+                token_budget: None,
+                timeout_ms: None,
+                max_concurrency: None,
+            },
+            tool_name: "spawn_subagent".into(),
+            atomic_tool_name: None,
+            ok: false,
+            summary: "subagent_runtime_unavailable".into(),
+            decision: Some(
+                "allowed:profile=full_local_workspace action=local subagent dispatch permission=AllowWithAudit"
+                    .into(),
+            ),
+            duration_ms: 1,
+            retryable: false,
+            target_path: None,
+            resolved_path: None,
+            cwd: None,
+            command: None,
+            entries: vec![],
+            output_bytes: None,
+            output_lines: None,
+            stderr_bytes: None,
+            stderr_lines: None,
+            output: None,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            changed_files: vec![],
+            write_before_bytes: None,
+            write_after_bytes: None,
+            write_changed: None,
+            write_operation: None,
+            write_diff_preview: None,
+            write_diff_truncated: false,
+            failure_class: Some("tool_failed".into()),
+            output_redacted: false,
+            stdout_redacted: false,
+            stderr_redacted: false,
+            output_truncated: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        });
+        assert!(answer.contains("不是权限拦住"));
+        assert!(answer.contains("field-accept") || answer.contains("doctor"));
+        assert!(!answer.contains("拦截原因"));
+        assert!(!answer.contains("治理决策"));
+    }
+
+    #[test]
     fn run_with_options_returns_terminal_tool_failure_for_unapproved_desktop_action() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-terminal-tool-failure-test-{}",
@@ -7110,10 +7282,10 @@ allowed_channels = ["app-server"]
         )
         .expect("terminal tool failure should return a user-facing response");
 
-        assert!(turn.result.response.body.contains("本轮没有完成真实动作"));
-        assert!(turn.result.response.body.contains("未执行点击、输入或修改"));
-        assert!(turn.result.response.body.contains("actuator_unconfigured"));
-        assert!(turn.result.response.body.contains("普通桌面动作"));
+        assert!(turn.result.response.body.contains("没有完成真实桌面动作"));
+        assert!(turn.result.response.body.contains("执行器还没配好"));
+        assert!(!turn.result.response.body.contains("拦截原因"));
+        assert!(!turn.result.response.body.contains("治理决策"));
         assert!(turn.result.response.body.contains("不需要人工审批"));
         assert_eq!(
             turn.result
@@ -7581,6 +7753,14 @@ allowed_channels = ["app-server"]
 
     fn test_kernel_config(db_path: PathBuf, identity_root: PathBuf) -> ChuangKernelConfig {
         let mut runtime = RuntimeConfig::new(db_path);
+        // Tool catalog / always-on norms exceed the library default reserve (32).
+        runtime.context_budget = chuang_agent::context_engine::ContextBudget {
+            max_tokens: 272_000,
+            reserve_system_tokens: 4_096,
+            min_working_tokens: 1,
+            max_tool_results: 5,
+            max_memory_segments: 5,
+        };
         runtime.identity_memory =
             chuang_agent::runtime_config::IdentityMemoryConfig::HermesDualFile {
                 root: identity_root,

@@ -289,6 +289,7 @@ impl AtomicToolRegistry {
         format!(
             "工具面（薄目录）：工作区内可用。原子：{mapped}。辅助：list_dir, open_app, apply_patch, memory_recall, spawn_subagent, browser_read, browser_navigate（旧名 read_file/write_file/shell_exec）。\n\
 协议：一次只输出一条 ACTION tool_call 或 FINAL；需要细节时读完整工具说明。code_execute 经 RTK 压缩常见输出。浏览器用 browser_navigate+browser_read；桌面观察用 locate/screenshot。\n\
+自检/体检：优先 code_execute 跑 `chuang doctor` 或 `SKIP_LIVE=1 chuang field-accept`；不要用 spawn_subagent 做本机自检。\n\
 工作区：{}",
             workspace_root.display()
         )
@@ -301,7 +302,7 @@ impl AtomicToolRegistry {
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
 辅助工具：list_dir, open_app, apply_patch, memory_recall, spawn_subagent, browser_read, browser_navigate。兼容旧名：read_file, write_file, shell_exec。\n\
-spawn_subagent 派出工人子代理（默认可并行）：单任务用 task；多任务用 tasks:[...] 与 max_concurrency（默认 min(n,4)）。任务会自动带上派工简报。不在此死磕编码手感——调度台派活、工人执行、admission 后只回收摘要。\n\
+spawn_subagent 派出工人子代理（默认可并行）：单任务用 task；多任务用 tasks:[...] 与 max_concurrency（默认 min(n,4)）。任务会自动带上派工简报。不在此死磕编码手感——调度台派活、工人执行、admission 后只回收摘要。本机自检/体检不要走 spawn_subagent（runtime 未装配时会 subagent_runtime_unavailable）；改用 code_execute：`chuang doctor` 或 `SKIP_LIVE=1 chuang field-accept`。\n\
 code_execute 使用 Bash 登录 shell 执行命令；可以使用 pipefail、here-doc 和常见 Bash 语法。支持的 ls/git/cargo/cat 等命令会经 RTK 自动改写以压缩输出；可设 tool_shell_rtk_rewrite=false 或 CHUANG_SHELL_RTK_REWRITE=0 关闭。\n\
 无头浏览器：browser_navigate 打开 URL，browser_read 读取当前页 URL/标题/DOM 文本；默认自动拉起 managed headless Chrome（可用 chuang browser start/status；CHUANG_HEADLESS_AUTOSTART=0 关闭自动启动）。这与桌面 screenshot/locate 不同，能拿到真实 DOM 文本。\n\
 桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面动作按 adapter、gate、allowlist、治理和审计执行；普通打开应用、点击和输入默认直接执行，不要先要求人工审批，只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。\n\

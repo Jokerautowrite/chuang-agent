@@ -2157,7 +2157,11 @@ fn execute_spawn_subagent(
     subagent: &Option<SubagentToolContext>,
 ) -> ToolExecutionRecord {
     let Some(subagent) = subagent else {
-        return failed_record(registry, call, "subagent_runtime_unavailable".to_string());
+        return failed_record(
+            registry,
+            call,
+            "subagent_runtime_unavailable: 子代理工具上下文未装配（不是权限拦截）。本机自检请用 code_execute 跑 chuang doctor 或 SKIP_LIVE=1 chuang field-accept".to_string(),
+        );
     };
 
     let mut job_list: Vec<String> = tasks

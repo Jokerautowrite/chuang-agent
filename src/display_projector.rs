@@ -204,9 +204,15 @@ impl DisplayProjector {
             ),
             TerminalEvent::ProtocolError { code, .. } => {
                 self.options.show_protocol_warnings.then(|| {
+                    let key = normalize_key(code);
                     let recoverable = matches!(
-                        normalize_key(code).as_str(),
-                        "plain_text_response" | "missing_required_action"
+                        key.as_str(),
+                        "plain_text_response"
+                            | "missing_required_action"
+                            | "invalid_action_json"
+                            | "action_and_final_mixed"
+                            | "action_final_mixed"
+                            | "trailing_final"
                     );
                     DisplayEvent::new(
                         if recoverable {
@@ -386,9 +392,14 @@ fn humanize_protocol_error(code: &str) -> String {
     match normalize_key(code).as_str() {
         "plain_text_response" => "正在调整执行格式并继续".to_string(),
         "missing_required_action" => "正在补全必要的实际检查".to_string(),
+        "invalid_action_json" => "正在修正操作格式并继续".to_string(),
+        "action_and_final_mixed" | "action_final_mixed" | "trailing_final" => {
+            "正在拆分操作与答复并继续".to_string()
+        }
         "empty_final_answer" => "答复生成失败：最终答复为空".to_string(),
         "rejected_tool_call" => "流程被拦截：出现未允许的额外操作".to_string(),
-        _ => format!("流程异常：{}", sanitize_label(code, 24)),
+        // Never dump raw snake_case codes to the default conversation stream.
+        other => format!("执行格式需调整（{}），正在继续", sanitize_label(other, 18)),
     }
 }
 
@@ -407,6 +418,9 @@ fn tool_running_label(tool: &str) -> String {
         "keyboard" => "执行键盘操作".to_string(),
         "wait" => "等待结果".to_string(),
         "human_suspend" => "等待人工处理".to_string(),
+        "spawn_subagent" => "派生子代理".to_string(),
+        "browser_read" => "读取网页".to_string(),
+        "browser_navigate" => "打开网页".to_string(),
         _ => format!("执行{}", tool_subject(tool)),
     }
 }
@@ -426,6 +440,9 @@ fn tool_subject(tool: &str) -> String {
         "keyboard" => "键盘操作".to_string(),
         "wait" => "等待阶段".to_string(),
         "human_suspend" => "人工处理阶段".to_string(),
+        "spawn_subagent" => "子代理派发".to_string(),
+        "browser_read" => "网页读取".to_string(),
+        "browser_navigate" => "网页导航".to_string(),
         _ => format!("操作 {}", sanitize_label(tool, 18)),
     }
 }

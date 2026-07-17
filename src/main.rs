@@ -1924,6 +1924,9 @@ fn print_repl_result(
 }
 
 fn render_repl_answer_text(answer: &str, turn_count: usize) -> Result<String, String> {
+    // Defense in depth: never paint raw tool JSON / governance dumps as the answer.
+    let answer = cli_runtime::sanitize_operator_facing_answer_for_display(answer);
+    let answer = answer.as_str();
     let answer_chars = answer.chars().count();
     if answer_chars <= REPL_ANSWER_PREVIEW_CHARS {
         return Ok(wrap_text_block(answer, REPL_TEXT_WRAP_WIDTH));
@@ -2786,6 +2789,7 @@ mod tests {
             context_engine_kind: "deterministic".to_string(),
             tool_loop_max_rounds: 4,
             tool_shell_timeout_ms: 10_000,
+            tool_shell_rtk_rewrite: true,
             tool_shell_risk_rule_counts: "0".to_string(),
             db_path: "db.sqlite".to_string(),
             recall_limit: 5,
