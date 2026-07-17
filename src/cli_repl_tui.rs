@@ -113,27 +113,16 @@ impl TuiApp {
         app
     }
 
-    /// 启动横幅：大号镂空字 chuang，居中渲染，雷蛇绿，无副标题。
+    /// 启动横幅：实心块字 CHUANG，字母间距约 10px，整行居中，雷蛇绿。
     fn push_startup_banner(&mut self) {
-        // 线框感 / 镂空（非实心 █），体量大但透气
-        const LOGO: &[&str] = &[
-            r"   _____ _                               ",
-            r"  / ____| |                              ",
-            r" | |    | |__  _   _  __ _ _ __   __ _   ",
-            r" | |    | '_ \| | | |/ _` | '_ \ / _` |  ",
-            r" | |____| | | | |_| | (_| | | | | (_| |  ",
-            r"  \_____|_| |_|\__,_|\__,_|_| |_|\__, |  ",
-            r"                                 |___/   ",
-        ];
         self.lines.push(TranscriptLine {
             kind: LineKind::Meta,
             text: String::new(),
         });
-        for row in LOGO {
+        for row in compose_chuang_banner() {
             self.lines.push(TranscriptLine {
                 kind: LineKind::Banner,
-                // 存原始行；居中在 draw 时按终端宽度做
-                text: row.trim_end().to_string(),
+                text: row,
             });
         }
         self.lines.push(TranscriptLine {
@@ -784,6 +773,106 @@ fn center_line(s: &str, width: usize) -> String {
     format!("{}{s}", " ".repeat(left))
 }
 
+/// 字母间距：2 个半角格 ≈ 终端里约 10px（随字号略变）。
+const LETTER_GAP: &str = "  ";
+
+/// 实心 7×7 字模（OpenCode/CLI 常见 block 体），对齐不歪。
+/// 每行等宽，用 █ 填实，空位用空格。
+fn letter_glyphs() -> [&'static [&'static str]; 6] {
+    // C H U A N G — 每字 7 列 × 7 行
+    [
+        // C
+        &[
+            " █████ ",
+            "██   ██",
+            "██     ",
+            "██     ",
+            "██     ",
+            "██   ██",
+            " █████ ",
+        ],
+        // H
+        &[
+            "██   ██",
+            "██   ██",
+            "██   ██",
+            "███████",
+            "██   ██",
+            "██   ██",
+            "██   ██",
+        ],
+        // U
+        &[
+            "██   ██",
+            "██   ██",
+            "██   ██",
+            "██   ██",
+            "██   ██",
+            "██   ██",
+            " █████ ",
+        ],
+        // A
+        &[
+            "  ███  ",
+            " ██ ██ ",
+            "██   ██",
+            "███████",
+            "██   ██",
+            "██   ██",
+            "██   ██",
+        ],
+        // N
+        &[
+            "██   ██",
+            "███  ██",
+            "████ ██",
+            "██ ████",
+            "██  ███",
+            "██   ██",
+            "██   ██",
+        ],
+        // G
+        &[
+            " █████ ",
+            "██   ██",
+            "██     ",
+            "██ ████",
+            "██   ██",
+            "██   ██",
+            " █████ ",
+        ],
+    ]
+}
+
+fn compose_chuang_banner() -> Vec<String> {
+    let glyphs = letter_glyphs();
+    let rows = glyphs[0].len();
+    // 校验字模等高、等宽，避免「歪」
+    let width = glyphs[0][0].chars().count();
+    for (li, letter) in glyphs.iter().enumerate() {
+        assert_eq!(letter.len(), rows, "letter {li} row count");
+        for (ri, line) in letter.iter().enumerate() {
+            assert_eq!(
+                line.chars().count(),
+                width,
+                "letter {li} row {ri} width"
+            );
+        }
+    }
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut line = String::new();
+        for (i, letter) in glyphs.iter().enumerate() {
+            if i > 0 {
+                line.push_str(LETTER_GAP);
+            }
+            line.push_str(letter[r]);
+        }
+        out.push(line);
+    }
+    out
+}
+
 fn thinking_title() -> String {
     // Animate dots so it feels alive while the model works.
     let n = SystemTime::now()
@@ -885,17 +974,31 @@ fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
 }
 
 fn display_width(s: &str) -> usize {
-    s.chars()
-        .map(|c| {
-            if c <= '\u{1f}' {
-                0
-            } else if c <= '\u{7e}' {
-                1
-            } else {
-                2
-            }
-        })
-        .sum()
+    s.chars().map(char_display_width).sum()
+}
+
+/// 半角 1、全角 CJK 2；█ 等区块字符按 1（否则横幅居中会歪）。
+fn char_display_width(c: char) -> usize {
+    if c <= '\u{1f}' || c == '\u{7f}' {
+        return 0;
+    }
+    if c <= '\u{7e}' {
+        return 1;
+    }
+    // East-Asian wide (approx.) — not box/block drawing.
+    matches!(
+        c,
+        '\u{1100}'..='\u{115F}'
+            | '\u{2E80}'..='\u{A4CF}'
+            | '\u{AC00}'..='\u{D7A3}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FE10}'..='\u{FE6F}'
+            | '\u{FF01}'..='\u{FF60}'
+            | '\u{FFE0}'..='\u{FFE6}'
+            | '\u{1F300}'..='\u{1FAFF}'
+    )
+    .then_some(2)
+    .unwrap_or(1)
 }
 
 fn truncate_to_width(s: &str, max: usize) -> String {
