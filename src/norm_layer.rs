@@ -462,6 +462,44 @@ pub fn norm_context_segments(user_input: &str) -> Vec<ContextSegment> {
     segments
 }
 
+/// After packing/compaction: if always-on norm cards were dropped, pin them back.
+/// Call every pack so long tool loops and summary compaction cannot lose doctrine.
+pub fn repin_always_on_norms(packed: &mut crate::context_engine::PackedContext) {
+    let mut insert_at = packed
+        .segments
+        .iter()
+        .position(|segment| segment.id == "system-core")
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+
+    if !packed
+        .segments
+        .iter()
+        .any(|segment| segment.id == DOCTRINE_CARD_ID)
+    {
+        let card = doctrine_card_segment();
+        packed.total_tokens = packed
+            .total_tokens
+            .saturating_add(card.tokens.unwrap_or(0));
+        packed.dropped_ids.retain(|id| id != DOCTRINE_CARD_ID);
+        packed.segments.insert(insert_at, card);
+        insert_at = insert_at.saturating_add(1);
+    }
+
+    if !packed
+        .segments
+        .iter()
+        .any(|segment| segment.id == SKILL_INDEX_ID)
+    {
+        let index = skill_index_segment();
+        packed.total_tokens = packed
+            .total_tokens
+            .saturating_add(index.tokens.unwrap_or(0));
+        packed.dropped_ids.retain(|id| id != SKILL_INDEX_ID);
+        packed.segments.insert(insert_at, index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +572,27 @@ mod tests {
         assert!(segs.iter().any(|s| s.id == "norm-skill-gen-eval-separate"));
         let code = on_demand_skill_segments("修一下编译错误");
         assert!(!code.iter().any(|s| s.id == "norm-skill-gen-eval-separate"));
+    }
+
+    #[test]
+    fn repin_restores_missing_always_on_cards() {
+        use crate::context_engine::PackedContext;
+        let mut packed = PackedContext {
+            segments: vec![],
+            total_tokens: 0,
+            dropped_ids: vec![DOCTRINE_CARD_ID.to_string(), SKILL_INDEX_ID.to_string()],
+            drop_reasons: vec![],
+            budget_exceeded: false,
+            budget_exceeded_reasons: vec![],
+            working_reservation: None,
+            trace: vec![],
+            compaction_events: vec![],
+        };
+        repin_always_on_norms(&mut packed);
+        assert!(packed.segments.iter().any(|s| s.id == DOCTRINE_CARD_ID));
+        assert!(packed.segments.iter().any(|s| s.id == SKILL_INDEX_ID));
+        assert!(!packed.dropped_ids.iter().any(|id| id == DOCTRINE_CARD_ID));
+        assert!(!packed.dropped_ids.iter().any(|id| id == SKILL_INDEX_ID));
+        assert!(packed.total_tokens > 0);
     }
 }

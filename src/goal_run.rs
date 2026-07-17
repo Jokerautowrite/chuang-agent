@@ -12,6 +12,9 @@ pub struct GoalRun {
     pub validation_plan: GoalValidationPlan,
     pub integration_policy: GoalIntegrationPolicy,
     pub checkpoint_log: Vec<GoalCheckpoint>,
+    /// Wall-clock start for hard max_minutes budget. Optional for old on-disk runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,9 +120,48 @@ impl GoalRun {
             validation_plan,
             integration_policy,
             checkpoint_log: Vec::new(),
+            started_at: Some(current_rfc3339_timestamp()),
         };
         run.validate()?;
         Ok(run)
+    }
+
+    /// Hard stop when wall-clock `max_minutes` budget is exhausted.
+    /// Returns `Ok(())` if budget unset, `started_at` missing (legacy runs), or still within budget.
+    pub fn assert_time_budget_allows_continue(&self) -> Result<(), GoalRunError> {
+        let Some(max_minutes) = self.goal_spec.budget.max_minutes else {
+            return Ok(());
+        };
+        let Some(started_at) = self.started_at.as_deref() else {
+            // Legacy goal JSON without started_at — do not block mid-flight runs.
+            return Ok(());
+        };
+        let started = chrono::DateTime::parse_from_rfc3339(started_at).map_err(|_| {
+            GoalRunError::new(
+                "started_at",
+                "started_at must be RFC3339 when time budget is enforced",
+            )
+        })?;
+        let elapsed = chrono::Utc::now().signed_duration_since(started.with_timezone(&chrono::Utc));
+        let elapsed_minutes = elapsed.num_minutes().max(0) as u64;
+        if elapsed_minutes >= u64::from(max_minutes) {
+            return Err(GoalRunError::new(
+                "budget.max_minutes",
+                &format!(
+                    "goal time budget exhausted: max_minutes={max_minutes} elapsed_minutes={elapsed_minutes} started_at={started_at}"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Cap how many worker runs a single `goal step` may execute.
+    pub fn step_run_cap(&self, requested_max_runs: usize) -> usize {
+        let requested = requested_max_runs.max(1);
+        match self.goal_spec.budget.max_tool_rounds {
+            Some(cap) if cap > 0 => requested.min(cap),
+            _ => requested,
+        }
     }
 
     pub fn record_checkpoint(&mut self, checkpoint: GoalCheckpoint) -> Result<(), GoalRunError> {

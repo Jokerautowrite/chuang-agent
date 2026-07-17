@@ -8,3 +8,4 @@
 6. Current work（刚做到哪）
 7. Next step（须紧贴用户最近明确要求）
 安全相关约束必须原样保留。不要发明用户没说过的批准。
+always-on 规矩由 runtime 在 pack 后 repin，交接只补工作态，不重抄 doctrine 全文。

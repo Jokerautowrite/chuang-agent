@@ -153,6 +153,21 @@ else
   bad "10 薄规范资产" "缺文件"
 fi
 
+# 11 repin always-on norms after compaction
+if cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib repin_restores 2>"$TMPDIR_RUN/repin.err"; then
+  ok "11 repin_always_on_norms（compact 后复注）"
+else
+  bad "11 repin_always_on_norms" "$(tail -c 160 "$TMPDIR_RUN/repin.err" | tr '\n' ' ')"
+fi
+
+# 12 goal hard budget (time + step cap)
+if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test goal_run_tests \
+  goal_run_ 2>"$TMPDIR_RUN/budget.err"; then
+  ok "12 goal 硬预算（max_minutes + step_run_cap）"
+else
+  bad "12 goal 硬预算" "$(tail -c 160 "$TMPDIR_RUN/budget.err" | tr '\n' ' ')"
+fi
+
 echo
 echo "=== 汇总 PASS=$PASS FAIL=$FAIL SKIP=$SKIP ==="
 cat "$LOG"

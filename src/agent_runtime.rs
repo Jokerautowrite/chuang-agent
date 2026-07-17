@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::capability_primer::capability_primer_segment;
-use crate::norm_layer::norm_context_segments;
+use crate::norm_layer::{norm_context_segments, repin_always_on_norms};
 use crate::context_engine::{
     BudgetExceededReason, ContextBudget, ContextEngineKind, ContextPackError, ContextSegment,
     DropReason, PackedContext, SegmentSource,
@@ -230,13 +230,16 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
-        self.context_engine_kind.pack(
+        let mut packed = self.context_engine_kind.pack(
             request
                 .context_budget
                 .clone()
                 .unwrap_or_else(default_context_budget),
             segments,
-        )
+        )?;
+        // Compact/trim must not erase always-on harness cards.
+        repin_always_on_norms(&mut packed);
+        Ok(packed)
     }
 }
 
@@ -301,7 +304,9 @@ pub fn debug_pack_for_test(
     segments.extend(norm_context_segments(user_input));
     segments.push(build_working_segment(user_input));
     segments.extend(recall_segments.iter().cloned());
-    ContextEngineKind::DeterministicBudget.pack(context_budget, segments)
+    let mut packed = ContextEngineKind::DeterministicBudget.pack(context_budget, segments)?;
+    repin_always_on_norms(&mut packed);
+    Ok(packed)
 }
 
 fn build_system_segment() -> ContextSegment {

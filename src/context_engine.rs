@@ -654,6 +654,10 @@ fn is_reserved_segment(segment: &ContextSegment) -> bool {
     if matches!(segment.source, SegmentSource::System) {
         return true;
     }
+    // Always-on / on-demand norms must survive trim/compaction (thin harness pin).
+    if segment.id.starts_with("norm-") {
+        return true;
+    }
 
     match segment.id.as_str() {
         "system-capabilities"
@@ -667,6 +671,9 @@ fn is_reserved_segment(segment: &ContextSegment) -> bool {
                     | "tool_protocol"
                     | "session_context"
                     | "recent_conversation_history"
+                    | "doctrine_card"
+                    | "skill_index"
+                    | "skill_ondemand"
             )
         ),
     }

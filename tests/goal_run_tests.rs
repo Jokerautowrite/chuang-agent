@@ -771,3 +771,36 @@ fn assert_rfc3339_timestamp(value: Option<&str>) {
     let value = value.expect("checkpoint should include created_at");
     chrono::DateTime::parse_from_rfc3339(value).expect("created_at should be RFC3339");
 }
+
+#[test]
+fn goal_run_sets_started_at_and_caps_step_runs() {
+    let run = sample_goal_run();
+    assert!(run.started_at.is_some());
+    assert_eq!(run.step_run_cap(100), 8); // mainline_mvp max_tool_rounds=8
+    assert_eq!(run.step_run_cap(3), 3);
+    run.assert_time_budget_allows_continue()
+        .expect("fresh run should be within 60 minutes");
+}
+
+#[test]
+fn goal_run_time_budget_blocks_when_elapsed() {
+    let mut run = sample_goal_run();
+    run.goal_spec.budget.max_minutes = Some(1);
+    // two hours ago
+    run.started_at = Some(
+        (chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339(),
+    );
+    let err = run
+        .assert_time_budget_allows_continue()
+        .expect_err("should exhaust time budget");
+    assert_eq!(err.field, "budget.max_minutes");
+}
+
+#[test]
+fn goal_run_time_budget_skips_legacy_without_started_at() {
+    let mut run = sample_goal_run();
+    run.started_at = None;
+    run.goal_spec.budget.max_minutes = Some(1);
+    run.assert_time_budget_allows_continue()
+        .expect("legacy runs without started_at must not hard-block");
+}

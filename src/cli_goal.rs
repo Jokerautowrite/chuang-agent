@@ -217,6 +217,8 @@ fn goal_dispatch_command(args: &[String]) -> Result<(), String> {
     let run = store
         .load(&request.goal_id)
         .map_err(format_goal_run_error)?;
+    run.assert_time_budget_allows_continue()
+        .map_err(format_goal_run_error)?;
     let receipt = dispatch_goal_run(
         &run,
         &request.root,
@@ -386,8 +388,11 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
 fn goal_step_command(args: &[String]) -> Result<(), String> {
     let request = parse_goal_step(args)?;
     let store = GoalRunStore::new(&request.root);
-    store
+    let goal_run = store
         .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    goal_run
+        .assert_time_budget_allows_continue()
         .map_err(format_goal_run_error)?;
     let manifest = load_goal_dispatch_manifest(&request.root, &request.goal_id)
         .map_err(format_goal_dispatch_error)?;
@@ -396,7 +401,8 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|dispatch| dispatch.run_id.clone())
         .collect::<BTreeSet<_>>();
-    let max_runs = request.max_runs.unwrap_or(allowed_run_ids.len().max(1));
+    let requested_max_runs = request.max_runs.unwrap_or(allowed_run_ids.len().max(1));
+    let max_runs = goal_run.step_run_cap(requested_max_runs);
     let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&request.queue_root))
         .map_err(dispatch_error_from_queue)?;
     let run_once_request = request.run_once_request();
