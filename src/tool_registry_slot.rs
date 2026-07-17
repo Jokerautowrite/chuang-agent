@@ -70,8 +70,15 @@ const KEYBOARD_SCHEMA_FIELDS: &[&str] = &["text", "secret"];
 const WAIT_SCHEMA_FIELDS: &[&str] = &["millis"];
 const HUMAN_SUSPEND_SCHEMA_FIELDS: &[&str] = &["reason", "prompt"];
 const MEMORY_RECALL_SCHEMA_FIELDS: &[&str] = &["query", "session_id", "limit"];
-const SPAWN_SUBAGENT_SCHEMA_FIELDS: &[&str] =
-    &["task", "agent_name", "policy", "token_budget", "timeout_ms"];
+const SPAWN_SUBAGENT_SCHEMA_FIELDS: &[&str] = &[
+    "task",
+    "tasks",
+    "agent_name",
+    "policy",
+    "token_budget",
+    "timeout_ms",
+    "max_concurrency",
+];
 const BROWSER_READ_SCHEMA_FIELDS: &[&str] = &[];
 const BROWSER_NAVIGATE_SCHEMA_FIELDS: &[&str] = &["url"];
 

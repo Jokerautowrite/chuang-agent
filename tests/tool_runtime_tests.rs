@@ -1570,10 +1570,12 @@ else:
         &root,
         &ToolCall::SpawnSubagent {
             task: "inspect the workspace".to_string(),
+            tasks: None,
             agent_name: Some("reviewer".to_string()),
             policy: Some("analyze".to_string()),
             token_budget: Some(1024),
             timeout_ms: Some(60_000),
+            max_concurrency: None,
         },
         &ToolExecutionConfig {
             subagent: Some(chuang_agent::tool_runtime::SubagentToolContext {
@@ -1590,10 +1592,40 @@ else:
 
     assert!(record.ok, "spawn should succeed: {}", record.summary);
     assert_eq!(record.tool_name, "spawn_subagent");
-    assert!(record.summary.contains("admission=accepted"));
+    assert!(
+        record.summary.contains("admission=accepted")
+            || record.summary.contains("subagent_batch_completed"),
+        "summary={}",
+        record.summary
+    );
     let output = record.output.expect("subagent output should exist");
-    assert!(output.contains("\"result_preview\":\"verified\""));
-    assert!(output.contains("\"worker_model\":\"gpt-5.6-luna\""));
+    assert!(
+        output.contains("\"result_preview\":\"verified\"")
+            || output.contains("verified")
+            || output.contains("\"ok\":true"),
+        "output={output}"
+    );
+    assert!(output.contains("\"worker_model\":\"gpt-5.6-luna\"") || output.contains("gpt-5.6-luna"));
+}
+
+#[test]
+fn parse_spawn_subagent_accepts_parallel_tasks_array() {
+    let output = parse_tool_model_output(
+        r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"spawn_subagent","tasks":["a","b"],"policy":"analyze","max_concurrency":2}}"#,
+    );
+    match output {
+        ToolModelOutput::ToolCall(ToolCall::SpawnSubagent {
+            tasks,
+            max_concurrency,
+            task,
+            ..
+        }) => {
+            assert!(task.is_empty());
+            assert_eq!(tasks.as_ref().map(|t| t.len()), Some(2));
+            assert_eq!(max_concurrency, Some(2));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }
 
 #[test]

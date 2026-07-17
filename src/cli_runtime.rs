@@ -1326,7 +1326,13 @@ fn human_tool_activity_title(call: &ToolCall) -> &'static str {
         ToolCall::ApplyPatch { .. } => "应用补丁",
         ToolCall::ShellExec { command, .. } => human_shell_activity_title(command),
         ToolCall::MemoryRecall { .. } => "检索记忆",
-        ToolCall::SpawnSubagent { .. } => "派生子代理",
+        ToolCall::SpawnSubagent { tasks, .. } => {
+            if tasks.as_ref().map(|t| t.len()).unwrap_or(0) > 1 {
+                "并行派生子代理"
+            } else {
+                "派生子代理"
+            }
+        }
         ToolCall::BrowserRead { .. } => "读取网页",
         ToolCall::BrowserNavigate { .. } => "打开网页",
     }
@@ -1351,7 +1357,14 @@ fn human_tool_activity_detail(call: &ToolCall) -> Option<String> {
         ToolCall::ApplyPatch { .. } => Some("按补丁内容更新代码或文本".to_string()),
         ToolCall::ShellExec { command, .. } => Some(human_shell_activity_detail(command)),
         ToolCall::MemoryRecall { .. } => Some("检索相关记忆和历史线索".to_string()),
-        ToolCall::SpawnSubagent { .. } => Some("把子任务派给独立子代理执行".to_string()),
+        ToolCall::SpawnSubagent { tasks, .. } => {
+            let n = tasks.as_ref().map(|t| t.len()).unwrap_or(0);
+            if n > 1 {
+                Some(format!("并行派出 {n} 个工人子代理并回收报告"))
+            } else {
+                Some("把子任务派给独立子代理执行".to_string())
+            }
+        }
         ToolCall::BrowserRead { .. } => Some("通过无头浏览器读取当前页 URL/标题/正文".to_string()),
         ToolCall::BrowserNavigate { url } => {
             Some(format!("打开网页并读取内容：{}", url.trim()))

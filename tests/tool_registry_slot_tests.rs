@@ -159,7 +159,15 @@ fn descriptor_namespaces_and_schema_fields_match_the_tool_surface() {
     assert_descriptor_shape(
         "spawn_subagent",
         "subagent",
-        &["task", "agent_name", "policy", "token_budget", "timeout_ms"],
+        &[
+            "task",
+            "tasks",
+            "agent_name",
+            "policy",
+            "token_budget",
+            "timeout_ms",
+            "max_concurrency",
+        ],
     );
     assert_descriptor_shape("browser_read", "browser", &[]);
     assert_descriptor_shape("browser_navigate", "browser", &["url"]);

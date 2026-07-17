@@ -92,7 +92,12 @@ pub enum ToolCall {
         limit: Option<usize>,
     },
     SpawnSubagent {
+        /// Single task (legacy / simple).
+        #[serde(default)]
         task: String,
+        /// Parallel tasks: when non-empty, each item is one worker job (preferred for speed).
+        #[serde(default)]
+        tasks: Option<Vec<String>>,
         #[serde(default)]
         agent_name: Option<String>,
         #[serde(default)]
@@ -101,6 +106,9 @@ pub enum ToolCall {
         token_budget: Option<u16>,
         #[serde(default)]
         timeout_ms: Option<u64>,
+        /// How many workers to run at once (default min(n,4), max 8).
+        #[serde(default)]
+        max_concurrency: Option<u8>,
     },
     /// Read current page URL/title/DOM via managed headless Chrome CDP.
     BrowserRead {},
@@ -917,19 +925,23 @@ fn execute_tool_call_with_registry_and_config(
         } => execute_memory_recall(registry, call, query, session_id, *limit, &config.memory),
         ToolCall::SpawnSubagent {
             task,
+            tasks,
             agent_name,
             policy,
             token_budget,
             timeout_ms,
+            max_concurrency,
         } => execute_spawn_subagent(
             workspace_root,
             registry,
             call,
             task,
+            tasks.as_deref(),
             agent_name.as_deref(),
             policy.as_deref(),
             *token_budget,
             *timeout_ms,
+            *max_concurrency,
             &config.subagent,
         ),
         ToolCall::BrowserRead {} => execute_browser_read(registry, call),
@@ -2002,17 +2014,33 @@ fn execute_spawn_subagent(
     registry: &AtomicToolRegistry,
     call: &ToolCall,
     task: &str,
+    tasks: Option<&[String]>,
     agent_name: Option<&str>,
     policy: Option<&str>,
     token_budget: Option<u16>,
     timeout_ms: Option<u64>,
+    max_concurrency: Option<u8>,
     subagent: &Option<SubagentToolContext>,
 ) -> ToolExecutionRecord {
     let Some(subagent) = subagent else {
         return failed_record(registry, call, "subagent_runtime_unavailable".to_string());
     };
-    if task.trim().is_empty() {
+
+    let mut job_list: Vec<String> = tasks
+        .unwrap_or(&[])
+        .iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if job_list.is_empty() && !task.trim().is_empty() {
+        job_list.push(task.trim().to_string());
+    }
+    if job_list.is_empty() {
         return failed_record(registry, call, "subagent_task_empty".to_string());
+    }
+    // Safety cap: one tool call should not fork dozens of workers.
+    if job_list.len() > 8 {
+        job_list.truncate(8);
     }
 
     let policy = policy.unwrap_or("analyze").trim().to_ascii_lowercase();
@@ -2026,13 +2054,18 @@ fn execute_spawn_subagent(
     let agent_name = sanitize_subagent_name(agent_name.unwrap_or("worker"));
     let token_budget = token_budget.unwrap_or(2048).clamp(256, 16_384);
     let timeout_ms = timeout_ms.unwrap_or(300_000).clamp(30_000, 900_000);
+    let concurrency = max_concurrency
+        .map(|v| v as usize)
+        .unwrap_or_else(|| job_list.len().min(4))
+        .clamp(1, 8)
+        .min(job_list.len());
+
     let run_suffix = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => format!("{}-{}", std::process::id(), duration.as_nanos()),
         Err(error) => {
             return failed_record(registry, call, format!("subagent_clock_failed: {error}"))
         }
     };
-    let task_id = format!("tool-subagent-{run_suffix}");
     let queue_root = subagent.queue_root.join(&run_suffix);
     let config_path = subagent.config_path.display().to_string();
     let queue_root_text = queue_root.display().to_string();
@@ -2040,47 +2073,68 @@ fn execute_spawn_subagent(
     let token_budget_text = token_budget.to_string();
     let timeout_text = timeout_ms.to_string();
 
-    let dispatch_args = vec![
-        "subagent",
-        "dispatch",
-        "--config",
-        config_path.as_str(),
-        "--subagent-queue-root",
-        queue_root_text.as_str(),
-        "--task",
-        task.trim(),
-        "--task-id",
-        task_id.as_str(),
-        "--agent-name",
-        agent_name.as_str(),
-        "--policy",
-        policy.as_str(),
-        "--token-budget",
-        token_budget_text.as_str(),
-        "--idle-timeout-ms",
-        timeout_text.as_str(),
-        "--requires-capability",
-        subagent.worker_capability.as_str(),
-        "--json",
-    ];
-    let dispatch = match run_subagent_cli_json(workspace_root, &dispatch_args, timeout_ms, subagent)
-    {
-        Ok(value) => value,
-        Err(error) => return failed_record(registry, call, error),
-    };
-    let run_id = dispatch
-        .get("run_id")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    if run_id.is_empty() {
-        return failed_record(
-            registry,
-            call,
-            "subagent_dispatch_missing_run_id".to_string(),
-        );
+    // Prepend dispatch-only worker brief (category C — not main-session doctrine dump).
+    let wrapped_jobs: Vec<String> = job_list
+        .iter()
+        .map(|t| crate::norm_layer::wrap_task_for_worker(t))
+        .collect();
+
+    let mut run_ids: Vec<String> = Vec::new();
+    let mut task_ids: Vec<String> = Vec::new();
+    for (index, wrapped) in wrapped_jobs.iter().enumerate() {
+        let task_id = format!("tool-subagent-{run_suffix}-{index}");
+        let name = if job_list.len() == 1 {
+            agent_name.clone()
+        } else {
+            format!("{agent_name}-{}", index + 1)
+        };
+        let dispatch_args = vec![
+            "subagent".to_string(),
+            "dispatch".to_string(),
+            "--config".to_string(),
+            config_path.clone(),
+            "--subagent-queue-root".to_string(),
+            queue_root_text.clone(),
+            "--task".to_string(),
+            wrapped.clone(),
+            "--task-id".to_string(),
+            task_id.clone(),
+            "--agent-name".to_string(),
+            name,
+            "--policy".to_string(),
+            policy.clone(),
+            "--token-budget".to_string(),
+            token_budget_text.clone(),
+            "--idle-timeout-ms".to_string(),
+            timeout_text.clone(),
+            "--requires-capability".to_string(),
+            subagent.worker_capability.clone(),
+            "--json".to_string(),
+        ];
+        let dispatch_refs: Vec<&str> = dispatch_args.iter().map(String::as_str).collect();
+        let dispatch =
+            match run_subagent_cli_json(workspace_root, &dispatch_refs, timeout_ms, subagent) {
+                Ok(value) => value,
+                Err(error) => return failed_record(registry, call, error),
+            };
+        let run_id = dispatch
+            .get("run_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if run_id.is_empty() {
+            return failed_record(
+                registry,
+                call,
+                format!("subagent_dispatch_missing_run_id index={index}"),
+            );
+        }
+        run_ids.push(run_id);
+        task_ids.push(task_id);
     }
 
+    let max_runs_text = job_list.len().to_string();
+    let concurrency_text = concurrency.to_string();
     let run_args = vec![
         "subagent",
         "run-loop",
@@ -2097,88 +2151,111 @@ fn execute_spawn_subagent(
         "--capability",
         subagent.worker_capability.as_str(),
         "--max-runs",
-        "1",
+        max_runs_text.as_str(),
         "--max-concurrency",
-        "1",
+        concurrency_text.as_str(),
         "--approve-exec",
         "--json",
     ];
-    let run = match run_subagent_cli_json(
-        workspace_root,
-        &run_args,
-        timeout_ms.saturating_add(30_000),
-        subagent,
-    ) {
+    let loop_timeout = timeout_ms
+        .saturating_mul(job_list.len() as u64)
+        .saturating_div(concurrency as u64)
+        .saturating_add(60_000);
+    let run = match run_subagent_cli_json(workspace_root, &run_args, loop_timeout, subagent) {
         Ok(value) => value,
         Err(error) => return failed_record(registry, call, error),
     };
-    if run.get("ran_count").and_then(serde_json::Value::as_u64) != Some(1) {
-        return failed_record(
-            registry,
-            call,
-            format!("subagent_runner_did_not_run run_id={run_id}"),
-        );
-    }
-
-    let collect_args = vec![
-        "subagent",
-        "collect",
-        "--config",
-        config_path.as_str(),
-        "--subagent-queue-root",
-        queue_root_text.as_str(),
-        "--run-id",
-        run_id.as_str(),
-        "--json",
-    ];
-    let collected = match run_subagent_cli_json(workspace_root, &collect_args, 30_000, subagent) {
-        Ok(value) => value,
-        Err(error) => return failed_record(registry, call, error),
-    };
-    let accepted = collected
-        .pointer("/report_admission/status")
-        .and_then(enum_json_name)
-        .as_deref()
-        == Some("Accepted");
-    let report_status = collected
-        .pointer("/report/status")
-        .and_then(enum_json_name)
-        .unwrap_or_else(|| "missing".to_string());
-    let summary = collected
-        .pointer("/report/summary")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("subagent returned no summary");
-    let stdout_preview = collected
-        .pointer("/report/stdout_preview")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    if !accepted || report_status != "Success" {
+    let ran = run.get("ran_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    if ran < job_list.len() as u64 {
         return failed_record(
             registry,
             call,
             format!(
-                "subagent_failed run_id={run_id} status={report_status} admission_accepted={accepted} summary={}",
-                redact_sensitive_text("subagent_summary", summary).text
+                "subagent_runner_incomplete expected={} ran={ran} concurrency={concurrency}",
+                job_list.len()
             ),
         );
     }
 
+    let mut results = Vec::new();
+    let mut all_ok = true;
+    for (index, run_id) in run_ids.iter().enumerate() {
+        let collect_args = vec![
+            "subagent",
+            "collect",
+            "--config",
+            config_path.as_str(),
+            "--subagent-queue-root",
+            queue_root_text.as_str(),
+            "--run-id",
+            run_id.as_str(),
+            "--json",
+        ];
+        let collected = match run_subagent_cli_json(workspace_root, &collect_args, 30_000, subagent)
+        {
+            Ok(value) => value,
+            Err(error) => return failed_record(registry, call, error),
+        };
+        let accepted = collected
+            .pointer("/report_admission/status")
+            .and_then(enum_json_name)
+            .as_deref()
+            == Some("Accepted");
+        let report_status = collected
+            .pointer("/report/status")
+            .and_then(enum_json_name)
+            .unwrap_or_else(|| "missing".to_string());
+        let summary = collected
+            .pointer("/report/summary")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("subagent returned no summary");
+        let stdout_preview = collected
+            .pointer("/report/stdout_preview")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let ok = accepted && report_status == "Success";
+        if !ok {
+            all_ok = false;
+        }
+        results.push(serde_json::json!({
+            "run_id": run_id,
+            "task_id": task_ids.get(index),
+            "task_preview": redact_sensitive_text("subagent_task", &job_list[index]).text,
+            "status": report_status,
+            "admission": if accepted { "accepted" } else { "rejected" },
+            "ok": ok,
+            "summary": redact_sensitive_text("subagent_summary", summary).text,
+            "result_preview": redact_sensitive_text("subagent_output", stdout_preview).text,
+        }));
+    }
+
     let output = serde_json::json!({
-        "run_id": run_id,
-        "agent_id": dispatch.get("agent_id"),
-        "task_id": task_id,
-        "status": report_status,
-        "admission": "accepted",
-        "summary": redact_sensitive_text("subagent_summary", summary).text,
-        "result_preview": redact_sensitive_text("subagent_output", stdout_preview).text,
+        "worker_count": job_list.len(),
+        "max_concurrency": concurrency,
         "worker_model": subagent.worker_model,
         "workspace_root": workspace_root.display().to_string(),
+        "results": results,
     })
     .to_string();
+
+    if !all_ok {
+        return failed_record(
+            registry,
+            call,
+            format!(
+                "subagent_batch_partial_failure workers={} concurrency={concurrency} detail={output}",
+                job_list.len()
+            ),
+        );
+    }
+
     success_record(
         registry,
         call,
-        format!("subagent_completed run_id={run_id} admission=accepted"),
+        format!(
+            "subagent_batch_completed workers={} concurrency={concurrency} admission=accepted",
+            job_list.len()
+        ),
         Some(output),
         false,
     )
@@ -2388,16 +2465,25 @@ fn redacted_tool_call(call: &ToolCall) -> ToolCall {
         },
         ToolCall::SpawnSubagent {
             task,
+            tasks,
             agent_name,
             policy,
             token_budget,
             timeout_ms,
+            max_concurrency,
         } => ToolCall::SpawnSubagent {
             task: redact_sensitive_text("subagent_task", task).text,
+            tasks: tasks.as_ref().map(|items| {
+                items
+                    .iter()
+                    .map(|item| redact_sensitive_text("subagent_task", item).text)
+                    .collect()
+            }),
             agent_name: agent_name.clone(),
             policy: policy.clone(),
             token_budget: *token_budget,
             timeout_ms: *timeout_ms,
+            max_concurrency: *max_concurrency,
         },
         _ => call.clone(),
     }
@@ -2857,16 +2943,29 @@ fn tool_target(workspace_root: &Path, call: &ToolCall) -> String {
         ),
         ToolCall::SpawnSubagent {
             task,
+            tasks,
             agent_name,
             policy,
+            max_concurrency,
             ..
-        } => format!(
-            "{}::subagent name={} policy={} task={}",
-            workspace_root.display(),
-            agent_name.as_deref().unwrap_or("worker"),
-            policy.as_deref().unwrap_or("analyze"),
-            redact_sensitive_text("subagent_task", task).text.trim()
-        ),
+        } => {
+            let n = tasks
+                .as_ref()
+                .map(|t| t.len())
+                .filter(|n| *n > 0)
+                .unwrap_or(if task.trim().is_empty() { 0 } else { 1 });
+            format!(
+                "{}::subagent name={} policy={} workers={} concurrency={} task={}",
+                workspace_root.display(),
+                agent_name.as_deref().unwrap_or("worker"),
+                policy.as_deref().unwrap_or("analyze"),
+                n,
+                max_concurrency
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "auto".to_string()),
+                redact_sensitive_text("subagent_task", task).text.trim()
+            )
+        }
         ToolCall::BrowserRead {} => "browser::read_current_page".to_string(),
         ToolCall::BrowserNavigate { url } => format!("browser::navigate url={}", url.trim()),
     }
@@ -2914,22 +3013,35 @@ fn tool_summary(call: &ToolCall) -> String {
         ),
         ToolCall::SpawnSubagent {
             task,
+            tasks,
             agent_name,
             policy,
             token_budget,
             timeout_ms,
-        } => format!(
-            "spawn_subagent name={} policy={} token_budget={} timeout_ms={} task={}",
-            agent_name.as_deref().unwrap_or("worker"),
-            policy.as_deref().unwrap_or("analyze"),
-            token_budget
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "2048".to_string()),
-            timeout_ms
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "300000".to_string()),
-            redact_sensitive_text("subagent_task", task).text.trim()
-        ),
+            max_concurrency,
+        } => {
+            let n = tasks
+                .as_ref()
+                .map(|t| t.iter().filter(|s| !s.trim().is_empty()).count())
+                .filter(|n| *n > 0)
+                .unwrap_or(if task.trim().is_empty() { 0 } else { 1 });
+            format!(
+                "spawn_subagent name={} policy={} workers={} concurrency={} token_budget={} timeout_ms={} task={}",
+                agent_name.as_deref().unwrap_or("worker"),
+                policy.as_deref().unwrap_or("analyze"),
+                n,
+                max_concurrency
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "auto".to_string()),
+                token_budget
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "2048".to_string()),
+                timeout_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "300000".to_string()),
+                redact_sensitive_text("subagent_task", task).text.trim()
+            )
+        }
         ToolCall::BrowserRead {} => "browser_read".to_string(),
         ToolCall::BrowserNavigate { url } => format!("browser_navigate url={}", url.trim()),
     }

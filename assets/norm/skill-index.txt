@@ -1,0 +1,5 @@
+【按需 skill 索引·非全文】命中意图时系统会注入对应短 skill；完整架构见 docs/。
+- coding-dispatch：写代码/重构/修测试 → 派工人并行，不自己死磕手感
+- verify-before-claim：声称完成前要有命令/测试/读文件证据
+- readonly-triage：只读排查、定位问题、给方案不改生产
+磁盘：docs/blueprint-v1.md、docs/prompt-doctrine.md、docs/core-boundary.md

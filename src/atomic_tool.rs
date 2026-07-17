@@ -289,7 +289,7 @@ impl AtomicToolRegistry {
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
 优先使用 GA 原子工具名：{mapped}。\n\
 辅助工具：list_dir, open_app, apply_patch, memory_recall, spawn_subagent, browser_read, browser_navigate。兼容旧名：read_file, write_file, shell_exec。\n\
-spawn_subagent 会启动隔离的本地 Codex 子代理，适合并行分析或工作区内实现；普通读写、构建、测试自动执行，高危动作仍由治理边界限制。子代理完成后会把经过 admission 的摘要回传本轮。\n\
+spawn_subagent 派出工人子代理（默认可并行）：单任务用 task；多任务用 tasks:[...] 与 max_concurrency（默认 min(n,4)）。任务会自动带上派工简报。不在此死磕编码手感——调度台派活、工人执行、admission 后只回收摘要。\n\
 code_execute 使用 Bash 登录 shell 执行命令；可以使用 pipefail、here-doc 和常见 Bash 语法。\n\
 无头浏览器：browser_navigate 打开 URL，browser_read 读取当前页 URL/标题/DOM 文本；依赖本机托管 headless Chrome（scripts/chuang-headless-chrome.sh 或 CHUANG_CDP_PORT）。这与桌面 screenshot/locate 不同，能拿到真实 DOM 文本。\n\
 桌面工具 open_app/mouse/keyboard/screenshot/locate 已映射到 actuator 端口；其中 screenshot / locate 是桌面只读观察工具，只用于取证；open_app / mouse / keyboard 是交互工具。真实桌面动作按 adapter、gate、allowlist、治理和审计执行；普通打开应用、点击和输入默认直接执行，不要先要求人工审批，只有删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问等高危操作才询问或拒绝。\n\
@@ -317,6 +317,7 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"appl
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"code_execute\",\"command\":\"cargo test --quiet\",\"cwd\":\".\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memory_recall\",\"query\":\"live 缺口\",\"limit\":3}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"spawn_subagent\",\"task\":\"审计测试覆盖并给出结论\",\"agent_name\":\"reviewer\",\"policy\":\"analyze\",\"timeout_ms\":300000}}}}\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"spawn_subagent\",\"tasks\":[\"只读审 Cargo.toml 包名\",\"只读列 src 顶层目录\"],\"policy\":\"analyze\",\"max_concurrency\":2,\"timeout_ms\":300000}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"open_app\",\"app_name\":\"Chrome\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"locate\",\"target\":\"screen\"}}}}\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"screenshot\",\"target\":\"screen\"}}}}\n\

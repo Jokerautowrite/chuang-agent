@@ -32,6 +32,7 @@ pub mod lifecycle;
 pub mod live_adapter_gate;
 pub mod live_subagent_rehearsal;
 pub mod mcp_fake_adapter;
+pub mod norm_layer;
 pub mod memory_admission;
 pub mod memory_policy;
 pub mod memory_recall;

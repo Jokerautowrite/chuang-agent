@@ -1,3 +1,9 @@
+# 2026-07-18 规范分层 + 并行 spawn_subagent（抄 Grok 装配，不抄 Codex 手感）
+- 新增 `docs/prompt-doctrine.md` 与 `assets/norm/`：常驻 doctrine-card / skill-index、按需 skills、仅派工 dispatch-worker-brief。
+- `norm_layer` 注入 context（优先级 253/252/200）；派工 task 自动 wrap 工人简报。
+- `spawn_subagent` 支持 `tasks[]` + `max_concurrency`（默认 min(n,4)，上限 8），run-loop 并行回收 admission 摘要。
+- 明确不抄 Codex 编码体验；快路径靠并行工人。
+
 # 2026-07-18 架构钉死：调度台原则（防死磕）
 - 明确创是调度台 / 本地 Agent OS，不是全能最强工人：不求编码/搜索/通才处处第一，要求能调用最强 agent 打工并守住记忆、治理、编排、可替换插槽。
 - 写入 `docs/blueprint-v1.md` §0.1、`docs/core-boundary.md`、`docs/pluggable-architecture-v1.md` §0.1、`AGENTS.md` Core thesis、`README.md` 当前目标；禁止在 Codex/Claude Code/Grok 主业赛道重复造轮子死磕。

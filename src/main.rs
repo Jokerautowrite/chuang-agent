@@ -2147,12 +2147,33 @@ fn approval_action_summary(call: &chuang_agent::tool_runtime::ToolCall) -> Strin
         }
         ToolCall::MemoryRecall { query, .. } => format!("检索记忆 {}", safe_preview(query)),
         ToolCall::SpawnSubagent {
-            task, agent_name, ..
-        } => format!(
-            "派发子代理 {}：{}",
-            agent_name.as_deref().unwrap_or("worker"),
-            safe_preview(task)
-        ),
+            task,
+            tasks,
+            agent_name,
+            max_concurrency,
+            ..
+        } => {
+            let n = tasks
+                .as_ref()
+                .map(|t| t.iter().filter(|s| !s.trim().is_empty()).count())
+                .filter(|n| *n > 0)
+                .unwrap_or(if task.trim().is_empty() { 0 } else { 1 });
+            if n > 1 {
+                format!(
+                    "并行派发 {} 个子代理（concurrency={}）",
+                    n,
+                    max_concurrency
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "auto".to_string())
+                )
+            } else {
+                format!(
+                    "派发子代理 {}：{}",
+                    agent_name.as_deref().unwrap_or("worker"),
+                    safe_preview(task)
+                )
+            }
+        }
         ToolCall::BrowserRead { .. } => "读取无头浏览器当前页".to_string(),
         ToolCall::BrowserNavigate { url } => format!("打开网页 {}", safe_preview(url)),
     }

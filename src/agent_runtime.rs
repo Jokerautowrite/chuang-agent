@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::capability_primer::capability_primer_segment;
+use crate::norm_layer::norm_context_segments;
 use crate::context_engine::{
     BudgetExceededReason, ContextBudget, ContextEngineKind, ContextPackError, ContextSegment,
     DropReason, PackedContext, SegmentSource,
@@ -222,8 +223,10 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         let mut segments = vec![
             build_system_segment(),
             capability_primer_segment(),
-            build_working_segment(&request.user_input),
         ];
+        // Thin always-on doctrine + skill index + at most 2 on-demand skills.
+        segments.extend(norm_context_segments(&request.user_input));
+        segments.push(build_working_segment(&request.user_input));
         segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
@@ -294,14 +297,16 @@ pub fn debug_pack_for_test(
     let mut segments = vec![
         build_system_segment(),
         capability_primer_segment(),
-        build_working_segment(user_input),
     ];
+    segments.extend(norm_context_segments(user_input));
+    segments.push(build_working_segment(user_input));
     segments.extend(recall_segments.iter().cloned());
     ContextEngineKind::DeterministicBudget.pack(context_budget, segments)
 }
 
 fn build_system_segment() -> ContextSegment {
-    let content = "你是创项目本地 Agent 内核，先闭环，再优化。".to_string();
+    let content =
+        "你是创：调度台内核。常驻规范见 doctrine-card；重活并行派工人；先闭环再优化。".to_string();
     ContextSegment {
         id: "system-core".to_string(),
         source: SegmentSource::System,
