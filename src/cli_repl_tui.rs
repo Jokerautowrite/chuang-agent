@@ -113,16 +113,17 @@ impl TuiApp {
         app
     }
 
-    /// 启动横幅：大号方块字 chuang，雷蛇绿，无副标题。
+    /// 启动横幅：大号镂空字 chuang，居中渲染，雷蛇绿，无副标题。
     fn push_startup_banner(&mut self) {
-        // Big / block style "CHUANG" (figlet-like, ~70 cols)
+        // 线框感 / 镂空（非实心 █），体量大但透气
         const LOGO: &[&str] = &[
-            r"  ██████╗██╗  ██╗██╗   ██╗ █████╗ ███╗   ██╗ ██████╗ ",
-            r" ██╔════╝██║  ██║██║   ██║██╔══██╗████╗  ██║██╔════╝ ",
-            r" ██║     ███████║██║   ██║███████║██╔██╗ ██║██║  ███╗",
-            r" ██║     ██╔══██║██║   ██║██╔══██║██║╚██╗██║██║   ██║",
-            r" ╚██████╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║╚██████╔╝",
-            r"  ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ",
+            r"   _____ _                               ",
+            r"  / ____| |                              ",
+            r" | |    | |__  _   _  __ _ _ __   __ _   ",
+            r" | |    | '_ \| | | |/ _` | '_ \ / _` |  ",
+            r" | |____| | | | |_| | (_| | | | | (_| |  ",
+            r"  \_____|_| |_|\__,_|\__,_|_| |_|\__, |  ",
+            r"                                 |___/   ",
         ];
         self.lines.push(TranscriptLine {
             kind: LineKind::Meta,
@@ -131,7 +132,8 @@ impl TuiApp {
         for row in LOGO {
             self.lines.push(TranscriptLine {
                 kind: LineKind::Banner,
-                text: (*row).to_string(),
+                // 存原始行；居中在 draw 时按终端宽度做
+                text: row.trim_end().to_string(),
             });
         }
         self.lines.push(TranscriptLine {
@@ -708,13 +710,16 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
 
 fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
     match line.kind {
-        // 启动横幅：纯品牌绿大字（Gemini / OpenCode 开场感）
-        LineKind::Banner => Line::from(Span::styled(
-            line.text.clone(),
-            Style::default()
-                .fg(BRAND)
-                .add_modifier(Modifier::BOLD),
-        )),
+        // 启动横幅：品牌绿 + 水平居中
+        LineKind::Banner => {
+            let centered = center_line(&line.text, width as usize);
+            Line::from(Span::styled(
+                centered,
+                Style::default()
+                    .fg(BRAND)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        }
         // 你的话：品牌绿字 + 淡绿底
         LineKind::User => {
             let raw = format!(" {} ", line.text);
@@ -765,6 +770,18 @@ fn pad_line_bg(s: &str, width: usize) -> String {
         return truncate_to_width(s, width);
     }
     format!("{s}{}", " ".repeat(width - w))
+}
+
+fn center_line(s: &str, width: usize) -> String {
+    if width == 0 {
+        return s.to_string();
+    }
+    let w = display_width(s);
+    if w >= width {
+        return truncate_to_width(s, width);
+    }
+    let left = (width - w) / 2;
+    format!("{}{s}", " ".repeat(left))
 }
 
 fn thinking_title() -> String {
