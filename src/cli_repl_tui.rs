@@ -68,6 +68,8 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LineKind {
+    /// Startup ASCII wordmark (brand green).
+    Banner,
     User,
     Tool,
     ToolFail,
@@ -96,9 +98,8 @@ struct TuiApp {
 }
 
 impl TuiApp {
-    fn new(chip: String) -> Self {
-        // Quiet open: no self-describing "how this shell works" spam.
-        Self {
+    fn new(chip: String, subtitle: &str) -> Self {
+        let mut app = Self {
             lines: Vec::new(),
             draft: String::new(),
             scroll: 0,
@@ -107,7 +108,44 @@ impl TuiApp {
             footer: "Enter 发送 · /help · /stop · /exit · /trace".to_string(),
             activity: String::new(),
             running: false,
+        };
+        app.push_startup_banner(subtitle);
+        app
+    }
+
+    /// Gemini / OpenCode 风格开场：斜体大字 + 一行产品副标。
+    fn push_startup_banner(&mut self, subtitle: &str) {
+        // slant-ish "chuang" wordmark (hand-tuned, ~50 cols)
+        const LOGO: &[&str] = &[
+            r"       __                          ",
+            r"  ____/ /_  __  ______ _____  ____ ",
+            r" / __  / / / / / __  / __  / / __ \",
+            r"/ /_/ / /_/ / / /_/ / /_/ / / / / /",
+            r"\__,_/\__,_/  \__,_/\__,_/_/ /_/  ",
+        ];
+        self.lines.push(TranscriptLine {
+            kind: LineKind::Meta,
+            text: String::new(),
+        });
+        for row in LOGO {
+            self.lines.push(TranscriptLine {
+                kind: LineKind::Banner,
+                text: (*row).to_string(),
+            });
         }
+        self.lines.push(TranscriptLine {
+            kind: LineKind::Meta,
+            text: String::new(),
+        });
+        // Subtitle under logo — product identity, not how-to spam.
+        self.lines.push(TranscriptLine {
+            kind: LineKind::System,
+            text: format!("  {subtitle}"),
+        });
+        self.lines.push(TranscriptLine {
+            kind: LineKind::Meta,
+            text: String::new(),
+        });
     }
 
     fn push(&mut self, kind: LineKind, text: impl Into<String>) {
@@ -259,7 +297,16 @@ fn run_app(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
 
-    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false));
+    let subtitle = format!(
+        "agent  ·  {} ({})  ·  /help",
+        summary.model_name,
+        if effort.is_empty() {
+            "—"
+        } else {
+            effort.as_str()
+        }
+    );
+    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false), &subtitle);
 
     loop {
         // --- progress / completion while turn runs ---
@@ -678,6 +725,13 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
 
 fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
     match line.kind {
+        // 启动横幅：纯品牌绿大字（Gemini / OpenCode 开场感）
+        LineKind::Banner => Line::from(Span::styled(
+            line.text.clone(),
+            Style::default()
+                .fg(BRAND)
+                .add_modifier(Modifier::BOLD),
+        )),
         // 你的话：品牌绿字 + 淡绿底
         LineKind::User => {
             let raw = format!(" {} ", line.text);
