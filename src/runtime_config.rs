@@ -113,6 +113,8 @@ pub struct PermissionRuntimeConfig {
 pub struct ToolLoopConfig {
     pub max_rounds: usize,
     pub shell_timeout_ms: u64,
+    /// Auto-prefix supported shell tools with `rtk` for compact tool output.
+    pub shell_rtk_rewrite: bool,
     pub shell_risk_rules: ShellRiskRules,
 }
 
@@ -266,6 +268,7 @@ impl RuntimeConfig {
             tool_loop: ToolLoopConfig {
                 max_rounds: 4,
                 shell_timeout_ms: 120_000,
+                shell_rtk_rewrite: true,
                 shell_risk_rules: ShellRiskRules::default(),
             },
             actuator: ActuatorConfig::Fake,

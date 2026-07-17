@@ -191,6 +191,7 @@ pub fn build_governance_slot(config: &RuntimeConfig) -> Result<GovernanceSlot, C
 fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
     ExecutionSlot::generic_agent_mvp(ToolExecutionConfig {
         shell_timeout_ms: config.tool_loop.shell_timeout_ms,
+        shell_rtk_rewrite: config.tool_loop.shell_rtk_rewrite,
         shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
         memory: None,
         actuator: None,

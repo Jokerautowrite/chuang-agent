@@ -81,6 +81,17 @@ pub fn parse_runtime_config_file_with_options(
     if let Some(value) = get_any(
         &values,
         &[
+            "tool_loop.shell_rtk_rewrite",
+            "tool_shell_rtk_rewrite",
+            "shell_rtk_rewrite",
+        ],
+    ) {
+        config.tool_loop.shell_rtk_rewrite =
+            parse_bool("tool_loop.shell_rtk_rewrite", value)?;
+    }
+    if let Some(value) = get_any(
+        &values,
+        &[
             "tool_loop.risk.delete_or_cleanup",
             "tool_shell_risk_delete_or_cleanup",
         ],

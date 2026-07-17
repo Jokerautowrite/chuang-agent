@@ -383,6 +383,9 @@ pub struct ToolSurfaceStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionConfig {
     pub shell_timeout_ms: u64,
+    /// When true (default), rewrite supported shell commands through `rtk`
+    /// (Rust Token Killer) before execution to shrink tool output tokens.
+    pub shell_rtk_rewrite: bool,
     pub shell_risk_rules: ShellRiskRules,
     pub memory: Option<MemoryToolContext>,
     pub actuator: Option<ActuatorConfig>,
@@ -417,6 +420,7 @@ impl Default for ToolExecutionConfig {
     fn default() -> Self {
         Self {
             shell_timeout_ms: 120_000,
+            shell_rtk_rewrite: true,
             shell_risk_rules: ShellRiskRules::default(),
             memory: None,
             actuator: None,
@@ -917,6 +921,7 @@ fn execute_tool_call_with_registry_and_config(
             command,
             cwd,
             config.shell_timeout_ms,
+            config.shell_rtk_rewrite,
         ),
         ToolCall::MemoryRecall {
             query,
@@ -1722,6 +1727,7 @@ fn execute_shell_exec(
     command: &str,
     cwd: &Option<String>,
     timeout_ms: u64,
+    rtk_rewrite: bool,
 ) -> ToolExecutionRecord {
     let cwd_path = match cwd {
         Some(value) if !value.trim().is_empty() => {
@@ -1732,16 +1738,19 @@ fn execute_shell_exec(
         }
         _ => workspace_root.to_path_buf(),
     };
-    let child = match Command::new("bash")
-        .arg("-lc")
-        .arg(command)
+    let (run_command, rtk_applied) = apply_rtk_shell_rewrite(command, rtk_rewrite);
+    let mut bash = Command::new("bash");
+    bash.arg("-lc")
+        .arg(&run_command)
         .current_dir(&cwd_path)
         .env("CHUANG_GOVERNED_TOOL_PROCESS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    if let Some(path) = path_env_with_rtk() {
+        bash.env("PATH", path);
+    }
+    let child = match bash.spawn() {
         Ok(child) => child,
         Err(error) => {
             return failed_record(
@@ -1776,11 +1785,19 @@ fn execute_shell_exec(
     let stderr_redaction = redact_sensitive_text("stderr", &stderr_raw);
     let stdout = truncate_text_with_flag(&stdout_redaction.text, 8_000);
     let stderr = truncate_text_with_flag(&stderr_redaction.text, 4_000);
+    let rtk_note = if rtk_applied {
+        format!(
+            " rtk_rewrite=true original={}",
+            redact_sensitive_text("command", command).text
+        )
+    } else {
+        String::new()
+    };
     let mut record = success_record(
         registry,
         call,
         format!(
-            "cwd={} status={:?} stdout=\n{}\nstderr=\n{}",
+            "cwd={} status={:?}{rtk_note} stdout=\n{}\nstderr=\n{}",
             cwd_path.display(),
             output.status.code(),
             stdout.text,
@@ -1790,7 +1807,7 @@ fn execute_shell_exec(
         false,
     );
     record.cwd = Some(cwd_path.display().to_string());
-    record.command = Some(redact_sensitive_text("command", command).text);
+    record.command = Some(redact_sensitive_text("command", &run_command).text);
     record.ok = output.status.success();
     record.stdout = Some(stdout.text);
     record.stderr = Some(stderr.text);
@@ -1808,6 +1825,111 @@ fn execute_shell_exec(
         record.failure_class = Some("exit_nonzero".to_string());
     }
     record
+}
+
+/// Discover `rtk` binary: `RTK_BIN`, `PATH`, then common install locations.
+pub fn discover_rtk_bin() -> Option<PathBuf> {
+    if let Some(raw) = std::env::var_os("RTK_BIN") {
+        let path = PathBuf::from(raw);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(output) = Command::new("sh")
+        .args(["-c", "command -v rtk"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !text.is_empty() {
+                let path = PathBuf::from(&text);
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    for rel in [".cargo/bin/rtk", ".local/bin/rtk"] {
+        let cand = home.join(rel);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+fn path_env_with_rtk() -> Option<String> {
+    let rtk = discover_rtk_bin()?;
+    let dir = rtk.parent()?.display().to_string();
+    let current = std::env::var("PATH").unwrap_or_default();
+    if current.split(':').any(|p| p == dir) {
+        Some(current)
+    } else {
+        Some(format!("{dir}:{current}"))
+    }
+}
+
+fn rtk_rewrite_env_disabled() -> bool {
+    match std::env::var("CHUANG_SHELL_RTK_REWRITE") {
+        Ok(value) => {
+            let v = value.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "0" | "false" | "off" | "no")
+        }
+        Err(_) => false,
+    }
+}
+
+/// Parse `rtk hook check` stdout into an optional rewritten command.
+pub fn parse_rtk_hook_check_output(stdout: &str, original: &str) -> Option<String> {
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    if line.starts_with("No rewrite for:") {
+        return None;
+    }
+    let original = original.trim();
+    if line == original {
+        return None;
+    }
+    // Rewrites are `rtk …` or embed `rtk` mid-pipeline (`cd x && rtk ls`).
+    if line.starts_with("rtk ") || line.contains(" rtk ") || line.contains("&& rtk ") {
+        return Some(line.to_string());
+    }
+    None
+}
+
+/// When enabled and `rtk` is available, rewrite supported commands for compact output.
+/// Returns `(command_to_run, rewritten)`.
+pub fn apply_rtk_shell_rewrite(command: &str, enabled: bool) -> (String, bool) {
+    if !enabled || rtk_rewrite_env_disabled() {
+        return (command.to_string(), false);
+    }
+    let original = command.trim();
+    if original.is_empty() {
+        return (command.to_string(), false);
+    }
+    let Some(rtk) = discover_rtk_bin() else {
+        return (command.to_string(), false);
+    };
+    let output = match Command::new(&rtk)
+        .args(["hook", "check", "--agent", "claude"])
+        .arg(original)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return (command.to_string(), false),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match parse_rtk_hook_check_output(&stdout, original) {
+        Some(rewritten) => (rewritten, true),
+        None => (command.to_string(), false),
+    }
 }
 
 fn execute_browser_read(registry: &AtomicToolRegistry, call: &ToolCall) -> ToolExecutionRecord {
@@ -3534,5 +3656,45 @@ fn truncate_text_with_flag(value: &str, max_len: usize) -> TruncatedText {
     TruncatedText {
         text: truncated,
         truncated: true,
+    }
+}
+
+#[cfg(test)]
+mod rtk_rewrite_tests {
+    use super::{apply_rtk_shell_rewrite, parse_rtk_hook_check_output};
+
+    #[test]
+    fn parse_rtk_check_output_detects_rewrite() {
+        assert_eq!(
+            parse_rtk_hook_check_output("rtk ls -la\n", "ls -la").as_deref(),
+            Some("rtk ls -la")
+        );
+        assert_eq!(
+            parse_rtk_hook_check_output("cd /tmp && rtk ls\n", "cd /tmp && ls").as_deref(),
+            Some("cd /tmp && rtk ls")
+        );
+        assert_eq!(
+            parse_rtk_hook_check_output("No rewrite for: echo hi\n", "echo hi"),
+            None
+        );
+    }
+
+    #[test]
+    fn apply_rtk_respects_disable_flag() {
+        let (cmd, applied) = apply_rtk_shell_rewrite("ls -la", false);
+        assert_eq!(cmd, "ls -la");
+        assert!(!applied);
+    }
+
+    #[test]
+    fn apply_rtk_rewrites_when_available() {
+        if super::discover_rtk_bin().is_none() {
+            return;
+        }
+        // Avoid env pollution from parallel tests by not setting CHUANG_SHELL_RTK_REWRITE.
+        let (cmd, applied) = apply_rtk_shell_rewrite("git status", true);
+        if applied {
+            assert!(cmd.contains("rtk"), "rewritten command should use rtk: {cmd}");
+        }
     }
 }

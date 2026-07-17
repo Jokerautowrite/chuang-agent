@@ -105,6 +105,7 @@ pub(crate) fn run_with_options(
         runtime.tool_loop.max_rounds,
         ToolExecutionConfig {
             shell_timeout_ms: runtime.tool_loop.shell_timeout_ms,
+            shell_rtk_rewrite: runtime.tool_loop.shell_rtk_rewrite,
             shell_risk_rules: runtime.tool_loop.shell_risk_rules.clone(),
             memory: Some(MemoryToolContext {
                 db_path: runtime.db_path.clone(),

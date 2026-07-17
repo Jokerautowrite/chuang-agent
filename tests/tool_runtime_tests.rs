@@ -1492,6 +1492,7 @@ fn execution_slot_uses_configured_shell_risk_rules() {
     let mut governance = StaticRuleGovernance::new();
     let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig {
         shell_timeout_ms: 30_000,
+        shell_rtk_rewrite: true,
         shell_risk_rules: ShellRiskRules {
             network_change: vec![" make deploy".to_string()],
             ..ShellRiskRules::default()
