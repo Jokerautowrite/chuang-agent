@@ -283,7 +283,19 @@ impl AtomicToolRegistry {
             .collect()
     }
 
-    pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
+    /// Short always-on catalog (progressive disclosure layer 1).
+    pub fn tool_catalog_block(&self, workspace_root: &Path) -> String {
+        let mapped = self.mapped_atomic_names().join(", ");
+        format!(
+            "工具面（薄目录）：工作区内可用。原子：{mapped}。辅助：list_dir, open_app, apply_patch, memory_recall, spawn_subagent, browser_read, browser_navigate（旧名 read_file/write_file/shell_exec）。\n\
+协议：一次只输出一条 ACTION tool_call 或 FINAL；需要细节时读完整工具说明。code_execute 经 RTK 压缩常见输出。浏览器用 browser_navigate+browser_read；桌面观察用 locate/screenshot。\n\
+工作区：{}",
+            workspace_root.display()
+        )
+    }
+
+    /// Full tool protocol + examples (progressive disclosure layer 2).
+    pub fn tool_detail_block(&self, workspace_root: &Path) -> String {
         let mapped = self.mapped_atomic_names().join(", ");
         format!(
             "本轮你可以使用本地工具，但只能在工作区内操作。\n\
@@ -326,6 +338,56 @@ ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"brow
             workspace_root.display()
         )
     }
+
+    /// Backward-compatible full block = catalog + detail (tests / doctor).
+    pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
+        format!(
+            "{}\n{}",
+            self.tool_catalog_block(workspace_root),
+            self.tool_detail_block(workspace_root)
+        )
+    }
+}
+
+/// When true, inject full tool protocol (examples + long notes). Always inject short catalog.
+pub fn needs_full_tool_protocol(user_input: &str) -> bool {
+    let t = user_input.to_ascii_lowercase();
+    const KEYS: &[&str] = &[
+        "写",
+        "改",
+        "修",
+        "读",
+        "打开",
+        "执行",
+        "运行",
+        "测试",
+        "浏览器",
+        "网页",
+        "截图",
+        "点击",
+        "工具",
+        "派",
+        "子代理",
+        "spawn",
+        "file",
+        "cargo",
+        "git",
+        "bug",
+        "fix",
+        "implement",
+        "browser",
+        "screenshot",
+        "list_dir",
+        "code_execute",
+        "apply_patch",
+        "创建",
+        "删除",
+        "检查",
+        "验收",
+        "定位",
+        "搜索",
+    ];
+    KEYS.iter().any(|k| t.contains(k))
 }
 
 pub fn actuator_atomic_bindings() -> Vec<ActuatorAtomicBinding> {
@@ -409,5 +471,31 @@ fn atomic_audit_operation_name(kind: AtomicToolKind) -> &'static str {
         AtomicToolKind::CodeExecute => "tool.code_execute",
         AtomicToolKind::Wait => "tool.wait",
         AtomicToolKind::HumanSuspend => "tool.human_suspend",
+    }
+}
+
+#[cfg(test)]
+mod progressive_tool_tests {
+    use super::needs_full_tool_protocol;
+    use crate::atomic_tool::AtomicToolRegistry;
+    use std::path::Path;
+
+    #[test]
+    fn needs_full_tool_protocol_is_narrow() {
+        assert!(!needs_full_tool_protocol("今天天气怎么样"));
+        assert!(needs_full_tool_protocol("帮我修一下编译错误"));
+        assert!(needs_full_tool_protocol("打开浏览器读 example.com"));
+    }
+
+    #[test]
+    fn catalog_is_much_shorter_than_detail() {
+        let reg = AtomicToolRegistry::generic_agent_mvp();
+        let root = Path::new(".");
+        let catalog = reg.tool_catalog_block(root);
+        let detail = reg.tool_detail_block(root);
+        assert!(catalog.chars().count() < 500);
+        assert!(detail.chars().count() > catalog.chars().count() * 3);
+        assert!(detail.contains("ACTION:"));
+        assert!(catalog.contains("薄目录") || catalog.contains("工具面"));
     }
 }

@@ -509,12 +509,24 @@ impl ExecutionSlot {
         &self.registry
     }
 
-    pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
+    pub fn tool_catalog_block(&self, workspace_root: &Path) -> String {
+        self.registry.tool_catalog_block(workspace_root)
+    }
+
+    pub fn tool_detail_block(&self, workspace_root: &Path) -> String {
         format!(
             "{}\n\
 受治理只读记忆工具：memory_recall。仅可检索当前会话记忆；未配置会话 DB 或 session_id 时会返回结构化未配置结果，不会接外部知识库。\n\
 ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"memory_recall\",\"query\":\"关键词\",\"limit\":3}}}}",
-            self.registry.tool_instruction_block(workspace_root)
+            self.registry.tool_detail_block(workspace_root)
+        )
+    }
+
+    pub fn tool_instruction_block(&self, workspace_root: &Path) -> String {
+        format!(
+            "{}\n{}",
+            self.tool_catalog_block(workspace_root),
+            self.tool_detail_block(workspace_root)
         )
     }
 

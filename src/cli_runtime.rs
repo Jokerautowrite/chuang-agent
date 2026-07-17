@@ -374,7 +374,12 @@ where
     let mut runtime_event_ledger = InMemoryRuntimeEventLedger::new();
     let mut transcript: Vec<String> = Vec::new();
     let mut turn_context = extra_context_segments;
-    turn_context.push(tool_instruction_segment(workspace_root));
+    // Progressive disclosure: always inject thin tool catalog; full protocol only when task needs tools.
+    turn_context.extend(tool_instruction_segments(
+        workspace_root,
+        &original_input,
+        false,
+    ));
     let execution_slot = ExecutionSlot::generic_agent_mvp(tool_config);
     let mut current_input = original_input.clone();
     let mut live_guidance_cursor = 0usize;
@@ -2239,14 +2244,19 @@ fn insert_tool_surface_metadata(
     Ok(())
 }
 
-fn tool_instruction_segment(workspace_root: &Path) -> ContextSegment {
-    let content = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default())
-        .tool_instruction_block(workspace_root);
+fn tool_instruction_segments(
+    workspace_root: &Path,
+    user_input: &str,
+    force_full: bool,
+) -> Vec<ContextSegment> {
+    use chuang_agent::atomic_tool::needs_full_tool_protocol;
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
     let now = chrono::Utc::now();
-    ContextSegment {
-        id: "tool-instructions".to_string(),
+    let catalog = slot.tool_catalog_block(workspace_root);
+    let mut segments = vec![ContextSegment {
+        id: "tool-catalog".to_string(),
         source: SegmentSource::Identity,
-        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+        tokens: Some(catalog.chars().count().min(u32::MAX as usize) as u32),
         priority: 252,
         created_at: now,
         last_accessed: now,
@@ -2254,8 +2264,25 @@ fn tool_instruction_segment(workspace_root: &Path) -> ContextSegment {
             "kind".to_string(),
             "tool_protocol".to_string(),
         )]),
-        content,
+        content: catalog,
+    }];
+    if force_full || needs_full_tool_protocol(user_input) {
+        let detail = slot.tool_detail_block(workspace_root);
+        segments.push(ContextSegment {
+            id: "tool-instructions".to_string(),
+            source: SegmentSource::Identity,
+            tokens: Some(detail.chars().count().min(u32::MAX as usize) as u32),
+            priority: 251,
+            created_at: now,
+            last_accessed: now,
+            metadata: std::collections::HashMap::from([(
+                "kind".to_string(),
+                "tool_protocol".to_string(),
+            )]),
+            content: detail,
+        });
     }
+    segments
 }
 
 fn tool_finalization_context_segment() -> ContextSegment {

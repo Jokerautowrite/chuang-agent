@@ -23,6 +23,7 @@ const SKILL_FIRST: &str = include_str!("../assets/norm/skills/first-principles.m
 const SKILL_CONTRADICTION: &str = include_str!("../assets/norm/skills/contradiction-analysis.md");
 const SKILL_CLOSED_LOOP: &str = include_str!("../assets/norm/skills/closed-loop-control.md");
 const SKILL_GEN_EVAL: &str = include_str!("../assets/norm/skills/gen-eval-separate.md");
+const SKILL_CURATOR: &str = include_str!("../assets/norm/skills/skill-curator.md");
 const SKILL_ADV: &str = include_str!("../assets/norm/skills/adversarial-review.md");
 const SKILL_GRILL: &str = include_str!("../assets/norm/skills/grill-clarify.md");
 const SKILL_COASE: &str = include_str!("../assets/norm/skills/coase-delegate.md");
@@ -111,6 +112,11 @@ const SKILLS: &[SkillSpec] = &[
         id: "norm-skill-gen-eval-separate",
         body: SKILL_GEN_EVAL,
         matcher: matches_gen_eval,
+    },
+    SkillSpec {
+        id: "norm-skill-skill-curator",
+        body: SKILL_CURATOR,
+        matcher: matches_skill_curator,
     },
     SkillSpec {
         id: "norm-skill-coding-dispatch",
@@ -299,6 +305,23 @@ fn matches_gen_eval(text: &str) -> bool {
         "独立评审",
         "别自己评自己",
         "对抗生成",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+fn matches_skill_curator(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "skill 清理",
+        "skill清理",
+        "skill 腐烂",
+        "skill腐烂",
+        "skill curator",
+        "skill-curator",
+        "技能库卫生",
+        "清理 skill",
+        "retire skill",
+        "skill monitor",
+        "技能腐烂",
     ];
     KEYS.iter().any(|k| text.contains(k))
 }

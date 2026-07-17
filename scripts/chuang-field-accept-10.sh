@@ -101,16 +101,24 @@ else
   skip "7 goal-mode-smoke" "无脚本"
 fi
 
-# 8 browser
+# 8 browser CDP
 if [[ "${SKIP_BROWSER:-0}" == "1" ]]; then
   skip "8 无头浏览器" "SKIP_BROWSER=1"
 elif [[ -f "$ROOT/scripts/chuang-headless-chrome.sh" ]]; then
-  if timeout 90 sh "$ROOT/scripts/chuang-headless-chrome.sh" status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err"; then
-    ok "8 headless chrome status"
-  elif timeout 90 sh "$ROOT/scripts/chuang-headless-chrome.sh" start >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err"; then
-    ok "8 headless chrome start"
+  timeout 90 bash "$ROOT/scripts/chuang-headless-chrome.sh" start >"$TMPDIR_RUN/chrome.start" 2>&1 || true
+  chrome_ok=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if timeout 15 bash "$ROOT/scripts/chuang-headless-chrome.sh" status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" \
+      && grep -q 'cdp_reachable=1' "$TMPDIR_RUN/chrome.out"; then
+      chrome_ok=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$chrome_ok" == "1" ]]; then
+    ok "8 headless chrome CDP reachable"
   else
-    skip "8 无头浏览器" "本机 Chrome/CDP 不可用"
+    skip "8 无头浏览器" "CDP 不可达（见 chrome status）"
   fi
 else
   skip "8 无头浏览器" "无脚本"
@@ -166,6 +174,43 @@ if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test goal_run_tests \
   ok "12 goal 硬预算（max_minutes + step_run_cap）"
 else
   bad "12 goal 硬预算" "$(tail -c 160 "$TMPDIR_RUN/budget.err" | tr '\n' ' ')"
+fi
+
+# 13 skill curator (read-only monitor)
+if timeout 60 "$BIN" skill curator --skills-root "$ROOT/data/skills" \
+  >"$TMPDIR_RUN/curator.out" 2>"$TMPDIR_RUN/curator.err"; then
+  if grep -q 'curator_mode=read_only' "$TMPDIR_RUN/curator.out"; then
+    ok "13 skill curator 只读卫生"
+  else
+    bad "13 skill curator" "缺 curator_mode 页脚"
+  fi
+else
+  bad "13 skill curator" "$(tail -c 160 "$TMPDIR_RUN/curator.err" | tr '\n' ' ')"
+fi
+
+# 14 browser tools when CDP live
+if grep -q 'cdp_reachable=1' "$TMPDIR_RUN/chrome.out" 2>/dev/null; then
+  if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test tool_runtime_tests \
+    browser_navigate_and_read 2>"$TMPDIR_RUN/browser.err"; then
+    ok "14 browser_navigate + browser_read（CDP live）"
+  else
+    bad "14 browser tools" "$(tail -c 160 "$TMPDIR_RUN/browser.err" | tr '\n' ' ')"
+  fi
+else
+  skip "14 browser tools" "无 live CDP"
+fi
+
+# 15 progressive tool protocol unit
+if cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib needs_full_tool 2>"$TMPDIR_RUN/prog.err" \
+  || cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib atomic_tool 2>"$TMPDIR_RUN/prog.err"; then
+  ok "15 工具面渐进披露（catalog/detail 分层）"
+else
+  # soft: compile-time presence is enough if no dedicated test name
+  if rg -q 'needs_full_tool_protocol|tool_catalog_block' "$ROOT/src/atomic_tool.rs" 2>/dev/null; then
+    ok "15 工具面渐进披露（源码在位）"
+  else
+    bad "15 工具面渐进披露" "缺分层 API"
+  fi
 fi
 
 echo

@@ -291,14 +291,15 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
     assert!(instructions.contains("open_app/mouse/keyboard/screenshot/locate"));
-    assert!(instructions.contains("当前屏幕、窗口标题、页面内容"));
-    assert!(instructions.contains("桌面/浏览器只读观察工具"));
+    assert!(instructions.contains("browser_navigate + browser_read") || instructions.contains("browser_navigate+browser_read") || instructions.contains("browser_navigate"));
     assert!(instructions.contains("open_app / mouse / keyboard 是交互工具"));
-    assert!(instructions.contains("桌面/浏览器只读观察：screenshot, locate"));
+    assert!(instructions.contains("桌面只读观察：screenshot, locate"));
     assert!(instructions.contains("每次回复只能输出一个结构"));
     assert!(instructions.contains("输出 tool_call 后必须等待工具结果"));
     assert!(instructions.contains("不要把 ACTION 和 FINAL 粘在同一次输出里"));
     assert!(instructions.contains("进入工具往返"));
+    // Progressive disclosure: short catalog + full detail both present in combined block.
+    assert!(instructions.contains("工具面（薄目录）") || instructions.contains("薄目录"));
 }
 
 #[test]

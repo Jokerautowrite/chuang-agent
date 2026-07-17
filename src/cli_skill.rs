@@ -19,7 +19,8 @@ pub(crate) fn skill_command(args: &[String]) -> Result<(), String> {
         Some("approve") => skill_approve_command(&args[1..]),
         Some("solidify") => skill_solidify_command(&args[1..]),
         Some("retire") | Some("deprecate") => skill_retire_command(&args[1..]),
-        Some("monitor") => skill_monitor_command(&args[1..]),
+        // Curator: read-only hygiene alias for monitor (never auto-writes).
+        Some("monitor") | Some("curator") => skill_monitor_command(&args[1..]),
         Some("rollback") => skill_rollback_command(&args[1..]),
         _ => Err(usage()),
     }
@@ -499,6 +500,24 @@ fn skill_monitor_command(args: &[String]) -> Result<(), String> {
                     skill.decay_candidate,
                     skill.rollback_available
                 );
+            }
+            // Curator footer: recommendations only — no automatic retire/write.
+            println!(
+                "curator_mode=read_only auto_write=false decay_candidates={} rollback_candidates={}",
+                output.decay_candidate_count, output.rollback_candidate_count
+            );
+            if output.decay_candidate_count > 0 {
+                println!(
+                    "curator_hint: review decay_candidate=true skills; retire/deprecate only with explicit --reason (never auto)"
+                );
+            }
+            if output.rollback_candidate_count > 0 {
+                println!(
+                    "curator_hint: rollback_available=true skills can restore previous snapshot via skill rollback"
+                );
+            }
+            if output.skill_count == 0 {
+                println!("curator_hint: skills root empty — nothing to curate");
             }
         }
     }
