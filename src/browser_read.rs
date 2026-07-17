@@ -133,7 +133,7 @@ struct CdpTabJson {
     web_socket_debugger_url: Option<String>,
 }
 
-/// Resolve the live CDP adapter.
+/// Resolve the live CDP adapter (no side effects).
 ///
 /// Order:
 /// 1. `CHUANG_CDP_PORT` if set and parseable
@@ -145,10 +145,117 @@ pub fn resolve_cdp_browser_read_adapter() -> Result<CdpBrowserReadAdapter, Brows
     }
     Err(BrowserReadError {
         code: "browser_read_unavailable".to_string(),
-        message: "no headless browser CDP endpoint; start with `scripts/chuang-headless-chrome.sh start` or set CHUANG_CDP_PORT".to_string(),
+        message: "no headless browser CDP endpoint; start with `chuang browser start` / `scripts/chuang-headless-chrome.sh start` or set CHUANG_CDP_PORT".to_string(),
         adapter_kind: "unavailable".to_string(),
         retryable: true,
     })
+}
+
+/// Resolve CDP adapter; when missing/unreachable, auto-start managed headless Chrome unless disabled.
+///
+/// Disable with `CHUANG_HEADLESS_AUTOSTART=0` (or false/off/no).
+pub fn ensure_cdp_browser_read_adapter() -> Result<CdpBrowserReadAdapter, BrowserReadError> {
+    if let Some(port) = resolve_cdp_port() {
+        let adapter = CdpBrowserReadAdapter::new(port);
+        if adapter.is_port_open() {
+            return Ok(adapter);
+        }
+        // Stale CHUANG_CDP_PORT or dead managed instance — try autostart below.
+    }
+    if headless_autostart_disabled() {
+        return resolve_cdp_browser_read_adapter();
+    }
+    try_start_managed_headless_chrome()?;
+    for _ in 0..20 {
+        // Prefer managed state file after start; env may still point at dead port.
+        if let Some(port) = managed_headless_cdp_port().or_else(cdp_port_from_env) {
+            let adapter = CdpBrowserReadAdapter::new(port);
+            if adapter.is_port_open() {
+                return Ok(adapter);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(BrowserReadError {
+        code: "browser_read_unavailable".to_string(),
+        message: "started managed headless Chrome but CDP never became reachable; check `chuang browser status` / scripts/chuang-headless-chrome.sh".to_string(),
+        adapter_kind: "unavailable".to_string(),
+        retryable: true,
+    })
+}
+
+pub(crate) fn headless_autostart_disabled() -> bool {
+    match std::env::var("CHUANG_HEADLESS_AUTOSTART") {
+        Ok(value) => {
+            let v = value.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "0" | "false" | "off" | "no")
+        }
+        Err(_) => false,
+    }
+}
+
+fn try_start_managed_headless_chrome() -> Result<(), BrowserReadError> {
+    use std::process::{Command, Stdio};
+    let script = find_headless_chrome_script().ok_or_else(|| BrowserReadError {
+        code: "browser_headless_script_missing".to_string(),
+        message: "cannot find scripts/chuang-headless-chrome.sh (set CHUANG_AGENT_ROOT or CHUANG_HEADLESS_SCRIPT)".to_string(),
+        adapter_kind: "unavailable".to_string(),
+        retryable: false,
+    })?;
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("start")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| BrowserReadError {
+            code: "browser_headless_start_failed".to_string(),
+            message: format!("failed to spawn headless chrome script: {err}"),
+            adapter_kind: "unavailable".to_string(),
+            retryable: true,
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Err(BrowserReadError {
+        code: "browser_headless_start_failed".to_string(),
+        message: format!(
+            "headless chrome start exited {}: stdout={} stderr={}",
+            output.status.code().unwrap_or(-1),
+            stdout.trim(),
+            stderr.trim()
+        ),
+        adapter_kind: "unavailable".to_string(),
+        retryable: true,
+    })
+}
+
+/// Locate managed headless chrome control script.
+pub fn find_headless_chrome_script() -> Option<std::path::PathBuf> {
+    if let Ok(path) = std::env::var("CHUANG_HEADLESS_SCRIPT") {
+        let p = std::path::PathBuf::from(path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let mut candidates = Vec::new();
+    if let Ok(root) = std::env::var("CHUANG_AGENT_ROOT") {
+        candidates.push(std::path::PathBuf::from(root).join("scripts/chuang-headless-chrome.sh"));
+    }
+    candidates.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/chuang-headless-chrome.sh"));
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("scripts/chuang-headless-chrome.sh"));
+        candidates.push(cwd.join("chuang-agent/scripts/chuang-headless-chrome.sh"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(
+            std::path::PathBuf::from(home)
+                .join("projects/chuang-agent/scripts/chuang-headless-chrome.sh"),
+        );
+    }
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 pub fn cdp_port_from_env() -> Option<u16> {
@@ -705,5 +812,27 @@ impl BrowserReadAdapter for CdpBrowserReadAdapter {
             source: format!("cdp_localhost_{}", self.port),
             read_at: Utc::now().to_rfc3339(),
         })
+    }
+}
+
+#[cfg(test)]
+mod ensure_tests {
+    use super::{find_headless_chrome_script, headless_autostart_disabled};
+
+    #[test]
+    fn finds_headless_script_from_manifest() {
+        let script = find_headless_chrome_script().expect("script should resolve in repo");
+        assert!(script.ends_with("chuang-headless-chrome.sh"));
+        assert!(script.is_file());
+    }
+
+    #[test]
+    fn autostart_disabled_flag_parses() {
+        // default is enabled (function returns false)
+        std::env::remove_var("CHUANG_HEADLESS_AUTOSTART");
+        assert!(!headless_autostart_disabled());
+        std::env::set_var("CHUANG_HEADLESS_AUTOSTART", "0");
+        assert!(headless_autostart_disabled());
+        std::env::remove_var("CHUANG_HEADLESS_AUTOSTART");
     }
 }

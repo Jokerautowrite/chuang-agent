@@ -231,6 +231,7 @@ mod cli_memory;
 mod cli_output;
 mod cli_plugin;
 mod cli_runtime;
+mod cli_browser;
 mod cli_skill;
 mod cli_subagent;
 mod cli_types;
@@ -261,6 +262,7 @@ use cli_output::{
 };
 use cli_plugin::plugin_command;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
+use cli_browser::browser_command;
 use cli_skill::skill_command;
 use cli_subagent::subagent_command;
 use cli_types::*;
@@ -308,6 +310,7 @@ fn run_cli() -> Result<(), String> {
         Some("memory") => memory_command(&args[2..]),
         Some("plugin") => plugin_command(&args[2..]),
         Some("skill") => skill_command(&args[2..]),
+        Some("browser") => browser_command(&args[2..]),
         Some("experiment") => experiment_command(&args[2..]),
         Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),

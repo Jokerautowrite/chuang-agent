@@ -13,7 +13,7 @@ use crate::actuator::{
 };
 use crate::atomic_tool::AtomicToolRegistry;
 use crate::browser_read::{
-    resolve_cdp_browser_read_adapter, BrowserReadAdapter, BrowserReadError,
+    ensure_cdp_browser_read_adapter, BrowserReadAdapter, BrowserReadError,
 };
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
@@ -1945,7 +1945,7 @@ pub fn apply_rtk_shell_rewrite(command: &str, enabled: bool) -> (String, bool) {
 }
 
 fn execute_browser_read(registry: &AtomicToolRegistry, call: &ToolCall) -> ToolExecutionRecord {
-    match resolve_cdp_browser_read_adapter() {
+    match ensure_cdp_browser_read_adapter() {
         Ok(adapter) => match adapter.read_current_page() {
             Ok(page) => {
                 let output = format_browser_page_output(
@@ -1978,7 +1978,7 @@ fn execute_browser_navigate(
     call: &ToolCall,
     url: &str,
 ) -> ToolExecutionRecord {
-    match resolve_cdp_browser_read_adapter() {
+    match ensure_cdp_browser_read_adapter() {
         Ok(adapter) => match adapter.navigate_and_read(url) {
             Ok(page) => {
                 let output = format_browser_page_output(
