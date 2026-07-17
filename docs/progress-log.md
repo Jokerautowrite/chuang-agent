@@ -1,3 +1,7 @@
+# 2026-07-18 矛盾分析 skill 最小落地（毛选方法论薄蒸馏）
+- 研究见 `docs/research-agent-maoxuan-notes.md`；Git 上多为按需 skill 而非全文灌 system。
+- 新增 `contradiction-analysis.md`（主要矛盾/调查/阶段/力量），窄触发、非常驻、非语录；日常写码不加载。
+
 # 2026-07-18 老爸定理入 norm：剃刀/墨菲/科斯/第一性/对抗/禁旁白/grill
 - 开发奥卡姆、验收墨菲、派工科斯写进 doctrine-card；旁白禁令常驻。
 - 新增 skill：occam-develop、murphy-accept、first-principles、adversarial-review、grill-clarify（去 95%）、coase-delegate。

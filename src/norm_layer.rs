@@ -19,6 +19,7 @@ const SKILL_SURGICAL: &str = include_str!("../assets/norm/skills/surgical-diff.m
 const SKILL_OCCAM: &str = include_str!("../assets/norm/skills/occam-develop.md");
 const SKILL_MURPHY: &str = include_str!("../assets/norm/skills/murphy-accept.md");
 const SKILL_FIRST: &str = include_str!("../assets/norm/skills/first-principles.md");
+const SKILL_CONTRADICTION: &str = include_str!("../assets/norm/skills/contradiction-analysis.md");
 const SKILL_ADV: &str = include_str!("../assets/norm/skills/adversarial-review.md");
 const SKILL_GRILL: &str = include_str!("../assets/norm/skills/grill-clarify.md");
 const SKILL_COASE: &str = include_str!("../assets/norm/skills/coase-delegate.md");
@@ -92,6 +93,11 @@ const SKILLS: &[SkillSpec] = &[
         id: "norm-skill-first-principles",
         body: SKILL_FIRST,
         matcher: matches_first_principles,
+    },
+    SkillSpec {
+        id: "norm-skill-contradiction-analysis",
+        body: SKILL_CONTRADICTION,
+        matcher: matches_contradiction,
     },
     SkillSpec {
         id: "norm-skill-coding-dispatch",
@@ -219,6 +225,24 @@ fn matches_first_principles(text: &str) -> bool {
     ];
     KEYS.iter().any(|k| text.contains(k))
         || (text.contains("架构") && (text.contains("设计") || text.contains("方案")))
+}
+
+/// Narrow triggers only — strategy/priority tradeoffs, not daily coding.
+fn matches_contradiction(text: &str) -> bool {
+    const KEYS: &[&str] = &[
+        "主要矛盾",
+        "次要矛盾",
+        "取舍",
+        "优先级怎么排",
+        "战略",
+        "竞争不过",
+        "资源不够",
+        "团队扯皮",
+        "先做哪个",
+        "根据地",
+        "矛盾分析",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
 }
 
 fn matches_coding(text: &str) -> bool {
@@ -420,5 +444,15 @@ mod tests {
     #[test]
     fn casual_no_skill() {
         assert!(on_demand_skill_segments("今天天气怎么样").is_empty());
+    }
+
+    #[test]
+    fn contradiction_skill_is_short_and_narrow() {
+        assert!(SKILL_CONTRADICTION.chars().count() < 500);
+        let segs = on_demand_skill_segments("我们资源不够，主要矛盾到底是什么");
+        assert!(segs.iter().any(|s| s.id == "norm-skill-contradiction-analysis"));
+        // daily coding must not load it
+        let code = on_demand_skill_segments("修一下编译错误");
+        assert!(!code.iter().any(|s| s.id == "norm-skill-contradiction-analysis"));
     }
 }

@@ -81,6 +81,7 @@ Claude Code：抄 harness 纪律与分片组装，不 1:1 粘贴其 system promp
 | **对抗审查** | 复杂收尾 | 多 analyze 找茬；非默认每任务 |
 | **禁止可选旁白** | 全程 | DO NOT send optional commentary |
 | **Grill 澄清** | 仅歧义 | 一次一问；出口=目标+不做清单+验收，**不用 95%** |
+| **矛盾分析** | 仅复杂取舍 | 主要矛盾/阶段/力量；**非语录、非常驻**（`contradiction-analysis.md`） |
 
 ## 禁止
 

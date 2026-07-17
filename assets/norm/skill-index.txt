@@ -4,6 +4,7 @@
 - occam-develop / surgical-diff：开发减法
 - murphy-accept / verify-before-claim：验收加法与如实
 - first-principles：修 bug/方案/架构从机制推
+- contradiction-analysis：复杂取舍锁主要矛盾/阶段/力量（非默认、非语录）
 - adversarial-review：复杂收尾对抗审查（非默认）
 - think-before-act / grill-clarify：想清楚；歧义时一次一问（无「95%」）
 - compact-handoff / readonly-triage：交接与只读排查
