@@ -29,10 +29,12 @@
 - `cargo test --bin chuang-agent repl_`：18 通过（含 answer-before-trace）
 
 ## 未做（后续）
-- `/trace` 驱动 live 投影档位（研究 P2）
 - 原地更新长工具 spinner（仍 append-only）
-- `run` 子命令 `cli_output` 字段墙美化
 - 全屏 TUI
+
+## 后续已做
+- `/trace` live 投影：见 04-TRACE-LIVE.md
+- `run` 字段墙：见 12-RUN-OUTPUT.md
 
 ## 本地验收建议
 ```bash

@@ -62,7 +62,7 @@ fn cli_run_http_transport_surfaces_https_scheme_error_with_request_preview() {
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("body: CONFIG_ERROR: openai-compatible provider invalid field=base_url reason=unsupported_http_scheme:https://api.example.com/v1/responses"),
+        stdout.contains("CONFIG_ERROR: openai-compatible provider invalid field=base_url reason=unsupported_http_scheme:https://api.example.com/v1/responses"),
         "stdout={stdout}"
     );
     assert!(
@@ -115,7 +115,7 @@ fn cli_run_http_transport_reports_invalid_port_shape() {
         "stdout={stdout}"
     );
     assert!(
-        stdout.contains("body: CONFIG_ERROR: openai-compatible provider invalid field=base_url reason=invalid_port:http://127.0.0.1:notaport/v1/responses"),
+        stdout.contains("CONFIG_ERROR: openai-compatible provider invalid field=base_url reason=invalid_port:http://127.0.0.1:notaport/v1/responses"),
         "stdout={stdout}"
     );
     assert!(

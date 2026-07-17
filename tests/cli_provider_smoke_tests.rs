@@ -54,8 +54,8 @@ fn cli_run_accepts_provider_config_and_surfaces_provider_identity() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("model_name: gpt-4.1-mini"));
-    assert!(stdout.contains("provider: custom-openai"));
+    assert!(stdout.contains("小创  gpt-4.1-mini"));
+    assert!(stdout.contains("provider custom-openai"));
     assert!(stdout.contains("transport=openai-compatible"));
 }
 

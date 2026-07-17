@@ -1560,6 +1560,57 @@ fn cli_run_command_boots_and_returns_structured_response() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    // Default run output is conversational (answer first), not the old field wall.
+    assert!(stdout.contains("小创  stub-responder"));
+    assert!(stdout.contains("模型 stub-responder"));
+    assert!(stdout.contains("provider fake-responder"));
+    assert!(stdout.contains("引擎 deterministic_budget"));
+    assert!(!stdout.contains("model_name:"));
+    assert!(!stdout.contains("body:"));
+    assert!(!stdout.contains("context_drop_reasons:"));
+    assert!(stdout.contains("runtime_report: report-turn-1"));
+    assert_eq!(stdout.matches("governance_decision: allowed:").count(), 1);
+    assert!(stdout.contains("创项目现在启动试试"));
+}
+
+#[test]
+fn cli_run_verbose_keeps_structured_field_wall() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir;
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chuang-agent-cli-run-verbose-test-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    fs::create_dir_all(temp_dir.join("identity")).expect("identity dir should be created");
+
+    let config_path = write_fake_config(&temp_dir);
+
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            "run",
+            "--verbose",
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
+            "--input",
+            "创项目 verbose 字段墙",
+        ])
+        .current_dir(&workspace_root)
+        .output()
+        .expect("cargo run should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("model_name: stub-responder"));
     assert!(stdout.contains("body:"));
     assert!(stdout.contains("trace:"));
@@ -1569,8 +1620,6 @@ fn cli_run_command_boots_and_returns_structured_response() {
     assert!(stdout.contains("context_working_reservation:"));
     assert!(stdout.contains("context_budget_exceeded:"));
     assert!(stdout.contains("runtime_report: report-turn-1"));
-    assert_eq!(stdout.matches("governance_decision: allowed:").count(), 1);
-    assert!(stdout.contains("创项目现在启动试试"));
 }
 
 #[test]
@@ -1614,7 +1663,7 @@ fn cli_run_can_select_summary_compression_context_engine() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("context_engine: summary_compression"));
+    assert!(stdout.contains("引擎 summary_compression"));
     assert!(stdout.contains("测试上下文引擎切换"));
 }
 
@@ -1942,7 +1991,7 @@ fn cli_run_can_remember_turn_summary_when_requested() {
         String::from_utf8_lossy(&second.stderr)
     );
     let second_stdout = String::from_utf8_lossy(&second.stdout);
-    assert!(second_stdout.contains("recall_hits: 1"));
+    assert!(second_stdout.contains("召回 1"));
     assert!(second_stdout.contains("MVP记忆写入测试"));
 }
 

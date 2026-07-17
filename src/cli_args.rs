@@ -356,6 +356,10 @@ pub(crate) fn parse_run_request(args: &[String]) -> Result<RunCliRequest, String
                 knowledge_context_enabled = true;
                 index += 1;
             }
+            // Accepted by run_command (split_run_verbosity); ignore if present here.
+            "--verbose" => {
+                index += 1;
+            }
             _ => return Err(usage()),
         }
     }

@@ -255,7 +255,10 @@ use cli_external_ai::external_ai_command;
 use cli_genesis::genesis_command;
 use cli_goal::goal_command;
 use cli_memory::memory_command;
-use cli_output::{print_json, print_runtime_result, print_status, usage, ControlOutputFormat};
+use cli_output::{
+    print_json, print_runtime_result, print_runtime_result_verbose, print_status, usage,
+    ControlOutputFormat,
+};
 use cli_plugin::plugin_command;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_skill::skill_command;
@@ -314,9 +317,14 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn run_command(args: &[String]) -> Result<(), String> {
-    let request = parse_run_request(args)?;
+    let (runtime_args, verbose) = split_run_verbosity(args);
+    let request = parse_run_request(&runtime_args)?;
     let (result, memory_records) = run_with_options(&request)?;
-    print_runtime_result(&result);
+    if verbose {
+        print_runtime_result_verbose(&result);
+    } else {
+        print_runtime_result(&result);
+    }
     if let Some(record_id) = memory_records.sqlite_record_id {
         println!("memory_recorded: {record_id}");
     }
@@ -342,6 +350,19 @@ fn run_command(args: &[String]) -> Result<(), String> {
         println!("subagent_dispatch_task_id: {task_id}");
     }
     Ok(())
+}
+
+fn split_run_verbosity(args: &[String]) -> (Vec<String>, bool) {
+    let mut verbose = false;
+    let mut runtime_args = Vec::with_capacity(args.len());
+    for arg in args {
+        if arg == "--verbose" {
+            verbose = true;
+        } else {
+            runtime_args.push(arg.clone());
+        }
+    }
+    (runtime_args, verbose)
 }
 
 fn repl_command(args: &[String]) -> Result<(), String> {
@@ -396,7 +417,7 @@ fn repl_command(args: &[String]) -> Result<(), String> {
             progress_path: None,
         })?;
         if verbose {
-            print_runtime_result(&result);
+            print_runtime_result_verbose(&result);
         } else {
             writeln!(stdout, "{}", result.response.body)
                 .map_err(|e| format!("stdout_write_failed: {e}"))?;
@@ -1514,7 +1535,7 @@ fn finish_running_turn(
                 *pending_approval = Some(approval);
             }
             if verbose {
-                print_runtime_result(&result);
+                print_runtime_result_verbose(&result);
             }
         }
         Err(error) => {

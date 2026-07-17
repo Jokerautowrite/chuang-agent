@@ -1,3 +1,8 @@
+# 2026-07-18 run 子命令默认人话输出
+- `chuang run` 默认不再打 model_name/body/trace/context 字段墙：先 `小创 + 模型`，再正文，再一行 `模型 · provider · 引擎 · 召回`；`*_json` 大块默认隐藏，短 operational meta 仍保留。
+- `run --verbose` 与 REPL `/verbose` 仍输出完整字段墙，兼容脚本与排障。
+- 回归：`cli_run_command_boots_and_returns_structured_response`、`cli_run_verbose_keeps_structured_field_wall` 与 provider smoke 同步。
+
 # 2026-07-11 满血工作区权限与模型子代理工具
 - `full_local_workspace` 现在同时校验实际 turn workspace 与 permission workspace；不再出现策略显示根和真实读写根静默不一致。项目内普通读写、补丁、构建、测试、扫描、桌面交互继续自动执行并审计，高危删除/清理/reset/卸载、提权、系统服务、网络、支付、验证码、密钥和外部提交仍要求审批。
 - 新增正式模型工具 `spawn_subagent`，进入 ACTION schema、tool surface、descriptor、Atomic auxiliary mapping、治理和终端活动流。模型可选择 `analyze` 或 `execute`，默认禁用递归派发。

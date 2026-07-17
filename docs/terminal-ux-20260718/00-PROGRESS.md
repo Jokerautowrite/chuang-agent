@@ -10,7 +10,7 @@
 | 第二刀 /trace 驱动 live 投影 | done | 见 04-TRACE-LIVE.md |
 | 第三刀 实时 HUD 计时/模型/阶段 | done | 见 05-LIVE-HUD.md |
 | 抛光底栏/banner/过程行 | done | 见 11-POLISH.md |
-| 第四刀（可选）run 子命令字段墙 | pending | |
+| 第四刀 run 子命令字段墙 | done | 见 12-RUN-OUTPUT.md |
 
 ## 第二刀目标
 - `/trace`：live 显示模型轮次进度 + 更高折叠上限 + 完成块技术行
