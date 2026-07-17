@@ -496,6 +496,10 @@ where
                 },
             )?;
         }
+        // After first tool evidence or protocol repair, force full tool protocol into context.
+        if round_index > 0 || !tool_calls.is_empty() || !protocol_errors.is_empty() {
+            ensure_full_tool_protocol_context(&mut turn_context, workspace_root);
+        }
         write_terminal_event(
             progress_path,
             &TerminalEvent::ModelStarted {
@@ -2267,22 +2271,38 @@ fn tool_instruction_segments(
         content: catalog,
     }];
     if force_full || needs_full_tool_protocol(user_input) {
-        let detail = slot.tool_detail_block(workspace_root);
-        segments.push(ContextSegment {
-            id: "tool-instructions".to_string(),
-            source: SegmentSource::Identity,
-            tokens: Some(detail.chars().count().min(u32::MAX as usize) as u32),
-            priority: 251,
-            created_at: now,
-            last_accessed: now,
-            metadata: std::collections::HashMap::from([(
-                "kind".to_string(),
-                "tool_protocol".to_string(),
-            )]),
-            content: detail,
-        });
+        segments.push(tool_detail_context_segment(workspace_root));
     }
     segments
+}
+
+fn tool_detail_context_segment(workspace_root: &Path) -> ContextSegment {
+    let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    let detail = slot.tool_detail_block(workspace_root);
+    let now = chrono::Utc::now();
+    ContextSegment {
+        id: "tool-instructions".to_string(),
+        source: SegmentSource::Identity,
+        tokens: Some(detail.chars().count().min(u32::MAX as usize) as u32),
+        priority: 251,
+        created_at: now,
+        last_accessed: now,
+        metadata: std::collections::HashMap::from([(
+            "kind".to_string(),
+            "tool_protocol".to_string(),
+        )]),
+        content: detail,
+    }
+}
+
+fn ensure_full_tool_protocol_context(turn_context: &mut Vec<ContextSegment>, workspace_root: &Path) {
+    if turn_context
+        .iter()
+        .any(|segment| segment.id == "tool-instructions")
+    {
+        return;
+    }
+    turn_context.push(tool_detail_context_segment(workspace_root));
 }
 
 fn tool_finalization_context_segment() -> ContextSegment {

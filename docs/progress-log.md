@@ -2705,3 +2705,13 @@
 - 新增模型可调用的 `spawn_subagent` 工具，复用 queued dispatch、command runner、ReportAdmission 和 collect 主链；默认 worker 为 `gpt-5.6-luna`，分析任务只读，执行任务限工作区写入。
 - 状态面新增独立 `model_tool_worker_*` 字段，真实表达模型工具 worker 是否可用，同时保留 `live_worker_available` 对完整外部 worker/live-adapter 聚合的严格语义，避免把单 worker 成功误报成全局 live ready。
 - 子代理 runner 明确禁止删除、清理、reset、提权、服务/网络修改、支付/验证码、密钥导出、外部推送、递归派发和核心记忆直写。
+
+# 2026-07-18 harness 薄化与实战硬化（小k）
+
+- 模型：`gpt-5.6-terra` + `reasoning_effort=max`；OpenAI-compatible 支持 `max` effort。
+- RTK：`code_execute` 执行前 `rtk hook check` 自动改写；`tool_shell_rtk_rewrite` 可关。
+- 规范：闭环控制 / gen-eval / skill-curator 薄 skill；常驻半句闭环+模型提议；pack 后 `repin_always_on_norms`。
+- Goal：`started_at` + `max_minutes` 硬停 step/dispatch；`max_tool_rounds` 封顶 step max_runs。
+- 工具面渐进披露：薄 catalog 常驻；detail 按意图注入；工具轮/协议纠偏后强制 full。
+- 验收：`scripts/chuang-field-accept-10.sh`（15 项，含 CDP browser live、curator、repin、budget）。
+- 提交：`99bb490` `70e7768` `81063ab` `e3a7a35` 及本轮 follow-up。
