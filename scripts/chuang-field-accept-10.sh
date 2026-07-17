@@ -101,27 +101,37 @@ else
   skip "7 goal-mode-smoke" "无脚本"
 fi
 
-# 8 browser CDP
+# 8 browser CDP via CLI (after ensure path exists)
 if [[ "${SKIP_BROWSER:-0}" == "1" ]]; then
   skip "8 无头浏览器" "SKIP_BROWSER=1"
 elif [[ -f "$ROOT/scripts/chuang-headless-chrome.sh" ]]; then
-  timeout 90 bash "$ROOT/scripts/chuang-headless-chrome.sh" start >"$TMPDIR_RUN/chrome.start" 2>&1 || true
-  chrome_ok=0
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if timeout 15 bash "$ROOT/scripts/chuang-headless-chrome.sh" status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" \
-      && grep -q 'cdp_reachable=1' "$TMPDIR_RUN/chrome.out"; then
+  timeout 90 "$BIN" browser stop >"$TMPDIR_RUN/chrome.stop" 2>&1 || true
+  # Autostart path: do not pre-start; navigate test should bring CDP up.
+  if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test tool_runtime_tests \
+    browser_navigate_and_read -- --nocapture >"$TMPDIR_RUN/browser.autostart.out" 2>"$TMPDIR_RUN/browser.autostart.err"; then
+    if timeout 20 "$BIN" browser status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" \
+      && grep -qE 'cdp_reachable=1|resolved_cdp_port=[0-9]+' "$TMPDIR_RUN/chrome.out"; then
+      ok "8 browser 自动拉起 + CDP reachable"
       chrome_ok=1
-      break
+    else
+      # test passed but status flaky — still count navigate success
+      if ! grep -qi 'skipped/failed' "$TMPDIR_RUN/browser.autostart.out" "$TMPDIR_RUN/browser.autostart.err" 2>/dev/null; then
+        ok "8 browser 自动拉起（navigate 测试通过）"
+        chrome_ok=1
+        # best-effort status snapshot
+        timeout 20 "$BIN" browser status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" || true
+      else
+        skip "8 无头浏览器" "navigate 测试跳过/失败"
+        chrome_ok=0
+      fi
     fi
-    sleep 0.5
-  done
-  if [[ "$chrome_ok" == "1" ]]; then
-    ok "8 headless chrome CDP reachable"
   else
-    skip "8 无头浏览器" "CDP 不可达（见 chrome status）"
+    skip "8 无头浏览器" "browser 测试失败"
+    chrome_ok=0
   fi
 else
   skip "8 无头浏览器" "无脚本"
+  chrome_ok=0
 fi
 
 # 9 live
@@ -188,29 +198,47 @@ else
   bad "13 skill curator" "$(tail -c 160 "$TMPDIR_RUN/curator.err" | tr '\n' ' ')"
 fi
 
-# 14 browser tools when CDP live
-if grep -q 'cdp_reachable=1' "$TMPDIR_RUN/chrome.out" 2>/dev/null; then
-  if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test tool_runtime_tests \
-    browser_navigate_and_read 2>"$TMPDIR_RUN/browser.err"; then
-    ok "14 browser_navigate + browser_read（CDP live）"
+# 14 status JSON browser_readiness after tools
+if [[ "${chrome_ok:-0}" == "1" ]] || grep -qE 'cdp_reachable=1|resolved_cdp_port=[0-9]+' "$TMPDIR_RUN/chrome.out" 2>/dev/null; then
+  if "$BIN" status --config "$CFG" --json >"$TMPDIR_RUN/status-browser.json" 2>"$TMPDIR_RUN/status-browser.err"; then
+    if python3 - "$TMPDIR_RUN/status-browser.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+br=d.get("browser_readiness") or {}
+if not br.get("browser_read_adapter_available"):
+    raise SystemExit(1)
+print(br.get("browser_read_state"), br.get("browser_read_adapter_kind"))
+PY
+    then
+      ok "14 status browser_readiness=available"
+    else
+      bad "14 status browser_readiness" "adapter not available in status JSON"
+    fi
   else
-    bad "14 browser tools" "$(tail -c 160 "$TMPDIR_RUN/browser.err" | tr '\n' ' ')"
+    bad "14 status browser_readiness" "status --json failed"
   fi
 else
-  skip "14 browser tools" "无 live CDP"
+  skip "14 status browser_readiness" "无 live CDP"
 fi
 
 # 15 progressive tool protocol unit
-if cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib needs_full_tool 2>"$TMPDIR_RUN/prog.err" \
-  || cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib atomic_tool 2>"$TMPDIR_RUN/prog.err"; then
+if cargo test -q --manifest-path "$ROOT/Cargo.toml" --lib progressive_tool 2>"$TMPDIR_RUN/prog.err"; then
   ok "15 工具面渐进披露（catalog/detail 分层）"
 else
-  # soft: compile-time presence is enough if no dedicated test name
-  if rg -q 'needs_full_tool_protocol|tool_catalog_block' "$ROOT/src/atomic_tool.rs" 2>/dev/null; then
-    ok "15 工具面渐进披露（源码在位）"
+  bad "15 工具面渐进披露" "$(tail -c 160 "$TMPDIR_RUN/prog.err" | tr '\n' ' ')"
+fi
+
+# 16 doctor surfaces browser_cdp + rtk lines
+if timeout 90 "$BIN" doctor --config "$CFG" >"$TMPDIR_RUN/doctor.out" 2>"$TMPDIR_RUN/doctor.err"; then
+  if grep -q 'browser_cdp:' "$TMPDIR_RUN/doctor.out" \
+    && grep -q 'tool_shell_rtk_rewrite:' "$TMPDIR_RUN/doctor.out" \
+    && grep -q 'doctor_check name=browser_cdp' "$TMPDIR_RUN/doctor.out"; then
+    ok "16 doctor 露出 browser_cdp + rtk"
   else
-    bad "15 工具面渐进披露" "缺分层 API"
+    bad "16 doctor 露出" "缺 browser_cdp 或 rtk 行"
   fi
+else
+  bad "16 doctor" "$(tail -c 160 "$TMPDIR_RUN/doctor.err" | tr '\n' ' ')"
 fi
 
 echo

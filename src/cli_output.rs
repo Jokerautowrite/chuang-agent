@@ -126,6 +126,10 @@ pub fn print_status(status: &ChuangMvpStatus) {
         status.config.tool_shell_timeout_ms
     );
     println!(
+        "tool_shell_rtk_rewrite: {}",
+        status.config.tool_shell_rtk_rewrite
+    );
+    println!(
         "tool_shell_risk_rule_counts: {}",
         status.config.tool_shell_risk_rule_counts
     );
@@ -172,6 +176,14 @@ pub fn print_status(status: &ChuangMvpStatus) {
                 .atomic_tools
                 .desktop_browser_live_gated_atomic_tool_names
         )
+    );
+    println!(
+        "browser_cdp: available={} state={} kind={} reason_code={} reason={}",
+        status.browser_readiness.browser_read_adapter_available,
+        status.browser_readiness.browser_read_state,
+        status.browser_readiness.browser_read_adapter_kind,
+        status.browser_readiness.browser_read_reason_code,
+        status.browser_readiness.browser_read_reason
     );
     println!(
         "desktop_read: ready={} tools={} boundary={}",

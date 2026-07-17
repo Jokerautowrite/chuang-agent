@@ -222,6 +222,19 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         "atomic_tools",
         "GenericAgent 9 atomic tool manifest is available",
     ));
+    // Soft readiness only — CDP down must not fail doctor.
+    checks.push(pass(
+        "browser_cdp",
+        &format!(
+            "available={} state={} kind={} reason_code={} reason={} overall={} autostart_default=on",
+            status.browser_readiness.browser_read_adapter_available,
+            status.browser_readiness.browser_read_state,
+            status.browser_readiness.browser_read_adapter_kind,
+            status.browser_readiness.browser_read_reason_code,
+            status.browser_readiness.browser_read_reason,
+            status.browser_readiness.overall_state
+        ),
+    ));
     if !status.governance.ok {
         return Err("doctor_governance_readiness_failed".to_string());
     }
@@ -696,6 +709,21 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     }
     println!("provider: {}", doctor.status.config.provider_kind);
     println!("model: {}", doctor.status.config.model_name);
+    println!(
+        "tool_shell_rtk_rewrite: {}",
+        doctor.status.config.tool_shell_rtk_rewrite
+    );
+    println!(
+        "browser_cdp: available={} state={} kind={} reason_code={} reason={}",
+        doctor
+            .status
+            .browser_readiness
+            .browser_read_adapter_available,
+        doctor.status.browser_readiness.browser_read_state,
+        doctor.status.browser_readiness.browser_read_adapter_kind,
+        doctor.status.browser_readiness.browser_read_reason_code,
+        doctor.status.browser_readiness.browser_read_reason
+    );
     println!(
         "context_engine: {}",
         doctor.status.config.context_engine_kind
