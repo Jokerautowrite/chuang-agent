@@ -293,6 +293,7 @@ mod cli_output;
 mod cli_plugin;
 mod cli_runtime;
 mod cli_browser;
+mod cli_repl_tui;
 mod cli_skill;
 mod cli_subagent;
 mod cli_types;
@@ -330,7 +331,7 @@ use cli_types::*;
 
 const REPL_ANSWER_PREVIEW_CHARS: usize = 2400;
 const REPL_TEXT_WRAP_WIDTH: usize = 78;
-const REPL_HISTORY_MAX_TURNS: usize = 8;
+pub(crate) const REPL_HISTORY_MAX_TURNS: usize = 8;
 const REPL_META_WRAP_WIDTH: usize = 92;
 /// Default conversation: keep the live stream short (Grok-like secondary noise).
 const REPL_ACTIVITY_VISIBLE_LIMIT: usize = 8;
@@ -535,6 +536,22 @@ fn repl_command(args: &[String]) -> Result<(), String> {
 
 fn repl_interactive_loop(
     options: CliOptions,
+    verbose: bool,
+    show_trace: bool,
+    _stdout: &mut io::Stdout,
+) -> Result<(), String> {
+    // Default: Ratatui 3-pane shell. Legacy pin-prompt: CHUANG_REPL_LEGACY=1
+    let legacy = env::var("CHUANG_REPL_LEGACY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !legacy {
+        return cli_repl_tui::run_ratatui_repl(options, verbose, show_trace);
+    }
+    repl_interactive_loop_legacy(options, verbose, show_trace, _stdout)
+}
+
+fn repl_interactive_loop_legacy(
+    options: CliOptions,
     mut verbose: bool,
     mut show_trace: bool,
     stdout: &mut io::Stdout,
@@ -548,7 +565,6 @@ fn repl_interactive_loop(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
     let mut chrome = ReplChrome::detect(true);
-    // App-owned draft buffer (Grok-style). Terminal does NOT echo.
     let mut draft = String::new();
 
     chrome.enable(stdout)?;
@@ -570,7 +586,6 @@ fn repl_interactive_loop(
 
     let result = (|| -> Result<(), String> {
         loop {
-            // Background turn progress while idle for keys.
             let had_progress = poll_progress_events(
                 stdout,
                 &mut chrome,
@@ -609,7 +624,6 @@ fn repl_interactive_loop(
             if !event::poll(Duration::from_millis(200))
                 .map_err(|e| format!("event_poll_failed: {e}"))?
             {
-                // Keep timer on bottom strip while a turn runs (safe: we own buffer).
                 if running.is_some() {
                     print_repl_prompt(
                         stdout,
@@ -649,20 +663,7 @@ fn repl_interactive_loop(
                         continue;
                     }
                     match handle_sticky_key(key, &mut draft)? {
-                        StickyKeyAction::None => {
-                            print_repl_prompt(
-                                stdout,
-                                &mut chrome,
-                                running.is_some(),
-                                pending_guidance.len(),
-                                &stats,
-                                pending_approval.is_some(),
-                                show_trace,
-                                running.as_ref().map(|turn| turn.started_at),
-                                &draft,
-                            )?;
-                        }
-                        StickyKeyAction::Redraw => {
+                        StickyKeyAction::None | StickyKeyAction::Redraw => {
                             print_repl_prompt(
                                 stdout,
                                 &mut chrome,
@@ -725,14 +726,14 @@ fn repl_interactive_loop(
     result
 }
 
-enum StickyKeyAction {
+pub(crate) enum StickyKeyAction {
     None,
     Redraw,
     Submit(String),
     Exit,
 }
 
-fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<StickyKeyAction, String> {
+pub(crate) fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<StickyKeyAction, String> {
     // Ctrl+C / Ctrl+D
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
@@ -972,17 +973,17 @@ impl LivePhase {
 }
 
 #[derive(Debug, Clone, Default)]
-struct TurnTimingSummary {
-    thinking_ms: u128,
-    acting_ms: u128,
+pub(crate) struct TurnTimingSummary {
+    pub(crate) thinking_ms: u128,
+    pub(crate) acting_ms: u128,
 }
 
 #[derive(Default)]
-struct ProgressCursor {
-    bytes_read: u64,
-    visible_count: usize,
-    displays: Vec<ProgressDisplay>,
-    last_message: Option<String>,
+pub(crate) struct ProgressCursor {
+    pub(crate) bytes_read: u64,
+    pub(crate) visible_count: usize,
+    pub(crate) displays: Vec<ProgressDisplay>,
+    pub(crate) last_message: Option<String>,
     collapsed_notice_shown: bool,
     section_opened: bool,
     phase: LivePhase,
@@ -993,7 +994,7 @@ struct ProgressCursor {
 }
 
 impl ProgressCursor {
-    fn reset_for_idle(&mut self) {
+    pub(crate) fn reset_for_idle(&mut self) {
         self.bytes_read = 0;
         self.visible_count = 0;
         self.displays.clear();
@@ -1038,7 +1039,7 @@ impl ProgressCursor {
         }
     }
 
-    fn finish_timing(&mut self) -> TurnTimingSummary {
+    pub(crate) fn finish_timing(&mut self) -> TurnTimingSummary {
         self.accumulate_phase_time();
         TurnTimingSummary {
             thinking_ms: self.thinking_ms,
@@ -1046,7 +1047,7 @@ impl ProgressCursor {
         }
     }
 
-    fn note_display(&mut self, display: &ProgressDisplay) {
+    pub(crate) fn note_display(&mut self, display: &ProgressDisplay) {
         // Infer phase from projected human message / kind.
         match (display.kind, display.state) {
             (DisplayEventKind::Tool, DisplayState::Running) => {
@@ -1089,7 +1090,7 @@ impl ProgressCursor {
     }
 }
 
-fn format_short_duration(duration: Duration) -> String {
+pub(crate) fn format_short_duration(duration: Duration) -> String {
     let secs = duration.as_secs_f64();
     if secs < 10.0 {
         format!("{secs:.1}s")
@@ -1102,7 +1103,7 @@ fn format_short_duration(duration: Duration) -> String {
     }
 }
 
-fn format_ms_duration(ms: u128) -> String {
+pub(crate) fn format_ms_duration(ms: u128) -> String {
     format_short_duration(Duration::from_millis(ms as u64))
 }
 
@@ -1194,7 +1195,7 @@ fn poll_progress_events(
     Ok(wrote_progress)
 }
 
-fn note_raw_progress_line(cursor: &mut ProgressCursor, line: &str) {
+pub(crate) fn note_raw_progress_line(cursor: &mut ProgressCursor, line: &str) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         return;
     };
@@ -1270,7 +1271,7 @@ fn note_raw_terminal_event(cursor: &mut ProgressCursor, event: &TerminalEvent) {
     }
 }
 
-fn format_progress_event(line: &str, show_trace: bool) -> Option<ProgressDisplay> {
+pub(crate) fn format_progress_event(line: &str, show_trace: bool) -> Option<ProgressDisplay> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     if let Some(event) = value.get("event") {
         let event: TerminalEvent = serde_json::from_value(event.clone()).ok()?;
@@ -1323,7 +1324,7 @@ fn repl_display_projector(show_trace: bool) -> DisplayProjector {
     }
 }
 
-type ProgressDisplay = DisplayEvent;
+pub(crate) type ProgressDisplay = DisplayEvent;
 
 fn display_progress(message: &str) -> ProgressDisplay {
     ProgressDisplay {
@@ -1452,32 +1453,32 @@ fn poll_running_turn(
     Ok(false)
 }
 
-struct RunningTurn {
-    started_at: Instant,
-    input_preview: String,
-    user_input: String,
-    receiver: mpsc::Receiver<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
-    handle: thread::JoinHandle<()>,
-    result: Option<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
-    guidance_path: PathBuf,
-    progress_path: PathBuf,
+pub(crate) struct RunningTurn {
+    pub(crate) started_at: Instant,
+    pub(crate) input_preview: String,
+    pub(crate) user_input: String,
+    pub(crate) receiver: mpsc::Receiver<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
+    pub(crate) handle: thread::JoinHandle<()>,
+    pub(crate) result: Option<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
+    pub(crate) guidance_path: PathBuf,
+    pub(crate) progress_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ReplSessionStats {
-    model_name: String,
-    context_tokens: u64,
-    context_max_tokens: u64,
-    last_input_tokens: u64,
-    last_output_tokens: u64,
-    session_total_tokens: u64,
-    turn_running: bool,
+pub(crate) struct ReplSessionStats {
+    pub(crate) model_name: String,
+    pub(crate) context_tokens: u64,
+    pub(crate) context_max_tokens: u64,
+    pub(crate) last_input_tokens: u64,
+    pub(crate) last_output_tokens: u64,
+    pub(crate) session_total_tokens: u64,
+    pub(crate) turn_running: bool,
     /// Provider HTTP timeout (for remaining-time countdown while running).
-    request_timeout_ms: Option<u64>,
+    pub(crate) request_timeout_ms: Option<u64>,
 }
 
 impl ReplSessionStats {
-    fn from_summary(summary: &chuang_agent::runtime_config::ConfigSummary) -> Self {
+    pub(crate) fn from_summary(summary: &chuang_agent::runtime_config::ConfigSummary) -> Self {
         Self {
             model_name: summary.model_name.clone(),
             context_max_tokens: u64::from(summary.context_max_tokens),
@@ -1486,11 +1487,11 @@ impl ReplSessionStats {
         }
     }
 
-    fn mark_turn_started(&mut self) {
+    pub(crate) fn mark_turn_started(&mut self) {
         self.turn_running = true;
     }
 
-    fn update_from_result(&mut self, result: &chuang_agent::agent_runtime::RuntimeResult) {
+    pub(crate) fn update_from_result(&mut self, result: &chuang_agent::agent_runtime::RuntimeResult) {
         self.model_name = result.response.model_name.clone();
         self.context_tokens = u64::from(result.packed_token_count);
         self.last_input_tokens =
@@ -1512,21 +1513,21 @@ impl ReplSessionStats {
         self.turn_running = false;
     }
 
-    fn mark_turn_finished(&mut self) {
+    pub(crate) fn mark_turn_finished(&mut self) {
         self.turn_running = false;
     }
 }
 
 #[derive(Debug, Clone)]
-struct ReplPendingApproval {
-    approval_id: String,
-    pending_file: PathBuf,
-    workspace_root: PathBuf,
-    reason: String,
-    action: String,
+pub(crate) struct ReplPendingApproval {
+    pub(crate) approval_id: String,
+    pub(crate) pending_file: PathBuf,
+    pub(crate) workspace_root: PathBuf,
+    pub(crate) reason: String,
+    pub(crate) action: String,
 }
 
-fn spawn_repl_turn(
+pub(crate) fn spawn_repl_turn(
     options: CliOptions,
     user_input: String,
     conversation_history: Vec<ConversationHistoryItem>,
@@ -1696,7 +1697,7 @@ fn print_repl_failure(
     )
 }
 
-fn readable_runtime_error(error: &str) -> String {
+pub(crate) fn readable_runtime_error(error: &str) -> String {
     if error.contains("turn_cancelled_at_safe_point") {
         return "已按你的要求在安全点停止，未继续执行后续步骤。".to_string();
     }
@@ -1709,7 +1710,7 @@ fn readable_runtime_error(error: &str) -> String {
     "本轮处理没有完成，详细错误可通过 /trace 查看。".to_string()
 }
 
-fn recent_repl_conversation_history(
+pub(crate) fn recent_repl_conversation_history(
     history: &[ConversationHistoryItem],
     max_turns: usize,
 ) -> Vec<ConversationHistoryItem> {
@@ -1725,7 +1726,7 @@ fn recent_repl_conversation_history(
     recent
 }
 
-fn record_repl_conversation_turn(
+pub(crate) fn record_repl_conversation_turn(
     history: &mut Vec<ConversationHistoryItem>,
     user_input: &str,
     assistant_text: &str,
@@ -1800,7 +1801,7 @@ fn render_sticky_status_line(
     parts.join(" · ")
 }
 
-fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
+pub(crate) fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
     if guidance.is_empty() {
         return input.to_string();
     }
@@ -1815,7 +1816,7 @@ fn merge_repl_guidance(input: &str, guidance: &[String]) -> String {
     merged
 }
 
-fn compact_preview(input: &str, max_chars: usize) -> String {
+pub(crate) fn compact_preview(input: &str, max_chars: usize) -> String {
     let text = input.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.chars().count() <= max_chars {
         return text;
@@ -1828,7 +1829,7 @@ fn compact_preview(input: &str, max_chars: usize) -> String {
     preview
 }
 
-fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
+pub(crate) fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("guidance_dir_create_failed: {e}"))?;
     }
@@ -1840,7 +1841,7 @@ fn append_live_guidance(path: &PathBuf, note: &str) -> Result<(), String> {
     writeln!(file, "{}", note.trim()).map_err(|e| format!("guidance_write_failed: {e}"))
 }
 
-fn handle_repl_command(
+pub(crate) fn handle_repl_command(
     input: &str,
     verbose: &mut bool,
     show_trace: &mut bool,
@@ -1983,7 +1984,7 @@ fn print_repl_result(
     chrome.write_body(stdout, &format!("{block}\n"))
 }
 
-fn render_repl_answer_text(answer: &str, turn_count: usize) -> Result<String, String> {
+pub(crate) fn render_repl_answer_text(answer: &str, turn_count: usize) -> Result<String, String> {
     // Defense in depth: never paint raw tool JSON / governance dumps as the answer.
     let answer = cli_runtime::sanitize_operator_facing_answer_for_display(answer);
     let answer = answer.as_str();
@@ -2208,7 +2209,7 @@ fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) ->
     }
 }
 
-fn pending_approval_from_result(
+pub(crate) fn pending_approval_from_result(
     result: &chuang_agent::agent_runtime::RuntimeResult,
 ) -> Option<ReplPendingApproval> {
     let meta = &result.response.meta.extra;
@@ -2306,7 +2307,7 @@ fn render_approval_prompt(approval: &ReplPendingApproval) -> String {
     )
 }
 
-fn render_approval_details(approval: &ReplPendingApproval) -> String {
+pub(crate) fn render_approval_details(approval: &ReplPendingApproval) -> String {
     format!(
         "{}审批编号{} {}\n{}一次性范围{} 当前操作的精确指纹\n{}待审批记录{} {}",
         ANSI_DIM,
@@ -2320,7 +2321,7 @@ fn render_approval_details(approval: &ReplPendingApproval) -> String {
     )
 }
 
-fn humanize_approval_record(record: &chuang_agent::tool_runtime::ToolExecutionRecord) -> String {
+pub(crate) fn humanize_approval_record(record: &chuang_agent::tool_runtime::ToolExecutionRecord) -> String {
     if record.ok {
         format!(
             "{}成功，耗时 {}ms",
@@ -2438,7 +2439,7 @@ fn wrap_single_line(input: &str, width: usize) -> String {
     compact_preview(input, width)
 }
 
-fn render_completion_metadata_line(
+pub(crate) fn render_completion_metadata_line(
     elapsed: &str,
     tool_status: &str,
     pending_guidance_count: usize,

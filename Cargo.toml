@@ -9,6 +9,7 @@ edition = "2021"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "std"] }
 crossterm = "0.28"
+ratatui = "0.30"
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
