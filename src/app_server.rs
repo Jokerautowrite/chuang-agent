@@ -660,7 +660,7 @@ fn handle_model_list(params: &Value) -> Result<Value, String> {
             "model": model_name,
             "displayName": model_name,
             "isDefault": true,
-            "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+            "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
             "defaultReasoningEffort": "medium",
         }]
     }))

@@ -113,6 +113,8 @@ pub enum ReasoningEffort {
     Medium,
     High,
     XHigh,
+    /// Highest effort for providers that accept OpenAI-style `"max"` (e.g. gpt-5.6-terra).
+    Max,
 }
 
 impl ReasoningEffort {
@@ -122,6 +124,7 @@ impl ReasoningEffort {
             Self::Medium => "medium",
             Self::High => "high",
             Self::XHigh => "xhigh",
+            Self::Max => "max",
         }
     }
 }
@@ -141,8 +144,9 @@ impl FromStr for ReasoningEffort {
             "medium" => Ok(Self::Medium),
             "high" => Ok(Self::High),
             "xhigh" => Ok(Self::XHigh),
+            "max" => Ok(Self::Max),
             other => Err(format!(
-                "unsupported reasoning effort: {other} (supported: low, medium, high, xhigh)"
+                "unsupported reasoning effort: {other} (supported: low, medium, high, xhigh, max)"
             )),
         }
     }
