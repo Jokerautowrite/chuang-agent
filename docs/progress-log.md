@@ -1,8 +1,21 @@
-# 2026-07-18 终端统一 app-server + 真实服务状态面
+# 2026-07-18 app-server streamed progress + guidance/interrupt
+- 多代理并行完成 daemon live turn 与 REPL socket control 两条实现线；持久化只做设计判断，本轮不和并发状态机混做。
+- daemon 改为每客户端独立线程，active-turn registry 拒绝同 thread 并发 turn；`turn/started` 在 runtime 前发送，TerminalEvent JSONL 通过 `turn/progress` 实时转发。
+- 新增 `turn/guidance` 与 cooperative `turn/interrupt`。ack 只表示排队成功，实际应用/取消以 `GuidanceInjected` / `TurnCancelled` 为准；inactive turn 明确返回 `turn_not_active`。
+- live-turn 根与 turn 目录固定 `0700`，`guidance.txt` / `progress.jsonl` 使用 `create_new` 并固定 `0600`；per-turn writer mutex 防并发控制帧交叉，state 锁把 active 校验与写入收敛为单一线性化点。
+- REPL socket transport 读取 final response 后、结果交付前关闭 live-control gate 并做 final drain；控制失败显示可见 warning，不 fallback。progress/warning 写入串行化，未完成 JSONL 尾部不会被 cursor 吞掉。
+- cancelled、failed、`provider_error` turn 均不进入后续模型历史；只允许 completed / human-input-required 历史注入。
+- 服务已重建并重启：PID `2131353`、`NRestarts=0`、socket mode `600`、probe/doctor/status 正常、effective live gates `3/3 enabled`。
+- 真实 interrupt：`/tmp/chuang-live-control-1784407434165014603`，ack=`interrupt_requested`、progress=`turn_cancelled`、final=`cancelled`。
+- 真实 guidance：`/tmp/chuang-live-guidance-1784407542279886083`，ack=`guidance_queued`、progress=`guidance_injected`、final=`completed`，答复含 `LIVE_GUIDANCE_OK_1784407542279886083`。
+- 完整隔离测试全绿；app-server `23/23`、Cargo `repl_` filter `51`、transport `11/11`，`cargo check --all-targets`、`cargo build`、focused rustfmt 与 `git diff --check` 通过。
+- 下一步：SQLite 持久化 daemon thread/turn snapshot；重启时把 running turn 收口为 interrupted，不自动重放。
+
+# 2026-07-18 终端统一 app-server + 真实服务状态面（历史基线，以上方 live-turn 为准）
 - 并行完成并集成两条主线：剩余 context-budget 测试修复；交互 REPL 接入 Unix socket canonical app-server。没有改 Agent Hub、Feishu，也没有纳入 TN 站点或小策审计文档。
 - 新增 `app-server daemon/probe/ask`，保留无参数 stdio 兼容。`chuang ask`、自由文本和交互 REPL 默认复用 `/run/user/1000/chuang-agent/app-server.sock`，只允许显式 `CHUANG_APP_SERVER_MODE=local` / stub 走旧直连；stale socket 改名保留，服务脚本已移除 FIFO/`rm`。
 - Ratatui 与 legacy REPL 共用 `ReplTurnTransport`，复用 daemon thread id；`CHUANG_REPL_WORKSPACE_ROOT` 保留调用者 cwd。socket 失败不 fallback，未知 thread 明确报错，pending approval metadata 会随 thread snapshot 保留。
-- 同步协议不支持实时 progress/guidance/stop；REPL 如实提示，`turn/interrupt` 返回 unsupported，不再给假成功。
+- 当时同步协议不支持实时 progress/guidance/stop；该限制已由上方 live-turn 实现取代。
 - `status`、`doctor`、`app-server health` 新增 `app_server_service` 与 `effective_live_adapter_gates`，真实读取 active service 的 4 个 gate 状态且不暴露其它环境内容。
 - 用户服务已切换并验证：active/running，PID `1659562`，`NRestarts=0`，socket mode `600`；installed `chuang` 与 unit 均和仓库一致。
 - 真实 `chuang ask` 已一次并行派出两名 Luna Analyze worker，同秒启动并均返回 Success；父任务正确汇总 Cargo package name 和 AGENTS 核心定位。

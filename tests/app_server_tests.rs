@@ -1,8 +1,9 @@
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, path::PathBuf};
@@ -122,6 +123,14 @@ fn app_server_socket(name: &str) -> PathBuf {
 }
 
 fn spawn_app_server_daemon(socket: &PathBuf, workspace: Option<&PathBuf>) -> std::process::Child {
+    spawn_app_server_daemon_with_runtime_dir(socket, workspace, None)
+}
+
+fn spawn_app_server_daemon_with_runtime_dir(
+    socket: &PathBuf,
+    workspace: Option<&PathBuf>,
+    runtime_dir: Option<&PathBuf>,
+) -> std::process::Child {
     std::fs::create_dir_all(
         socket
             .parent()
@@ -138,6 +147,9 @@ fn spawn_app_server_daemon(socket: &PathBuf, workspace: Option<&PathBuf>) -> std
         .stderr(Stdio::piped());
     if let Some(workspace) = workspace {
         command.env("CHUANG_AGENT_WORKSPACE_ROOT", workspace);
+    }
+    if let Some(runtime_dir) = runtime_dir {
+        command.env("XDG_RUNTIME_DIR", runtime_dir);
     }
     command.spawn().expect("app-server daemon should spawn")
 }
@@ -164,6 +176,30 @@ fn stop_app_server_daemon(child: &mut std::process::Child) {
         !status.success(),
         "test daemon should only stop because the test terminated it"
     );
+}
+
+fn daemon_request(socket: &PathBuf, request: serde_json::Value) -> serde_json::Value {
+    let mut stream = UnixStream::connect(socket).expect("daemon socket should connect");
+    writeln!(
+        stream,
+        "{}",
+        serde_json::to_string(&request).expect("request should serialize")
+    )
+    .expect("daemon request should write");
+    let request_id = request["id"].clone();
+    let mut reader = BufReader::new(stream);
+    loop {
+        let mut line = String::new();
+        let read = reader
+            .read_line(&mut line)
+            .expect("daemon response should read");
+        assert!(read > 0, "daemon closed before response");
+        let response: serde_json::Value =
+            serde_json::from_str(line.trim()).expect("daemon response should parse");
+        if response.get("id") == Some(&request_id) {
+            return response;
+        }
+    }
 }
 
 #[test]
@@ -324,6 +360,331 @@ fn app_server_daemon_probe_and_ask_use_canonical_socket() {
     );
     assert_eq!(second["thread_id"], "chuang-thread-1");
     assert_eq!(second["turn"]["id"], "chuang-turn-2");
+
+    stop_app_server_daemon(&mut daemon);
+}
+
+#[test]
+fn app_server_daemon_streams_live_turn_progress_and_accepts_cross_connection_controls() {
+    let workspace = temp_workspace("daemon-live-turn-controls");
+    let runtime_dir = temp_workspace("daemon-live-turn-runtime");
+    write_basic_stub_workspace(&workspace);
+    fs::create_dir_all(&runtime_dir).expect("runtime dir should create");
+    fs::set_permissions(&runtime_dir, fs::Permissions::from_mode(0o700))
+        .expect("runtime dir permissions should set");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener
+        .local_addr()
+        .expect("listener address should exist");
+    let (provider_started_tx, provider_started_rx) = std::sync::mpsc::channel();
+    let provider = thread::spawn(move || {
+        listener
+            .set_nonblocking(true)
+            .expect("provider listener should become nonblocking");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "provider request did not arrive"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("provider listener failed: {error}"),
+            }
+        };
+        provider_started_tx
+            .send(())
+            .expect("provider start signal should send");
+        let _ = read_http_request(&mut stream);
+        thread::sleep(Duration::from_millis(400));
+        let body = serde_json::json!({
+            "id": "live-turn",
+            "object": "response",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "FINAL: delayed completion"},
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("provider response should write");
+    });
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-live-turn"
+base_url = "http://{address}/v1"
+model = "gpt-app-server-live-turn"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("live turn config should write");
+
+    let socket = app_server_socket("daemon-live-turn-controls");
+    let mut daemon =
+        spawn_app_server_daemon_with_runtime_dir(&socket, Some(&workspace), Some(&runtime_dir));
+    wait_for_app_server_socket(&socket);
+
+    let mut turn_stream = UnixStream::connect(&socket).expect("turn socket should connect");
+    turn_stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .expect("turn socket timeout should set");
+    writeln!(
+        turn_stream,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"执行一个可中断的任务"}}}}"#,
+        workspace.display()
+    )
+    .expect("turn/start should write");
+    let mut turn_reader = BufReader::new(turn_stream);
+    let mut messages = Vec::new();
+    let started = loop {
+        let mut line = String::new();
+        let read = turn_reader
+            .read_line(&mut line)
+            .expect("turn start notification should read");
+        assert!(read > 0, "turn socket closed before turn/started");
+        let value: serde_json::Value =
+            serde_json::from_str(line.trim()).expect("turn notification should parse");
+        let is_started = value["method"] == "turn/started";
+        messages.push(value.clone());
+        if is_started {
+            break value;
+        }
+    };
+    let thread_id = started["params"]["threadId"]
+        .as_str()
+        .expect("started thread id should exist")
+        .to_string();
+    let turn_id = started["params"]["turn"]["id"]
+        .as_str()
+        .expect("started turn id should exist")
+        .to_string();
+    let live_turns_dir = runtime_dir.join("chuang-agent/live-turns");
+    let turn_dirs = fs::read_dir(&live_turns_dir)
+        .expect("live turn root should list")
+        .map(|entry| entry.expect("live turn entry should read").path())
+        .collect::<Vec<_>>();
+    assert_eq!(turn_dirs.len(), 1, "one per-turn directory should exist");
+    let turn_dir = &turn_dirs[0];
+    let guidance_path = turn_dir.join("guidance.txt");
+    let progress_path = turn_dir.join("progress.jsonl");
+    for directory in [
+        runtime_dir.join("chuang-agent"),
+        live_turns_dir.clone(),
+        turn_dir.clone(),
+    ] {
+        assert_eq!(
+            fs::metadata(&directory)
+                .expect("private directory metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "directory should be private: {}",
+            directory.display()
+        );
+    }
+    for file in [&guidance_path, &progress_path] {
+        assert_eq!(
+            fs::metadata(file)
+                .expect("live turn file should exist before turn/started")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "live turn file should be private: {}",
+            file.display()
+        );
+    }
+    provider_started_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("runtime should reach the provider before control messages");
+
+    let busy = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 2,
+            "method": "turn/start",
+            "params": {
+                "workspaceRoot": workspace,
+                "threadId": thread_id,
+                "text": "第二个任务"
+            }
+        }),
+    );
+    assert!(busy["error"]["message"]
+        .as_str()
+        .expect("busy error should be a string")
+        .contains("thread_busy"));
+
+    let mismatched = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 3,
+            "method": "turn/guidance",
+            "params": {
+                "threadId": thread_id,
+                "turnId": "wrong-turn",
+                "text": "不要接受"
+            }
+        }),
+    );
+    assert!(mismatched["error"]["message"]
+        .as_str()
+        .expect("inactive error should be a string")
+        .contains("turn_not_active"));
+
+    let control_barrier = Arc::new(Barrier::new(3));
+    let guidance_socket = socket.clone();
+    let guidance_thread_id = thread_id.clone();
+    let guidance_turn_id = turn_id.clone();
+    let guidance_barrier = Arc::clone(&control_barrier);
+    let guidance_handle = thread::spawn(move || {
+        guidance_barrier.wait();
+        daemon_request(
+            &guidance_socket,
+            serde_json::json!({
+                "id": 4,
+                "method": "turn/guidance",
+                "params": {
+                    "threadId": guidance_thread_id,
+                    "turnId": guidance_turn_id,
+                    "text": "  等待期间保持只读  "
+                }
+            }),
+        )
+    });
+    let interrupt_socket = socket.clone();
+    let interrupt_thread_id = thread_id.clone();
+    let interrupt_turn_id = turn_id.clone();
+    let interrupt_barrier = Arc::clone(&control_barrier);
+    let interrupt_handle = thread::spawn(move || {
+        interrupt_barrier.wait();
+        daemon_request(
+            &interrupt_socket,
+            serde_json::json!({
+                "id": 5,
+                "method": "turn/interrupt",
+                "params": {
+                    "threadId": interrupt_thread_id,
+                    "turnId": interrupt_turn_id
+                }
+            }),
+        )
+    });
+    control_barrier.wait();
+    let guidance = guidance_handle
+        .join()
+        .expect("guidance request should finish");
+    assert_eq!(guidance["result"]["accepted"], true);
+    assert_eq!(guidance["result"]["status"], "guidance_queued");
+    let interrupt = interrupt_handle
+        .join()
+        .expect("interrupt request should finish");
+    assert_eq!(interrupt["result"]["accepted"], true);
+    assert_eq!(interrupt["result"]["status"], "interrupt_requested");
+    assert_eq!(interrupt["result"]["effectiveAt"], "next_safe_point");
+    assert!(interrupt["result"].get("cancelled").is_none());
+    let guidance_contents =
+        fs::read_to_string(&guidance_path).expect("guidance evidence should remain readable");
+    let guidance_lines = guidance_contents.lines().collect::<Vec<_>>();
+    assert_eq!(guidance_lines.len(), 2);
+    assert!(guidance_lines.contains(&"等待期间保持只读"));
+    assert_eq!(
+        guidance_lines
+            .iter()
+            .filter(|line| **line == "[chuang-control] stop")
+            .count(),
+        1
+    );
+
+    loop {
+        let mut line = String::new();
+        let read = turn_reader
+            .read_line(&mut line)
+            .expect("turn completion should read");
+        assert!(read > 0, "turn socket closed before final response");
+        let value: serde_json::Value =
+            serde_json::from_str(line.trim()).expect("turn output should parse");
+        let is_final_response = value["id"] == 1;
+        messages.push(value);
+        if is_final_response {
+            break;
+        }
+    }
+    let started_at = messages
+        .iter()
+        .position(|value| value["method"] == "turn/started")
+        .expect("turn/started should be emitted");
+    let completed_at = messages
+        .iter()
+        .position(|value| value["method"] == "turn/completed")
+        .expect("turn/completed should be emitted");
+    let response_at = messages
+        .iter()
+        .position(|value| value["id"] == 1)
+        .expect("turn/start response should be emitted");
+    assert!(started_at < completed_at);
+    assert!(completed_at < response_at);
+    let progress = messages
+        .iter()
+        .find(|value| value["method"] == "turn/progress")
+        .expect("turn should stream a progress event while runtime is active");
+    assert!(progress["params"]["event"].get("schema_version").is_some());
+    assert!(progress["params"]["event"].get("event").is_some());
+    assert_eq!(
+        messages[response_at]["error"]["message"]
+            .as_str()
+            .expect("cancelled turn should return an RPC error")
+            .contains("turn_cancelled_at_safe_point"),
+        true
+    );
+    assert_eq!(
+        messages[completed_at]["params"]["turn"]["status"],
+        "cancelled"
+    );
+    provider.join().expect("provider should finish");
+
+    let inactive = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 6,
+            "method": "turn/interrupt",
+            "params": {
+                "threadId": thread_id,
+                "turnId": turn_id
+            }
+        }),
+    );
+    assert!(inactive["error"]["message"]
+        .as_str()
+        .expect("inactive error should be a string")
+        .contains("turn_not_active"));
 
     stop_app_server_daemon(&mut daemon);
 }
@@ -1307,6 +1668,124 @@ fn app_server_second_turn_injects_recent_thread_history() {
             .unwrap()
             .len(),
         2
+    );
+}
+
+#[test]
+fn app_server_provider_error_turn_is_excluded_from_recent_thread_history() {
+    let workspace = temp_workspace("provider-error-history");
+    write_basic_stub_workspace(&workspace);
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+    let address = listener.local_addr().expect("local addr should exist");
+    let server = thread::spawn(move || {
+        let (mut first, _) = listener.accept().expect("first request should arrive");
+        let _ = read_http_request(&mut first);
+        let first_body = "at capacity";
+        let first_response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            first_body.len(),
+            first_body
+        );
+        first
+            .write_all(first_response.as_bytes())
+            .expect("first response should write");
+
+        let (mut second, _) = listener.accept().expect("second request should arrive");
+        let _ = read_http_request(&mut second);
+        let second_body = serde_json::json!({
+            "id": "history-after-provider-error",
+            "object": "response",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "FINAL: recovered"},
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+        let second_response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            second_body.len(),
+            second_body
+        );
+        second
+            .write_all(second_response.as_bytes())
+            .expect("second response should write");
+    });
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-provider-error-history"
+base_url = "http://{address}/v1"
+model = "gpt-app-server-provider-error-history"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("provider history config should write");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("app-server should spawn");
+    let mut stdin = child.stdin.take().expect("stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"first"}}}}"#,
+        workspace.display()
+    )
+    .expect("first turn should write");
+    writeln!(
+        stdin,
+        r#"{{"id":2,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"chuang-thread-1","text":"second"}}}}"#,
+        workspace.display()
+    )
+    .expect("second turn should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(
+        output.status.success(),
+        "app-server failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("provider server should finish");
+    let responses = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let first = responses
+        .iter()
+        .find(|value| value["id"] == 1)
+        .expect("first response should exist");
+    assert_eq!(first["result"]["turn"]["status"], "provider_error");
+    let second = responses
+        .iter()
+        .find(|value| value["id"] == 2)
+        .expect("second response should exist");
+    assert_eq!(
+        second["result"]["turn"]["runtimeObservability"]["recent_conversation_history_item_count"],
+        "0"
+    );
+    assert_eq!(
+        second["result"]["turn"]["runtimeObservability"]["recent_conversation_history_injected"],
+        "false"
     );
 }
 

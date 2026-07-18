@@ -18,6 +18,12 @@ The daemon creates a `0600` socket. An occupied reachable socket fails as alread
 socket is preserved by renaming it to a `.stale-<timestamp>-<pid>-*` sibling before binding; the
 daemon never removes socket paths.
 
+Each active turn gets a private directory under
+`${XDG_RUNTIME_DIR}/chuang-agent/live-turns`. The runtime root and per-turn directory are `0700`;
+`guidance.txt` and `progress.jsonl` are atomically created with `create_new` and mode `0600`.
+If `XDG_RUNTIME_DIR` is unavailable, the daemon still creates a private `0700` per-turn directory
+under the system temporary directory instead of using shared flat control files.
+
 ## Terminal Client
 
 ```bash
@@ -35,6 +41,31 @@ It never falls back to a direct local runtime when the socket is unavailable.
 Repository `scripts/chuang` routes `chuang ask` and free-form one-shot tasks through this socket by
 default. Set `CHUANG_APP_SERVER_MODE=local` only when an explicit legacy direct-runtime invocation is
 needed.
+
+## Live Turn Control
+
+The daemon handles each Unix client on its own thread and keeps active-turn control metadata behind
+short-lived state locks. Provider and tool execution never run while holding the shared state lock.
+
+An active socket turn emits:
+
+```text
+turn/started
+turn/progress
+item/agentMessage/delta
+item/completed
+turn/completed
+```
+
+`turn/guidance` queues text for the runtime's existing safe-point guidance reader.
+`turn/interrupt` queues `[chuang-control] stop` and returns
+`effectiveAt=next_safe_point`; it does not claim an already-blocking provider or shell operation was
+immediately cancelled. Concurrent clients may send these controls while the original
+`turn/start` connection remains open.
+
+Guidance and interrupt writes share a per-turn file mutex. Active-turn validation and the write
+also occur inside one app-server state-lock interval, so the operation has one linearization point:
+it either writes and returns a queued response, or returns `turn_not_active` without writing.
 
 ## Health Check
 

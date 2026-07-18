@@ -1,13 +1,20 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
-use crate::{spawn_repl_turn, spawn_repl_turn_task, RunningTurn};
+use crate::{spawn_repl_turn, spawn_repl_turn_task, LiveControlGate, RunningTurn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplTransportKind {
@@ -80,9 +87,21 @@ impl ReplTurnTransport {
                 let socket = self.socket.clone().expect("socket transport has socket");
                 let workspace_root = self.workspace_root.clone();
                 let thread_id = self.thread_id.clone();
-                spawn_repl_turn_task(user_input.clone(), false, move |_, _| {
-                    app_server_turn(&socket, &workspace_root, thread_id.as_deref(), &user_input)
-                })
+                spawn_repl_turn_task(
+                    user_input.clone(),
+                    true,
+                    move |guidance_path, progress_path, live_control_gate| {
+                        app_server_turn(
+                            &socket,
+                            &workspace_root,
+                            thread_id.as_deref(),
+                            &user_input,
+                            &guidance_path,
+                            &progress_path,
+                            &live_control_gate,
+                        )
+                    },
+                )
             }
         }
     }
@@ -151,20 +170,343 @@ fn app_server_turn(
     workspace_root: &Path,
     thread_id: Option<&str>,
     user_input: &str,
+    guidance_path: &Path,
+    progress_path: &Path,
+    live_control_gate: &LiveControlGate,
 ) -> Result<chuang_agent::agent_runtime::RuntimeResult, String> {
+    let request = json!({
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+            "threadId": thread_id.unwrap_or(""),
+            "workspaceRoot": workspace_root,
+            "text": user_input,
+        }
+    });
+    let response = app_server_stream_turn(
+        socket,
+        request,
+        guidance_path,
+        progress_path,
+        live_control_gate,
+    )?;
+    runtime_result_from_app_server_response(user_input, &response)
+}
+
+#[derive(Debug, Clone)]
+struct TurnControlTarget {
+    thread_id: String,
+    turn_id: String,
+}
+
+fn app_server_stream_turn(
+    socket: &Path,
+    request: Value,
+    guidance_path: &Path,
+    progress_path: &Path,
+    live_control_gate: &LiveControlGate,
+) -> Result<Value, String> {
+    let request_id = request
+        .get("id")
+        .cloned()
+        .ok_or_else(|| "app_server_client_request_missing_id".to_string())?;
+    let controls_done = Arc::new(AtomicBool::new(false));
+    let control_target = Arc::new(Mutex::new(None));
+    let progress_writer = Arc::new(Mutex::new(()));
+    let control_handle = spawn_live_control_forwarder(
+        socket.to_path_buf(),
+        guidance_path.to_path_buf(),
+        progress_path.to_path_buf(),
+        Arc::clone(&control_target),
+        Arc::clone(&controls_done),
+        Arc::clone(&progress_writer),
+    );
+    let result = (|| -> Result<Value, String> {
+        let mut stream = UnixStream::connect(socket).map_err(|error| {
+            format!(
+                "app_server_unavailable: socket={} error={error}",
+                socket.display()
+            )
+        })?;
+        let encoded = serde_json::to_string(&request)
+            .map_err(|error| format!("app_server_client_json_encode_failed: {error}"))?;
+        writeln!(stream, "{encoded}").map_err(|error| {
+            format!(
+                "app_server_client_write_failed: socket={} error={error}",
+                socket.display()
+            )
+        })?;
+        stream.flush().map_err(|error| {
+            format!(
+                "app_server_client_flush_failed: socket={} error={error}",
+                socket.display()
+            )
+        })?;
+        let mut reader = BufReader::new(stream);
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).map_err(|error| {
+                format!(
+                    "app_server_client_read_failed: socket={} error={error}",
+                    socket.display()
+                )
+            })?;
+            if read == 0 {
+                return Err(format!(
+                    "app_server_unavailable: socket={} error=connection_closed_before_response",
+                    socket.display()
+                ));
+            }
+            let value: Value = serde_json::from_str(line.trim())
+                .map_err(|error| format!("app_server_client_invalid_json: {error}"))?;
+            match value.get("method").and_then(Value::as_str) {
+                Some("turn/started") => {
+                    if let Some(target) = turn_control_target_from_notification(&value) {
+                        if let Ok(mut current) = control_target.lock() {
+                            *current = Some(target);
+                        } else {
+                            append_control_warning(
+                                progress_path,
+                                "实时控制不可用：回合控制状态已损坏",
+                                &progress_writer,
+                            );
+                        }
+                    }
+                    continue;
+                }
+                Some("turn/progress") => {
+                    if let Some(event) = value.get("params").and_then(|params| params.get("event"))
+                    {
+                        append_progress_event(progress_path, event, &progress_writer)?;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            if value.get("id") != Some(&request_id) {
+                continue;
+            }
+            if let Some(message) = value["error"]["message"].as_str() {
+                return Err(format!("app_server_rpc_failed: {message}"));
+            }
+            return value
+                .get("result")
+                .cloned()
+                .ok_or_else(|| "app_server_client_response_missing_result".to_string());
+        }
+    })();
+    live_control_gate.close();
+    controls_done.store(true, Ordering::Release);
+    let _ = control_handle.join();
+    result
+}
+
+fn turn_control_target_from_notification(notification: &Value) -> Option<TurnControlTarget> {
+    let params = notification.get("params")?;
+    let thread_id = params.get("threadId")?.as_str()?.trim();
+    let turn_id = params.get("turn")?.get("id")?.as_str()?.trim();
+    if thread_id.is_empty() || turn_id.is_empty() {
+        return None;
+    }
+    Some(TurnControlTarget {
+        thread_id: thread_id.to_string(),
+        turn_id: turn_id.to_string(),
+    })
+}
+
+fn spawn_live_control_forwarder(
+    socket: PathBuf,
+    guidance_path: PathBuf,
+    progress_path: PathBuf,
+    control_target: Arc<Mutex<Option<TurnControlTarget>>>,
+    done: Arc<AtomicBool>,
+    progress_writer: Arc<Mutex<()>>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut bytes_read = 0usize;
+        loop {
+            drain_live_controls(
+                &socket,
+                &guidance_path,
+                &progress_path,
+                &control_target,
+                &progress_writer,
+                &mut bytes_read,
+                false,
+            );
+            if done.load(Ordering::Acquire) {
+                drain_live_controls(
+                    &socket,
+                    &guidance_path,
+                    &progress_path,
+                    &control_target,
+                    &progress_writer,
+                    &mut bytes_read,
+                    true,
+                );
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    })
+}
+
+fn drain_live_controls(
+    socket: &Path,
+    guidance_path: &Path,
+    progress_path: &Path,
+    control_target: &Arc<Mutex<Option<TurnControlTarget>>>,
+    progress_writer: &Arc<Mutex<()>>,
+    bytes_read: &mut usize,
+    final_drain: bool,
+) {
+    let target = match control_target.lock() {
+        Ok(current) => current.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    if target.is_none() && !final_drain {
+        return;
+    }
+    let lines = match read_new_guidance_lines(guidance_path, bytes_read) {
+        Ok(lines) => lines,
+        Err(error) => {
+            append_control_warning(
+                progress_path,
+                &format!("实时控制读取失败：{error}"),
+                progress_writer,
+            );
+            return;
+        }
+    };
+    for line in lines {
+        if let Some(target) = target.as_ref() {
+            if let Err(error) = forward_live_control(socket, target, line.as_str()) {
+                append_control_warning(
+                    progress_path,
+                    &format!("实时控制请求失败：{error}"),
+                    progress_writer,
+                );
+            }
+        } else if final_drain {
+            let action = if line == "[chuang-control] stop" {
+                "停止请求"
+            } else {
+                "补充要求"
+            };
+            append_control_warning(
+                progress_path,
+                &format!("{action}未送达：回合在服务端提供控制标识前已结束"),
+                progress_writer,
+            );
+        }
+    }
+}
+
+fn read_new_guidance_lines(path: &Path, bytes_read: &mut usize) -> Result<Vec<String>, String> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("guidance_read_failed: {error}")),
+    };
+    let start = (*bytes_read).min(content.len());
+    let tail = &content[start..];
+    let Some(last_newline) = tail.rfind('\n') else {
+        return Ok(Vec::new());
+    };
+    let complete_len = last_newline + 1;
+    let lines = tail[..complete_len]
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    *bytes_read = start + complete_len;
+    Ok(lines)
+}
+
+fn forward_live_control(
+    socket: &Path,
+    target: &TurnControlTarget,
+    line: &str,
+) -> Result<(), String> {
+    let (method, params) = if line == "[chuang-control] stop" {
+        (
+            "turn/interrupt",
+            json!({
+                "threadId": target.thread_id.as_str(),
+                "turnId": target.turn_id.as_str(),
+            }),
+        )
+    } else {
+        (
+            "turn/guidance",
+            json!({
+                "threadId": target.thread_id.as_str(),
+                "turnId": target.turn_id.as_str(),
+                "text": line,
+            }),
+        )
+    };
     let response = app_server_rpc_request(
         socket,
         json!({
             "id": 1,
-            "method": "turn/start",
-            "params": {
-                "threadId": thread_id.unwrap_or(""),
-                "workspaceRoot": workspace_root,
-                "text": user_input,
-            }
+            "method": method,
+            "params": params,
         }),
     )?;
-    runtime_result_from_app_server_response(user_input, &response)
+    let accepted = response
+        .get("accepted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if accepted {
+        Ok(())
+    } else {
+        let status = response
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        Err(format!("app_server_control_rejected: status={status}"))
+    }
+}
+
+fn append_progress_event(
+    path: &Path,
+    event: &Value,
+    progress_writer: &Arc<Mutex<()>>,
+) -> Result<(), String> {
+    let mut encoded = serde_json::to_vec(event)
+        .map_err(|error| format!("progress_json_encode_failed: {error}"))?;
+    encoded.push(b'\n');
+    let _writer_guard = progress_writer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("progress_dir_create_failed: {error}"))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("progress_open_failed: {error}"))?;
+    file.write_all(&encoded)
+        .map_err(|error| format!("progress_write_failed: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("progress_flush_failed: {error}"))
+}
+
+fn append_control_warning(path: &Path, message: &str, progress_writer: &Arc<Mutex<()>>) {
+    let _ = append_progress_event(
+        path,
+        &json!({
+            "kind": "live_control_warning",
+            "details": {
+                "message": message,
+            }
+        }),
+        progress_writer,
+    );
 }
 
 fn app_server_rpc_request(socket: &Path, request: Value) -> Result<Value, String> {
@@ -174,6 +516,9 @@ fn app_server_rpc_request(socket: &Path, request: Value) -> Result<Value, String
             socket.display()
         )
     })?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| format!("app_server_client_timeout_config_failed: {error}"))?;
     let encoded = serde_json::to_string(&request)
         .map_err(|error| format!("app_server_client_json_encode_failed: {error}"))?;
     writeln!(stream, "{encoded}").map_err(|error| {
@@ -358,6 +703,7 @@ mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
+    use std::sync::mpsc;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -387,6 +733,27 @@ mod tests {
             .expect("socket turn should succeed");
         turn.handle.join().expect("turn thread should join");
         result
+    }
+
+    fn final_turn_response(request_id: &Value, answer: &str) -> Value {
+        json!({
+            "id": request_id,
+            "result": {
+                "thread": {
+                    "id": "socket-thread-1",
+                    "turns": [{"items": [{"type": "agentMessage", "text": answer}]}]
+                },
+                "turn": {
+                    "modelName": "socket-model",
+                    "finishReason": "completed",
+                    "recallHitCount": 0,
+                    "packedTokenCount": 12,
+                    "contextEngineKind": "deterministic",
+                    "contextMaxTokens": 64000,
+                    "providerMeta": {}
+                }
+            }
+        })
     }
 
     #[test]
@@ -517,6 +884,412 @@ mod tests {
     }
 
     #[test]
+    fn socket_turn_forwards_progress_and_live_controls_after_started_notification() {
+        let socket = temp_socket("stream-controls");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let (start_ready_tx, start_ready_rx) = mpsc::channel();
+        let (release_started_tx, release_started_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let start_request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            start_ready_tx
+                .send(())
+                .expect("test should wait before turn/started");
+            release_started_rx
+                .recv()
+                .expect("test should release turn/started");
+
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "socket-thread-1",
+                        "turn": {"id": "socket-turn-1"}
+                    }
+                })
+            )
+            .expect("turn/started notification should write");
+            let progress = json!({
+                "schema_version": 2,
+                "event": {
+                    "kind": "tool_started",
+                    "round": 1,
+                    "tool": "code_execute",
+                    "summary": null,
+                    "activity_title": "检查状态",
+                    "activity_detail": null
+                }
+            });
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "method": "turn/progress",
+                    "params": {
+                        "threadId": "socket-thread-1",
+                        "turnId": "socket-turn-1",
+                        "event": progress
+                    }
+                })
+            )
+            .expect("turn/progress notification should write");
+
+            let mut controls = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("control connection should arrive");
+                let mut reader = BufReader::new(
+                    stream
+                        .try_clone()
+                        .expect("control stream clone should work"),
+                );
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("control request should read");
+                let request: Value =
+                    serde_json::from_str(line.trim()).expect("control request should be JSON");
+                writeln!(
+                    stream,
+                    "{}",
+                    json!({
+                        "id": request["id"],
+                        "result": {
+                            "accepted": true,
+                            "status": "queued",
+                            "effectiveAt": "next_safe_point"
+                        }
+                    })
+                )
+                .expect("control response should write");
+                controls.push(request);
+            }
+            writeln!(
+                writer,
+                "{}",
+                final_turn_response(&start_request["id"], "answer")
+            )
+            .expect("final response should write");
+            (start_request, controls, progress)
+        });
+
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
+        assert!(turn.supports_live_control);
+        let progress_path = turn.progress_path.clone();
+        start_ready_rx
+            .recv()
+            .expect("server should wait before emitting turn/started");
+        assert_eq!(
+            turn.enqueue_live_control("focus on the failing test")
+                .expect("guidance should queue"),
+            crate::LiveControlEnqueueResult::Queued
+        );
+        assert_eq!(
+            turn.enqueue_live_control("[chuang-control] stop")
+                .expect("stop should queue"),
+            crate::LiveControlEnqueueResult::Queued
+        );
+        release_started_tx
+            .send(())
+            .expect("server should emit turn/started");
+
+        let result = receive_turn(turn);
+        transport.capture_result(&result);
+        let (start_request, controls, expected_progress) =
+            server.join().expect("server should join");
+        let progress_lines = fs::read_to_string(progress_path)
+            .expect("turn/progress event should be written locally");
+        let forwarded: Value =
+            serde_json::from_str(progress_lines.trim()).expect("progress line should remain JSON");
+
+        assert_eq!(start_request["method"], "turn/start");
+        assert_eq!(controls.len(), 2);
+        assert_eq!(controls[0]["method"], "turn/guidance");
+        assert_eq!(controls[0]["params"]["threadId"], "socket-thread-1");
+        assert_eq!(controls[0]["params"]["turnId"], "socket-turn-1");
+        assert_eq!(controls[0]["params"]["text"], "focus on the failing test");
+        assert_eq!(controls[1]["method"], "turn/interrupt");
+        assert_eq!(controls[1]["params"]["threadId"], "socket-thread-1");
+        assert_eq!(controls[1]["params"]["turnId"], "socket-turn-1");
+        assert_eq!(forwarded, expected_progress);
+        assert_eq!(result.response.body, "answer");
+        assert_eq!(transport.thread_id(), Some("socket-thread-1"));
+    }
+
+    #[test]
+    fn socket_control_failure_is_written_as_progress_warning() {
+        let socket = temp_socket("control-warning");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "socket-thread-1",
+                        "turn": {"id": "socket-turn-1"}
+                    }
+                })
+            )
+            .expect("turn/started notification should write");
+
+            let (mut stream, _) = listener.accept().expect("control connection should arrive");
+            let mut control_reader = BufReader::new(
+                stream
+                    .try_clone()
+                    .expect("control stream clone should work"),
+            );
+            let mut control_line = String::new();
+            control_reader
+                .read_line(&mut control_line)
+                .expect("control request should read");
+            let control_request: Value =
+                serde_json::from_str(control_line.trim()).expect("control request should be JSON");
+            writeln!(
+                stream,
+                "{}",
+                json!({
+                    "id": control_request["id"],
+                    "error": {"message": "turn_not_running"}
+                })
+            )
+            .expect("control error should write");
+            writeln!(writer, "{}", final_turn_response(&request["id"], "answer"))
+                .expect("final response should write");
+        });
+
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
+        let progress_path = turn.progress_path.clone();
+        assert_eq!(
+            turn.enqueue_live_control("please stop soon")
+                .expect("guidance should queue"),
+            crate::LiveControlEnqueueResult::Queued
+        );
+        let result = receive_turn(turn);
+        transport.capture_result(&result);
+        server.join().expect("server should join");
+
+        let progress = fs::read_to_string(progress_path)
+            .expect("control failure should be written to progress");
+        let warning = progress
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("progress line should be JSON"))
+            .find(|line| line["kind"] == "live_control_warning")
+            .expect("control warning should be visible to renderers");
+        assert!(
+            warning["details"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("turn_not_running")),
+            "warning={warning}"
+        );
+    }
+
+    #[test]
+    fn socket_final_response_drains_control_queued_immediately_before_completion() {
+        let socket = temp_socket("final-drain");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "method": "turn/started",
+                    "params": {
+                        "threadId": "socket-thread-1",
+                        "turn": {"id": "socket-turn-final"}
+                    }
+                })
+            )
+            .expect("turn/started notification should write");
+            writer.flush().expect("turn/started should flush");
+            started_tx
+                .send(())
+                .expect("test should queue final control");
+            finish_rx
+                .recv()
+                .expect("test should release final response");
+            writeln!(writer, "{}", final_turn_response(&request["id"], "answer"))
+                .expect("final response should write");
+            writer.flush().expect("final response should flush");
+
+            let (mut control, _) = listener.accept().expect("final drain should connect");
+            let mut control_reader = BufReader::new(
+                control
+                    .try_clone()
+                    .expect("control stream clone should work"),
+            );
+            let mut control_line = String::new();
+            control_reader
+                .read_line(&mut control_line)
+                .expect("control request should read");
+            let control_request: Value =
+                serde_json::from_str(control_line.trim()).expect("control request should be JSON");
+            writeln!(
+                control,
+                "{}",
+                json!({
+                    "id": control_request["id"],
+                    "result": {"accepted": true, "status": "queued"}
+                })
+            )
+            .expect("control response should write");
+            control_request
+        });
+
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
+        started_rx.recv().expect("turn should start");
+        assert_eq!(
+            turn.enqueue_live_control("last safe-point guidance")
+                .expect("guidance should queue before final"),
+            crate::LiveControlEnqueueResult::Queued
+        );
+        finish_tx.send(()).expect("server should finish");
+        let result = receive_turn(turn);
+        let control = server.join().expect("server should join");
+
+        assert_eq!(control["method"], "turn/guidance");
+        assert_eq!(control["params"]["turnId"], "socket-turn-final");
+        assert_eq!(control["params"]["text"], "last safe-point guidance");
+        assert_eq!(result.response.body, "answer");
+    }
+
+    #[test]
+    fn socket_final_drain_warns_when_accepted_control_has_no_turn_ids() {
+        let socket = temp_socket("final-warning");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            ready_tx.send(()).expect("test should queue guidance");
+            finish_rx
+                .recv()
+                .expect("test should release final response");
+            writeln!(stream, "{}", final_turn_response(&request["id"], "answer"))
+                .expect("final response should write");
+        });
+
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
+        let progress_path = turn.progress_path.clone();
+        ready_rx.recv().expect("start request should arrive");
+        assert_eq!(
+            turn.enqueue_live_control("late guidance")
+                .expect("guidance should queue"),
+            crate::LiveControlEnqueueResult::Queued
+        );
+        finish_tx.send(()).expect("server should finish");
+        let _ = receive_turn(turn);
+        server.join().expect("server should join");
+
+        let progress =
+            fs::read_to_string(progress_path).expect("undeliverable control should warn");
+        assert!(progress.lines().any(|line| {
+            serde_json::from_str::<Value>(line)
+                .ok()
+                .is_some_and(|value| value["kind"] == "live_control_warning")
+        }));
+    }
+
+    #[test]
+    fn concurrent_progress_and_warning_writes_are_complete_jsonl_records() {
+        let path = temp_socket("progress-writer").with_file_name("progress.jsonl");
+        let writer = Arc::new(Mutex::new(()));
+        let mut handles = Vec::new();
+        for worker in 0..6 {
+            let path = path.clone();
+            let writer = Arc::clone(&writer);
+            handles.push(thread::spawn(move || {
+                for index in 0..40 {
+                    if worker % 2 == 0 {
+                        append_progress_event(
+                            &path,
+                            &json!({
+                                "kind": "tool_started",
+                                "details": {
+                                    "worker": worker,
+                                    "index": index,
+                                    "payload": "x".repeat(4096)
+                                }
+                            }),
+                            &writer,
+                        )
+                        .expect("progress event should write");
+                    } else {
+                        append_control_warning(
+                            &path,
+                            &format!("worker={worker} index={index}"),
+                            &writer,
+                        );
+                    }
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("writer should join");
+        }
+
+        let content = fs::read_to_string(path).expect("progress JSONL should exist");
+        let lines = content.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 240);
+        assert!(content.ends_with('\n'));
+        assert!(lines
+            .iter()
+            .all(|line| serde_json::from_str::<Value>(line).is_ok()));
+    }
+
+    #[test]
     fn socket_failure_returns_explicit_error_without_local_fallback() {
         let socket = temp_socket("unavailable");
         let workspace = env::current_dir().expect("workspace should resolve");
@@ -536,6 +1309,80 @@ mod tests {
             error.contains(&socket.display().to_string()),
             "error={error}"
         );
+        assert_eq!(transport.thread_id(), None);
+    }
+
+    #[test]
+    fn socket_eof_is_explicit_without_local_fallback() {
+        let socket = temp_socket("eof");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+        });
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "do not fall back".into(), Vec::new());
+        let error = turn
+            .receiver
+            .recv()
+            .expect("turn result should arrive")
+            .expect_err("EOF must fail");
+        turn.handle.join().expect("turn thread should join");
+        server.join().expect("server should join");
+
+        assert!(error.contains("app_server_unavailable"), "error={error}");
+        assert!(
+            error.contains("connection_closed_before_response"),
+            "error={error}"
+        );
+        assert_eq!(transport.thread_id(), None);
+    }
+
+    #[test]
+    fn socket_unknown_thread_is_explicit_without_local_fallback() {
+        let socket = temp_socket("unknown-thread");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("start connection should arrive");
+            let mut reader =
+                BufReader::new(stream.try_clone().expect("start stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            writeln!(
+                stream,
+                "{}",
+                json!({
+                    "id": request["id"],
+                    "error": {"message": "unknown_thread: stale-thread"}
+                })
+            )
+            .expect("unknown thread response should write");
+        });
+        let workspace = env::current_dir().expect("workspace should resolve");
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let turn = transport.spawn_turn(test_options(), "do not fall back".into(), Vec::new());
+        let error = turn
+            .receiver
+            .recv()
+            .expect("turn result should arrive")
+            .expect_err("unknown thread must fail");
+        turn.handle.join().expect("turn thread should join");
+        server.join().expect("server should join");
+
+        assert!(error.contains("app_server_rpc_failed"), "error={error}");
+        assert!(error.contains("unknown_thread"), "error={error}");
         assert_eq!(transport.thread_id(), None);
     }
 }

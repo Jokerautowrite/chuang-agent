@@ -1,12 +1,15 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -29,11 +32,24 @@ use chuang_agent::runtime_report::runtime_observability_meta;
 use chuang_agent::tool_loop_meta::{parse_json_value, ToolLoopMeta};
 use chuang_agent::tool_runtime::{ToolExecutionRecord, ToolProtocolError};
 
+static APP_SERVER_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Debug, Default)]
 struct AppServerState {
     next_thread_seq: u64,
     next_turn_seq: u64,
     threads: BTreeMap<String, ThreadState>,
+    active_turns: BTreeMap<String, ActiveTurn>,
+}
+
+type SharedAppServerState = Arc<Mutex<AppServerState>>;
+
+#[derive(Debug)]
+struct ActiveTurn {
+    thread_id: String,
+    turn_id: String,
+    guidance_path: PathBuf,
+    guidance_writer: Arc<Mutex<File>>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,14 +168,17 @@ fn serve_json_lines<R: BufRead, W: Write>(
 fn app_server_daemon_command(args: &[String]) -> Result<(), String> {
     let socket = parse_socket_only_args(args, "daemon")?;
     let listener = bind_app_server_socket(&socket)?;
-    let mut state = AppServerState::default();
+    let state = Arc::new(Mutex::new(AppServerState::default()));
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(error) = serve_unix_client(stream, &mut state) {
-                    eprintln!("app_server_client_failed: {error}");
-                }
+                let state = Arc::clone(&state);
+                thread::spawn(move || {
+                    if let Err(error) = serve_unix_client(stream, state) {
+                        eprintln!("app_server_client_failed: {error}");
+                    }
+                });
             }
             Err(error) => return Err(format!("app_server_accept_failed: {error}")),
         }
@@ -168,12 +187,93 @@ fn app_server_daemon_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn serve_unix_client(stream: UnixStream, state: &mut AppServerState) -> Result<(), String> {
+fn serve_unix_client(stream: UnixStream, state: SharedAppServerState) -> Result<(), String> {
     let mut writer = stream
         .try_clone()
         .map_err(|e| format!("app_server_client_clone_failed: {e}"))?;
     let reader = BufReader::new(stream);
-    serve_json_lines(reader, &mut writer, state)
+    serve_daemon_json_lines(reader, &mut writer, state)
+}
+
+fn serve_daemon_json_lines<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+    state: SharedAppServerState,
+) -> Result<(), String> {
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("app_server_read_failed: {e}"))?;
+        let raw = line.trim();
+        if raw.is_empty() {
+            continue;
+        }
+
+        let parsed: Value = match serde_json::from_str(raw) {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = write_json_line(
+                    writer,
+                    &json!({
+                        "error": {
+                            "message": format!("invalid_json: {error}"),
+                        }
+                    }),
+                );
+                continue;
+            }
+        };
+
+        let Some(method) = parsed.get("method").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let id = parsed.get("id").cloned();
+        let params = parsed.get("params").cloned().unwrap_or(Value::Null);
+
+        if method == "initialized" {
+            continue;
+        }
+
+        let result = match method {
+            "initialize" => Ok(handle_initialize()),
+            "model/list" => handle_model_list(&params),
+            "thread/start" => {
+                with_app_server_state(&state, |state| handle_thread_start(state, &params))
+            }
+            "thread/resume" => {
+                with_app_server_state(&state, |state| handle_thread_resume(state, &params))
+            }
+            "thread/list" => with_app_server_state(&state, |state| Ok(handle_thread_list(state))),
+            "turn/start" => handle_live_turn_start(Arc::clone(&state), &params, writer),
+            "turn/guidance" => handle_turn_guidance(&state, &params),
+            "turn/interrupt" => handle_turn_interrupt(&state, &params),
+            _ => Err(format!("unsupported_method: {method}")),
+        };
+
+        if let Some(id) = id {
+            match result {
+                Ok(result) => {
+                    write_json_line(writer, &json!({ "id": id, "result": result }))?;
+                }
+                Err(message) => {
+                    write_json_line(
+                        writer,
+                        &json!({ "id": id, "error": { "message": message } }),
+                    )?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn with_app_server_state<T>(
+    state: &SharedAppServerState,
+    action: impl FnOnce(&mut AppServerState) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut state = state
+        .lock()
+        .map_err(|_| "app_server_state_lock_poisoned".to_string())?;
+    action(&mut state)
 }
 
 fn parse_socket_only_args(args: &[String], command: &str) -> Result<PathBuf, String> {
@@ -1154,6 +1254,657 @@ fn handle_thread_list(state: &AppServerState) -> Value {
     })
 }
 
+#[derive(Debug, Clone)]
+struct PreparedLiveTurn {
+    thread_id: String,
+    turn_id: String,
+    workspace_root: String,
+    input_text: String,
+    conversation_history: Vec<ConversationHistoryItem>,
+    goal_spec: Option<GoalSpec>,
+    guidance_path: PathBuf,
+    progress_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct LiveTurnStorage {
+    guidance_path: PathBuf,
+    progress_path: PathBuf,
+    guidance_writer: Arc<Mutex<File>>,
+}
+
+struct LiveTurnResult {
+    tool_run: ToolLoopResult,
+    live_readiness: Value,
+    context_max_tokens: u32,
+    elapsed_ms: u64,
+}
+
+fn handle_live_turn_start(
+    state: SharedAppServerState,
+    params: &Value,
+    writer: &mut dyn Write,
+) -> Result<Value, String> {
+    let prepared = prepare_live_turn(&state, params)?;
+    if let Err(error) = write_json_line(
+        writer,
+        &json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": prepared.thread_id,
+                "turn": { "id": prepared.turn_id },
+            }
+        }),
+    ) {
+        unregister_active_turn(&state, &prepared.thread_id, &prepared.turn_id);
+        return Err(error);
+    }
+
+    let task_params = params.clone();
+    let task = prepared.clone();
+    let (sender, receiver) = mpsc::channel();
+    let runtime_worker = thread::spawn(move || {
+        let _ = sender.send(run_live_turn(task, &task_params));
+    });
+
+    let mut progress_cursor = 0usize;
+    let mut stream_error = None;
+    let runtime_result = loop {
+        match receiver.recv_timeout(Duration::from_millis(25)) {
+            Ok(result) => {
+                if stream_error.is_none() {
+                    if let Err(error) =
+                        emit_live_progress(writer, &prepared, &mut progress_cursor, true)
+                    {
+                        stream_error = Some(error);
+                    }
+                }
+                break result;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if stream_error.is_none() {
+                    if let Err(error) =
+                        emit_live_progress(writer, &prepared, &mut progress_cursor, false)
+                    {
+                        stream_error = Some(error);
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                break Err("app_server_runtime_worker_disconnected".to_string());
+            }
+        }
+    };
+    let _ = runtime_worker.join();
+
+    match runtime_result {
+        Ok(live_turn) => {
+            let thread = record_live_turn_success(&state, &prepared, &live_turn)?;
+            if let Some(error) = stream_error {
+                return Err(error);
+            }
+            emit_live_turn_success(writer, &prepared, &thread, live_turn)
+        }
+        Err(error) => {
+            let status = if error.contains("turn_cancelled_at_safe_point:") {
+                "cancelled"
+            } else {
+                "failed"
+            };
+            record_live_turn_failure(&state, &prepared, status);
+            if let Some(stream_error) = stream_error {
+                return Err(stream_error);
+            }
+            write_json_line(
+                writer,
+                &json!({
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": prepared.thread_id,
+                        "turn": {
+                            "id": prepared.turn_id,
+                            "status": status,
+                            "error": error,
+                        }
+                    }
+                }),
+            )?;
+            Err(error)
+        }
+    }
+}
+
+fn prepare_live_turn(
+    state: &SharedAppServerState,
+    params: &Value,
+) -> Result<PreparedLiveTurn, String> {
+    let requested_thread_id =
+        normalize_text(params.get("threadId").and_then(|value| value.as_str()));
+    let requested_workspace_root = params
+        .get("workspaceRoot")
+        .and_then(|value| value.as_str())
+        .map(normalize_workspace_root);
+    let input_text = extract_turn_input_text(params);
+    if input_text.is_empty() {
+        return Err("turn/start requires non-empty input".to_string());
+    }
+    let goal_spec = extract_turn_goal(params)?;
+
+    let (thread_id, turn_id, workspace_root, conversation_history) =
+        with_app_server_state(state, |state| {
+            let thread_id = if requested_thread_id.is_empty() {
+                let workspace_root =
+                    requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
+                create_thread(
+                    state,
+                    workspace_root.clone(),
+                    thread_display_name(&workspace_root),
+                )
+                .id
+            } else if let Some(thread) = state.threads.get(&requested_thread_id) {
+                if let Some(workspace_root) = requested_workspace_root.as_deref() {
+                    ensure_thread_workspace_matches(thread, workspace_root)?;
+                }
+                requested_thread_id.clone()
+            } else {
+                return Err(format!("unknown_thread: {requested_thread_id}"));
+            };
+
+            if state.active_turns.contains_key(&thread_id) {
+                return Err(format!("thread_busy: threadId={thread_id}"));
+            }
+
+            let workspace_root = state
+                .threads
+                .get(&thread_id)
+                .map(|thread| thread.workspace_root.clone())
+                .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
+            let turn_id = next_turn_id(state);
+            let conversation_history = recent_thread_history(state, &thread_id, 6);
+
+            Ok((thread_id, turn_id, workspace_root, conversation_history))
+        })?;
+
+    let storage = create_live_turn_storage()?;
+    with_app_server_state(state, |state| {
+        if state.active_turns.contains_key(&thread_id) {
+            return Err(format!("thread_busy: threadId={thread_id}"));
+        }
+        state.active_turns.insert(
+            thread_id.clone(),
+            ActiveTurn {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+                guidance_path: storage.guidance_path.clone(),
+                guidance_writer: Arc::clone(&storage.guidance_writer),
+            },
+        );
+
+        Ok(PreparedLiveTurn {
+            thread_id,
+            turn_id,
+            workspace_root,
+            input_text,
+            conversation_history,
+            goal_spec,
+            guidance_path: storage.guidance_path,
+            progress_path: storage.progress_path,
+        })
+    })
+}
+
+fn create_live_turn_storage() -> Result<LiveTurnStorage, String> {
+    let runtime_root = std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    if let Some(runtime_root) = runtime_root {
+        let base = runtime_root.join("chuang-agent").join("live-turns");
+        ensure_private_directory(&runtime_root.join("chuang-agent"))?;
+        ensure_private_directory(&base)?;
+        return create_live_turn_storage_under(&base);
+    }
+    create_live_turn_storage_under(&std::env::temp_dir())
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "live_turn_storage_not_private_directory: {}",
+                    path.display()
+                ));
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match fs::DirBuilder::new().mode(0o700).create(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let metadata = fs::symlink_metadata(path).map_err(|error| {
+                        format!(
+                            "live_turn_storage_directory_metadata_failed: path={} error={error}",
+                            path.display()
+                        )
+                    })?;
+                    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                        return Err(format!(
+                            "live_turn_storage_not_private_directory: {}",
+                            path.display()
+                        ));
+                    }
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "live_turn_storage_directory_create_failed: path={} error={error}",
+                        path.display()
+                    ))
+                }
+            }
+        }
+        Err(error) => {
+            return Err(format!(
+                "live_turn_storage_directory_metadata_failed: path={} error={error}",
+                path.display()
+            ))
+        }
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+        format!(
+            "live_turn_storage_directory_permissions_failed: path={} error={error}",
+            path.display()
+        )
+    })
+}
+
+fn create_live_turn_storage_under(base: &Path) -> Result<LiveTurnStorage, String> {
+    for _ in 0..1024 {
+        let nonce = APP_SERVER_TURN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let turn_dir = base.join(format!("turn-{}-{}-{nonce}", process::id(), now_millis()));
+        match fs::DirBuilder::new().mode(0o700).create(&turn_dir) {
+            Ok(()) => {
+                fs::set_permissions(&turn_dir, fs::Permissions::from_mode(0o700)).map_err(
+                    |error| {
+                        format!(
+                            "live_turn_storage_directory_permissions_failed: path={} error={error}",
+                            turn_dir.display()
+                        )
+                    },
+                )?;
+                return create_live_turn_files(&turn_dir);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "live_turn_storage_directory_create_failed: path={} error={error}",
+                    turn_dir.display()
+                ))
+            }
+        }
+    }
+    Err(format!(
+        "live_turn_storage_directory_name_exhausted: {}",
+        base.display()
+    ))
+}
+
+fn create_live_turn_files(turn_dir: &Path) -> Result<LiveTurnStorage, String> {
+    let guidance_path = turn_dir.join("guidance.txt");
+    let progress_path = turn_dir.join("progress.jsonl");
+    let guidance_file = create_private_turn_file(&guidance_path, true)?;
+    let _progress_file = create_private_turn_file(&progress_path, false)?;
+    Ok(LiveTurnStorage {
+        guidance_path,
+        progress_path,
+        guidance_writer: Arc::new(Mutex::new(guidance_file)),
+    })
+}
+
+fn create_private_turn_file(path: &Path, append: bool) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options
+        .create_new(true)
+        .write(true)
+        .append(append)
+        .mode(0o600);
+    let file = options.open(path).map_err(|error| {
+        format!(
+            "live_turn_storage_file_create_failed: path={} error={error}",
+            path.display()
+        )
+    })?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| {
+            format!(
+                "live_turn_storage_file_permissions_failed: path={} error={error}",
+                path.display()
+            )
+        })?;
+    Ok(file)
+}
+
+fn run_live_turn(prepared: PreparedLiveTurn, params: &Value) -> Result<LiveTurnResult, String> {
+    let mut runtime =
+        build_runtime_for_workspace(&app_server_config_workspace_root(&prepared.workspace_root))?;
+    runtime
+        .metadata
+        .insert("channel".to_string(), "app-server".to_string());
+    let runtime = override_runtime_model(runtime, params);
+    let live_readiness = build_chuang_mvp_status(&runtime, &kernel_config_from_runtime(&runtime)?)
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?
+        .live_readiness;
+    let live_readiness =
+        serde_json::to_value(live_readiness).map_err(|e| format!("json_render_failed: {e}"))?;
+    let context_max_tokens = runtime.context_budget.max_tokens;
+    let started_at = Instant::now();
+    let tool_run = run_turn_with_tools(
+        &runtime,
+        &prepared.thread_id,
+        &prepared.workspace_root,
+        &prepared.input_text,
+        prepared.conversation_history,
+        prepared.goal_spec,
+        Some(&prepared.guidance_path),
+        Some(&prepared.progress_path),
+    )?;
+
+    Ok(LiveTurnResult {
+        tool_run,
+        live_readiness,
+        context_max_tokens,
+        elapsed_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+    })
+}
+
+fn emit_live_progress(
+    writer: &mut dyn Write,
+    prepared: &PreparedLiveTurn,
+    cursor: &mut usize,
+    include_unterminated_tail: bool,
+) -> Result<(), String> {
+    let content = match fs::read(&prepared.progress_path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "app_server_progress_read_failed: path={} error={error}",
+                prepared.progress_path.display()
+            ))
+        }
+    };
+    let start = (*cursor).min(content.len());
+    let unread = &content[start..];
+    let mut consumed = 0usize;
+    for line in unread.split_inclusive(|byte| *byte == b'\n') {
+        let terminated = line.last() == Some(&b'\n');
+        if !terminated && !include_unterminated_tail {
+            break;
+        }
+        consumed += line.len();
+        let line = line
+            .strip_suffix(b"\n")
+            .unwrap_or(line)
+            .strip_suffix(b"\r")
+            .unwrap_or(line);
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        write_json_line(
+            writer,
+            &json!({
+                "method": "turn/progress",
+                "params": {
+                    "threadId": prepared.thread_id,
+                    "turnId": prepared.turn_id,
+                    "event": event,
+                }
+            }),
+        )?;
+    }
+    *cursor = start + consumed;
+    Ok(())
+}
+
+fn record_live_turn_success(
+    state: &SharedAppServerState,
+    prepared: &PreparedLiveTurn,
+    live_turn: &LiveTurnResult,
+) -> Result<ThreadState, String> {
+    with_app_server_state(state, |state| {
+        let result = &live_turn.tool_run.result;
+        let now = now_millis();
+        let status = app_server_turn_status(&result.response.meta.extra).to_string();
+        let thread = {
+            let thread = state
+                .threads
+                .get_mut(&prepared.thread_id)
+                .ok_or_else(|| format!("unknown_thread: {}", prepared.thread_id))?;
+            thread.updated_at = now;
+            thread.turns.push(TurnState {
+                id: prepared.turn_id.clone(),
+                user_text: prepared.input_text.clone(),
+                assistant_text: result.response.body.clone(),
+                model_name: result.response.model_name.clone(),
+                status,
+                provider_meta: result.response.meta.extra.clone(),
+                tool_trace: live_turn.tool_run.tool_trace.clone(),
+                tool_surface: live_turn.tool_run.tool_surface.clone(),
+                updated_at: now,
+            });
+            thread.clone()
+        };
+        remove_active_turn(state, &prepared.thread_id, &prepared.turn_id);
+        Ok(thread)
+    })
+}
+
+fn record_live_turn_failure(
+    state: &SharedAppServerState,
+    prepared: &PreparedLiveTurn,
+    status: &str,
+) {
+    let _ = with_app_server_state(state, |state| {
+        let now = now_millis();
+        if let Some(thread) = state.threads.get_mut(&prepared.thread_id) {
+            thread.updated_at = now;
+            thread.turns.push(TurnState {
+                id: prepared.turn_id.clone(),
+                user_text: prepared.input_text.clone(),
+                assistant_text: String::new(),
+                model_name: String::new(),
+                status: status.to_string(),
+                provider_meta: BTreeMap::new(),
+                tool_trace: String::new(),
+                tool_surface: None,
+                updated_at: now,
+            });
+        }
+        remove_active_turn(state, &prepared.thread_id, &prepared.turn_id);
+        Ok(())
+    });
+}
+
+fn unregister_active_turn(state: &SharedAppServerState, thread_id: &str, turn_id: &str) {
+    let _ = with_app_server_state(state, |state| {
+        remove_active_turn(state, thread_id, turn_id);
+        Ok(())
+    });
+}
+
+fn remove_active_turn(state: &mut AppServerState, thread_id: &str, turn_id: &str) {
+    if state
+        .active_turns
+        .get(thread_id)
+        .map(|active| active.turn_id == turn_id)
+        .unwrap_or(false)
+    {
+        state.active_turns.remove(thread_id);
+    }
+}
+
+fn emit_live_turn_success(
+    writer: &mut dyn Write,
+    prepared: &PreparedLiveTurn,
+    thread: &ThreadState,
+    live_turn: LiveTurnResult,
+) -> Result<Value, String> {
+    let tool_run = live_turn.tool_run;
+    let result = tool_run.result;
+    let status = app_server_turn_status(&result.response.meta.extra).to_string();
+    let assistant_text = result.response.body.clone();
+    let model_name = result.response.model_name.clone();
+    let tool_call_count = tool_run.tool_calls.len();
+    let tool_protocol_error_count = tool_run.tool_protocol_errors.len();
+    let runtime_observability = runtime_observability_meta(&result);
+
+    write_json_line(
+        writer,
+        &json!({
+            "method": "item/agentMessage/delta",
+            "params": {
+                "threadId": prepared.thread_id,
+                "turnId": prepared.turn_id,
+                "delta": assistant_text,
+            }
+        }),
+    )?;
+    write_json_line(
+        writer,
+        &json!({
+            "method": "item/completed",
+            "params": {
+                "threadId": prepared.thread_id,
+                "turnId": prepared.turn_id,
+                "item": {
+                    "type": "agentMessage",
+                    "text": assistant_text,
+                }
+            }
+        }),
+    )?;
+    write_json_line(
+        writer,
+        &json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": prepared.thread_id,
+                "turn": {
+                    "id": prepared.turn_id,
+                    "status": status,
+                    "runtimeReportId": tool_run.runtime_report_id.clone(),
+                    "toolCallCount": tool_call_count,
+                    "toolProtocolErrorCount": tool_protocol_error_count,
+                    "toolTrace": tool_run.tool_trace.clone(),
+                    "toolReport": tool_run.tool_report.clone(),
+                    "toolSurface": tool_run.tool_surface.clone(),
+                    "toolCalls": tool_run.tool_calls.iter().map(tool_execution_record_to_json).collect::<Vec<_>>(),
+                    "toolProtocolErrors": tool_run.tool_protocol_errors.iter().map(tool_protocol_error_to_json).collect::<Vec<_>>(),
+                    "toolEvents": tool_run.tool_events,
+                    "providerMeta": result.response.meta.extra.clone(),
+                    "runtimeObservability": runtime_observability.clone(),
+                    "liveReadiness": live_turn.live_readiness.clone(),
+                }
+            }
+        }),
+    )?;
+
+    Ok(json!({
+        "thread": thread_to_resume_json(thread),
+        "turn": {
+            "id": prepared.turn_id,
+            "status": status,
+            "runtimeReportId": tool_run.runtime_report_id,
+            "modelName": model_name,
+            "finishReason": result.response.meta.finish_reason.clone().unwrap_or_else(|| "completed".to_string()),
+            "elapsedMs": live_turn.elapsed_ms,
+            "recallHitCount": result.recall_hit_count,
+            "packedTokenCount": result.packed_token_count,
+            "contextEngineKind": result.context_engine_kind,
+            "contextMaxTokens": live_turn.context_max_tokens,
+            "providerMeta": result.response.meta.extra,
+            "runtimeObservability": runtime_observability,
+            "liveReadiness": live_turn.live_readiness,
+            "trace": result.response.trace,
+            "apiCallCount": 1,
+            "toolCallCount": tool_call_count,
+            "toolProtocolErrorCount": tool_protocol_error_count,
+            "toolTrace": tool_run.tool_trace,
+            "toolReport": tool_run.tool_report,
+            "toolSurface": tool_run.tool_surface,
+            "toolCalls": tool_run.tool_calls.iter().map(tool_execution_record_to_json).collect::<Vec<_>>(),
+            "toolProtocolErrors": tool_run.tool_protocol_errors.iter().map(tool_protocol_error_to_json).collect::<Vec<_>>(),
+            "toolEvents": tool_run.tool_events,
+        }
+    }))
+}
+
+fn handle_turn_guidance(state: &SharedAppServerState, params: &Value) -> Result<Value, String> {
+    let note = normalize_text(params.get("text").and_then(|value| value.as_str()));
+    if note.is_empty() {
+        return Err("turn/guidance requires non-empty text".to_string());
+    }
+    with_active_turn_for_control(state, params, |active| append_live_turn_note(active, &note))?;
+    Ok(json!({
+        "accepted": true,
+        "status": "guidance_queued",
+    }))
+}
+
+fn handle_turn_interrupt(state: &SharedAppServerState, params: &Value) -> Result<Value, String> {
+    with_active_turn_for_control(state, params, |active| {
+        append_live_turn_note(active, "[chuang-control] stop")
+    })?;
+    Ok(json!({
+        "accepted": true,
+        "status": "interrupt_requested",
+        "effectiveAt": "next_safe_point",
+    }))
+}
+
+fn with_active_turn_for_control<T>(
+    state: &SharedAppServerState,
+    params: &Value,
+    action: impl FnOnce(&ActiveTurn) -> Result<T, String>,
+) -> Result<T, String> {
+    let thread_id = normalize_text(params.get("threadId").and_then(|value| value.as_str()));
+    let turn_id = normalize_text(params.get("turnId").and_then(|value| value.as_str()));
+    with_app_server_state(state, |state| {
+        let active = state
+            .active_turns
+            .get(&thread_id)
+            .filter(|active| active.thread_id == thread_id && active.turn_id == turn_id)
+            .ok_or_else(|| turn_not_active_error(&thread_id, &turn_id))?;
+        action(active)
+    })
+}
+
+fn turn_not_active_error(thread_id: &str, turn_id: &str) -> String {
+    format!("turn_not_active: threadId={thread_id} turnId={turn_id}")
+}
+
+fn append_live_turn_note(active: &ActiveTurn, note: &str) -> Result<(), String> {
+    let note = normalize_text(Some(note));
+    if note.is_empty() {
+        return Err("live_turn_guidance_requires_non_empty_text".to_string());
+    }
+    let mut writer = active
+        .guidance_writer
+        .lock()
+        .map_err(|_| "live_turn_guidance_lock_poisoned".to_string())?;
+    writer
+        .write_all(note.as_bytes())
+        .and_then(|_| writer.write_all(b"\n"))
+        .and_then(|_| writer.flush())
+        .map_err(|error| {
+            format!(
+                "guidance_write_failed: path={} error={error}",
+                active.guidance_path.display()
+            )
+        })
+}
+
 fn handle_turn_start(
     state: &mut AppServerState,
     params: &Value,
@@ -1214,6 +1965,8 @@ fn handle_turn_start(
         &input_text,
         conversation_history,
         goal_spec,
+        None,
+        None,
     )?;
     let result = tool_run.result.clone();
     let tool_trace = tool_run.tool_trace.clone();
@@ -1377,6 +2130,8 @@ fn run_turn_with_tools(
     original_input: &str,
     conversation_history: Vec<ConversationHistoryItem>,
     goal_spec: Option<GoalSpec>,
+    live_guidance_path: Option<&Path>,
+    progress_path: Option<&Path>,
 ) -> Result<ToolLoopResult, String> {
     let request = RunCliRequest {
         options: CliOptions {
@@ -1393,8 +2148,8 @@ fn run_turn_with_tools(
         dispatch_subagent: false,
         goal_spec,
         knowledge_context: None,
-        live_guidance_path: None,
-        progress_path: None,
+        live_guidance_path: live_guidance_path.map(Path::to_path_buf),
+        progress_path: progress_path.map(Path::to_path_buf),
     };
 
     let (result, records) = run_with_options(&request)?;
@@ -1549,6 +2304,7 @@ fn recent_thread_history(
         .turns
         .iter()
         .rev()
+        .filter(|turn| turn_status_is_admissible_for_history(&turn.status))
         .take(max_turns)
         .collect::<Vec<_>>()
         .into_iter()
@@ -1567,6 +2323,10 @@ fn recent_thread_history(
         })
         .filter(|item| !item.text.trim().is_empty())
         .collect()
+}
+
+fn turn_status_is_admissible_for_history(status: &str) -> bool {
+    matches!(status, "completed" | "human_input_required")
 }
 
 fn thread_to_json(thread: &ThreadState) -> Value {
@@ -2120,6 +2880,165 @@ mod tests {
         assert_eq!(
             snapshot["providerMeta"]["pending_approval_id"],
             "approval-test"
+        );
+    }
+
+    #[test]
+    fn recent_thread_history_only_includes_admissible_turn_statuses() {
+        let mut state = AppServerState::default();
+        let thread = create_thread(
+            &mut state,
+            "/tmp/workspace".to_string(),
+            "workspace".to_string(),
+        );
+        let thread_id = thread.id;
+        {
+            let thread = state
+                .threads
+                .get_mut(&thread_id)
+                .expect("thread should exist");
+            for (id, status, user, assistant) in [
+                ("turn-1", "completed", "first", "first answer"),
+                ("turn-2", "cancelled", "cancelled request", ""),
+                ("turn-3", "failed", "failed request", ""),
+                (
+                    "turn-provider-error",
+                    "provider_error",
+                    "provider error request",
+                    "provider error answer",
+                ),
+                (
+                    "turn-4",
+                    "human_input_required",
+                    "approval",
+                    "need approval",
+                ),
+            ] {
+                thread.turns.push(TurnState {
+                    id: id.to_string(),
+                    user_text: user.to_string(),
+                    assistant_text: assistant.to_string(),
+                    model_name: "test-model".to_string(),
+                    status: status.to_string(),
+                    provider_meta: BTreeMap::new(),
+                    tool_trace: String::new(),
+                    tool_surface: None,
+                    updated_at: 1,
+                });
+            }
+        }
+
+        let history = recent_thread_history(&state, &thread_id, 6);
+        assert_eq!(
+            history
+                .iter()
+                .map(|item| (item.role.as_str(), item.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("user", "first"),
+                ("assistant", "first answer"),
+                ("user", "approval"),
+                ("assistant", "need approval"),
+            ]
+        );
+    }
+
+    #[test]
+    fn active_turn_control_write_and_removal_share_a_linearization_point() {
+        let guidance_path = std::env::temp_dir().join(format!(
+            "chuang-agent-app-server-control-test-{}-{}",
+            process::id(),
+            APP_SERVER_TURN_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let guidance_writer = Arc::new(Mutex::new(
+            create_private_turn_file(&guidance_path, true)
+                .expect("private guidance file should create"),
+        ));
+        let state = Arc::new(Mutex::new(AppServerState::default()));
+        let thread_id = "thread-control-test".to_string();
+        let turn_id = "turn-control-test".to_string();
+        state
+            .lock()
+            .expect("state lock should acquire")
+            .active_turns
+            .insert(
+                thread_id.clone(),
+                ActiveTurn {
+                    thread_id: thread_id.clone(),
+                    turn_id: turn_id.clone(),
+                    guidance_path: guidance_path.clone(),
+                    guidance_writer,
+                },
+            );
+
+        let params = json!({
+            "threadId": thread_id,
+            "turnId": turn_id,
+        });
+        let (control_entered_tx, control_entered_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_control_tx, release_control_rx) = std::sync::mpsc::sync_channel(0);
+        let control_state = Arc::clone(&state);
+        let control_params = params.clone();
+        let control = thread::spawn(move || {
+            with_active_turn_for_control(&control_state, &control_params, |active| {
+                control_entered_tx
+                    .send(())
+                    .expect("control entry signal should send");
+                release_control_rx
+                    .recv()
+                    .expect("control write should be released");
+                append_live_turn_note(active, "accepted before unregister")
+            })
+        });
+        control_entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("control should enter the active-turn linearization point");
+
+        let (unregister_done_tx, unregister_done_rx) = std::sync::mpsc::sync_channel(0);
+        let unregister_state = Arc::clone(&state);
+        let unregister_thread_id = thread_id.clone();
+        let unregister_turn_id = turn_id.clone();
+        let unregister = thread::spawn(move || {
+            unregister_active_turn(
+                &unregister_state,
+                &unregister_thread_id,
+                &unregister_turn_id,
+            );
+            unregister_done_tx
+                .send(())
+                .expect("unregister completion signal should send");
+        });
+        assert!(
+            unregister_done_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "unregister must wait for an accepted control write"
+        );
+
+        release_control_tx
+            .send(())
+            .expect("control write release should send");
+        control
+            .join()
+            .expect("control write should finish")
+            .expect("control write should be accepted");
+        unregister_done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("unregister should finish after the control write");
+        unregister.join().expect("unregister thread should finish");
+
+        assert_eq!(
+            fs::read_to_string(&guidance_path).expect("guidance contents should read"),
+            "accepted before unregister\n"
+        );
+        let error = with_active_turn_for_control(&state, &params, |active| {
+            append_live_turn_note(active, "must not be written")
+        })
+        .expect_err("unregistered turn should reject control writes");
+        assert!(error.contains("turn_not_active"));
+        assert_eq!(
+            fs::read_to_string(&guidance_path).expect("guidance contents should remain readable"),
+            "accepted before unregister\n"
         );
     }
 }

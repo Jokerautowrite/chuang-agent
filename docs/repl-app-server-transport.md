@@ -12,13 +12,37 @@ The launchers preserve the caller's directory in `CHUANG_REPL_WORKSPACE_ROOT`, s
 local compatibility turns, terminal metadata, and approval handling use the same workspace even
 though the launcher changes into the project root to load Chuang's config.
 
-The current `turn/start` protocol is request/response. It preserves final answer, model,
-packed-context usage, provider metadata, and tool/approval metadata, but it does not expose
-streamed progress or an actionable interrupt while a synchronous turn is running. In socket mode,
-the REPL states this explicitly for `/stop` and mid-turn guidance instead of claiming either action
-was delivered. The generic `turn/interrupt` RPC also returns an explicit unsupported error.
+The socket daemon accepts clients concurrently. A `turn/start` connection receives
+`turn/started`, live `turn/progress` notifications, the existing completion notifications, and the
+final request/response result. Progress payloads preserve the runtime's existing JSONL terminal
+event envelope, so Ratatui and legacy REPL reuse the same renderer.
+
+While a socket turn is active, the REPL forwards local control input over separate connections:
+
+- `!guidance` and ordinary mid-turn text call `turn/guidance`;
+- `/stop` calls `turn/interrupt`;
+- a second turn on the same thread is rejected with `thread_busy`;
+- stale, mismatched, or completed turn controls return `turn_not_active`.
+
+Successful guidance or interrupt responses mean the request was queued. The runtime remains
+cooperative: guidance is applied and stop becomes effective at the next safe point. An already
+blocking provider request or shell process is not claimed to stop immediately. `GuidanceInjected`
+and `TurnCancelled` progress events are the authoritative applied/cancelled evidence. Control
+delivery failures are surfaced as visible REPL warnings and never trigger a local fallback.
+
+After reading the final response and before publishing the turn result to the UI, the REPL closes
+its live-control gate and performs one final control drain. A control accepted by the UI is
+therefore either forwarded or represented by a visible `live_control_warning`. Socket progress and
+warning records share one writer lock, and both legacy and Ratatui cursors consume only
+newline-terminated JSONL records; an incomplete tail is retained for the next read instead of being
+skipped.
+
+The compatibility stdio mode keeps its existing JSON-lines request/response behavior. Same-stream
+live control is not promised there; the canonical terminal live-control path is the Unix socket
+daemon.
 
 Thread state is daemon-local. A caller must omit `threadId` to start a new thread; an unknown or
 stale id is rejected instead of silently creating a replacement. Completed thread snapshots retain
 `providerMeta`, including pending-approval metadata, and approval turns use
-`status=human_input_required`.
+`status=human_input_required`. Cancelled, failed, and `provider_error` turns remain visible in
+snapshots but are not injected into later model conversation history.

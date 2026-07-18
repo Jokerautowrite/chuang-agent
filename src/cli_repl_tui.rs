@@ -38,12 +38,12 @@ use crate::cli_approval::resume_local_tty_approval;
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::cli_repl_transport::ReplTurnTransport;
 use crate::{
-    append_live_guidance, compact_preview, format_ms_duration, format_progress_event,
+    compact_preview, complete_progress_jsonl, format_ms_duration, format_progress_event,
     format_short_duration, handle_repl_command, handle_sticky_key, humanize_approval_record,
     insert_str_at, merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
     readable_runtime_error, recent_repl_conversation_history, record_repl_conversation_turn,
     render_approval_details, render_completion_metadata_line, render_repl_answer_text,
-    ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
+    LiveControlEnqueueResult, ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
     StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
 use chuang_agent::display_projector::DisplayState;
@@ -635,14 +635,16 @@ fn handle_submit(
 
     if input.eq_ignore_ascii_case("/stop") {
         if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
-                app.push(LineKind::System, "■ 已请求停止，将在安全点结束。");
-            } else {
-                app.push(
-                    LineKind::System,
-                    "当前 app-server socket 回合不支持中途停止；请等待本轮完成。",
-                );
+            match turn.enqueue_live_control("[chuang-control] stop")? {
+                LiveControlEnqueueResult::Queued => {
+                    app.push(LineKind::System, "■ 停止请求已排队，等待安全点确认。")
+                }
+                LiveControlEnqueueResult::Closed => {
+                    app.push(LineKind::System, "当前回合已结束，停止请求未发送。")
+                }
+                LiveControlEnqueueResult::NotSupported => {
+                    app.push(LineKind::System, "当前回合不支持中途停止；请等待本轮完成。")
+                }
             }
         } else {
             app.push(LineKind::Meta, "当前没有运行中的任务。");
@@ -730,14 +732,17 @@ fn handle_submit(
         if note.is_empty() {
             app.push(LineKind::Meta, "guidance ignored: empty note");
         } else if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, note)?;
-                app.push(LineKind::System, "已注入补充要求到当前任务。");
-            } else {
-                app.push(
+            match turn.enqueue_live_control(note)? {
+                LiveControlEnqueueResult::Queued => {
+                    app.push(LineKind::System, "补充要求已排队发送，等待安全点确认。")
+                }
+                LiveControlEnqueueResult::Closed => {
+                    app.push(LineKind::System, "当前回合已结束，补充要求未发送。")
+                }
+                LiveControlEnqueueResult::NotSupported => app.push(
                     LineKind::System,
-                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。",
-                );
+                    "当前回合不支持实时补充；请等待本轮完成后发送。",
+                ),
             }
         } else {
             pending_guidance.push(note.to_string());
@@ -751,17 +756,18 @@ fn handle_submit(
 
     if running.is_some() {
         if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, input)?;
-                app.push(
+            match turn.enqueue_live_control(input)? {
+                LiveControlEnqueueResult::Queued => app.push(
                     LineKind::System,
-                    "已注入当前任务（建议下次用 !补充 更明确）。",
-                );
-            } else {
-                app.push(
+                    "补充要求已排队发送，等待安全点确认（建议下次用 !补充 更明确）。",
+                ),
+                LiveControlEnqueueResult::Closed => {
+                    app.push(LineKind::System, "当前回合已结束，补充要求未发送。")
+                }
+                LiveControlEnqueueResult::NotSupported => app.push(
                     LineKind::System,
-                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。",
-                );
+                    "当前回合不支持实时补充；请等待本轮完成后发送。",
+                ),
             }
         }
         return Ok(SubmitResult::Continue);
@@ -788,8 +794,7 @@ fn drain_progress(
     let Ok(content) = std::fs::read_to_string(&turn.progress_path) else {
         return;
     };
-    let start = cursor.bytes_read.min(content.len() as u64) as usize;
-    let new_content = &content[start..];
+    let (new_content, complete_end) = complete_progress_jsonl(&content, cursor.bytes_read);
     for line in new_content.lines().filter(|l| !l.trim().is_empty()) {
         note_raw_progress_line(cursor, line);
         let Some(display) = format_progress_event(line, show_trace) else {
@@ -806,7 +811,7 @@ fn drain_progress(
         cursor.last_message = Some(display.message.clone());
         cursor.displays.push(display);
     }
-    cursor.bytes_read = content.len() as u64;
+    cursor.bytes_read = complete_end;
 }
 
 fn poll_finish_turn(
@@ -1704,5 +1709,38 @@ mod tests {
                 .collect();
             assert_eq!(display_width(&plain), 8, "row={plain:?}");
         }
+    }
+
+    #[test]
+    fn drain_progress_preserves_incomplete_jsonl_tail() {
+        let turn = crate::spawn_repl_turn_task(
+            "progress".to_string(),
+            true,
+            |_guidance_path, _progress_path, _live_control_gate| Err("done".to_string()),
+        );
+        let _ = turn
+            .receiver
+            .recv()
+            .expect("turn completion should arrive");
+        let partial = concat!(
+            "{\"kind\":\"live_control_warning\",\"details\":{\"message\":\"first\"}}\n",
+            "{\"kind\":\"live_control_warning\",\"details\":{\"message\":\"second\""
+        );
+        std::fs::write(&turn.progress_path, partial).expect("partial progress should write");
+
+        let mut app = TuiApp::new("model".to_string(), "usage".to_string());
+        let mut cursor = ProgressCursor::default();
+        drain_progress(&mut app, &turn, &mut cursor, false);
+        let first_end = partial.find('\n').expect("first record should end") + 1;
+        assert_eq!(cursor.bytes_read, first_end as u64);
+        assert!(app.lines.iter().any(|line| line.text == "first"));
+        assert!(!app.lines.iter().any(|line| line.text == "second"));
+
+        let complete = format!("{partial}}}}}\n");
+        std::fs::write(&turn.progress_path, &complete).expect("complete progress should write");
+        drain_progress(&mut app, &turn, &mut cursor, false);
+        assert_eq!(cursor.bytes_read, complete.len() as u64);
+        assert!(app.lines.iter().any(|line| line.text == "second"));
+        turn.handle.join().expect("turn thread should join");
     }
 }

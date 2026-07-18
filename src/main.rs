@@ -4,6 +4,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -915,17 +916,18 @@ fn process_repl_input(
 
     if input.eq_ignore_ascii_case("/stop") {
         if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
-                chrome.write_body(
+            match turn.enqueue_live_control("[chuang-control] stop")? {
+                LiveControlEnqueueResult::Queued => chrome.write_body(
                     stdout,
-                    &format!("{ANSI_YELLOW}■{ANSI_RESET} 已请求停止，将在当前安全点结束任务。\n"),
-                )?;
-            } else {
-                chrome.write_body(
+                    &format!("{ANSI_YELLOW}■{ANSI_RESET} 停止请求已排队，等待安全点确认。\n"),
+                )?,
+                LiveControlEnqueueResult::Closed => {
+                    chrome.write_body(stdout, "当前回合已结束，停止请求未发送。\n")?
+                }
+                LiveControlEnqueueResult::NotSupported => chrome.write_body(
                     stdout,
-                    "当前 app-server socket 回合不支持中途停止；请等待本轮完成。\n",
-                )?;
+                    "当前回合不支持中途停止；请等待本轮完成。\n",
+                )?,
             }
         } else {
             chrome.write_body(
@@ -1001,14 +1003,18 @@ fn process_repl_input(
         if note.is_empty() {
             chrome.write_body(stdout, "guidance ignored: empty note\n")?;
         } else if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, note)?;
-                chrome.write_body(stdout, "guidance injected into current turn\n")?;
-            } else {
-                chrome.write_body(
+            match turn.enqueue_live_control(note)? {
+                LiveControlEnqueueResult::Queued => chrome.write_body(
                     stdout,
-                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。\n",
-                )?;
+                    "guidance queued for delivery; waiting for safe-point confirmation\n",
+                )?,
+                LiveControlEnqueueResult::Closed => {
+                    chrome.write_body(stdout, "当前回合已结束，补充要求未发送。\n")?
+                }
+                LiveControlEnqueueResult::NotSupported => chrome.write_body(
+                    stdout,
+                    "当前回合不支持实时补充；请等待本轮完成后发送。\n",
+                )?,
             }
         } else {
             pending_guidance.push(note.to_string());
@@ -1022,17 +1028,18 @@ fn process_repl_input(
 
     if running.is_some() {
         if let Some(turn) = running.as_ref() {
-            if turn.supports_live_control {
-                append_live_guidance(&turn.guidance_path, input)?;
-                chrome.write_body(
+            match turn.enqueue_live_control(input)? {
+                LiveControlEnqueueResult::Queued => chrome.write_body(
                     stdout,
-                    "guidance injected into current turn. Prefix with ! next time to make this explicit.\n",
-                )?;
-            } else {
-                chrome.write_body(
+                    "guidance queued for delivery; waiting for safe-point confirmation. Prefix with ! next time to make this explicit.\n",
+                )?,
+                LiveControlEnqueueResult::Closed => {
+                    chrome.write_body(stdout, "当前回合已结束，补充要求未发送。\n")?
+                }
+                LiveControlEnqueueResult::NotSupported => chrome.write_body(
                     stdout,
-                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。\n",
-                )?;
+                    "当前回合不支持实时补充；请等待本轮完成后发送。\n",
+                )?,
             }
         }
         return Ok(InputAction::Continue);
@@ -1239,8 +1246,7 @@ fn poll_progress_events(
             return Ok(false);
         }
     };
-    let start = cursor.bytes_read.min(content.len() as u64) as usize;
-    let new_content = &content[start..];
+    let (new_content, complete_end) = complete_progress_jsonl(&content, cursor.bytes_read);
     let limit = activity_visible_limit(show_trace);
     let mut wrote_progress = false;
     if !new_content.trim().is_empty() {
@@ -1290,7 +1296,7 @@ fn poll_progress_events(
             wrote_progress = true;
         }
     }
-    cursor.bytes_read = content.len() as u64;
+    cursor.bytes_read = complete_end;
     // Bottom strip is refreshed by the interactive loop (running prompt + timer).
     let _ = (turn, show_trace, wrote_progress);
     Ok(wrote_progress)
@@ -1416,6 +1422,13 @@ pub(crate) fn format_progress_event(line: &str, show_trace: bool) -> Option<Prog
             Some(display_warning("当前操作失败，正在保留现场信息"))
         }
         "guidance_injected" => Some(display_progress("已接收新的补充要求")),
+        "live_control_warning" => {
+            let message = details
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("实时控制请求没有送达服务端");
+            Some(display_warning(message))
+        }
         _ => None,
     }
 }
@@ -1571,6 +1584,64 @@ pub(crate) struct RunningTurn {
     pub(crate) guidance_path: PathBuf,
     pub(crate) progress_path: PathBuf,
     pub(crate) supports_live_control: bool,
+    live_control_gate: LiveControlGate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiveControlEnqueueResult {
+    Queued,
+    Closed,
+    NotSupported,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LiveControlGate {
+    open: Arc<Mutex<bool>>,
+}
+
+impl LiveControlGate {
+    fn new() -> Self {
+        Self {
+            open: Arc::new(Mutex::new(true)),
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        let mut open = self
+            .open
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *open = false;
+    }
+
+    fn append_if_open(
+        &self,
+        path: &PathBuf,
+        note: &str,
+    ) -> Result<LiveControlEnqueueResult, String> {
+        let open = self
+            .open
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !*open {
+            return Ok(LiveControlEnqueueResult::Closed);
+        }
+        append_live_guidance(path, note)?;
+        Ok(LiveControlEnqueueResult::Queued)
+    }
+}
+
+impl RunningTurn {
+    pub(crate) fn enqueue_live_control(
+        &self,
+        note: &str,
+    ) -> Result<LiveControlEnqueueResult, String> {
+        if !self.supports_live_control {
+            return Ok(LiveControlEnqueueResult::NotSupported);
+        }
+        self.live_control_gate
+            .append_if_open(&self.guidance_path, note)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1648,25 +1719,29 @@ pub(crate) fn spawn_repl_turn(
     workspace_root: Option<PathBuf>,
 ) -> RunningTurn {
     let request_user_input = user_input.clone();
-    spawn_repl_turn_task(user_input, true, move |guidance_path, progress_path| {
-        run_with_options(&RunCliRequest {
-            options,
-            user_input: request_user_input,
-            workspace_root,
-            remember: false,
-            session_id: None,
-            remember_session: false,
-            conversation_history,
-            remember_identity: false,
-            remember_experience: false,
-            dispatch_subagent: false,
-            goal_spec: None,
-            knowledge_context: None,
-            live_guidance_path: Some(guidance_path),
-            progress_path: Some(progress_path),
-        })
-        .map(|(result, _)| result)
-    })
+    spawn_repl_turn_task(
+        user_input,
+        true,
+        move |guidance_path, progress_path, _live_control_gate| {
+            run_with_options(&RunCliRequest {
+                options,
+                user_input: request_user_input,
+                workspace_root,
+                remember: false,
+                session_id: None,
+                remember_session: false,
+                conversation_history,
+                remember_identity: false,
+                remember_experience: false,
+                dispatch_subagent: false,
+                goal_spec: None,
+                knowledge_context: None,
+                live_guidance_path: Some(guidance_path),
+                progress_path: Some(progress_path),
+            })
+            .map(|(result, _)| result)
+        },
+    )
 }
 
 pub(crate) fn spawn_repl_turn_task<F>(
@@ -1675,7 +1750,11 @@ pub(crate) fn spawn_repl_turn_task<F>(
     task: F,
 ) -> RunningTurn
 where
-    F: FnOnce(PathBuf, PathBuf) -> Result<chuang_agent::agent_runtime::RuntimeResult, String>
+    F: FnOnce(
+            PathBuf,
+            PathBuf,
+            LiveControlGate,
+        ) -> Result<chuang_agent::agent_runtime::RuntimeResult, String>
         + Send
         + 'static,
 {
@@ -1695,8 +1774,15 @@ where
     let (sender, receiver) = mpsc::channel();
     let task_guidance_path = guidance_path.clone();
     let task_progress_path = progress_path.clone();
+    let live_control_gate = LiveControlGate::new();
+    let task_live_control_gate = live_control_gate.clone();
     let handle = thread::spawn(move || {
-        let result = task(task_guidance_path, task_progress_path);
+        let result = task(
+            task_guidance_path,
+            task_progress_path,
+            task_live_control_gate.clone(),
+        );
+        task_live_control_gate.close();
         let _ = sender.send(result);
     });
     RunningTurn {
@@ -1709,7 +1795,21 @@ where
         guidance_path,
         progress_path,
         supports_live_control,
+        live_control_gate,
     }
+}
+
+pub(crate) fn complete_progress_jsonl(content: &str, bytes_read: u64) -> (&str, u64) {
+    let start = bytes_read.min(content.len() as u64) as usize;
+    let tail = &content[start..];
+    let Some(last_newline) = tail.rfind('\n') else {
+        return ("", start as u64);
+    };
+    let complete_len = last_newline + 1;
+    (
+        &tail[..complete_len],
+        start.saturating_add(complete_len) as u64,
+    )
 }
 
 fn repl_turn_nonce() -> String {
@@ -2749,6 +2849,56 @@ mod tests {
             format_progress_event(&step, true).is_some_and(|d| d.message.contains("准备上下文")),
             "trace still shows lifecycle steps"
         );
+    }
+
+    #[test]
+    fn repl_progress_event_shows_live_control_failure_in_default_mode() {
+        let warning = serde_json::json!({
+            "kind": "live_control_warning",
+            "details": {
+                "message": "实时控制请求失败：app_server_rpc_failed: turn_not_running"
+            }
+        })
+        .to_string();
+
+        assert_eq!(
+            format_progress_event(&warning, false),
+            Some(display_warning(
+                "实时控制请求失败：app_server_rpc_failed: turn_not_running"
+            ))
+        );
+    }
+
+    #[test]
+    fn live_control_gate_rejects_after_turn_completion() {
+        let turn = spawn_repl_turn_task(
+            "done".to_string(),
+            true,
+            |_guidance_path, _progress_path, _live_control_gate| Err("done".to_string()),
+        );
+        let _ = turn
+            .receiver
+            .recv()
+            .expect("turn completion should arrive");
+        assert_eq!(
+            turn.enqueue_live_control("too late")
+                .expect("closed gate should be reported"),
+            LiveControlEnqueueResult::Closed
+        );
+        turn.handle.join().expect("turn thread should join");
+    }
+
+    #[test]
+    fn complete_progress_jsonl_preserves_incomplete_tail() {
+        let first = "{\"kind\":\"model_started\"}\n{\"kind\":\"tool_started\"";
+        let (complete, cursor) = complete_progress_jsonl(first, 0);
+        assert_eq!(complete, "{\"kind\":\"model_started\"}\n");
+        assert_eq!(cursor, complete.len() as u64);
+
+        let finished = format!("{first},\"details\":{{}}}}\n");
+        let (tail, next_cursor) = complete_progress_jsonl(&finished, cursor);
+        assert_eq!(tail, "{\"kind\":\"tool_started\",\"details\":{}}\n");
+        assert_eq!(next_cursor, finished.len() as u64);
     }
 
     #[test]
