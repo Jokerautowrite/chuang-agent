@@ -4359,8 +4359,8 @@ allowed_channels = ["app-server"]
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            max_tokens: 3600,
-            reserve_system_tokens: 3200,
+            max_tokens: 2600,
+            reserve_system_tokens: 1200,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,
@@ -6281,10 +6281,10 @@ allowed_channels = ["app-server"]
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            // System/tool instructions grew (e.g. spawn_subagent); keep headroom so
-            // this still tests memory eviction rather than hard system budget fail.
-            max_tokens: 4200,
-            reserve_system_tokens: 64,
+            // Always-on norms and the thin tool catalog grew; keep headroom so this
+            // still tests memory eviction rather than hard system budget failure.
+            max_tokens: 7000,
+            reserve_system_tokens: 1200,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,
@@ -6335,7 +6335,7 @@ allowed_channels = ["app-server"]
         let (result, _) = run_with_options(&request).expect("run should succeed");
 
         assert!(result.prompt.contains("[session-context]"));
-        assert!(result.prompt.contains("[tool-instructions]"));
+        assert!(result.prompt.contains("[tool-catalog]"));
         assert!(result.prompt.contains("[recent-conversation-history]"));
         assert!(result.prompt.contains("workspace_root="));
         assert!(result.prompt.contains("thread-pressure"));
@@ -7816,7 +7816,7 @@ allowed_channels = ["app-server"]
     fn goal_context_test_budget() -> chuang_agent::context_engine::ContextBudget {
         chuang_agent::context_engine::ContextBudget {
             max_tokens: 8192,
-            reserve_system_tokens: 64,
+            reserve_system_tokens: 1200,
             min_working_tokens: 1,
             max_tool_results: 5,
             max_memory_segments: 20,

@@ -1066,7 +1066,7 @@ fn mask_key_state(api_key: &str) -> String {
 pub fn default_context_budget() -> ContextBudget {
     ContextBudget {
         max_tokens: 272000,
-        reserve_system_tokens: 32,
+        reserve_system_tokens: 4096,
         min_working_tokens: 1,
         max_tool_results: 5,
         max_memory_segments: 5,

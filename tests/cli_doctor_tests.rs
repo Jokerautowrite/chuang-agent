@@ -56,6 +56,7 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("doctor_check name=channel_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=subagent_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=live_adapter_preflight ok=true"));
+    assert!(stdout.contains("doctor_check name=app_server_service_runtime ok=true"));
     assert!(stdout.contains("doctor_check name=external_ai_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=local_contract_readiness ok=true"));
     assert!(stdout.contains("doctor_check name=slots ok=true"));
@@ -252,7 +253,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     let parsed: Value = serde_json::from_str(&stdout).expect("stdout should be json");
 
     assert_eq!(parsed["ok"], true);
-    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 24);
+    assert_eq!(parsed["checks"].as_array().expect("checks array").len(), 27);
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")
@@ -346,6 +347,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
                 .as_str()
                 .expect("live adapter preflight detail")
                 .contains("next_actions=")));
+    assert!(parsed["checks"]
+        .as_array()
+        .expect("checks array")
+        .iter()
+        .any(|check| check["name"] == "app_server_service_runtime"
+            && check["detail"]
+                .as_str()
+                .expect("app server service runtime detail")
+                .contains("effective_environment=")));
     assert!(parsed["checks"]
         .as_array()
         .expect("checks array")

@@ -186,7 +186,7 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("subagent_queue_root: ./data/subagent-queue"));
     assert!(stdout.contains(
-        "context_budget: max=272000 reserve_system=32 min_working=1 max_tool_results=5 max_memory_segments=5"
+        "context_budget: max=272000 reserve_system=4096 min_working=1 max_tool_results=5 max_memory_segments=5"
     ));
     assert!(stdout.contains("control_plane: fake_local"));
     assert!(stdout.contains(
@@ -1304,7 +1304,7 @@ fn cli_status_can_select_queued_external_subagent_slot() {
     assert!(parsed["subagent_readiness"]["model_tool_worker_reason"]
         .as_str()
         .expect("model tool worker reason")
-        .contains("spawn_subagent can execute"));
+        .contains("spawn_subagent runs governed local Codex workers"));
     assert_eq!(parsed["subagent_readiness"]["live_worker_available"], false);
     assert_eq!(
         parsed["subagent_readiness"]["worker_runtime_state"],
@@ -1313,12 +1313,12 @@ fn cli_status_can_select_queued_external_subagent_slot() {
     assert!(parsed["subagent_readiness"]["worker_runtime_reason"]
         .as_str()
         .expect("queued_external worker runtime reason")
-        .contains("no live worker adapter is available yet"));
+        .contains("spawn_subagent can start local Codex workers"));
     assert!(
         parsed["subagent_readiness"]["worker_runtime_blocked_reason"]
             .as_str()
             .expect("queued_external worker runtime blocked reason")
-            .contains("queued_external")
+            .contains("local spawn_subagent/Codex path is available")
     );
     assert_eq!(
         parsed["subagent_readiness"]["capability_route_state"],

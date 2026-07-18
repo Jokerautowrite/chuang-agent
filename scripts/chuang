@@ -3,6 +3,8 @@
 set -euo pipefail
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 CALLER_CWD="$(pwd)"
+APP_SERVER_SOCKET="${CHUANG_APP_SERVER_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/chuang-agent/app-server.sock}"
+export CHUANG_REPL_WORKSPACE_ROOT="${CHUANG_REPL_WORKSPACE_ROOT:-$CALLER_CWD}"
 cd "$ROOT"
 
 export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-1}"
@@ -56,7 +58,7 @@ show_usage() {
   cat <<'EOF'
 用法:
   chuang                         启动本地交互 REPL
-  chuang ask "你的问题"           直接问一次，走真实本地 runtime
+  chuang ask "你的问题"           直接问一次，默认走 canonical app-server socket
   chuang status --config config.toml [--json]
   chuang doctor --config config.toml
   chuang browser status|start|stop   无头 Chrome（CDP）；工具也可自动拉起
@@ -69,13 +71,14 @@ show_usage() {
 
 说明:
   默认项目: /home/user/projects/chuang-agent
-  配置真相: config.toml（ask 路径会 materialize 绝对路径，避免 cwd 漂移）
+  配置真相: 常驻 app-server 加载项目 config.toml；local 模式会 materialize 绝对路径
   provider env: ~/.config/chuang-agent/provider.env
   真实 provider 变量: CHUANG_PROXY_API_KEY=<set>
   可选: SKIP_LIVE=1 SKIP_BROWSER=1 chuang field-accept
   浏览器自动拉起关: CHUANG_HEADLESS_AUTOSTART=0
   RTK 关: tool_shell_rtk_rewrite=false 或 CHUANG_SHELL_RTK_REWRITE=0
   强制 cargo: CHUANG_FORCE_CARGO=1
+  旧直连 runtime: CHUANG_APP_SERVER_MODE=local
 EOF
 }
 
@@ -113,12 +116,18 @@ case "${1:-}" in
       exit 2
     fi
     load_provider_env
-    runtime_config="$(write_abs_runtime_config)"
-    cd "$CALLER_CWD"
-    if bin="$(resolve_chuang_bin)"; then
-      exec "$bin" run --config "$runtime_config" --input "$*"
+    if [[ "${CHUANG_APP_SERVER_MODE:-socket}" == "local" ]]; then
+      runtime_config="$(write_abs_runtime_config)"
+      cd "$CALLER_CWD"
+      if bin="$(resolve_chuang_bin)"; then
+        exec "$bin" run --config "$runtime_config" --input "$*"
+      fi
+      exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
     fi
-    exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
+    run_chuang app-server ask \
+      --socket "$APP_SERVER_SOCKET" \
+      --workspace-root "$CALLER_CWD" \
+      --text "$*"
     ;;
   browser)
     shift
@@ -154,11 +163,17 @@ case "${1:-}" in
     ;;
   *)
     load_provider_env
-    runtime_config="$(write_abs_runtime_config)"
-    cd "$CALLER_CWD"
-    if bin="$(resolve_chuang_bin)"; then
-      exec "$bin" run --config "$runtime_config" --input "$*"
+    if [[ "${CHUANG_APP_SERVER_MODE:-socket}" == "local" ]]; then
+      runtime_config="$(write_abs_runtime_config)"
+      cd "$CALLER_CWD"
+      if bin="$(resolve_chuang_bin)"; then
+        exec "$bin" run --config "$runtime_config" --input "$*"
+      fi
+      exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
     fi
-    exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- run --config "$runtime_config" --input "$*"
+    run_chuang app-server ask \
+      --socket "$APP_SERVER_SOCKET" \
+      --workspace-root "$CALLER_CWD" \
+      --text "$*"
     ;;
 esac

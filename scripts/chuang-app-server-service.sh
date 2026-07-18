@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Supervise chuang app-server for systemd user unit.
-# Keeps a named-pipe stdin open so the stdio server stays alive for channel attach.
+# Supervise the canonical Chuang app-server Unix socket for the user service.
 set -euo pipefail
 
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 WORKSPACE="${CHUANG_AGENT_WORKSPACE_ROOT:-$ROOT}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 BIN="${CHUANG_BIN:-$ROOT/target/debug/chuang-agent}"
-FIFO_DIR="${XDG_RUNTIME_DIR:-/tmp}/chuang-agent"
-FIFO="$FIFO_DIR/app-server.stdin"
+SOCKET_DIR="${XDG_RUNTIME_DIR:-/tmp}/chuang-agent"
+SOCKET="${CHUANG_APP_SERVER_SOCKET:-$SOCKET_DIR/app-server.sock}"
 
 if [[ -f "$PROVIDER_ENV_FILE" ]]; then
   set -a
@@ -27,16 +26,9 @@ if [[ ! -x "$BIN" ]]; then
   BIN="$ROOT/target/debug/chuang-agent"
 fi
 
-mkdir -p "$FIFO_DIR"
-if [[ ! -p "$FIFO" ]]; then
-  rm -f "$FIFO"
-  mkfifo "$FIFO"
-fi
+mkdir -p "$SOCKET_DIR"
 
 # Health is best-effort; do not block service start if provider env is mid-edit.
 "$BIN" app-server health --workspace-root "$WORKSPACE" --json >/dev/null 2>&1 || true
 
-# O_RDWR open on FIFO never blocks for lack of a peer (POSIX).
-# CLI requires subcommand as argv[1] (not global flags first).
-exec 3<>"$FIFO"
-exec "$BIN" app-server <&3
+exec "$BIN" app-server daemon --socket "$SOCKET"

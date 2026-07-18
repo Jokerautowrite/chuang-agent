@@ -1,3 +1,7 @@
+use crate::app_server_service::{
+    collect_app_server_service_runtime_snapshot, effective_gate_value,
+    AppServerServiceRuntimeSnapshot,
+};
 use crate::atomic_tool::{ga_atomic_tool_manifests, AtomicToolManifest, AtomicToolStatus};
 use crate::browser_read::{
     unavailable_browser_read_status, BrowserReadAdapter, BrowserReadStatus, CdpBrowserReadAdapter,
@@ -15,7 +19,7 @@ use crate::knowledge_read::{
     preflight_knowledge_read_status, KnowledgeReadConfig, KnowledgeReadStatus,
     KNOWLEDGE_READ_CONTRACT_VERSION,
 };
-use crate::live_adapter_gate::{evaluate_live_adapter_gate, LiveAdapterSlot};
+use crate::live_adapter_gate::LiveAdapterSlot;
 use crate::permission_profile_slot::{
     decide_descriptor_risk, full_local_workspace_profile, PermissionDecision, PermissionTag,
     ToolDescriptorRisk,
@@ -48,7 +52,10 @@ pub struct ChuangMvpStatus {
     pub external_ai_readiness: ExternalAiReadinessStatus,
     pub browser_readiness: BrowserReadinessStatus,
     pub live_readiness: LiveReadinessStatus,
+    /// Compatibility view for the calling CLI process only.
     pub live_adapter_gates: LiveAdapterGateStatus,
+    pub effective_live_adapter_gates: LiveAdapterGateStatus,
+    pub app_server_service: AppServerServiceRuntimeSnapshot,
     pub atomic_tools: AtomicToolSurfaceStatus,
     pub policy_tool_status: PolicyToolStatusSurface,
     pub runtime_report_surface: RuntimeReportSurfaceStatus,
@@ -648,6 +655,10 @@ pub fn build_chuang_mvp_status(
     let external_ai_readiness = build_external_ai_readiness();
     let browser_readiness = build_browser_readiness(&atomic_tools);
     let live_adapter_gates = build_live_adapter_gate_status();
+    let app_server_service = collect_app_server_service_runtime_snapshot();
+    let effective_live_adapter_gates = build_live_adapter_gate_status_with_lookup(|name| {
+        effective_gate_value(&app_server_service, name)
+    });
     let global_real_live_receipt = build_global_real_live_receipt_gate();
     let live_readiness = build_live_readiness(
         &atomic_tools,
@@ -741,6 +752,8 @@ pub fn build_chuang_mvp_status(
         browser_readiness,
         live_readiness,
         live_adapter_gates,
+        effective_live_adapter_gates,
+        app_server_service,
         atomic_tools,
         policy_tool_status,
         runtime_report_surface,
@@ -2285,6 +2298,13 @@ fn external_ai_layer(
 }
 
 fn build_live_adapter_gate_status() -> LiveAdapterGateStatus {
+    build_live_adapter_gate_status_with_lookup(|name| std::env::var(name).ok())
+}
+
+fn build_live_adapter_gate_status_with_lookup<F>(lookup: F) -> LiveAdapterGateStatus
+where
+    F: Fn(&str) -> Option<String>,
+{
     let gates = [
         LiveAdapterSlot::SubagentRunner,
         LiveAdapterSlot::ControlApply,
@@ -2292,7 +2312,7 @@ fn build_live_adapter_gate_status() -> LiveAdapterGateStatus {
     ]
     .into_iter()
     .map(|slot| {
-        let gate = evaluate_live_adapter_gate(slot);
+        let gate = crate::live_adapter_gate::evaluate_live_adapter_gate_with_lookup(slot, &lookup);
         LiveAdapterGateLayerStatus {
             name: gate.name.to_string(),
             state: if gate.enabled {

@@ -3,11 +3,15 @@ set -u
 
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
+CALLER_CWD="$(pwd)"
+export CHUANG_REPL_WORKSPACE_ROOT="${CHUANG_REPL_WORKSPACE_ROOT:-$CALLER_CWD}"
 cd "$ROOT" || exit 1
 
 export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-1}"
 export CHUANG_REAL_CONTROL_ENABLE="${CHUANG_REAL_CONTROL_ENABLE:-1}"
 export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-1}"
+# Interactive turns use the canonical app-server socket unless explicitly local.
+export CHUANG_APP_SERVER_MODE="${CHUANG_APP_SERVER_MODE:-socket}"
 
 if [[ "${CHUANG_REPL_STUB:-0}" == "1" ]]; then
   if [[ -t 0 && -t 1 ]]; then

@@ -1,5 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -102,6 +104,7 @@ first_wake_path = "./identity/FIRST_WAKE.md"
 agents_registry_path = "./identity/agents.toml"
 rules_root = "./rules"
 rules_core_path = "./rules/core.md"
+context_reserve_system_tokens = 4096
 
 provider = "openai_compatible"
 provider_id = "app-server-openai"
@@ -112,6 +115,291 @@ transport = "stub"
 "#,
     )
     .expect("config should write");
+}
+
+fn app_server_socket(name: &str) -> PathBuf {
+    temp_workspace(name).join("app-server.sock")
+}
+
+fn spawn_app_server_daemon(socket: &PathBuf, workspace: Option<&PathBuf>) -> std::process::Child {
+    std::fs::create_dir_all(
+        socket
+            .parent()
+            .expect("socket path should have a parent directory"),
+    )
+    .expect("socket parent should create");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
+    command
+        .args(["app-server", "daemon", "--socket"])
+        .arg(socket)
+        .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    if let Some(workspace) = workspace {
+        command.env("CHUANG_AGENT_WORKSPACE_ROOT", workspace);
+    }
+    command.spawn().expect("app-server daemon should spawn")
+}
+
+fn wait_for_app_server_socket(socket: &PathBuf) {
+    for _ in 0..100 {
+        if UnixStream::connect(socket).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!(
+        "app-server daemon did not accept socket {}",
+        socket.display()
+    );
+}
+
+fn stop_app_server_daemon(child: &mut std::process::Child) {
+    child.kill().expect("app-server daemon should stop");
+    let status = child
+        .wait()
+        .expect("app-server daemon should exit after stop");
+    assert!(
+        !status.success(),
+        "test daemon should only stop because the test terminated it"
+    );
+}
+
+#[test]
+fn app_server_without_args_keeps_stdio_json_lines_compatibility() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("stdio app-server should spawn");
+    let mut stdin = child.stdin.take().expect("stdio stdin should exist");
+    writeln!(stdin, r#"{{"id":1,"method":"initialize","params":{{}}}}"#)
+        .expect("initialize should write");
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .expect("stdio app-server should exit");
+    assert!(output.status.success());
+    let response: serde_json::Value = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("initialize response should be JSON");
+    assert_eq!(response["id"], 1);
+    assert_eq!(
+        response["result"]["serverInfo"]["name"],
+        "chuang-agent-app-server"
+    );
+}
+
+#[test]
+fn app_server_turn_interrupt_reports_unsupported_instead_of_fake_success() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("stdio app-server should spawn");
+    let mut stdin = child.stdin.take().expect("stdio stdin should exist");
+    writeln!(
+        stdin,
+        "{}",
+        r#"{"id":1,"method":"turn/interrupt","params":{"threadId":"chuang-thread-1"}}"#
+    )
+    .expect("interrupt should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(output.status.success());
+    let response = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("interrupt response should parse");
+    assert!(response["error"]["message"]
+        .as_str()
+        .expect("interrupt error should be a string")
+        .contains("turn_interrupt_unsupported"));
+}
+
+#[test]
+fn app_server_rejects_unknown_thread_instead_of_recreating_it() {
+    let workspace = temp_workspace("unknown-thread");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("stdio app-server should spawn");
+    let mut stdin = child.stdin.take().expect("stdio stdin should exist");
+    writeln!(
+        stdin,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"stale-thread","text":"继续"}}}}"#,
+        workspace.display()
+    )
+    .expect("turn/start should write");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("app-server should exit");
+    assert!(output.status.success());
+    let response = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("turn response should parse");
+    assert_eq!(
+        response["error"]["message"].as_str(),
+        Some("unknown_thread: stale-thread")
+    );
+}
+
+#[test]
+fn app_server_daemon_probe_and_ask_use_canonical_socket() {
+    let workspace = temp_workspace("daemon-probe-ask-workspace");
+    write_basic_stub_workspace(&workspace);
+    let socket = app_server_socket("daemon-probe-ask");
+    let mut daemon = spawn_app_server_daemon(&socket, Some(&workspace));
+    wait_for_app_server_socket(&socket);
+
+    let permissions = std::fs::metadata(&socket)
+        .expect("socket metadata should exist")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(permissions, 0o600);
+
+    let probe = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args(["app-server", "probe", "--socket"])
+        .arg(&socket)
+        .arg("--json")
+        .output()
+        .expect("probe should run");
+    assert!(
+        probe.status.success(),
+        "probe stderr={}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
+    let probe_json: serde_json::Value =
+        serde_json::from_slice(&probe.stdout).expect("probe should return JSON");
+    assert_eq!(probe_json["ok"], true);
+    assert_eq!(
+        probe_json["server"]["serverInfo"]["name"],
+        "chuang-agent-app-server"
+    );
+
+    let ask = |text: &str, thread_id: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
+        command
+            .args(["app-server", "ask", "--socket"])
+            .arg(&socket)
+            .args(["--workspace-root"])
+            .arg(&workspace)
+            .args(["--text", text, "--json"]);
+        if let Some(thread_id) = thread_id {
+            command.args(["--thread-id", thread_id]);
+        }
+        let output = command.output().expect("ask should run");
+        assert!(
+            output.status.success(),
+            "ask stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("ask should return JSON")
+    };
+
+    let first = ask("还在吗？", None);
+    assert!(first["assistant_text"]
+        .as_str()
+        .expect("assistant text should be present")
+        .contains("stubbed_post_ok"));
+    assert_eq!(first["thread_id"], "chuang-thread-1");
+    assert_eq!(first["turn"]["id"], "chuang-turn-1");
+
+    let second = ask(
+        "继续。",
+        first["thread_id"]
+            .as_str()
+            .expect("thread id should be present")
+            .into(),
+    );
+    assert_eq!(second["thread_id"], "chuang-thread-1");
+    assert_eq!(second["turn"]["id"], "chuang-turn-2");
+
+    stop_app_server_daemon(&mut daemon);
+}
+
+#[test]
+fn app_server_daemon_preserves_stale_socket_before_binding() {
+    let socket = app_server_socket("stale-preservation");
+    std::fs::create_dir_all(
+        socket
+            .parent()
+            .expect("socket path should have a parent directory"),
+    )
+    .expect("socket parent should create");
+    let stale_listener = UnixListener::bind(&socket).expect("stale socket should bind");
+    drop(stale_listener);
+
+    let mut daemon = spawn_app_server_daemon(&socket, None);
+    wait_for_app_server_socket(&socket);
+
+    let stale_prefix = format!(
+        "{}.stale-",
+        socket
+            .file_name()
+            .expect("socket should have filename")
+            .to_string_lossy()
+    );
+    let stale_paths = std::fs::read_dir(
+        socket
+            .parent()
+            .expect("socket path should have a parent directory"),
+    )
+    .expect("socket parent should list")
+    .filter_map(Result::ok)
+    .map(|entry| entry.path())
+    .filter(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().starts_with(&stale_prefix))
+            .unwrap_or(false)
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(stale_paths.len(), 1, "stale socket should be preserved");
+    assert!(std::fs::symlink_metadata(&stale_paths[0])
+        .expect("stale socket should remain")
+        .file_type()
+        .is_socket());
+    assert!(std::fs::symlink_metadata(&socket)
+        .expect("new socket should exist")
+        .file_type()
+        .is_socket());
+
+    stop_app_server_daemon(&mut daemon);
+}
+
+#[test]
+fn app_server_socket_scripts_use_daemon_without_fifo_or_rm() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let service_script = std::fs::read_to_string(root.join("scripts/chuang-app-server-service.sh"))
+        .expect("service script should read");
+    assert!(service_script.contains("app-server daemon --socket"));
+    assert!(service_script.contains("app-server.sock"));
+    assert!(!service_script.contains("FIFO"));
+    assert!(!service_script.contains("rm "));
+
+    let terminal_script =
+        std::fs::read_to_string(root.join("scripts/chuang")).expect("terminal script should read");
+    assert!(terminal_script.contains("CHUANG_APP_SERVER_MODE"));
+    assert!(terminal_script.contains("app-server ask"));
+    assert!(terminal_script.contains("CHUANG_APP_SERVER_SOCKET"));
+
+    for unit in [
+        "ops/systemd/chuang-agent-app-server.service",
+        "ops/systemd/chuang-agent-app-server.service.example",
+    ] {
+        let contents = std::fs::read_to_string(root.join(unit)).expect("unit should read");
+        assert!(contents.contains("chuang-app-server-service.sh"));
+    }
 }
 
 #[test]
@@ -1127,7 +1415,7 @@ transport = "stub"
     let mut stdin = child.stdin.take().expect("stdin should exist");
     writeln!(
         stdin,
-        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","threadId":"chuang-thread-1","text":"{}"}}}}"#,
+        r#"{{"id":1,"method":"turn/start","params":{{"workspaceRoot":"{}","text":"{}"}}}}"#,
         workspace.display(),
         oversized_input
     )

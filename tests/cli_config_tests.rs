@@ -33,6 +33,7 @@ model = "config-check-stub"
 	subagent_live_worker_status = "configured_status_only"
 	subagent_queue_root = "{queue}"
 context_max_tokens = 333
+context_reserve_system_tokens = 128
 "#,
             db = root.join("chuang.db").display(),
             identity = root.join("identity").display(),
@@ -78,6 +79,7 @@ context_max_tokens = 333
         false
     );
     assert_eq!(parsed["summary"]["context_max_tokens"], 333);
+    assert_eq!(parsed["summary"]["context_reserve_system_tokens"], 128);
     assert!(parsed["summary"]["placeholder_warnings"]
         .as_array()
         .expect("placeholder warnings should be an array")

@@ -539,13 +539,19 @@ impl CdpBrowserReadAdapter {
             }
         };
 
-        // Give the page a short chance to settle, then poll readyState.
+        // A newly-created CDP target can report readyState=complete for about:blank
+        // before Chrome applies the requested URL. Wait for both navigation and load.
         std::thread::sleep(Duration::from_millis(400));
         for _ in 0..20 {
+            let current_url = self.ws_eval(&ws_url, "location.href").unwrap_or_default();
             let state = self
                 .ws_eval(&ws_url, "document.readyState")
                 .unwrap_or_default();
-            if state == "complete" || state == "interactive" {
+            let navigation_visible = url == "about:blank"
+                || (!current_url.is_empty()
+                    && current_url != "about:blank"
+                    && current_url != "data:,");
+            if navigation_visible && (state == "complete" || state == "interactive") {
                 break;
             }
             std::thread::sleep(Duration::from_millis(200));

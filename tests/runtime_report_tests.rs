@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use chuang_agent::agent_runtime::{AgentRuntime, RuntimeRequest};
+use chuang_agent::agent_runtime::{debug_pack_for_test, AgentRuntime, RuntimeRequest};
+use chuang_agent::context_engine::{ContextBudget, SegmentSource};
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 use chuang_agent::responder::{FakeResponder, ResponderMeta};
@@ -39,6 +40,47 @@ fn runtime<S>(store: S) -> AgentRuntime<S, FakeResponder> {
     AgentRuntime::with_responder(store, FakeResponder::new("stub-responder"))
 }
 
+fn pressure_budget(user_input: &str, keep_working: bool, min_working_tokens: u32) -> ContextBudget {
+    let baseline = debug_pack_for_test(
+        user_input,
+        &[],
+        ContextBudget {
+            max_tokens: 100_000,
+            reserve_system_tokens: 100_000,
+            min_working_tokens: 0,
+            max_tool_results: 5,
+            max_memory_segments: 20,
+        },
+    )
+    .expect("baseline context should pack");
+    let working_tokens = baseline
+        .segments
+        .iter()
+        .find(|segment| segment.id == "working-user-input")
+        .and_then(|segment| segment.tokens)
+        .expect("working segment should exist");
+    let protected_tokens = baseline
+        .segments
+        .iter()
+        .filter(|segment| segment.id != "working-user-input")
+        .map(|segment| segment.tokens.unwrap_or(0))
+        .sum::<u32>();
+    let system_tokens = baseline
+        .segments
+        .iter()
+        .filter(|segment| matches!(segment.source, SegmentSource::System))
+        .map(|segment| segment.tokens.unwrap_or(0))
+        .sum::<u32>();
+
+    ContextBudget {
+        max_tokens: protected_tokens.saturating_add(if keep_working { working_tokens } else { 0 }),
+        reserve_system_tokens: system_tokens,
+        min_working_tokens,
+        max_tool_results: 5,
+        max_memory_segments: 20,
+    }
+}
+
 #[test]
 fn runtime_report_builder_carries_runtime_debug_fields() {
     let mut store =
@@ -59,13 +101,11 @@ fn runtime_report_builder_carries_runtime_debug_fields() {
                 .to_string(),
             recall_limit: 1,
             metadata: BTreeMap::new(),
-            context_budget: Some(chuang_agent::context_engine::ContextBudget {
-                max_tokens: 348,
-                reserve_system_tokens: 240,
-                min_working_tokens: 5,
-                max_tool_results: 5,
-                max_memory_segments: 20,
-            }),
+            context_budget: Some(pressure_budget(
+                "这是一段很长很长的用户输入，用来制造 working segment 无法装入预算的情况",
+                false,
+                5,
+            )),
             extra_context_segments: Vec::new(),
         })
         .expect("runtime should succeed");
@@ -136,13 +176,7 @@ fn runtime_report_builder_carries_working_reservation_debug() {
                 .with_timezone(&chrono::Utc),
             metadata: std::collections::HashMap::new(),
         }],
-        chuang_agent::context_engine::ContextBudget {
-            max_tokens: 364,
-            reserve_system_tokens: 240,
-            min_working_tokens: 20,
-            max_tool_results: 5,
-            max_memory_segments: 20,
-        },
+        pressure_budget("12345678901234567890", true, 20),
     )
     .expect("debug pack should succeed");
 

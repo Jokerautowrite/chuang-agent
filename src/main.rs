@@ -1,7 +1,7 @@
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
@@ -262,6 +262,7 @@ impl ReplChrome {
 }
 
 /// Fit text that may already contain ANSI; width counted on plain text.
+#[allow(dead_code)]
 fn fit_display_ansi(s: &str, max_cols: usize) -> String {
     if max_cols == 0 {
         return String::new();
@@ -291,6 +292,7 @@ mod cli_memory;
 mod cli_output;
 mod cli_plugin;
 mod cli_repl_tui;
+mod cli_repl_transport;
 mod cli_runtime;
 mod cli_skill;
 mod cli_subagent;
@@ -322,6 +324,7 @@ use cli_output::{
     ControlOutputFormat,
 };
 use cli_plugin::plugin_command;
+use cli_repl_transport::ReplTurnTransport;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
 use cli_skill::skill_command;
 use cli_subagent::subagent_command;
@@ -340,6 +343,7 @@ static REPL_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_BOLD: &str = "\x1b[1m";
 const ANSI_DIM: &str = "\x1b[2m";
+#[allow(dead_code)]
 const ANSI_BLUE: &str = "\x1b[38;5;75m";
 const ANSI_RED: &str = "\x1b[38;5;203m";
 const ANSI_GREEN: &str = "\x1b[38;5;114m";
@@ -534,14 +538,15 @@ fn repl_interactive_loop(
     show_trace: bool,
     _stdout: &mut io::Stdout,
 ) -> Result<(), String> {
+    let mut transport = ReplTurnTransport::from_environment()?;
     // Default: Ratatui 3-pane shell. Legacy pin-prompt: CHUANG_REPL_LEGACY=1
     let legacy = env::var("CHUANG_REPL_LEGACY")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if !legacy {
-        return cli_repl_tui::run_ratatui_repl(options, verbose, show_trace);
+        return cli_repl_tui::run_ratatui_repl(options, verbose, show_trace, &mut transport);
     }
-    repl_interactive_loop_legacy(options, verbose, show_trace, _stdout)
+    repl_interactive_loop_legacy(options, verbose, show_trace, _stdout, &mut transport)
 }
 
 fn repl_interactive_loop_legacy(
@@ -549,6 +554,7 @@ fn repl_interactive_loop_legacy(
     mut verbose: bool,
     mut show_trace: bool,
     stdout: &mut io::Stdout,
+    transport: &mut ReplTurnTransport,
 ) -> Result<(), String> {
     let summary = options.runtime.summary();
     let mut turn_count = 0usize;
@@ -565,7 +571,10 @@ fn repl_interactive_loop_legacy(
     chrome.enable(stdout)?;
     chrome.write_body(
         stdout,
-        &format!("{}\n", render_repl_banner(&options.runtime.summary())),
+        &format!(
+            "{}\n",
+            render_repl_banner(&options.runtime.summary(), transport.workspace_root())
+        ),
     )?;
     print_repl_prompt(
         stdout,
@@ -601,6 +610,7 @@ fn repl_interactive_loop_legacy(
                 &mut pending_guidance,
                 &mut stats,
                 &mut pending_approval,
+                transport,
             )?;
             if had_progress || turn_finished {
                 print_repl_prompt(
@@ -687,6 +697,7 @@ fn repl_interactive_loop_legacy(
                                 &mut stats,
                                 stdout,
                                 &mut chrome,
+                                transport,
                             )? {
                                 InputAction::Continue => {
                                     print_repl_prompt(
@@ -881,6 +892,7 @@ fn process_repl_input(
     stats: &mut ReplSessionStats,
     stdout: &mut io::Stdout,
     chrome: &mut ReplChrome,
+    transport: &mut ReplTurnTransport,
 ) -> Result<InputAction, String> {
     let input = raw_input.trim();
     if input.eq_ignore_ascii_case("exit")
@@ -903,11 +915,18 @@ fn process_repl_input(
 
     if input.eq_ignore_ascii_case("/stop") {
         if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
-            chrome.write_body(
-                stdout,
-                &format!("{ANSI_YELLOW}■{ANSI_RESET} 已请求停止，将在当前安全点结束任务。\n"),
-            )?;
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
+                chrome.write_body(
+                    stdout,
+                    &format!("{ANSI_YELLOW}■{ANSI_RESET} 已请求停止，将在当前安全点结束任务。\n"),
+                )?;
+            } else {
+                chrome.write_body(
+                    stdout,
+                    "当前 app-server socket 回合不支持中途停止；请等待本轮完成。\n",
+                )?;
+            }
         } else {
             chrome.write_body(
                 stdout,
@@ -939,7 +958,7 @@ fn process_repl_input(
                 );
                 let history =
                     recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
-                *running = Some(spawn_repl_turn(options.clone(), continuation, history));
+                *running = Some(transport.spawn_turn(options.clone(), continuation, history));
             }
             "2" | "n" | "N" | "no" | "NO" => {
                 chrome.write_body(
@@ -982,8 +1001,15 @@ fn process_repl_input(
         if note.is_empty() {
             chrome.write_body(stdout, "guidance ignored: empty note\n")?;
         } else if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, note)?;
-            chrome.write_body(stdout, "guidance injected into current turn\n")?;
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, note)?;
+                chrome.write_body(stdout, "guidance injected into current turn\n")?;
+            } else {
+                chrome.write_body(
+                    stdout,
+                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。\n",
+                )?;
+            }
         } else {
             pending_guidance.push(note.to_string());
             chrome.write_body(
@@ -996,20 +1022,25 @@ fn process_repl_input(
 
     if running.is_some() {
         if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, input)?;
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, input)?;
+                chrome.write_body(
+                    stdout,
+                    "guidance injected into current turn. Prefix with ! next time to make this explicit.\n",
+                )?;
+            } else {
+                chrome.write_body(
+                    stdout,
+                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。\n",
+                )?;
+            }
         }
-        chrome.write_body(
-            stdout,
-            "guidance injected into current turn. Prefix with ! next time to make this explicit.\n",
-        )?;
         return Ok(InputAction::Continue);
     }
 
     let user_input = merge_repl_guidance(input, pending_guidance);
     pending_guidance.clear();
-    let cwd = env::current_dir()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
+    let cwd = transport.workspace_root().display().to_string();
     // App-owned input: no terminal echo. Clear bottom strip, print「你」once in body.
     chrome.clear_prompt_strip(stdout)?;
     chrome.write_body(
@@ -1017,7 +1048,7 @@ fn process_repl_input(
         &render_user_message_block(&user_input, &summary.provider_id, &summary.model_name, &cwd),
     )?;
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
-    *running = Some(spawn_repl_turn(options.clone(), user_input, history));
+    *running = Some(transport.spawn_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
     Ok(InputAction::Continue)
 }
@@ -1436,6 +1467,7 @@ fn parse_meta_u64(meta: &std::collections::BTreeMap<String, String>, key: &str) 
     meta.get(key).and_then(|value| value.parse::<u64>().ok())
 }
 
+#[allow(dead_code)]
 fn render_repl_status_line(
     stats: &ReplSessionStats,
     state: &str,
@@ -1481,6 +1513,7 @@ fn poll_running_turn(
     pending_guidance: &mut Vec<String>,
     stats: &mut ReplSessionStats,
     pending_approval: &mut Option<ReplPendingApproval>,
+    transport: &mut ReplTurnTransport,
 ) -> Result<bool, String> {
     if let Some(mut turn) = running.take() {
         match turn.receiver.try_recv() {
@@ -1498,6 +1531,7 @@ fn poll_running_turn(
                     pending_guidance,
                     stats,
                     pending_approval,
+                    transport,
                 )?;
                 return Ok(true);
             }
@@ -1518,6 +1552,7 @@ fn poll_running_turn(
                     pending_guidance,
                     stats,
                     pending_approval,
+                    transport,
                 )?;
                 return Ok(true);
             }
@@ -1535,6 +1570,7 @@ pub(crate) struct RunningTurn {
     pub(crate) result: Option<Result<chuang_agent::agent_runtime::RuntimeResult, String>>,
     pub(crate) guidance_path: PathBuf,
     pub(crate) progress_path: PathBuf,
+    pub(crate) supports_live_control: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1567,6 +1603,11 @@ impl ReplSessionStats {
     ) {
         self.model_name = result.response.model_name.clone();
         self.context_tokens = u64::from(result.packed_token_count);
+        self.context_max_tokens = parse_meta_u64(
+            &result.response.meta.extra,
+            "app_server_context_max_tokens",
+        )
+        .unwrap_or(self.context_max_tokens);
         self.last_input_tokens =
             parse_meta_u64(&result.response.meta.extra, "aggregate_prompt_tokens")
                 .or_else(|| parse_meta_u64(&result.response.meta.extra, "prompt_tokens"))
@@ -1604,10 +1645,42 @@ pub(crate) fn spawn_repl_turn(
     options: CliOptions,
     user_input: String,
     conversation_history: Vec<ConversationHistoryItem>,
+    workspace_root: Option<PathBuf>,
 ) -> RunningTurn {
+    let request_user_input = user_input.clone();
+    spawn_repl_turn_task(user_input, true, move |guidance_path, progress_path| {
+        run_with_options(&RunCliRequest {
+            options,
+            user_input: request_user_input,
+            workspace_root,
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history,
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: Some(guidance_path),
+            progress_path: Some(progress_path),
+        })
+        .map(|(result, _)| result)
+    })
+}
+
+pub(crate) fn spawn_repl_turn_task<F>(
+    user_input: String,
+    supports_live_control: bool,
+    task: F,
+) -> RunningTurn
+where
+    F: FnOnce(PathBuf, PathBuf) -> Result<chuang_agent::agent_runtime::RuntimeResult, String>
+        + Send
+        + 'static,
+{
     let started_at = Instant::now();
     let input_preview = compact_preview(&user_input, 80);
-    let request_user_input = user_input.clone();
     let turn_nonce = repl_turn_nonce();
     let guidance_path = env::temp_dir().join(format!(
         "chuang-repl-guidance-{}-{}.txt",
@@ -1620,26 +1693,10 @@ pub(crate) fn spawn_repl_turn(
         turn_nonce
     ));
     let (sender, receiver) = mpsc::channel();
-    let request_guidance_path = guidance_path.clone();
-    let request_progress_path = progress_path.clone();
+    let task_guidance_path = guidance_path.clone();
+    let task_progress_path = progress_path.clone();
     let handle = thread::spawn(move || {
-        let result = run_with_options(&RunCliRequest {
-            options,
-            user_input: request_user_input,
-            workspace_root: None,
-            remember: false,
-            session_id: None,
-            remember_session: false,
-            conversation_history,
-            remember_identity: false,
-            remember_experience: false,
-            dispatch_subagent: false,
-            goal_spec: None,
-            knowledge_context: None,
-            live_guidance_path: Some(request_guidance_path),
-            progress_path: Some(request_progress_path),
-        })
-        .map(|(result, _)| result);
+        let result = task(task_guidance_path, task_progress_path);
         let _ = sender.send(result);
     });
     RunningTurn {
@@ -1651,6 +1708,7 @@ pub(crate) fn spawn_repl_turn(
         result: None,
         guidance_path,
         progress_path,
+        supports_live_control,
     }
 }
 
@@ -1675,6 +1733,7 @@ fn finish_running_turn(
     pending_guidance: &mut [String],
     stats: &mut ReplSessionStats,
     pending_approval: &mut Option<ReplPendingApproval>,
+    transport: &mut ReplTurnTransport,
 ) -> Result<(), String> {
     let elapsed_ms = turn.started_at.elapsed().as_millis();
     let timing = progress_cursor.finish_timing();
@@ -1689,6 +1748,7 @@ fn finish_running_turn(
     let _ = turn.handle.join();
     match result {
         Ok(result) => {
+            transport.capture_result(&result);
             stats.update_from_result(&result);
             *turn_count += 1;
             record_repl_conversation_turn(
@@ -1708,7 +1768,9 @@ fn finish_running_turn(
                 &progress_displays,
                 &timing,
             )?;
-            if let Some(approval) = pending_approval_from_result(&result) {
+            if let Some(approval) =
+                pending_approval_from_result(&result, transport.workspace_root())
+            {
                 chrome.write_body(stdout, &format!("{}\n", render_approval_prompt(&approval)))?;
                 *pending_approval = Some(approval);
             }
@@ -2165,10 +2227,11 @@ fn visible_trace_lines(
     ]
 }
 
-fn render_repl_banner(summary: &chuang_agent::runtime_config::ConfigSummary) -> String {
-    let cwd = env::current_dir()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
+fn render_repl_banner(
+    summary: &chuang_agent::runtime_config::ConfigSummary,
+    workspace_root: &Path,
+) -> String {
+    let cwd = workspace_root.display().to_string();
     let cwd_short = short_path_for_display(&cwd, 48);
     // Default quiet (精装修). ASCII billboard only with CHUANG_FANCY_BANNER=1.
     let fancy = env::var("CHUANG_FANCY_BANNER")
@@ -2273,11 +2336,11 @@ fn render_progress_display_line(display: &ProgressDisplay, step_index: usize) ->
 
 pub(crate) fn pending_approval_from_result(
     result: &chuang_agent::agent_runtime::RuntimeResult,
+    workspace_root: &Path,
 ) -> Option<ReplPendingApproval> {
     let meta = &result.response.meta.extra;
     let pending_file = PathBuf::from(meta.get("pending_approval_path")?);
     let approval_id = meta.get("pending_approval_id")?.clone();
-    let workspace_root = env::current_dir().ok()?;
     let pending: chuang_agent::tool_runtime::PendingApproval =
         serde_json::from_slice(&fs::read(&pending_file).ok()?).ok()?;
     let call: chuang_agent::tool_runtime::ToolCall =
@@ -2285,7 +2348,7 @@ pub(crate) fn pending_approval_from_result(
     Some(ReplPendingApproval {
         approval_id,
         pending_file,
-        workspace_root,
+        workspace_root: workspace_root.to_path_buf(),
         reason: pending.risk_decision.reason,
         action: approval_action_summary(&call),
     })
@@ -2921,7 +2984,7 @@ mod tests {
             api_key_state: Some("set".to_string()),
             placeholder_warnings: Vec::new(),
         };
-        let rendered = render_repl_banner(&summary);
+        let rendered = render_repl_banner(&summary, Path::new("/tmp/chuang-workspace"));
 
         // Default banner is quiet (精装修); no ASCII billboard.
         assert!(rendered.contains("chuang"));

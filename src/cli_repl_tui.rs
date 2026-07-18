@@ -17,7 +17,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, Timelike};
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -27,7 +28,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Terminal;
 
 use crate::brand_theme::{
@@ -35,13 +36,14 @@ use crate::brand_theme::{
 };
 use crate::cli_approval::resume_local_tty_approval;
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
+use crate::cli_repl_transport::ReplTurnTransport;
 use crate::{
     append_live_guidance, compact_preview, format_ms_duration, format_progress_event,
     format_short_duration, handle_repl_command, handle_sticky_key, humanize_approval_record,
     insert_str_at, merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
     readable_runtime_error, recent_repl_conversation_history, record_repl_conversation_turn,
     render_approval_details, render_completion_metadata_line, render_repl_answer_text,
-    spawn_repl_turn, ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
+    ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
     StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
 use chuang_agent::display_projector::DisplayState;
@@ -51,9 +53,10 @@ pub fn run_ratatui_repl(
     options: CliOptions,
     mut verbose: bool,
     mut show_trace: bool,
+    transport: &mut ReplTurnTransport,
 ) -> Result<(), String> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, options, &mut verbose, &mut show_trace);
+    let result = run_app(&mut terminal, options, &mut verbose, &mut show_trace, transport);
     let _ = restore_terminal(&mut terminal);
     result
 }
@@ -61,15 +64,24 @@ pub fn run_ratatui_repl(
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>, String> {
     enable_raw_mode().map_err(|e| format!("raw_mode_failed: {e}"))?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
-        .map_err(|e| format!("alt_screen_failed: {e}"))?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )
+    .map_err(|e| format!("alt_screen_failed: {e}"))?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).map_err(|e| format!("terminal_new_failed: {e}"))
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), String> {
-    // Best-effort: leave paste mode even if later steps fail.
-    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
+    // Best-effort: leave paste/mouse even if later steps fail.
+    let _ = execute!(
+        terminal.backend_mut(),
+        DisableBracketedPaste,
+        DisableMouseCapture
+    );
     disable_raw_mode().map_err(|e| format!("raw_mode_disable_failed: {e}"))?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)
         .map_err(|e| format!("leave_alt_screen_failed: {e}"))?;
@@ -127,6 +139,8 @@ struct TuiApp {
     turn_top: Option<usize>,
     /// 最近一次 transcript 区高度（行），供 PageUp/PageDown 分页步长。
     last_transcript_h: u16,
+    /// 最近一次 transcript 区宽度（列），手动滚动时按显示宽度重算视觉行。
+    last_transcript_w: u16,
     /// 输入框右上角外：仅用量（不进输入框内）。
     usage: String,
     /// 界面右下角：模型名（不进输入框内）。
@@ -153,10 +167,11 @@ impl TuiApp {
             follow: true,
             turn_top: None,
             last_transcript_h: 0,
+            last_transcript_w: 0,
             usage,
             model,
             elapsed: String::new(),
-            footer: "Enter 发送 · /help · /stop · /exit · /trace · 输入 / 看命令".to_string(),
+            footer: "Enter 发送 · PgUp/PgDn 翻历史 · /help · /stop · /exit".to_string(),
             activity: String::new(),
             running: false,
             banner_cleared: false,
@@ -252,7 +267,7 @@ impl TuiApp {
         self.model = format_model_label(stats, effort, show_trace);
         self.usage = format_context_progress(stats.context_tokens, stats.context_max_tokens);
         self.elapsed.clear();
-        self.footer = "Enter 发送 · /help · /stop · /exit · /trace · 输入 / 看命令".to_string();
+        self.footer = "Enter 发送 · PgUp/PgDn 翻历史 · /help · /stop · /exit".to_string();
         self.activity.clear();
     }
 
@@ -348,6 +363,7 @@ fn run_app(
     options: CliOptions,
     verbose: &mut bool,
     show_trace: &mut bool,
+    transport: &mut ReplTurnTransport,
 ) -> Result<(), String> {
     let summary = options.runtime.summary();
     let effort = reasoning_effort_label(&summary);
@@ -379,6 +395,7 @@ fn run_app(
             &mut pending_approval,
             *verbose,
             *show_trace,
+            transport,
         )? {
             if pending_approval.is_some() {
                 app.set_approval_chrome(&stats, &effort);
@@ -448,6 +465,7 @@ fn run_app(
                                     &mut pending_approval,
                                     &mut stats,
                                     &mut app,
+                                    transport,
                                 )? {
                                     SubmitResult::Continue => {}
                                     SubmitResult::Exit => {
@@ -463,38 +481,32 @@ fn run_app(
                     }
                 }
                 // Scroll transcript（手动滚会清掉 turn_top 钉顶）
-                // PageUp/PageDown（含 Ctrl）在 slash 菜单打开时仍滚对话区，放在 sticky 之前。
+                // 关键：先从当前「真实视口」同步 scroll，再加减。
+                // 否则 follow/scroll=u16::MAX 时 PageUp 几乎不动，历史像被锁死。
+                // PageUp/PageDown 在 slash 菜单打开时仍滚对话区，放在 sticky 之前。
                 match key.code {
                     KeyCode::PageUp => {
-                        app.follow = false;
-                        app.turn_top = None;
-                        app.scroll = app
-                            .scroll
-                            .saturating_sub(page_scroll_step(app.last_transcript_h));
+                        let step = page_scroll_step(app.last_transcript_h) as i32;
+                        apply_manual_scroll(&mut app, -step);
                         continue;
                     }
                     KeyCode::PageDown => {
-                        app.follow = false;
-                        app.turn_top = None;
-                        app.scroll = app
-                            .scroll
-                            .saturating_add(page_scroll_step(app.last_transcript_h));
+                        let step = page_scroll_step(app.last_transcript_h) as i32;
+                        apply_manual_scroll(&mut app, step);
                         continue;
                     }
                     _ => {}
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::SHIFT)
+                {
                     match key.code {
                         KeyCode::Up => {
-                            app.follow = false;
-                            app.turn_top = None;
-                            app.scroll = app.scroll.saturating_sub(1);
+                            apply_manual_scroll(&mut app, -1);
                             continue;
                         }
                         KeyCode::Down => {
-                            app.follow = false;
-                            app.turn_top = None;
-                            app.scroll = app.scroll.saturating_add(1);
+                            apply_manual_scroll(&mut app, 1);
                             continue;
                         }
                         KeyCode::Home => {
@@ -546,6 +558,7 @@ fn run_app(
                             &mut pending_approval,
                             &mut stats,
                             &mut app,
+                            transport,
                         )? {
                             SubmitResult::Continue => {}
                             SubmitResult::Exit => {
@@ -555,6 +568,17 @@ fn run_app(
                             }
                         }
                     }
+                }
+            }
+            Event::Mouse(me) => {
+                match me.kind {
+                    MouseEventKind::ScrollUp => {
+                        apply_manual_scroll(&mut app, -3);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        apply_manual_scroll(&mut app, 3);
+                    }
+                    _ => {}
                 }
             }
             Event::Paste(text) => {
@@ -588,6 +612,7 @@ fn handle_submit(
     pending_approval: &mut Option<ReplPendingApproval>,
     stats: &mut ReplSessionStats,
     app: &mut TuiApp,
+    transport: &mut ReplTurnTransport,
 ) -> Result<SubmitResult, String> {
     let input = raw.trim();
     if input.eq_ignore_ascii_case("exit")
@@ -610,8 +635,15 @@ fn handle_submit(
 
     if input.eq_ignore_ascii_case("/stop") {
         if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
-            app.push(LineKind::System, "■ 已请求停止，将在安全点结束。");
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, "[chuang-control] stop")?;
+                app.push(LineKind::System, "■ 已请求停止，将在安全点结束。");
+            } else {
+                app.push(
+                    LineKind::System,
+                    "当前 app-server socket 回合不支持中途停止；请等待本轮完成。",
+                );
+            }
         } else {
             app.push(LineKind::Meta, "当前没有运行中的任务。");
         }
@@ -637,7 +669,7 @@ fn handle_submit(
                 );
                 let history =
                     recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
-                *running = Some(spawn_repl_turn(options.clone(), continuation, history));
+                *running = Some(transport.spawn_turn(options.clone(), continuation, history));
                 stats.mark_turn_started();
                 let effort = reasoning_effort_label(summary);
                 app.set_running_chrome(stats, &effort, "0s", *show_trace);
@@ -698,8 +730,15 @@ fn handle_submit(
         if note.is_empty() {
             app.push(LineKind::Meta, "guidance ignored: empty note");
         } else if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, note)?;
-            app.push(LineKind::System, "已注入补充要求到当前任务。");
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, note)?;
+                app.push(LineKind::System, "已注入补充要求到当前任务。");
+            } else {
+                app.push(
+                    LineKind::System,
+                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。",
+                );
+            }
         } else {
             pending_guidance.push(note.to_string());
             app.push(
@@ -712,12 +751,19 @@ fn handle_submit(
 
     if running.is_some() {
         if let Some(turn) = running.as_ref() {
-            append_live_guidance(&turn.guidance_path, input)?;
+            if turn.supports_live_control {
+                append_live_guidance(&turn.guidance_path, input)?;
+                app.push(
+                    LineKind::System,
+                    "已注入当前任务（建议下次用 !补充 更明确）。",
+                );
+            } else {
+                app.push(
+                    LineKind::System,
+                    "当前 app-server socket 回合不支持实时补充；请等待本轮完成后发送。",
+                );
+            }
         }
-        app.push(
-            LineKind::System,
-            "已注入当前任务（建议下次用 !补充 更明确）。",
-        );
         return Ok(SubmitResult::Continue);
     }
 
@@ -726,7 +772,7 @@ fn handle_submit(
     app.push(LineKind::User, format!("> {user_input}"));
     // turn_top 已在 push(User) 里设好；不要在这里 follow 跟底盖掉钉顶
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
-    *running = Some(spawn_repl_turn(options.clone(), user_input, history));
+    *running = Some(transport.spawn_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
     let effort = reasoning_effort_label(summary);
     app.set_running_chrome(stats, &effort, "0s", *show_trace);
@@ -773,6 +819,7 @@ fn poll_finish_turn(
     pending_approval: &mut Option<ReplPendingApproval>,
     verbose: bool,
     show_trace: bool,
+    transport: &mut ReplTurnTransport,
 ) -> Result<bool, String> {
     let Some(turn) = running.as_mut() else {
         return Ok(false);
@@ -799,6 +846,7 @@ fn poll_finish_turn(
         .unwrap_or(Err("repl_turn_missing_result".into()))
     {
         Ok(result) => {
+            transport.capture_result(&result);
             stats.update_from_result(&result);
             *turn_count += 1;
             record_repl_conversation_turn(
@@ -823,7 +871,9 @@ fn poll_finish_turn(
                 result.response.model_name.as_str(),
             );
             app.push(LineKind::Meta, strip_ansi(&metadata));
-            if let Some(approval) = pending_approval_from_result(&result) {
+            if let Some(approval) =
+                pending_approval_from_result(&result, transport.workspace_root())
+            {
                 app.push(
                     LineKind::System,
                     format!(
@@ -975,24 +1025,21 @@ fn draw_slash_menu(
     frame.render_widget(Paragraph::new(lines).style(Style::default().bg(BG)), area);
 }
 
-fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
+fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &mut TuiApp) {
     // No outer border — conversation should feel open, not caged.
     let height = area.height.max(1) as usize;
-    let total = app.lines.len();
-    // 视口策略（Grok）：见 resolve_scroll
-    let scroll = resolve_scroll(total, height, app.turn_top, app.follow, app.scroll);
+    let width = area.width.max(1);
+    app.last_transcript_w = width;
 
-    let width = area.width;
-    let visible = app
-        .lines
-        .iter()
-        .skip(scroll)
-        .take(height)
-        .map(|line| styled_line(line, width))
-        .collect::<Vec<_>>();
+    // 先按显示宽度展开成视觉行（1 逻辑行可多行），再滚动。
+    // 禁止再交给 Paragraph::wrap，否则行数与 scroll 对不齐，长中文会「挤歪」。
+    let (visual, turn_visual) = build_visual_rows(&app.lines, width, app.turn_top);
+    let total = visual.len();
+    let scroll = resolve_scroll(total, height, turn_visual, app.follow, app.scroll);
+
+    let mut lines: Vec<Line> = visual.into_iter().skip(scroll).take(height).collect();
 
     // 不足一屏时用空行垫满，黑底，避免露底；用户话仍在顶部
-    let mut lines = visible;
     while lines.len() < height {
         lines.push(Line::from(Span::styled(
             " ".repeat(width as usize),
@@ -1000,17 +1047,38 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         )));
     }
 
-    let para = Paragraph::new(lines)
-        .style(Style::default().bg(BG))
-        .wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines).style(Style::default().bg(BG));
     frame.render_widget(para, area);
 }
 
-fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
+/// 把逻辑 transcript 行展开成等宽视觉行；返回 (视觉行, turn_top 对应的视觉行下标)。
+fn build_visual_rows(
+    lines: &[TranscriptLine],
+    width: u16,
+    turn_top: Option<usize>,
+) -> (Vec<Line<'static>>, Option<usize>) {
+    let mut visual = Vec::new();
+    let mut turn_visual = None;
+    for (i, line) in lines.iter().enumerate() {
+        if turn_top == Some(i) {
+            turn_visual = Some(visual.len());
+        }
+        visual.extend(expand_transcript_line(line, width));
+    }
+    (visual, turn_visual)
+}
+
+fn count_visual_rows(line: &TranscriptLine, width: u16) -> usize {
+    expand_transcript_line(line, width).len().max(1)
+}
+
+/// 单条逻辑行 → 多条已垫满宽度的视觉行（scroll 单位 = 视觉行）。
+fn expand_transcript_line(line: &TranscriptLine, width: u16) -> Vec<Line<'static>> {
+    let w = width.max(1) as usize;
     match line.kind {
         // 启动横幅：只给实心块上色，空格保持纯黑底
         LineKind::Banner => {
-            let centered = center_line(&line.text, width as usize);
+            let centered = center_line(&line.text, w);
             let brand = Style::default()
                 .fg(BRAND)
                 .bg(BG)
@@ -1026,18 +1094,25 @@ fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
                     }
                 })
                 .collect();
-            Line::from(spans)
+            // 右侧补齐到满宽
+            let used = display_width(&centered);
+            let mut spans = spans;
+            if used < w {
+                spans.push(Span::styled(
+                    " ".repeat(w - used),
+                    Style::default().bg(BG),
+                ));
+            }
+            vec![Line::from(spans)]
         }
-        // 你的话：品牌绿字 + 淡绿底；最右侧时钟 `5:14 am`
+        // 你的话：品牌绿字 + 淡绿底；最右侧时钟 `5:14 am`（单行截断，钉顶稳定）
         LineKind::User => {
-            let w = width as usize;
             let time = line.time.as_deref().unwrap_or("");
             let time_w = display_width(time);
-            let gap = if time_w > 0 { 2 } else { 0 }; // 正文与时间之间至少 2 空格
+            let gap = if time_w > 0 { 2 } else { 0 };
             let left_budget = w.saturating_sub(time_w).saturating_sub(gap);
             let left_raw = format!(" {} ", line.text);
             let left = if display_width(&left_raw) > left_budget {
-                // 给时间留位，正文过长则截断
                 let mut t = truncate_to_width(&left_raw, left_budget.saturating_sub(1));
                 if !t.ends_with(' ') {
                     t.push(' ');
@@ -1063,36 +1138,115 @@ fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
             if time_w > 0 {
                 spans.push(Span::styled(time.to_string(), time_style));
             }
-            Line::from(spans)
+            vec![Line::from(spans)]
         }
-        LineKind::Tool => Line::from(Span::styled(
-            format!("  · {}", line.text),
-            Style::default().fg(BRAND_DIM).bg(BG),
-        )),
-        LineKind::ToolFail => Line::from(Span::styled(
-            format!("  ✗ {}", line.text),
-            Style::default().fg(DANGER).bg(BG),
-        )),
-        // 助手正文：左缩进 2 格，不顶界面最左
-        LineKind::Assistant => Line::from(Span::styled(
-            format!("  {}", line.text),
-            Style::default().fg(ASSIST_FG).bg(BG),
-        )),
-        LineKind::System => Line::from(Span::styled(
-            format!("  {}", line.text),
-            Style::default().fg(BRAND_SOFT).bg(BG),
-        )),
+        LineKind::Tool => expand_prefixed_rows("  · ", &line.text, w, BRAND_DIM),
+        LineKind::ToolFail => expand_prefixed_rows("  ✗ ", &line.text, w, DANGER),
+        // 助手正文：左缩进 2 格；按显示宽度折行并垫满，避免 CJK 挤乱
+        LineKind::Assistant => {
+            let plain = strip_ansi(&line.text);
+            expand_prefixed_rows("  ", &plain, w, ASSIST_FG)
+        }
+        LineKind::System => {
+            let plain = strip_ansi(&line.text);
+            expand_prefixed_rows("  ", &plain, w, BRAND_SOFT)
+        }
         LineKind::Meta => {
             if line.text.is_empty() {
-                Line::from(Span::styled("", Style::default().bg(BG)))
+                vec![Line::from(Span::styled(
+                    " ".repeat(w),
+                    Style::default().bg(BG),
+                ))]
             } else {
-                Line::from(Span::styled(
-                    format!("  {}", line.text),
-                    Style::default().fg(BRAND_MUTED).bg(BG),
-                ))
+                let plain = strip_ansi(&line.text);
+                expand_prefixed_rows("  ", &plain, w, BRAND_MUTED)
             }
         }
     }
+}
+
+/// 前缀 + 正文按显示宽度折行；续行与首行同缩进宽度；每行垫满 `width`。
+fn expand_prefixed_rows(
+    prefix: &str,
+    body: &str,
+    width: usize,
+    fg: ratatui::style::Color,
+) -> Vec<Line<'static>> {
+    let style = Style::default().fg(fg).bg(BG);
+    let prefix_w = display_width(prefix);
+    let body_w = width.saturating_sub(prefix_w).max(1);
+    let chunks = if body.is_empty() {
+        vec![String::new()]
+    } else {
+        wrap_by_display_width(body, body_w)
+    };
+    let cont = " ".repeat(prefix_w);
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let head = if i == 0 { prefix } else { cont.as_str() };
+            let raw = format!("{head}{chunk}");
+            Line::from(Span::styled(pad_line_bg(&raw, width), style))
+        })
+        .collect()
+}
+
+/// 按终端显示宽度折行（CJK=2），不按 char count。
+fn wrap_by_display_width(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for c in s.chars() {
+        let cw = char_display_width(c);
+        if cw == 0 {
+            continue;
+        }
+        if cur_w + cw > width && !cur.is_empty() {
+            rows.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        if cw > width && cur.is_empty() {
+            // 单字比行宽还宽：硬塞一行，避免死循环
+            rows.push(c.to_string());
+            continue;
+        }
+        cur.push(c);
+        cur_w += cw;
+    }
+    if !cur.is_empty() || rows.is_empty() {
+        rows.push(cur);
+    }
+    rows
+}
+
+/// 手动滚动：先对齐到当前真实视口，再加减。清 turn_top / follow。
+fn apply_manual_scroll(app: &mut TuiApp, delta: i32) {
+    let height = app.last_transcript_h.max(1) as usize;
+    let width = app.last_transcript_w.max(1);
+    let (total, turn_visual) = {
+        // 只算行数，不建 Line（滚动热路径）
+        let mut total = 0usize;
+        let mut turn_visual = None;
+        for (i, line) in app.lines.iter().enumerate() {
+            if app.turn_top == Some(i) {
+                turn_visual = Some(total);
+            }
+            total += count_visual_rows(line, width);
+        }
+        (total, turn_visual)
+    };
+    let current = resolve_scroll(total, height, turn_visual, app.follow, app.scroll);
+    app.follow = false;
+    app.turn_top = None;
+    let next = if delta < 0 {
+        current.saturating_sub((-delta) as usize)
+    } else {
+        current.saturating_add(delta as usize)
+    };
+    let max_scroll = total.saturating_sub(height);
+    app.scroll = next.min(max_scroll).min(u16::MAX as usize) as u16;
 }
 
 fn pad_line_bg(s: &str, width: usize) -> String {
@@ -1496,5 +1650,59 @@ mod tests {
         assert_eq!(page_scroll_step(0), 10);
         assert_eq!(page_scroll_step(1), 1);
         assert_eq!(page_scroll_step(20), 19);
+    }
+
+    #[test]
+    fn wrap_by_display_width_cjk_fits_cols() {
+        // 4 列：两个汉字正好一行
+        assert_eq!(wrap_by_display_width("你好", 4), vec!["你好".to_string()]);
+        // 3 列：你(2) 放下，好换行
+        assert_eq!(
+            wrap_by_display_width("你好", 3),
+            vec!["你".to_string(), "好".to_string()]
+        );
+        // ASCII
+        assert_eq!(
+            wrap_by_display_width("abcdef", 3),
+            vec!["abc".to_string(), "def".to_string()]
+        );
+    }
+
+    #[test]
+    fn apply_manual_scroll_from_follow_max_can_go_up() {
+        // 模拟 follow 到底：scroll=u16::MAX，PageUp 应立刻离开底部而不是卡死
+        let mut app = TuiApp::new("m".into(), "u".into());
+        app.lines.clear();
+        app.banner_cleared = true;
+        for i in 0..40 {
+            app.lines.push(transcript_line(LineKind::Meta, format!("line-{i}")));
+        }
+        app.follow = true;
+        app.turn_top = None;
+        app.scroll = u16::MAX;
+        app.last_transcript_h = 10;
+        app.last_transcript_w = 40;
+        apply_manual_scroll(&mut app, -9); // one page up
+        assert!(!app.follow);
+        assert!(app.turn_top.is_none());
+        // max_scroll = 40-10 = 30; after -9 → 21
+        assert_eq!(app.scroll, 21);
+    }
+
+    #[test]
+    fn expand_assistant_pads_and_wraps() {
+        let line = transcript_line(LineKind::Assistant, "你好世界AB");
+        // width 8: indent 2 + body 6 → 你(2)好(2)世(2) | 界(2)A(1)B(1)
+        let rows = expand_transcript_line(&line, 8);
+        assert!(rows.len() >= 2);
+        // 每行视觉内容经 pad 后显示宽 = 8
+        for row in &rows {
+            let plain: String = row
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            assert_eq!(display_width(&plain), 8, "row={plain:?}");
+        }
     }
 }

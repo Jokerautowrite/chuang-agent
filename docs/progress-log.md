@@ -1,3 +1,15 @@
+# 2026-07-18 终端统一 app-server + 真实服务状态面
+- 并行完成并集成两条主线：剩余 context-budget 测试修复；交互 REPL 接入 Unix socket canonical app-server。没有改 Agent Hub、Feishu，也没有纳入 TN 站点或小策审计文档。
+- 新增 `app-server daemon/probe/ask`，保留无参数 stdio 兼容。`chuang ask`、自由文本和交互 REPL 默认复用 `/run/user/1000/chuang-agent/app-server.sock`，只允许显式 `CHUANG_APP_SERVER_MODE=local` / stub 走旧直连；stale socket 改名保留，服务脚本已移除 FIFO/`rm`。
+- Ratatui 与 legacy REPL 共用 `ReplTurnTransport`，复用 daemon thread id；`CHUANG_REPL_WORKSPACE_ROOT` 保留调用者 cwd。socket 失败不 fallback，未知 thread 明确报错，pending approval metadata 会随 thread snapshot 保留。
+- 同步协议不支持实时 progress/guidance/stop；REPL 如实提示，`turn/interrupt` 返回 unsupported，不再给假成功。
+- `status`、`doctor`、`app-server health` 新增 `app_server_service` 与 `effective_live_adapter_gates`，真实读取 active service 的 4 个 gate 状态且不暴露其它环境内容。
+- 用户服务已切换并验证：active/running，PID `1659562`，`NRestarts=0`，socket mode `600`；installed `chuang` 与 unit 均和仓库一致。
+- 真实 `chuang ask` 已一次并行派出两名 Luna Analyze worker，同秒启动并均返回 Success；父任务正确汇总 Cargo package name 和 AGENTS 核心定位。
+- 外部目录真实 interactive REPL 连续两轮均返回 `REPL_SOCKET_OK`，证明 caller workspace 与 thread history 生效；服务 PID 未变化。
+- 旧预算夹具已改为按当前 always-on protected/system segments 动态计算，并修正薄工具目录、知识预览、flat config 与 CDP 导航竞态。
+- 门禁通过：binary `106`、app-server `21`、service `3`、status `13`、doctor `4`、runtime config `20`；完整 `cargo test -q --no-fail-fast -- --test-threads=1` 全绿；`cargo check --all-targets`、`bash -n`、focused rustfmt、`git diff --check` 通过。
+
 # 2026-07-18 矛盾分析 skill 最小落地（毛选方法论薄蒸馏）
 - 研究见 `docs/research-agent-maoxuan-notes.md`；Git 上多为按需 skill 而非全文灌 system。
 - 新增 `contradiction-analysis.md`（主要矛盾/调查/阶段/力量），窄触发、非常驻、非语录；日常写码不加载。

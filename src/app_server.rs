@@ -1,6 +1,11 @@
 use std::collections::BTreeMap;
-use std::io::{self, BufRead, Write};
+use std::fs;
+use std::io::{self, BufRead, BufReader, Write};
+use std::net::Shutdown;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::process;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,21 +53,39 @@ struct TurnState {
     assistant_text: String,
     model_name: String,
     status: String,
+    provider_meta: BTreeMap<String, String>,
     tool_trace: String,
     tool_surface: Option<Value>,
     updated_at: u64,
 }
 
 pub(crate) fn app_server_command(args: &[String]) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("health") {
-        return app_server_health_command(&args[1..]);
+    match args.first().map(String::as_str) {
+        None => app_server_stdio_command(),
+        Some("health") => app_server_health_command(&args[1..]),
+        Some("daemon") => app_server_daemon_command(&args[1..]),
+        Some("probe") => app_server_probe_command(&args[1..]),
+        Some("ask") => app_server_ask_command(&args[1..]),
+        Some(_) => Err(
+            "usage: chuang-agent app-server [health|daemon --socket PATH|probe --socket PATH [--json]|ask --socket PATH --workspace-root PATH --text TEXT [--thread-id ID] [--json]]"
+                .to_string(),
+        ),
     }
+}
 
+fn app_server_stdio_command() -> Result<(), String> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut state = AppServerState::default();
+    serve_json_lines(stdin.lock(), &mut stdout, &mut state)
+}
 
-    for line in stdin.lock().lines() {
+fn serve_json_lines<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+    state: &mut AppServerState,
+) -> Result<(), String> {
+    for line in reader.lines() {
         let line = line.map_err(|e| format!("app_server_read_failed: {e}"))?;
         let raw = line.trim();
         if raw.is_empty() {
@@ -73,7 +96,7 @@ pub(crate) fn app_server_command(args: &[String]) -> Result<(), String> {
             Ok(value) => value,
             Err(error) => {
                 let _ = write_json_line(
-                    &mut stdout,
+                    writer,
                     &json!({
                         "error": {
                             "message": format!("invalid_json: {error}"),
@@ -97,22 +120,25 @@ pub(crate) fn app_server_command(args: &[String]) -> Result<(), String> {
         let result = match method {
             "initialize" => Ok(handle_initialize()),
             "model/list" => handle_model_list(&params),
-            "thread/start" => handle_thread_start(&mut state, &params),
+            "thread/start" => handle_thread_start(&mut *state, &params),
             "thread/resume" => handle_thread_resume(&state, &params),
             "thread/list" => Ok(handle_thread_list(&state)),
-            "turn/start" => handle_turn_start(&mut state, &params),
-            "turn/interrupt" => Ok(json!({"ok": true})),
+            "turn/start" => handle_turn_start(state, &params, writer),
+            "turn/interrupt" => Err(
+                "turn_interrupt_unsupported: synchronous app-server turns cannot be interrupted"
+                    .to_string(),
+            ),
             _ => Err(format!("unsupported_method: {method}")),
         };
 
         if let Some(id) = id {
             match result {
                 Ok(result) => {
-                    write_json_line(&mut stdout, &json!({ "id": id, "result": result }))?;
+                    write_json_line(writer, &json!({ "id": id, "result": result }))?;
                 }
                 Err(message) => {
                     write_json_line(
-                        &mut stdout,
+                        writer,
                         &json!({ "id": id, "error": { "message": message } }),
                     )?;
                 }
@@ -121,6 +147,367 @@ pub(crate) fn app_server_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn app_server_daemon_command(args: &[String]) -> Result<(), String> {
+    let socket = parse_socket_only_args(args, "daemon")?;
+    let listener = bind_app_server_socket(&socket)?;
+    let mut state = AppServerState::default();
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                if let Err(error) = serve_unix_client(stream, &mut state) {
+                    eprintln!("app_server_client_failed: {error}");
+                }
+            }
+            Err(error) => return Err(format!("app_server_accept_failed: {error}")),
+        }
+    }
+
+    Ok(())
+}
+
+fn serve_unix_client(stream: UnixStream, state: &mut AppServerState) -> Result<(), String> {
+    let mut writer = stream
+        .try_clone()
+        .map_err(|e| format!("app_server_client_clone_failed: {e}"))?;
+    let reader = BufReader::new(stream);
+    serve_json_lines(reader, &mut writer, state)
+}
+
+fn parse_socket_only_args(args: &[String], command: &str) -> Result<PathBuf, String> {
+    let mut socket = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--socket" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    format!("app-server {command} requires a value after --socket")
+                })?;
+                socket = Some(PathBuf::from(value));
+                index += 2;
+            }
+            _ => {
+                return Err(format!(
+                    "usage: chuang-agent app-server {command} --socket PATH"
+                ))
+            }
+        }
+    }
+    let socket = socket.ok_or_else(|| format!("app-server {command} requires --socket PATH"))?;
+    if socket.as_os_str().is_empty() {
+        return Err(format!(
+            "app-server {command} requires a non-empty --socket PATH"
+        ));
+    }
+    Ok(socket)
+}
+
+fn bind_app_server_socket(socket: &Path) -> Result<UnixListener, String> {
+    match fs::symlink_metadata(socket) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_socket() {
+                return Err(format!(
+                    "app_server_socket_path_not_socket: {}",
+                    socket.display()
+                ));
+            }
+            match UnixStream::connect(socket) {
+                Ok(stream) => {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    return Err(format!(
+                        "app_server_already_running: socket={}",
+                        socket.display()
+                    ));
+                }
+                Err(error) if stale_socket_connect_error(&error) => {
+                    let stale_path = next_stale_socket_path(socket)?;
+                    fs::rename(socket, &stale_path).map_err(|rename_error| {
+                        format!(
+                            "app_server_stale_socket_rename_failed: socket={} stale={} error={rename_error}",
+                            socket.display(),
+                            stale_path.display()
+                        )
+                    })?;
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "app_server_socket_probe_failed: socket={} error={error}",
+                        socket.display()
+                    ))
+                }
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "app_server_socket_metadata_failed: socket={} error={error}",
+                socket.display()
+            ))
+        }
+    }
+
+    let listener = UnixListener::bind(socket).map_err(|e| {
+        format!(
+            "app_server_socket_bind_failed: socket={} error={e}",
+            socket.display()
+        )
+    })?;
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o600)).map_err(|e| {
+        format!(
+            "app_server_socket_permissions_failed: socket={} error={e}",
+            socket.display()
+        )
+    })?;
+    Ok(listener)
+}
+
+fn stale_socket_connect_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::NotFound
+            | io::ErrorKind::AddrNotAvailable
+    )
+}
+
+fn next_stale_socket_path(socket: &Path) -> Result<PathBuf, String> {
+    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
+    let name = socket
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("app_server_socket_invalid_name: {}", socket.display()))?;
+    let timestamp = now_millis();
+    let pid = process::id();
+    for sequence in 0..1024 {
+        let stale = parent.join(format!("{name}.stale-{timestamp}-{pid}-{sequence}"));
+        if !stale.exists() {
+            return Ok(stale);
+        }
+    }
+    Err(format!(
+        "app_server_stale_socket_name_exhausted: {}",
+        socket.display()
+    ))
+}
+
+fn app_server_probe_command(args: &[String]) -> Result<(), String> {
+    let (socket, output_json) = parse_probe_args(args)?;
+    let result = rpc_request(
+        &socket,
+        json!({"id": 1, "method": "initialize", "params": {}}),
+    )?;
+    let output = json!({
+        "ok": true,
+        "socket": socket,
+        "server": result,
+    });
+    if output_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .map_err(|e| format!("json_render_failed: {e}"))?
+        );
+    } else {
+        println!("app_server_available: true");
+        println!("socket: {}", socket.display());
+        println!(
+            "server: {}",
+            output["server"]["serverInfo"]["name"]
+                .as_str()
+                .unwrap_or("unknown")
+        );
+    }
+    Ok(())
+}
+
+fn parse_probe_args(args: &[String]) -> Result<(PathBuf, bool), String> {
+    let mut socket = None;
+    let mut output_json = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--socket" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "app-server probe requires value after --socket".to_string())?;
+                socket = Some(PathBuf::from(value));
+                index += 2;
+            }
+            "--json" => {
+                output_json = true;
+                index += 1;
+            }
+            _ => {
+                return Err(
+                    "usage: chuang-agent app-server probe --socket PATH [--json]".to_string(),
+                )
+            }
+        }
+    }
+    Ok((
+        socket.ok_or_else(|| "app-server probe requires --socket PATH".to_string())?,
+        output_json,
+    ))
+}
+
+fn app_server_ask_command(args: &[String]) -> Result<(), String> {
+    let ask = parse_ask_args(args)?;
+    let request = json!({
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+            "threadId": ask.thread_id,
+            "workspaceRoot": ask.workspace_root,
+            "text": ask.text,
+        }
+    });
+    let result = rpc_request(&ask.socket, request)?;
+    let assistant_text = result["thread"]["turns"]
+        .as_array()
+        .and_then(|turns| turns.last())
+        .and_then(|turn| {
+            turn["items"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["type"] == "agentMessage"))
+                .and_then(|item| item["text"].as_str())
+        })
+        .map(str::to_string)
+        .unwrap_or_default();
+    let output = json!({
+        "assistant_text": assistant_text,
+        "thread_id": result["thread"]["id"],
+        "turn": result["turn"],
+    });
+
+    if ask.output_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .map_err(|e| format!("json_render_failed: {e}"))?
+        );
+    } else {
+        println!("{}", output["assistant_text"].as_str().unwrap_or(""));
+        println!(
+            "thread_id: {}",
+            output["thread_id"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "turn_id: {}",
+            output["turn"]["id"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "turn_status: {}",
+            output["turn"]["status"].as_str().unwrap_or("unknown")
+        );
+    }
+    Ok(())
+}
+
+struct AppServerAskArgs {
+    socket: PathBuf,
+    workspace_root: String,
+    text: String,
+    thread_id: Option<String>,
+    output_json: bool,
+}
+
+fn parse_ask_args(args: &[String]) -> Result<AppServerAskArgs, String> {
+    let mut socket = None;
+    let mut workspace_root = None;
+    let mut text = None;
+    let mut thread_id = None;
+    let mut output_json = false;
+    let mut index = 0;
+    while index < args.len() {
+        let value = |flag: &str| {
+            args.get(index + 1)
+                .cloned()
+                .ok_or_else(|| format!("app-server ask requires value after {flag}"))
+        };
+        match args[index].as_str() {
+            "--socket" => {
+                socket = Some(PathBuf::from(value("--socket")?));
+                index += 2;
+            }
+            "--workspace-root" => {
+                workspace_root = Some(value("--workspace-root")?);
+                index += 2;
+            }
+            "--text" => {
+                text = Some(value("--text")?);
+                index += 2;
+            }
+            "--thread-id" => {
+                thread_id = Some(value("--thread-id")?);
+                index += 2;
+            }
+            "--json" => {
+                output_json = true;
+                index += 1;
+            }
+            _ => {
+                return Err(
+                    "usage: chuang-agent app-server ask --socket PATH --workspace-root PATH --text TEXT [--thread-id ID] [--json]"
+                        .to_string(),
+                )
+            }
+        }
+    }
+    let text = normalize_text(text.as_deref());
+    if text.is_empty() {
+        return Err("app-server ask requires non-empty --text TEXT".to_string());
+    }
+    Ok(AppServerAskArgs {
+        socket: socket.ok_or_else(|| "app-server ask requires --socket PATH".to_string())?,
+        workspace_root: workspace_root
+            .ok_or_else(|| "app-server ask requires --workspace-root PATH".to_string())?,
+        text,
+        thread_id: thread_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        output_json,
+    })
+}
+
+fn rpc_request(socket: &Path, request: Value) -> Result<Value, String> {
+    let mut stream = UnixStream::connect(socket).map_err(|e| {
+        format!(
+            "app_server_unavailable: socket={} error={e}",
+            socket.display()
+        )
+    })?;
+    write_json_line(&mut stream, &request)?;
+    let request_id = request
+        .get("id")
+        .cloned()
+        .ok_or_else(|| "app_server_client_request_missing_id".to_string())?;
+    let mut reader = BufReader::new(stream);
+    loop {
+        let mut line = String::new();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|e| format!("app_server_client_read_failed: {e}"))?;
+        if read == 0 {
+            return Err(format!(
+                "app_server_unavailable: socket={} error=connection_closed_before_response",
+                socket.display()
+            ));
+        }
+        let value: Value = serde_json::from_str(line.trim())
+            .map_err(|e| format!("app_server_client_invalid_json: {e}"))?;
+        if value.get("id") != Some(&request_id) {
+            continue;
+        }
+        if let Some(message) = value["error"]["message"].as_str() {
+            return Err(format!("app_server_rpc_failed: {message}"));
+        }
+        return value
+            .get("result")
+            .cloned()
+            .ok_or_else(|| "app_server_client_response_missing_result".to_string());
+    }
 }
 
 fn app_server_health_command(args: &[String]) -> Result<(), String> {
@@ -211,6 +598,8 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         "channel_readiness": status.channel_readiness,
         "subagent_readiness": status.subagent_readiness,
         "live_adapter_gates": status.live_adapter_gates,
+        "effective_live_adapter_gates": status.effective_live_adapter_gates,
+        "app_server_service": status.app_server_service,
         "live_readiness": status.live_readiness,
         "external_ai_readiness": status.external_ai_readiness,
         "db_path": runtime.db_path.display().to_string(),
@@ -584,6 +973,58 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 gate.next_action
             );
         }
+        let service = &status.app_server_service;
+        println!(
+            "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={}",
+            service.service_name,
+            service.observation_state,
+            service.loaded.as_deref().unwrap_or("none"),
+            service.active.as_deref().unwrap_or("none"),
+            service.substate.as_deref().unwrap_or("none"),
+            service.enabled.as_deref().unwrap_or("none"),
+            service
+                .main_pid
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            service
+                .restart_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            service.fragment_path.as_deref().unwrap_or("none"),
+            service.binary_summary.as_deref().unwrap_or("none"),
+            service.caller_environment.source,
+            service
+                .service_environment
+                .as_ref()
+                .map(|environment| environment.source.as_str())
+                .unwrap_or("unavailable"),
+            service.effective_environment
+        );
+        println!(
+            "effective_live_adapter_gates: source={} ok={} state={} gates={} enabled={} disabled={}",
+            service.effective_environment,
+            status.effective_live_adapter_gates.ok,
+            status.effective_live_adapter_gates.overall_state,
+            status.effective_live_adapter_gates.gate_count,
+            status.effective_live_adapter_gates.enabled_count,
+            status.effective_live_adapter_gates.disabled_count
+        );
+        for gate in &status.effective_live_adapter_gates.gates {
+            println!(
+                "effective_live_adapter_gate name={} state={} enabled={} default_enabled={} env_value_state={} required_env={} audit_label={} preflight={} must_reject={} reason={} next={}",
+                gate.name,
+                gate.state,
+                gate.enabled,
+                gate.default_enabled,
+                gate.env_value_state,
+                gate.required_env,
+                gate.audit_label,
+                format_text_list(&gate.preflight_checks),
+                format_text_list(&gate.must_reject_capabilities),
+                gate.reason,
+                gate.next_action
+            );
+        }
         let live_readiness = &status.live_readiness;
         println!(
             "live_readiness: ok={} state={} local_ready_scope={} ga_local_mapped_only={} desktop_browser_live_gated={} browser_worker_frozen={} live_worker_available={} real_external_acceptance_pending={} provider_live_request_verified_by_status={} mapped_does_not_mean_live={} gated_does_not_mean_ready={} frozen_does_not_mean_ready={} ready_does_not_mean_live={}",
@@ -652,7 +1093,7 @@ fn handle_model_list(params: &Value) -> Result<Value, String> {
             .and_then(|value| value.as_str())
             .unwrap_or(""),
     );
-    let runtime = build_runtime_for_workspace(&workspace_root)?;
+    let runtime = build_runtime_for_workspace(&app_server_config_workspace_root(&workspace_root))?;
     let model_name = provider_summary_model_name(&runtime);
     Ok(json!({
         "data": [{
@@ -713,7 +1154,11 @@ fn handle_thread_list(state: &AppServerState) -> Value {
     })
 }
 
-fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value, String> {
+fn handle_turn_start(
+    state: &mut AppServerState,
+    params: &Value,
+    writer: &mut dyn Write,
+) -> Result<Value, String> {
     let thread_id = normalize_text(params.get("threadId").and_then(|value| value.as_str()));
     let requested_workspace_root = params
         .get("workspaceRoot")
@@ -741,14 +1186,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
             }
             thread_id
         } else {
-            let workspace_root =
-                requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
-            let thread = create_thread(
-                state,
-                workspace_root.clone(),
-                thread_display_name(&workspace_root),
-            );
-            thread.id
+            return Err(format!("unknown_thread: {thread_id}"));
         }
     };
     let workspace_root = state
@@ -757,7 +1195,8 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         .map(|thread| thread.workspace_root.clone())
         .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
 
-    let mut runtime = build_runtime_for_workspace(&workspace_root)?;
+    let mut runtime =
+        build_runtime_for_workspace(&app_server_config_workspace_root(&workspace_root))?;
     runtime
         .metadata
         .insert("channel".to_string(), "app-server".to_string());
@@ -792,8 +1231,6 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
     let model_name = result.response.model_name.clone();
     let status = app_server_turn_status(&result.response.meta.extra).to_string();
     let now = now_millis();
-    let mut out = io::stdout();
-
     let thread = state
         .threads
         .get_mut(&thread_id)
@@ -805,13 +1242,14 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
         assistant_text: assistant_text.clone(),
         model_name: model_name.clone(),
         status: status.clone(),
+        provider_meta: result.response.meta.extra.clone(),
         tool_trace: tool_trace.clone(),
         tool_surface: tool_surface.clone(),
         updated_at: now,
     });
 
-    let _ = write_json_line(
-        &mut out,
+    write_json_line(
+        writer,
         &json!({
             "method": "turn/started",
             "params": {
@@ -819,9 +1257,9 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 "turn": { "id": turn_id },
             }
         }),
-    );
-    let _ = write_json_line(
-        &mut out,
+    )?;
+    write_json_line(
+        writer,
         &json!({
             "method": "item/agentMessage/delta",
             "params": {
@@ -830,9 +1268,9 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 "delta": assistant_text,
             }
         }),
-    );
-    let _ = write_json_line(
-        &mut out,
+    )?;
+    write_json_line(
+        writer,
         &json!({
             "method": "item/completed",
             "params": {
@@ -844,9 +1282,9 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 }
             }
         }),
-    );
-    let _ = write_json_line(
-        &mut out,
+    )?;
+    write_json_line(
+        writer,
         &json!({
             "method": "turn/completed",
             "params": {
@@ -875,7 +1313,7 @@ fn handle_turn_start(state: &mut AppServerState, params: &Value) -> Result<Value
                 }
             }
         }),
-    );
+    )?;
 
     Ok(json!({
         "thread": thread_to_resume_json(
@@ -979,7 +1417,19 @@ fn run_turn_with_tools(
 }
 
 fn app_server_turn_status(provider_meta: &BTreeMap<String, String>) -> &'static str {
-    if provider_meta.contains_key("provider_failure_reason_code")
+    if provider_meta
+        .get("human_input_required")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+        || provider_meta
+            .get("tool_loop_status")
+            .map(|value| value == "human_input_required")
+            .unwrap_or(false)
+        || (provider_meta.contains_key("pending_approval_id")
+            && provider_meta.contains_key("pending_approval_path"))
+    {
+        "human_input_required"
+    } else if provider_meta.contains_key("provider_failure_reason_code")
         || provider_meta.contains_key("provider_error_class")
         || provider_meta
             .get("provider_response_ok")
@@ -1152,6 +1602,7 @@ fn turn_to_json(turn: &TurnState) -> Value {
         "id": turn.id,
         "updatedAt": turn.updated_at,
         "status": turn.status,
+        "providerMeta": turn.provider_meta,
         "toolTrace": turn.tool_trace,
         "toolSurface": turn.tool_surface,
         "items": [
@@ -1408,6 +1859,14 @@ fn workspace_base_dir(workspace_root: &str) -> PathBuf {
     }
 }
 
+fn app_server_config_workspace_root(requested_workspace_root: &str) -> String {
+    std::env::var("CHUANG_AGENT_WORKSPACE_ROOT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| requested_workspace_root.to_string())
+}
+
 fn normalize_workspace_root(raw: &str) -> String {
     let trimmed = raw.trim();
     let path = if trimmed.is_empty() {
@@ -1613,5 +2072,54 @@ fn provider_config_model_name(provider: &ProviderConfig) -> String {
             provider_config_model_name(primary),
             provider_config_model_name(fallback)
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_approval_turn_status_requires_human_input() {
+        let provider_meta = BTreeMap::from([
+            (
+                "pending_approval_id".to_string(),
+                "approval-test".to_string(),
+            ),
+            (
+                "pending_approval_path".to_string(),
+                "/tmp/approval-test.json".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            app_server_turn_status(&provider_meta),
+            "human_input_required"
+        );
+    }
+
+    #[test]
+    fn thread_turn_snapshot_retains_provider_metadata() {
+        let turn = TurnState {
+            id: "turn-test".to_string(),
+            user_text: "test".to_string(),
+            assistant_text: "approval required".to_string(),
+            model_name: "test-model".to_string(),
+            status: "human_input_required".to_string(),
+            provider_meta: BTreeMap::from([(
+                "pending_approval_id".to_string(),
+                "approval-test".to_string(),
+            )]),
+            tool_trace: String::new(),
+            tool_surface: None,
+            updated_at: 1,
+        };
+
+        let snapshot = turn_to_json(&turn);
+        assert_eq!(snapshot["status"], "human_input_required");
+        assert_eq!(
+            snapshot["providerMeta"]["pending_approval_id"],
+            "approval-test"
+        );
     }
 }

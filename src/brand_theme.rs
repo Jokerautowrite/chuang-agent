@@ -39,4 +39,5 @@ pub const DANGER: Color = Color::Rgb(220, 88, 88);
 pub const INPUT_FG: Color = Color::Rgb(240, 255, 240);
 
 /// 占位符
+#[allow(dead_code)]
 pub const PLACEHOLDER: Color = Color::Rgb(70, 100, 70);

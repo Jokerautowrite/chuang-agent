@@ -139,7 +139,7 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
         ),
     ));
     let live_adapter_next_actions = status
-        .live_adapter_gates
+        .effective_live_adapter_gates
         .gates
         .iter()
         .map(|gate| format!("{}:{}", gate.name, gate.next_action))
@@ -148,12 +148,36 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "live_adapter_preflight",
         &format!(
-            "state={} gates={} enabled={} disabled={} next_actions={}",
-            status.live_adapter_gates.overall_state,
-            status.live_adapter_gates.gate_count,
-            status.live_adapter_gates.enabled_count,
-            status.live_adapter_gates.disabled_count,
+            "source={} state={} gates={} enabled={} disabled={} next_actions={}",
+            status.app_server_service.effective_environment,
+            status.effective_live_adapter_gates.overall_state,
+            status.effective_live_adapter_gates.gate_count,
+            status.effective_live_adapter_gates.enabled_count,
+            status.effective_live_adapter_gates.disabled_count,
             live_adapter_next_actions
+        ),
+    ));
+    checks.push(pass(
+        "app_server_service_runtime",
+        &format!(
+            "service={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} effective_environment={}",
+            status.app_server_service.service_name,
+            status.app_server_service.observation_state,
+            status.app_server_service.loaded.as_deref().unwrap_or("none"),
+            status.app_server_service.active.as_deref().unwrap_or("none"),
+            status.app_server_service.substate.as_deref().unwrap_or("none"),
+            status.app_server_service.enabled.as_deref().unwrap_or("none"),
+            status
+                .app_server_service
+                .main_pid
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            status
+                .app_server_service
+                .restart_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            status.app_server_service.effective_environment
         ),
     ));
     checks.push(pass(
@@ -1147,6 +1171,10 @@ fn print_doctor(doctor: &DoctorCliOutput) {
             gate.next_action
         );
     }
+    print_app_server_service_runtime(
+        &doctor.status.app_server_service,
+        &doctor.status.effective_live_adapter_gates,
+    );
     println!(
         "live_readiness: ok={} state={} local_ready_scope={} ga_local_mapped_only={} desktop_browser_live_gated={} browser_worker_frozen={} live_worker_available={} real_external_acceptance_pending={} provider_live_request_verified_by_status={} mapped_does_not_mean_live={} gated_does_not_mean_ready={} frozen_does_not_mean_ready={} ready_does_not_mean_live={}",
         doctor.status.live_readiness.ok,
@@ -1206,6 +1234,51 @@ fn print_doctor(doctor: &DoctorCliOutput) {
     } else {
         for warning in &doctor.status.config.placeholder_warnings {
             println!("placeholder_warning: {warning}");
+        }
+    }
+}
+
+fn print_app_server_service_runtime(
+    service: &chuang_agent::app_server_service::AppServerServiceRuntimeSnapshot,
+    effective_gates: &chuang_agent::kernel_status::LiveAdapterGateStatus,
+) {
+    println!(
+        "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={}",
+        service.service_name,
+        service.observation_state,
+        service.loaded.as_deref().unwrap_or("none"),
+        service.active.as_deref().unwrap_or("none"),
+        service.substate.as_deref().unwrap_or("none"),
+        service.enabled.as_deref().unwrap_or("none"),
+        service.main_pid.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        service.restart_count.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        service.fragment_path.as_deref().unwrap_or("none"),
+        service.binary_summary.as_deref().unwrap_or("none"),
+        service.caller_environment.source,
+        service.service_environment.as_ref().map(|environment| environment.source.as_str()).unwrap_or("unavailable"),
+        service.effective_environment
+    );
+    println!(
+        "effective_live_adapter_gates: source={} ok={} state={} gates={} enabled={} disabled={}",
+        service.effective_environment,
+        effective_gates.ok,
+        effective_gates.overall_state,
+        effective_gates.gate_count,
+        effective_gates.enabled_count,
+        effective_gates.disabled_count
+    );
+    for gate in &service.caller_environment.selected_gate_states {
+        println!(
+            "app_server_service_gate source={} name={} state={} enabled={}",
+            service.caller_environment.source, gate.name, gate.state, gate.enabled
+        );
+    }
+    if let Some(environment) = &service.service_environment {
+        for gate in &environment.selected_gate_states {
+            println!(
+                "app_server_service_gate source={} name={} state={} enabled={}",
+                environment.source, gate.name, gate.state, gate.enabled
+            );
         }
     }
 }

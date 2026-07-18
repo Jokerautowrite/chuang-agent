@@ -695,6 +695,52 @@ pub fn print_status(status: &ChuangMvpStatus) {
         );
     }
     println!(
+        "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={}",
+        status.app_server_service.service_name,
+        status.app_server_service.observation_state,
+        status.app_server_service.loaded.as_deref().unwrap_or("none"),
+        status.app_server_service.active.as_deref().unwrap_or("none"),
+        status.app_server_service.substate.as_deref().unwrap_or("none"),
+        status.app_server_service.enabled.as_deref().unwrap_or("none"),
+        status.app_server_service.main_pid.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        status.app_server_service.restart_count.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+        status.app_server_service.fragment_path.as_deref().unwrap_or("none"),
+        status.app_server_service.binary_summary.as_deref().unwrap_or("none"),
+        status.app_server_service.caller_environment.source,
+        status.app_server_service.service_environment.as_ref().map(|environment| environment.source.as_str()).unwrap_or("unavailable"),
+        status.app_server_service.effective_environment
+    );
+    println!(
+        "effective_live_adapter_gates: source={} ok={} state={} gates={} enabled={} disabled={}",
+        status.app_server_service.effective_environment,
+        status.effective_live_adapter_gates.ok,
+        status.effective_live_adapter_gates.overall_state,
+        status.effective_live_adapter_gates.gate_count,
+        status.effective_live_adapter_gates.enabled_count,
+        status.effective_live_adapter_gates.disabled_count
+    );
+    for gate in &status
+        .app_server_service
+        .caller_environment
+        .selected_gate_states
+    {
+        println!(
+            "app_server_service_gate source={} name={} state={} enabled={}",
+            status.app_server_service.caller_environment.source,
+            gate.name,
+            gate.state,
+            gate.enabled
+        );
+    }
+    if let Some(environment) = &status.app_server_service.service_environment {
+        for gate in &environment.selected_gate_states {
+            println!(
+                "app_server_service_gate source={} name={} state={} enabled={}",
+                environment.source, gate.name, gate.state, gate.enabled
+            );
+        }
+    }
+    println!(
         "live_readiness: ok={} state={} local_ready_scope={} ga_local_mapped_only={} desktop_browser_live_gated={} browser_worker_frozen={} live_worker_available={} real_external_acceptance_pending={} provider_live_request_verified_by_status={} mapped_does_not_mean_live={} gated_does_not_mean_ready={} frozen_does_not_mean_ready={} ready_does_not_mean_live={}",
         status.live_readiness.ok,
         status.live_readiness.overall_state,
