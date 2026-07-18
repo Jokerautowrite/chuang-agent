@@ -34,7 +34,12 @@ pub fn load_runtime_config_file_with_options(
     let content = fs::read_to_string(path).map_err(|_| RuntimeConfigFileError::ReadFailed {
         path: path.to_path_buf(),
     })?;
-    parse_runtime_config_file_with_options(&content, options)
+    let mut config = parse_runtime_config_file_with_options(&content, options)?;
+    let stored = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    config
+        .metadata
+        .insert("config_path".to_string(), stored.display().to_string());
+    Ok(config)
 }
 
 pub fn parse_runtime_config_file(content: &str) -> Result<RuntimeConfig, RuntimeConfigFileError> {
@@ -86,8 +91,7 @@ pub fn parse_runtime_config_file_with_options(
             "shell_rtk_rewrite",
         ],
     ) {
-        config.tool_loop.shell_rtk_rewrite =
-            parse_bool("tool_loop.shell_rtk_rewrite", value)?;
+        config.tool_loop.shell_rtk_rewrite = parse_bool("tool_loop.shell_rtk_rewrite", value)?;
     }
     if let Some(value) = get_any(
         &values,

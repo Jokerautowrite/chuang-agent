@@ -1071,15 +1071,19 @@ fn parse_cli_options_with_options(
         }
     }
 
-    let mut runtime = if let Some(path) = config_path {
-        load_runtime_config_file_with_options(&path, options.runtime_config_file)
-            .map_err(format_runtime_config_file_error)?
-    } else if let Some(path) = default_config_path() {
-        load_runtime_config_file_with_options(&path, options.runtime_config_file)
+    let source_config_path = config_path.or_else(default_config_path);
+    let mut runtime = if let Some(ref path) = source_config_path {
+        load_runtime_config_file_with_options(path, options.runtime_config_file)
             .map_err(format_runtime_config_file_error)?
     } else {
         RuntimeConfig::new(default_db_path())
     };
+    if let Some(path) = source_config_path {
+        let stored = std::fs::canonicalize(&path).unwrap_or(path);
+        runtime
+            .metadata
+            .insert("config_path".to_string(), stored.display().to_string());
+    }
     if let Some(path) = db_path {
         runtime.db_path = path;
     }

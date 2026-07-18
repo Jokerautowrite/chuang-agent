@@ -36,9 +36,9 @@ use chuang_agent::subagent_spawner::{
 };
 use chuang_agent::terminal_event::{StepStatus, TerminalEvent};
 use chuang_agent::tool_runtime::{
-    parse_tool_model_output, ExecutionSlot, MemoryToolContext, PendingApproval, ToolCall,
-    ToolExecutionConfig, ToolExecutionRecord, ToolLoopEvent, ToolLoopReport, ToolModelOutput,
-    ToolProtocolError, ToolSurfaceStatus,
+    build_subagent_tool_context, parse_tool_model_output, ExecutionSlot, MemoryToolContext,
+    PendingApproval, ToolCall, ToolExecutionConfig, ToolExecutionRecord, ToolLoopEvent,
+    ToolLoopReport, ToolModelOutput, ToolProtocolError, ToolSurfaceStatus,
 };
 use chuang_agent::{common::AgentId, common::TaskId};
 
@@ -114,7 +114,7 @@ pub(crate) fn run_with_options(
                 max_limit: runtime.recall_limit.max(1).max(10),
             }),
             actuator: Some(runtime.actuator.clone()),
-            subagent: None,
+            subagent: Some(build_subagent_tool_context(&runtime)),
         },
         request.user_input.clone(),
         runtime_context,
@@ -1377,9 +1377,7 @@ fn human_tool_activity_detail(call: &ToolCall) -> Option<String> {
             }
         }
         ToolCall::BrowserRead { .. } => Some("通过无头浏览器读取当前页 URL/标题/正文".to_string()),
-        ToolCall::BrowserNavigate { url } => {
-            Some(format!("打开网页并读取内容：{}", url.trim()))
-        }
+        ToolCall::BrowserNavigate { url } => Some(format!("打开网页并读取内容：{}", url.trim())),
     }
 }
 
@@ -1651,7 +1649,8 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
 自检/体检请改用本地命令，例如：\n\
 · chuang doctor\n\
 · SKIP_LIVE=1 chuang field-accept\n\n\
-你可以说「用本地 doctor 体检」，我会直接跑本地检查。".to_string();
+你可以说「用本地 doctor 体检」，我会直接跑本地检查。"
+            .to_string();
     }
 
     if summary.contains("actuator_unconfigured") || failure_class == "actuator_unconfigured" {
@@ -2403,7 +2402,10 @@ fn tool_detail_context_segment(workspace_root: &Path) -> ContextSegment {
     }
 }
 
-fn ensure_full_tool_protocol_context(turn_context: &mut Vec<ContextSegment>, workspace_root: &Path) {
+fn ensure_full_tool_protocol_context(
+    turn_context: &mut Vec<ContextSegment>,
+    workspace_root: &Path,
+) {
     if turn_context
         .iter()
         .any(|segment| segment.id == "tool-instructions")

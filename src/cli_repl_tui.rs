@@ -16,7 +16,9 @@ use std::io::{self, Stdout};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, Timelike};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -36,7 +38,7 @@ use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::{
     append_live_guidance, compact_preview, format_ms_duration, format_progress_event,
     format_short_duration, handle_repl_command, handle_sticky_key, humanize_approval_record,
-    merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
+    insert_str_at, merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
     readable_runtime_error, recent_repl_conversation_history, record_repl_conversation_turn,
     render_approval_details, render_completion_metadata_line, render_repl_answer_text,
     spawn_repl_turn, ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
@@ -59,12 +61,15 @@ pub fn run_ratatui_repl(
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>, String> {
     enable_raw_mode().map_err(|e| format!("raw_mode_failed: {e}"))?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).map_err(|e| format!("alt_screen_failed: {e}"))?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
+        .map_err(|e| format!("alt_screen_failed: {e}"))?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).map_err(|e| format!("terminal_new_failed: {e}"))
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), String> {
+    // Best-effort: leave paste mode even if later steps fail.
+    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
     disable_raw_mode().map_err(|e| format!("raw_mode_disable_failed: {e}"))?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)
         .map_err(|e| format!("leave_alt_screen_failed: {e}"))?;
@@ -551,6 +556,14 @@ fn run_app(
                         }
                     }
                 }
+            }
+            Event::Paste(text) => {
+                // Multi-line / bulk paste into draft at cursor; works with slash menu open.
+                app.draft_cursor = app.draft_cursor.min(app.draft.chars().count());
+                let n = text.chars().count();
+                insert_str_at(&mut app.draft, app.draft_cursor, &text);
+                app.draft_cursor = app.draft_cursor.saturating_add(n);
+                app.clamp_slash_sel();
             }
             Event::Resize(_, _) => {}
             _ => {}

@@ -828,7 +828,7 @@ pub(crate) fn handle_sticky_key(
 }
 
 fn char_byte_range(s: &str, char_idx: usize) -> Option<(usize, usize)> {
-    let mut it = s.char_indices().nth(char_idx)?;
+    let it = s.char_indices().nth(char_idx)?;
     let start = it.0;
     let end = start + it.1.len_utf8();
     Some((start, end))
@@ -841,6 +841,20 @@ fn insert_char_at(draft: &mut String, char_idx: usize, c: char) {
         .map(|(i, _)| i)
         .unwrap_or(draft.len());
     draft.insert(byte, c);
+}
+
+/// Insert `text` at char index `char_idx` (0..=draft.chars().count()).
+/// Used by sticky Char path peers and Ratatui bracketed paste.
+pub(crate) fn insert_str_at(draft: &mut String, char_idx: usize, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let byte = draft
+        .char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(draft.len());
+    draft.insert_str(byte, text);
 }
 
 fn remove_char_at(draft: &mut String, char_idx: usize) {
@@ -1532,8 +1546,6 @@ pub(crate) struct ReplSessionStats {
     pub(crate) last_output_tokens: u64,
     pub(crate) session_total_tokens: u64,
     pub(crate) turn_running: bool,
-    /// Provider HTTP timeout (for remaining-time countdown while running).
-    pub(crate) request_timeout_ms: Option<u64>,
 }
 
 impl ReplSessionStats {
@@ -1541,7 +1553,6 @@ impl ReplSessionStats {
         Self {
             model_name: summary.model_name.clone(),
             context_max_tokens: u64::from(summary.context_max_tokens),
-            request_timeout_ms: summary.provider_request_timeout_ms,
             ..Self::default()
         }
     }
@@ -2563,6 +2574,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn insert_str_at_cursor_mid_end_and_cjk() {
+        let mut s = String::from("ab");
+        insert_str_at(&mut s, 1, "XY");
+        assert_eq!(s, "aXYb");
+        let end = s.chars().count();
+        insert_str_at(&mut s, end, "!");
+        assert_eq!(s, "aXYb!");
+        insert_str_at(&mut s, 0, "");
+        assert_eq!(s, "aXYb!");
+
+        let mut cjk = String::from("你好");
+        insert_str_at(&mut cjk, 1, "们");
+        assert_eq!(cjk, "你们好");
+
+        let mut multi = String::from("hi");
+        insert_str_at(&mut multi, 2, "\nline2");
+        assert_eq!(multi, "hi\nline2");
+    }
+
+    #[test]
     fn repl_progress_event_formats_live_tool_stream_items() {
         let started = serde_json::json!({
             "kind": "turn_started",
@@ -2976,15 +3007,15 @@ mod tests {
             model_name: "gpt-5.5".into(),
             context_tokens: 1000,
             context_max_tokens: 10000,
-            request_timeout_ms: Some(30_000),
             ..ReplSessionStats::default()
         };
+        // Short chip: model · 运行中 {elapsed}. /stop lives on the shortcuts footer.
         let line = render_sticky_status_line(true, 0, &stats, false, false, Some(started));
         assert!(line.contains("gpt-5.5"));
         assert!(line.contains("运行中"));
-        assert!(line.contains("⏱"));
-        assert!(line.contains("剩"));
-        assert!(line.contains("/stop"));
+        assert!(line.contains('s') || line.contains('m'));
+        assert!(!line.contains("⏱"));
+        assert!(!line.contains("/stop"));
     }
 
     #[test]
@@ -3007,7 +3038,6 @@ mod tests {
             last_output_tokens: 684,
             session_total_tokens: 9_200,
             turn_running: false,
-            request_timeout_ms: None,
         };
 
         // Chip inside Grok box (right side): model · 就绪

@@ -33,7 +33,7 @@ use crate::subagent_spawner::{
     FakeSubagentSpawner, KillReason, QueuedSubagentSpawner, RunId, SpawnReceipt, SpawnRequest,
     SubagentError, SubagentSpawner,
 };
-use crate::tool_runtime::{ExecutionSlot, ToolExecutionConfig};
+use crate::tool_runtime::{build_subagent_tool_context, ExecutionSlot, ToolExecutionConfig};
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
@@ -195,7 +195,7 @@ fn build_execution(config: &RuntimeConfig) -> ExecutionSlot {
         shell_risk_rules: config.tool_loop.shell_risk_rules.clone(),
         memory: None,
         actuator: None,
-        subagent: None,
+        subagent: Some(build_subagent_tool_context(config)),
     })
 }
 

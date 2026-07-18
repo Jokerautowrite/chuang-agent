@@ -12,9 +12,7 @@ use crate::actuator::{
     OpenAppRequest, ScreenshotTarget, SecretOrPlainText,
 };
 use crate::atomic_tool::AtomicToolRegistry;
-use crate::browser_read::{
-    ensure_cdp_browser_read_adapter, BrowserReadAdapter, BrowserReadError,
-};
+use crate::browser_read::{ensure_cdp_browser_read_adapter, BrowserReadAdapter, BrowserReadError};
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use crate::governance::{
     risk_decision_label, risk_decision_reason, ActionKind, Governance, OperatorApprovalEvidence,
@@ -408,6 +406,85 @@ pub struct SubagentToolContext {
     pub runner_command: PathBuf,
     pub worker_model: String,
     pub worker_capability: String,
+}
+
+/// Default worker model for `spawn_subagent` (queued_external + codex runner).
+/// Matches existing smoke/docs; override with `CHUANG_CODEX_RUNNER_MODEL`.
+pub const DEFAULT_SUBAGENT_WORKER_MODEL: &str = "gpt-5.6-luna";
+
+/// Default capability advertised to the subagent dispatch/run-loop chain.
+pub const DEFAULT_SUBAGENT_WORKER_CAPABILITY: &str = "workspace";
+
+const SUBAGENT_RUNNER_REL: &str = "scripts/chuang-codex-runner.py";
+const RUNTIME_CONFIG_PATH_META: &str = "config_path";
+
+/// Build production `SubagentToolContext` from runtime config + current process.
+///
+/// Always returns a context so production tool loops can call `spawn_subagent`.
+/// A missing runner script is still recorded as a path; execution fails clearly later.
+/// Does **not** enable the live_worker adapter — this is the queued_external + codex runner path.
+pub fn build_subagent_tool_context(
+    config: &crate::runtime_config::RuntimeConfig,
+) -> SubagentToolContext {
+    SubagentToolContext {
+        executable_path: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("chuang-agent")),
+        config_path: resolve_subagent_config_path(config),
+        queue_root: config.subagent_queue.root.clone(),
+        runner_command: resolve_codex_runner_command(config),
+        worker_model: resolve_subagent_worker_model(),
+        worker_capability: DEFAULT_SUBAGENT_WORKER_CAPABILITY.to_string(),
+    }
+}
+
+fn resolve_subagent_config_path(config: &crate::runtime_config::RuntimeConfig) -> PathBuf {
+    if let Some(raw) = config.metadata.get(RUNTIME_CONFIG_PATH_META) {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let workspace_config = config.permission.workspace_root.join("config.toml");
+    if workspace_config.is_file() {
+        return workspace_config;
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_config = cwd.join("config.toml");
+        if cwd_config.is_file() {
+            return cwd_config;
+        }
+    }
+    PathBuf::from("config.toml")
+}
+
+fn resolve_codex_runner_command(config: &crate::runtime_config::RuntimeConfig) -> PathBuf {
+    let mut candidates = Vec::new();
+    if let Ok(root) = std::env::var("CHUANG_AGENT_ROOT") {
+        candidates.push(PathBuf::from(root).join(SUBAGENT_RUNNER_REL));
+    }
+    candidates.push(config.permission.workspace_root.join(SUBAGENT_RUNNER_REL));
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SUBAGENT_RUNNER_REL));
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(SUBAGENT_RUNNER_REL));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join(SUBAGENT_RUNNER_REL));
+            // cargo run layout: target/debug/chuang-agent → repo root
+            candidates.push(parent.join("../..").join(SUBAGENT_RUNNER_REL));
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(SUBAGENT_RUNNER_REL))
+}
+
+fn resolve_subagent_worker_model() -> String {
+    std::env::var("CHUANG_CODEX_RUNNER_MODEL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_SUBAGENT_WORKER_MODEL.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -2303,7 +2380,10 @@ fn execute_spawn_subagent(
         Ok(value) => value,
         Err(error) => return failed_record(registry, call, error),
     };
-    let ran = run.get("ran_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let ran = run
+        .get("ran_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
     if ran < job_list.len() as u64 {
         return failed_record(
             registry,
@@ -2871,9 +2951,9 @@ fn is_retryable_failure(failure_class: &str) -> bool {
 
 fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> ActionKind {
     match call {
-        ToolCall::ListDir { .. }
-        | ToolCall::MemoryRecall { .. }
-        | ToolCall::BrowserRead { .. } => ActionKind::Observe,
+        ToolCall::ListDir { .. } | ToolCall::MemoryRecall { .. } | ToolCall::BrowserRead { .. } => {
+            ActionKind::Observe
+        }
         ToolCall::ReadFile { path } if is_secret_material_path(path) => ActionKind::SecretAccess,
         ToolCall::ReadFile { .. } => ActionKind::Observe,
         ToolCall::Keyboard { secret: true, .. } => ActionKind::SecretAccess,
@@ -3710,7 +3790,64 @@ mod rtk_rewrite_tests {
         // Avoid env pollution from parallel tests by not setting CHUANG_SHELL_RTK_REWRITE.
         let (cmd, applied) = apply_rtk_shell_rewrite("git status", true);
         if applied {
-            assert!(cmd.contains("rtk"), "rewritten command should use rtk: {cmd}");
+            assert!(
+                cmd.contains("rtk"),
+                "rewritten command should use rtk: {cmd}"
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod subagent_context_builder_tests {
+    use super::{
+        build_subagent_tool_context, DEFAULT_SUBAGENT_WORKER_CAPABILITY,
+        DEFAULT_SUBAGENT_WORKER_MODEL,
+    };
+    use crate::runtime_config::RuntimeConfig;
+    use std::path::PathBuf;
+
+    #[test]
+    fn production_builder_yields_subagent_tool_context() {
+        let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+        config.metadata.insert(
+            "config_path".to_string(),
+            "/tmp/chuang-agent-test-config.toml".to_string(),
+        );
+        config.subagent_queue.root = PathBuf::from("./data/subagent-queue");
+        config.permission.workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let ctx = build_subagent_tool_context(&config);
+
+        assert_eq!(
+            ctx.config_path,
+            PathBuf::from("/tmp/chuang-agent-test-config.toml")
+        );
+        assert_eq!(ctx.queue_root, PathBuf::from("./data/subagent-queue"));
+        assert_eq!(ctx.worker_model, DEFAULT_SUBAGENT_WORKER_MODEL);
+        assert_eq!(ctx.worker_capability, DEFAULT_SUBAGENT_WORKER_CAPABILITY);
+        assert!(!ctx.executable_path.as_os_str().is_empty());
+        // Prefer real checked-in runner when discoverable from workspace/manifest.
+        let runner = ctx.runner_command.display().to_string();
+        assert!(
+            runner.contains("chuang-codex-runner.py"),
+            "runner_command should point at codex runner: {runner}"
+        );
+    }
+
+    #[test]
+    fn production_builder_uses_env_worker_model_override() {
+        let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+        // Safety: only assert override path when env is already set by the harness.
+        // We do not mutate process env here (parallel test risk).
+        let ctx = build_subagent_tool_context(&config);
+        if let Ok(model) = std::env::var("CHUANG_CODEX_RUNNER_MODEL") {
+            let trimmed = model.trim();
+            if !trimmed.is_empty() {
+                assert_eq!(ctx.worker_model, trimmed);
+                return;
+            }
+        }
+        assert_eq!(ctx.worker_model, DEFAULT_SUBAGENT_WORKER_MODEL);
     }
 }
