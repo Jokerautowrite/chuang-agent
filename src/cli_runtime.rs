@@ -1745,6 +1745,18 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
             .to_string();
     }
 
+    // Codex runner 执行失败（调度已成功，工人跑挂）
+    if summary.contains("subagent_batch_partial_failure")
+        || failure_class == "subagent_batch_partial_failure"
+    {
+        let detail = humanize_tool_failure_summary(summary, failure_class);
+        return format!(
+            "子代理已经派出去了（admission 往往已通过），但 Codex 工人执行失败：{detail}\n\n\
+这通常是 runner/模型瞬时错误，不是「不能派工」。可直接再试一次「派子代理…」；\n\
+或看 `data/subagent-queue/*/reports/` 里最新报告的 error_tail / stderr 尾部。"
+        );
+    }
+
     if summary.contains("actuator_unconfigured") || failure_class == "actuator_unconfigured" {
         return format!(
             "本轮没有完成真实桌面动作（{tool_name}）：执行器还没配好。\n\
