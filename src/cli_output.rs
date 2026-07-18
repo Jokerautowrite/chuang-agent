@@ -982,7 +982,7 @@ fn is_bulky_runtime_meta_key(key: &str) -> bool {
 }
 
 /// Compact human line for successful/failed `spawn_subagent` batches.
-/// Example: `派工 2工人·accepted·luna` or `派工 1工人·失败`.
+/// Example: `派工 2工人·accepted·luna` or `派工 1工人·失败·Failed·timeout…`.
 fn spawn_dispatch_hint_from_meta(
     extra: &std::collections::BTreeMap<String, String>,
 ) -> Option<String> {
@@ -996,6 +996,7 @@ fn spawn_dispatch_hint_from_meta(
     let mut accepted = 0u64;
     let mut failed = 0u64;
     let mut model: Option<String> = None;
+    let mut first_fail: Option<String> = None;
     for call in arr {
         let tool = call
             .get("tool_name")
@@ -1023,10 +1024,14 @@ fn spawn_dispatch_hint_from_meta(
                 for r in results {
                     let adm = r.get("admission").and_then(|v| v.as_str()).unwrap_or("");
                     let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                    if adm == "accepted" || ok {
+                    if ok || (adm == "accepted" && r.get("status").and_then(|v| v.as_str()) == Some("Success"))
+                    {
                         accepted = accepted.saturating_add(1);
-                    } else {
+                    } else if !ok {
                         failed = failed.saturating_add(1);
+                        if first_fail.is_none() {
+                            first_fail = spawn_first_fail_snippet(r, summary);
+                        }
                     }
                 }
             }
@@ -1035,7 +1040,24 @@ fn spawn_dispatch_hint_from_meta(
             .find_map(|p| p.strip_prefix("workers=").and_then(|n| n.parse().ok()))
         {
             workers = workers.saturating_add(caps);
-            if summary.contains("admission=accepted") {
+            let failed_n = summary
+                .split_whitespace()
+                .find_map(|p| p.strip_prefix("failed=").and_then(|n| n.parse::<u64>().ok()));
+            if summary.contains("subagent_batch_partial_failure")
+                || summary.contains("subagent_runtime_unavailable")
+                || summary.contains("subagent_cli_")
+                || summary.contains("subagent_runner_incomplete")
+            {
+                let f = failed_n.unwrap_or(caps).max(1);
+                failed = failed.saturating_add(f);
+                let ok_n = caps.saturating_sub(f);
+                if ok_n > 0 {
+                    accepted = accepted.saturating_add(ok_n);
+                }
+                if first_fail.is_none() {
+                    first_fail = spawn_first_fail_from_summary(summary);
+                }
+            } else if summary.contains("admission=accepted") {
                 accepted = accepted.saturating_add(caps);
             }
         } else {
@@ -1044,6 +1066,9 @@ fn spawn_dispatch_hint_from_meta(
                 accepted = accepted.saturating_add(1);
             } else {
                 failed = failed.saturating_add(1);
+                if first_fail.is_none() {
+                    first_fail = spawn_first_fail_from_summary(summary);
+                }
             }
         }
     }
@@ -1063,7 +1088,72 @@ fn spawn_dispatch_hint_from_meta(
         let short = m.rsplit('-').next().unwrap_or(m.as_str());
         parts.push(short.to_string());
     }
+    if failed > 0 {
+        if let Some(reason) = first_fail {
+            parts.push(reason);
+        }
+    }
     Some(parts.join("·"))
+}
+
+fn spawn_first_fail_snippet(result: &serde_json::Value, summary: &str) -> Option<String> {
+    let status = result
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let detail = result
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let mut bits = Vec::new();
+    if !status.is_empty() && status != "Success" {
+        bits.push(status.to_string());
+    }
+    if !detail.is_empty() {
+        bits.push(detail.chars().take(48).collect::<String>());
+    }
+    if bits.is_empty() {
+        spawn_first_fail_from_summary(summary)
+    } else {
+        Some(bits.join("·"))
+    }
+}
+
+fn spawn_first_fail_from_summary(summary: &str) -> Option<String> {
+    let mut first_status: Option<&str> = None;
+    let mut first: Option<&str> = None;
+    for part in summary.split_whitespace() {
+        if let Some(v) = part.strip_prefix("first_status=") {
+            first_status = Some(v);
+        } else if let Some(v) = part.strip_prefix("first=") {
+            first = Some(v);
+        }
+    }
+    let mut bits = Vec::new();
+    if let Some(s) = first_status {
+        if s != "unknown" {
+            bits.push(s.to_string());
+        }
+    }
+    if let Some(f) = first {
+        if !f.is_empty() {
+            bits.push(f.chars().take(48).collect::<String>());
+        }
+    }
+    if !bits.is_empty() {
+        return Some(bits.join("·"));
+    }
+    // Fallback: short machine class token from summary head.
+    let head = summary.split_whitespace().next().unwrap_or("").trim();
+    if head.starts_with("subagent_") {
+        Some(head.chars().take(40).collect())
+    } else if summary.is_empty() {
+        None
+    } else {
+        Some(summary.chars().take(40).collect())
+    }
 }
 
 #[cfg(test)]
@@ -1082,6 +1172,35 @@ mod spawn_hint_tests {
         assert!(hint.contains("派工 2工人"), "{hint}");
         assert!(hint.contains("accepted"), "{hint}");
         assert!(hint.contains("luna"), "{hint}");
+    }
+
+    #[test]
+    fn spawn_hint_partial_failure_includes_first_reason() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=2 failed=1 concurrency=2 first_status=Failed first=codex_timed_out","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true,\"status\":\"Success\"},{\"admission\":\"accepted\",\"ok\":false,\"status\":\"Failed\",\"summary\":\"codex timed out\"}]}"}]"#.to_string(),
+        );
+        let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
+        assert!(hint.contains("派工 2工人"), "{hint}");
+        assert!(hint.contains("部分成功"), "{hint}");
+        assert!(
+            hint.contains("Failed") || hint.contains("timed out") || hint.contains("codex"),
+            "{hint}"
+        );
+    }
+
+    #[test]
+    fn spawn_hint_from_short_summary_without_output_json() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=1 failed=1 concurrency=1 first_status=Failed first=runner_boom"}]"#.to_string(),
+        );
+        let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
+        assert!(hint.contains("派工 1工人"), "{hint}");
+        assert!(hint.contains("失败"), "{hint}");
+        assert!(hint.contains("Failed") || hint.contains("boom"), "{hint}");
     }
 
     #[test]

@@ -2457,14 +2457,36 @@ fn execute_spawn_subagent(
     .to_string();
 
     if !all_ok {
-        return failed_record(
-            registry,
-            call,
-            format!(
-                "subagent_batch_partial_failure workers={} concurrency={concurrency} detail={output}",
-                job_list.len()
-            ),
+        let failed: Vec<&serde_json::Value> = results
+            .iter()
+            .filter(|item| !item.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
+            .collect();
+        let first = failed.first().copied();
+        let first_status = first
+            .and_then(|item| item.get("status").and_then(|v| v.as_str()))
+            .unwrap_or("unknown");
+        let first_summary = first
+            .and_then(|item| item.get("summary").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .trim();
+        // Keep first= a single whitespace-free token so CLI humanizers can parse it.
+        let first_summary = if first_summary.is_empty() {
+            first_status.to_string()
+        } else {
+            first_summary
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join("_")
+                .chars()
+                .take(96)
+                .collect::<String>()
+        };
+        let short = format!(
+            "subagent_batch_partial_failure workers={} failed={} concurrency={concurrency} first_status={first_status} first={first_summary}",
+            job_list.len(),
+            failed.len(),
         );
+        return failed_record_with_output(registry, call, short, Some(output));
     }
 
     success_record(
@@ -2620,6 +2642,15 @@ fn failed_record(
     call: &ToolCall,
     summary: String,
 ) -> ToolExecutionRecord {
+    failed_record_with_output(registry, call, summary, None)
+}
+
+fn failed_record_with_output(
+    registry: &AtomicToolRegistry,
+    call: &ToolCall,
+    summary: String,
+    output: Option<String>,
+) -> ToolExecutionRecord {
     let mapping = registry.mapping_for_call(call);
     ToolExecutionRecord {
         call: redacted_tool_call(call),
@@ -2636,11 +2667,11 @@ fn failed_record(
         cwd: cwd_from_call(call),
         command: command_from_call(call),
         entries: Vec::new(),
-        output_bytes: None,
-        output_lines: None,
+        output_bytes: output.as_ref().map(|value| value.len()),
+        output_lines: output.as_ref().map(|value| count_lines(value)),
         stderr_bytes: None,
         stderr_lines: None,
-        output: None,
+        output,
         stdout: None,
         stderr: None,
         exit_code: None,
@@ -2940,13 +2971,33 @@ fn classify_tool_failure(summary: &str) -> &'static str {
         "write_failed"
     } else if summary.contains("list_dir_failed") {
         "list_failed"
+    } else if summary.contains("subagent_runtime_unavailable") {
+        "subagent_runtime_unavailable"
+    } else if summary.contains("subagent_batch_partial_failure") {
+        "subagent_batch_partial_failure"
+    } else if summary.contains("subagent_runner_incomplete") {
+        "subagent_runner_incomplete"
+    } else if summary.contains("subagent_cli_failed")
+        || summary.contains("subagent_cli_spawn_failed")
+        || summary.contains("subagent_cli_wait_failed")
+    {
+        "subagent_cli_failed"
+    } else if summary.contains("subagent_") {
+        "subagent_failed"
     } else {
         "tool_failed"
     }
 }
 
 fn is_retryable_failure(failure_class: &str) -> bool {
-    matches!(failure_class, "timeout" | "spawn_failed")
+    matches!(
+        failure_class,
+        "timeout"
+            | "spawn_failed"
+            | "subagent_batch_partial_failure"
+            | "subagent_runner_incomplete"
+            | "subagent_cli_failed"
+    )
 }
 
 fn tool_action_kind(call: &ToolCall, shell_risk_rules: &ShellRiskRules) -> ActionKind {

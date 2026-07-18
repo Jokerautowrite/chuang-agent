@@ -1688,6 +1688,11 @@ fn terminal_tool_failure(record: &ToolExecutionRecord) -> bool {
                         | "actuator_unconfigured"
                         | "governance_rejected"
                         | "tool_failed"
+                        | "subagent_runtime_unavailable"
+                        | "subagent_batch_partial_failure"
+                        | "subagent_runner_incomplete"
+                        | "subagent_cli_failed"
+                        | "subagent_failed"
                 )
             })
 }
@@ -1738,7 +1743,9 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
         || decision.contains("RequireExplicit");
 
     // 子代理上下文未装配（实现缺口）；不是「live_worker=false 所以不能派」。
-    if summary.contains("subagent_runtime_unavailable") {
+    if summary.contains("subagent_runtime_unavailable")
+        || failure_class == "subagent_runtime_unavailable"
+    {
         return "本轮 spawn_subagent 上下文没装上（不是权限，也不是 live adapter 的锅）。\n\n\
 正常路径：入口应带 CHUANG_CODEX_RUNNER_ENABLE=1，且本机有 codex + scripts/chuang-codex-runner.py。\n\
 可先：`chuang doctor` 看 subagent_model_tool_worker=available；或重试「派子代理读 Cargo.toml」。"
@@ -1754,6 +1761,36 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
             "子代理已经派出去了（admission 往往已通过），但 Codex 工人执行失败：{detail}\n\n\
 这通常是 runner/模型瞬时错误，不是「不能派工」。可直接再试一次「派子代理…」；\n\
 或看 `data/subagent-queue/*/reports/` 里最新报告的 error_tail / stderr 尾部。"
+        );
+    }
+
+    if summary.contains("subagent_runner_incomplete")
+        || failure_class == "subagent_runner_incomplete"
+    {
+        let detail = humanize_tool_failure_summary(summary, failure_class);
+        return format!(
+            "子代理队列已入队，但 runner 没把该跑的工人跑完：{detail}\n\n\
+不是权限问题。可重试「派子代理…」，或 `chuang subagent run-once` / doctor 看 worker 是否卡住。"
+        );
+    }
+
+    if summary.contains("subagent_cli_failed")
+        || summary.contains("subagent_cli_spawn_failed")
+        || summary.contains("subagent_cli_wait_failed")
+        || failure_class == "subagent_cli_failed"
+    {
+        let detail = humanize_tool_failure_summary(summary, failure_class);
+        return format!(
+            "本机调用子代理 CLI 失败（派工命令没跑通）：{detail}\n\n\
+先查可执行文件路径与 CHUANG_CODEX_RUNNER_ENABLE=1；`chuang doctor` 看 subagent 相关项。"
+        );
+    }
+
+    if failure_class == "subagent_failed" || summary.contains("subagent_") {
+        let detail = humanize_tool_failure_summary(summary, failure_class);
+        return format!(
+            "本轮派子代理没完成：{detail}\n\n\
+这不是权限拦截。可再试一次，或输入 /trace 看技术细节。"
         );
     }
 
@@ -1787,10 +1824,64 @@ fn humanize_tool_failure_summary(summary: &str, failure_class: &str) -> String {
     if s.contains("profile=full_local_workspace") && s.len() > 80 {
         return failure_class.to_string();
     }
+
+    // Prefer compact first-fail fields from spawn batch short summary.
+    if let Some(human) = humanize_subagent_batch_summary(s) {
+        return human;
+    }
+
     if s.chars().count() > 160 {
         return s.chars().take(160).collect::<String>() + "…";
     }
     s.to_string()
+}
+
+/// Turn
+/// `subagent_batch_partial_failure workers=2 failed=1 … first_status=Failed first=…`
+/// into a short operator line.
+fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
+    if !summary.contains("subagent_batch_partial_failure")
+        && !summary.contains("subagent_runner_incomplete")
+        && !summary.contains("subagent_cli_")
+    {
+        return None;
+    }
+    let mut workers: Option<&str> = None;
+    let mut failed: Option<&str> = None;
+    let mut first_status: Option<&str> = None;
+    let mut first: Option<&str> = None;
+    for part in summary.split_whitespace() {
+        if let Some(v) = part.strip_prefix("workers=") {
+            workers = Some(v);
+        } else if let Some(v) = part.strip_prefix("failed=") {
+            failed = Some(v);
+        } else if let Some(v) = part.strip_prefix("first_status=") {
+            first_status = Some(v);
+        } else if let Some(v) = part.strip_prefix("first=") {
+            first = Some(v);
+        }
+    }
+    let mut bits = Vec::new();
+    match (workers, failed) {
+        (Some(w), Some(f)) => bits.push(format!("{f}/{w} 工人失败")),
+        (Some(w), None) => bits.push(format!("workers={w}")),
+        _ => {}
+    }
+    if let Some(status) = first_status {
+        if status != "unknown" {
+            bits.push(format!("状态 {status}"));
+        }
+    }
+    if let Some(msg) = first {
+        if !msg.is_empty() && msg != "unknown" {
+            bits.push(msg.to_string());
+        }
+    }
+    if bits.is_empty() {
+        None
+    } else {
+        Some(bits.join(" · "))
+    }
 }
 
 /// Drop raw tool-call JSON that models sometimes dump as FINAL.
@@ -7417,7 +7508,7 @@ allowed_channels = ["app-server"]
             write_operation: None,
             write_diff_preview: None,
             write_diff_truncated: false,
-            failure_class: Some("tool_failed".into()),
+            failure_class: Some("subagent_runtime_unavailable".into()),
             output_redacted: false,
             stdout_redacted: false,
             stderr_redacted: false,
@@ -7425,10 +7516,116 @@ allowed_channels = ["app-server"]
             stdout_truncated: false,
             stderr_truncated: false,
         });
-        assert!(answer.contains("不是权限拦住"));
+        assert!(answer.contains("不是权限拦住") || answer.contains("不是权限"));
         assert!(answer.contains("field-accept") || answer.contains("doctor"));
         assert!(!answer.contains("拦截原因"));
         assert!(!answer.contains("治理决策"));
+        assert!(terminal_tool_failure(&ToolExecutionRecord {
+            call: ToolCall::SpawnSubagent {
+                task: "体检".into(),
+                tasks: None,
+                agent_name: None,
+                policy: None,
+                token_budget: None,
+                timeout_ms: None,
+                max_concurrency: None,
+            },
+            tool_name: "spawn_subagent".into(),
+            atomic_tool_name: None,
+            ok: false,
+            summary: "subagent_runtime_unavailable".into(),
+            decision: None,
+            duration_ms: 1,
+            retryable: false,
+            target_path: None,
+            resolved_path: None,
+            cwd: None,
+            command: None,
+            entries: vec![],
+            output_bytes: None,
+            output_lines: None,
+            stderr_bytes: None,
+            stderr_lines: None,
+            output: None,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            changed_files: vec![],
+            write_before_bytes: None,
+            write_after_bytes: None,
+            write_changed: None,
+            write_operation: None,
+            write_diff_preview: None,
+            write_diff_truncated: false,
+            failure_class: Some("subagent_runtime_unavailable".into()),
+            output_redacted: false,
+            stdout_redacted: false,
+            stderr_redacted: false,
+            output_truncated: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }));
+    }
+
+    #[test]
+    fn terminal_tool_failure_answer_batch_partial_is_human_and_retryable_class() {
+        let record = ToolExecutionRecord {
+            call: ToolCall::SpawnSubagent {
+                task: "读包名".into(),
+                tasks: None,
+                agent_name: None,
+                policy: None,
+                token_budget: None,
+                timeout_ms: None,
+                max_concurrency: None,
+            },
+            tool_name: "spawn_subagent".into(),
+            atomic_tool_name: None,
+            ok: false,
+            summary: "subagent_batch_partial_failure workers=2 failed=1 concurrency=2 first_status=Failed first=codex_boom".into(),
+            decision: None,
+            duration_ms: 12,
+            retryable: true,
+            target_path: None,
+            resolved_path: None,
+            cwd: None,
+            command: None,
+            entries: vec![],
+            output_bytes: None,
+            output_lines: None,
+            stderr_bytes: None,
+            stderr_lines: None,
+            output: None,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            changed_files: vec![],
+            write_before_bytes: None,
+            write_after_bytes: None,
+            write_changed: None,
+            write_operation: None,
+            write_diff_preview: None,
+            write_diff_truncated: false,
+            failure_class: Some("subagent_batch_partial_failure".into()),
+            output_redacted: false,
+            stdout_redacted: false,
+            stderr_redacted: false,
+            output_truncated: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        assert!(terminal_tool_failure(&record));
+        let answer = terminal_tool_failure_answer(&record);
+        assert!(answer.contains("已经派出去") || answer.contains("工人执行失败"), "{answer}");
+        assert!(
+            answer.contains("1/2") || answer.contains("codex_boom") || answer.contains("Failed"),
+            "{answer}"
+        );
+        assert!(!answer.contains("拦截原因"), "{answer}");
+        assert!(
+            !answer.contains("subagent_batch_partial_failure workers="),
+            "should not dump raw machine summary blob: {answer}"
+        );
     }
 
     #[test]
