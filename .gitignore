@@ -15,12 +15,31 @@
 
 # Local agent scratch / caches
 /.hermes/
+/.agent-hub/
+/.chuang-audit/
 /context/
 /data/
 /tmp/
 /$tmp/
 /$work_dir/
+/diagnostics/
+/reports/
+/artifacts/
+/citywall_event_ui_mockups/
 __pycache__/
+
+# One-off task drafts at repo root (feishu/citywall intermediate)
+/tmp-*/
+/tmp-*.md
+/tmp-*.json
+
+# Generated media noise (tracked subscription-upgrade pngs stay force-added if needed)
+/generated/*-image2.png
+
+# Local backups / editor leftovers
+/config.toml.bak*
+**/*.rs.bak*
+**/*.bak-*
 
 # Local external reference worktrees / downloaded helper repos
 /ai-sdk-codex-oauth/
