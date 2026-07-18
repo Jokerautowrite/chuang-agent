@@ -905,7 +905,14 @@ pub fn print_runtime_result_with_verbosity(result: &RuntimeResult, verbose: bool
         format!("召回 {}", result.recall_hit_count),
     ];
     if !result.recall_summary.trim().is_empty() {
-        meta_parts.push(format!("回忆 {}", compact_cli_preview(&result.recall_summary, 48)));
+        meta_parts.push(format!(
+            "回忆 {}",
+            compact_cli_preview(&result.recall_summary, 48)
+        ));
+    }
+    // 派工回执：默认人话输出也能看见 spawn 是否成功（不必 --verbose）
+    if let Some(spawn_hint) = spawn_dispatch_hint_from_meta(&result.response.meta.extra) {
+        meta_parts.push(spawn_hint);
     }
     println!("{}", meta_parts.join(" · "));
 
@@ -918,7 +925,10 @@ pub fn print_runtime_result_with_verbosity(result: &RuntimeResult, verbose: bool
     }
 
     if !result.response.trace.trim().is_empty() {
-        println!("trace: {}", compact_cli_preview(&result.response.trace, 120));
+        println!(
+            "trace: {}",
+            compact_cli_preview(&result.response.trace, 120)
+        );
     }
 }
 
@@ -969,6 +979,120 @@ fn is_bulky_runtime_meta_key(key: &str) -> bool {
         || key.contains("runtime_event_ledger")
         || key == "tool_trace"
         || key == "packed_context_preview"
+}
+
+/// Compact human line for successful/failed `spawn_subagent` batches.
+/// Example: `派工 2工人·accepted·luna` or `派工 1工人·失败`.
+fn spawn_dispatch_hint_from_meta(
+    extra: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    let raw = extra.get("tool_calls_json")?;
+    if !raw.contains("spawn_subagent") {
+        return None;
+    }
+    let calls: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let arr = calls.as_array()?;
+    let mut workers = 0u64;
+    let mut accepted = 0u64;
+    let mut failed = 0u64;
+    let mut model: Option<String> = None;
+    for call in arr {
+        let tool = call
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .or_else(|| call.pointer("/call/tool").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        if tool != "spawn_subagent" {
+            continue;
+        }
+        let summary = call.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        let output = call.get("output").and_then(|v| v.as_str()).unwrap_or("");
+        // Prefer structured output JSON when present.
+        if let Ok(out) = serde_json::from_str::<serde_json::Value>(output) {
+            if let Some(n) = out.get("worker_count").and_then(|v| v.as_u64()) {
+                workers = workers.saturating_add(n);
+            } else if let Some(results) = out.get("results").and_then(|v| v.as_array()) {
+                workers = workers.saturating_add(results.len() as u64);
+            }
+            if let Some(m) = out.get("worker_model").and_then(|v| v.as_str()) {
+                if !m.is_empty() {
+                    model = Some(m.to_string());
+                }
+            }
+            if let Some(results) = out.get("results").and_then(|v| v.as_array()) {
+                for r in results {
+                    let adm = r.get("admission").and_then(|v| v.as_str()).unwrap_or("");
+                    let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if adm == "accepted" || ok {
+                        accepted = accepted.saturating_add(1);
+                    } else {
+                        failed = failed.saturating_add(1);
+                    }
+                }
+            }
+        } else if let Some(caps) = summary
+            .split_whitespace()
+            .find_map(|p| p.strip_prefix("workers=").and_then(|n| n.parse().ok()))
+        {
+            workers = workers.saturating_add(caps);
+            if summary.contains("admission=accepted") {
+                accepted = accepted.saturating_add(caps);
+            }
+        } else {
+            workers = workers.saturating_add(1);
+            if call.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                accepted = accepted.saturating_add(1);
+            } else {
+                failed = failed.saturating_add(1);
+            }
+        }
+    }
+    if workers == 0 {
+        return None;
+    }
+    let status = if failed == 0 && accepted > 0 {
+        "accepted"
+    } else if accepted == 0 {
+        "失败"
+    } else {
+        "部分成功"
+    };
+    let mut parts = vec![format!("派工 {workers}工人"), status.to_string()];
+    if let Some(m) = model {
+        // keep short: gpt-5.6-luna → luna
+        let short = m.rsplit('-').next().unwrap_or(m.as_str());
+        parts.push(short.to_string());
+    }
+    Some(parts.join("·"))
+}
+
+#[cfg(test)]
+mod spawn_hint_tests {
+    use super::spawn_dispatch_hint_from_meta;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn spawn_hint_from_batch_json() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":true,"summary":"subagent_batch_completed workers=2 concurrency=2 admission=accepted","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true},{\"admission\":\"accepted\",\"ok\":true}]}"}]"#.to_string(),
+        );
+        let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
+        assert!(hint.contains("派工 2工人"), "{hint}");
+        assert!(hint.contains("accepted"), "{hint}");
+        assert!(hint.contains("luna"), "{hint}");
+    }
+
+    #[test]
+    fn spawn_hint_absent_without_spawn() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[{"tool_name":"file_read","ok":true}]"#.to_string(),
+        );
+        assert!(spawn_dispatch_hint_from_meta(&extra).is_none());
+    }
 }
 
 fn compact_cli_preview(input: &str, max_chars: usize) -> String {
