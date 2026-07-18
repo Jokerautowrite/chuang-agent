@@ -254,7 +254,8 @@ impl RuntimeConfig {
                 model_name: "stub-responder".to_string(),
             },
             identity_memory: IdentityMemoryConfig::HermesDualFile {
-                root: PathBuf::from("./data/hermes-memory"),
+                // 与 identity_bootstrap 同根：创自己的工作区，不用 hermes 遗留路径
+                root: PathBuf::from("./identity"),
                 user_max_chars: DEFAULT_USER_MEMORY_MAX_CHARS,
                 memory_max_chars: DEFAULT_HOT_MEMORY_MAX_CHARS,
             },
