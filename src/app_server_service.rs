@@ -2,7 +2,11 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 pub const APP_SERVER_SERVICE_NAME: &str = "chuang-agent-app-server.service";
 const SELECTED_GATE_NAMES: [&str; 4] = [
@@ -43,6 +47,20 @@ pub struct AppServerServiceRuntimeSnapshot {
     pub service_environment: Option<AppServerGateEnvironment>,
     pub effective_environment: String,
     pub observation_error: Option<String>,
+    pub persistence: AppServerPersistenceRuntimeSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppServerPersistenceRuntimeSnapshot {
+    pub observation_state: String,
+    pub persistence_enabled: Option<bool>,
+    pub schema: Option<i64>,
+    pub lock_held: Option<bool>,
+    pub thread_count: Option<u64>,
+    pub turn_count: Option<u64>,
+    pub active_count: Option<u64>,
+    pub interrupted_count: Option<u64>,
+    pub snapshot_updated_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -75,12 +93,30 @@ pub fn collect_app_server_service_runtime_snapshot() -> AppServerServiceRuntimeS
         };
     }
 
-    app_server_service_runtime_snapshot_from_evidence(evidence, caller_environment)
+    app_server_service_runtime_snapshot_from_evidence_and_persistence(
+        evidence,
+        caller_environment,
+        canonical_app_server_socket()
+            .map(|socket| app_server_persistence_runtime_snapshot_from_socket(&socket))
+            .unwrap_or_else(|| unavailable_persistence("canonical_socket_path_unavailable")),
+    )
 }
 
 pub fn app_server_service_runtime_snapshot_from_evidence(
     evidence: AppServerServiceEvidence,
     caller_environment: BTreeMap<String, String>,
+) -> AppServerServiceRuntimeSnapshot {
+    app_server_service_runtime_snapshot_from_evidence_and_persistence(
+        evidence,
+        caller_environment,
+        unavailable_persistence("persistence_socket_not_queried"),
+    )
+}
+
+fn app_server_service_runtime_snapshot_from_evidence_and_persistence(
+    evidence: AppServerServiceEvidence,
+    caller_environment: BTreeMap<String, String>,
+    persistence: AppServerPersistenceRuntimeSnapshot,
 ) -> AppServerServiceRuntimeSnapshot {
     let caller_environment =
         app_server_gate_environment_from_values("caller_environment", &caller_environment);
@@ -119,6 +155,106 @@ pub fn app_server_service_runtime_snapshot_from_evidence(
         service_environment,
         effective_environment,
         observation_error: evidence.observation_error,
+        persistence,
+    }
+}
+
+pub fn canonical_app_server_socket() -> Option<PathBuf> {
+    env::var_os("XDG_RUNTIME_DIR")
+        .filter(|value| !value.is_empty())
+        .map(|runtime_dir| PathBuf::from(runtime_dir).join("chuang-agent/app-server.sock"))
+}
+
+pub fn app_server_persistence_runtime_snapshot_from_socket(
+    socket: &Path,
+) -> AppServerPersistenceRuntimeSnapshot {
+    let result = (|| {
+        let mut stream = UnixStream::connect(socket)
+            .map_err(|error| format!("socket_connect_failed: {error}"))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .map_err(|error| format!("socket_read_timeout_failed: {error}"))?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .map_err(|error| format!("socket_write_timeout_failed: {error}"))?;
+        let request = serde_json::json!({
+            "id": 1,
+            "method": "server/status",
+            "params": {},
+        });
+        let rendered = serde_json::to_string(&request)
+            .map_err(|error| format!("request_encode_failed: {error}"))?;
+        stream
+            .write_all(rendered.as_bytes())
+            .and_then(|_| stream.write_all(b"\n"))
+            .map_err(|error| format!("request_write_failed: {error}"))?;
+        stream
+            .flush()
+            .map_err(|error| format!("request_flush_failed: {error}"))?;
+
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = reader
+                .read_line(&mut line)
+                .map_err(|error| format!("response_read_failed: {error}"))?;
+            if read == 0 {
+                return Err("connection_closed_before_response".to_string());
+            }
+            let response: serde_json::Value = serde_json::from_str(line.trim())
+                .map_err(|error| format!("response_decode_failed: {error}"))?;
+            if response.get("id") != Some(&serde_json::json!(1)) {
+                continue;
+            }
+            if let Some(message) = response["error"]["message"].as_str() {
+                return Err(format!("server_status_failed: {message}"));
+            }
+            return parse_persistence_status(
+                response
+                    .pointer("/result/persistence")
+                    .ok_or_else(|| "response_missing_persistence".to_string())?,
+            );
+        }
+    })();
+
+    match result {
+        Ok(snapshot) => snapshot,
+        Err(error) => unavailable_persistence(&error),
+    }
+}
+
+fn parse_persistence_status(
+    value: &serde_json::Value,
+) -> Result<AppServerPersistenceRuntimeSnapshot, String> {
+    Ok(AppServerPersistenceRuntimeSnapshot {
+        observation_state: "available".to_string(),
+        persistence_enabled: value.get("enabled").and_then(|value| value.as_bool()),
+        schema: value.get("schema").and_then(|value| value.as_i64()),
+        lock_held: value.get("lock_held").and_then(|value| value.as_bool()),
+        thread_count: value.get("thread_count").and_then(|value| value.as_u64()),
+        turn_count: value.get("turn_count").and_then(|value| value.as_u64()),
+        active_count: value.get("active_count").and_then(|value| value.as_u64()),
+        interrupted_count: value
+            .get("interrupted_count")
+            .and_then(|value| value.as_u64()),
+        snapshot_updated_at: value
+            .get("snapshot_updated_at")
+            .and_then(|value| value.as_u64()),
+    })
+}
+
+fn unavailable_persistence(_error: &str) -> AppServerPersistenceRuntimeSnapshot {
+    AppServerPersistenceRuntimeSnapshot {
+        observation_state: "unavailable".to_string(),
+        persistence_enabled: None,
+        schema: None,
+        lock_held: None,
+        thread_count: None,
+        turn_count: None,
+        active_count: None,
+        interrupted_count: None,
+        snapshot_updated_at: None,
     }
 }
 

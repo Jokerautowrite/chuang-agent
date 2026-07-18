@@ -12,6 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fs2::FileExt;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -44,6 +45,7 @@ struct AppServerState {
     threads: BTreeMap<String, ThreadState>,
     active_turns: BTreeMap<String, ActiveTurn>,
     snapshot_store: Option<AppServerSnapshotStore>,
+    db_lock: Option<AppServerDbLock>,
 }
 
 type SharedAppServerState = Arc<Mutex<AppServerState>>;
@@ -82,6 +84,11 @@ struct TurnState {
 #[derive(Debug, Clone)]
 struct AppServerSnapshotStore {
     db_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct AppServerDbLock {
+    _file: File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,8 +212,8 @@ fn serve_json_lines<R: BufRead, W: Write>(
 
 fn app_server_daemon_command(args: &[String]) -> Result<(), String> {
     let socket = parse_socket_only_args(args, "daemon")?;
-    let listener = bind_app_server_socket(&socket)?;
     let state = Arc::new(Mutex::new(load_daemon_app_server_state()?));
+    let listener = bind_app_server_socket(&socket)?;
 
     for stream in listener.incoming() {
         match stream {
@@ -272,6 +279,7 @@ fn serve_daemon_json_lines<R: BufRead, W: Write>(
 
         let result = match method {
             "initialize" => Ok(handle_initialize()),
+            "server/status" => with_app_server_state(&state, |state| handle_server_status(state)),
             "model/list" => handle_model_list(&params),
             "thread/start" => with_app_server_state(&state, |state| {
                 let result = handle_thread_start(state, &params)?;
@@ -420,6 +428,20 @@ impl AppServerSnapshotStore {
             .map_err(|error| format!("app_server_snapshot_commit_failed: {error}"))?;
         Ok(())
     }
+
+    fn snapshot_updated_at(&self) -> Result<Option<u64>, String> {
+        let conn = self.connection()?;
+        conn.query_row(
+            "SELECT updated_at
+             FROM app_server_snapshots
+             WHERE snapshot_id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map(|value| value.map(|value| value.max(0) as u64))
+        .map_err(|error| format!("app_server_snapshot_status_failed: {error}"))
+    }
 }
 
 impl AppServerSnapshot {
@@ -499,6 +521,7 @@ impl AppServerSnapshot {
                 .collect(),
             active_turns: BTreeMap::new(),
             snapshot_store: Some(snapshot_store),
+            db_lock: None,
         };
         restore_app_server_sequence_floors(&mut state);
         state
@@ -511,7 +534,11 @@ fn load_daemon_app_server_state() -> Result<AppServerState, String> {
         &workspace_root,
         RuntimeConfigFileOptions::allow_missing_env(),
     )?;
-    load_app_server_state_from_db(runtime.db_path)
+    let db_path = normalize_app_server_db_path(runtime.db_path)?;
+    let db_lock = AppServerDbLock::acquire(&db_path)?;
+    let mut state = load_app_server_state_from_db(db_path)?;
+    state.db_lock = Some(db_lock);
+    Ok(state)
 }
 
 fn load_app_server_state_from_db(db_path: PathBuf) -> Result<AppServerState, String> {
@@ -527,6 +554,70 @@ fn load_app_server_state_from_db(db_path: PathBuf) -> Result<AppServerState, Str
         persist_app_server_state(&state)?;
     }
     Ok(state)
+}
+
+impl AppServerDbLock {
+    fn acquire(db_path: &Path) -> Result<Self, String> {
+        let path = app_server_db_lock_path(db_path)?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "app_server_db_lock_parent_create_failed: path={} error={error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|error| {
+                format!(
+                    "app_server_db_lock_open_failed: db_path={} lock_path={} error={error}",
+                    db_path.display(),
+                    path.display()
+                )
+            })?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|error| {
+            format!(
+                "app_server_db_lock_permissions_failed: lock_path={} error={error}",
+                path.display()
+            )
+        })?;
+        file.try_lock_exclusive().map_err(|error| {
+            format!(
+                "app_server_db_locked: db_path={} lock_path={} error={error}",
+                db_path.display(),
+                path.display()
+            )
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
+fn app_server_db_lock_path(db_path: &Path) -> Result<PathBuf, String> {
+    if db_path.as_os_str().is_empty() {
+        return Err("app_server_db_lock_path_empty".to_string());
+    }
+    let mut path = db_path.as_os_str().to_os_string();
+    path.push(".lock");
+    Ok(PathBuf::from(path))
+}
+
+fn normalize_app_server_db_path(db_path: PathBuf) -> Result<PathBuf, String> {
+    let path = if db_path.is_absolute() {
+        db_path
+    } else {
+        std::env::current_dir()
+            .map_err(|error| format!("app_server_db_path_current_dir_failed: {error}"))?
+            .join(db_path)
+    };
+    Ok(normalize_path_lexically(&path))
 }
 
 fn persist_app_server_state(state: &AppServerState) -> Result<(), String> {
@@ -554,6 +645,46 @@ fn recover_interrupted_app_server_turns(state: &mut AppServerState) -> bool {
         }
     }
     recovered
+}
+
+fn handle_server_status(state: &AppServerState) -> Result<Value, String> {
+    let thread_count = state.threads.len();
+    let turn_count = state
+        .threads
+        .values()
+        .map(|thread| thread.turns.len())
+        .sum::<usize>();
+    let active_count = state
+        .threads
+        .values()
+        .flat_map(|thread| &thread.turns)
+        .filter(|turn| turn.status == "active")
+        .count();
+    let interrupted_count = state
+        .threads
+        .values()
+        .flat_map(|thread| &thread.turns)
+        .filter(|turn| turn.status == "interrupted")
+        .count();
+    let snapshot_updated_at = state
+        .snapshot_store
+        .as_ref()
+        .map(AppServerSnapshotStore::snapshot_updated_at)
+        .transpose()?
+        .flatten();
+
+    Ok(json!({
+        "persistence": {
+            "enabled": state.snapshot_store.is_some(),
+            "schema": state.snapshot_store.as_ref().map(|_| APP_SERVER_SNAPSHOT_SCHEMA_VERSION),
+            "lock_held": state.db_lock.is_some(),
+            "thread_count": thread_count,
+            "turn_count": turn_count,
+            "active_count": active_count,
+            "interrupted_count": interrupted_count,
+            "snapshot_updated_at": snapshot_updated_at,
+        }
+    }))
 }
 
 fn restore_app_server_sequence_floors(state: &mut AppServerState) {
@@ -1389,7 +1520,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
         }
         let service = &status.app_server_service;
         println!(
-            "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={}",
+            "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={} persistence_state={} persistence_enabled={} schema={} lock_held={} threads={} turns={} active={} interrupted={} snapshot_updated_at={}",
             service.service_name,
             service.observation_state,
             service.loaded.as_deref().unwrap_or("none"),
@@ -1412,7 +1543,48 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                 .as_ref()
                 .map(|environment| environment.source.as_str())
                 .unwrap_or("unavailable"),
-            service.effective_environment
+            service.effective_environment,
+            service.persistence.observation_state,
+            service
+                .persistence
+                .persistence_enabled
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .schema
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .lock_held
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .thread_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .turn_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .active_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .interrupted_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            service
+                .persistence
+                .snapshot_updated_at
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string())
         );
         println!(
             "effective_live_adapter_gates: source={} ok={} state={} gates={} enabled={} disabled={}",

@@ -160,7 +160,7 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "app_server_service_runtime",
         &format!(
-            "service={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} effective_environment={}",
+            "service={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} effective_environment={} persistence_state={} persistence_enabled={} schema={} lock_held={} threads={} turns={} active={} interrupted={} snapshot_updated_at={}",
             status.app_server_service.service_name,
             status.app_server_service.observation_state,
             status.app_server_service.loaded.as_deref().unwrap_or("none"),
@@ -177,7 +177,56 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
                 .restart_count
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "none".to_string()),
-            status.app_server_service.effective_environment
+            status.app_server_service.effective_environment,
+            status.app_server_service.persistence.observation_state,
+            status
+                .app_server_service
+                .persistence
+                .persistence_enabled
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .schema
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .lock_held
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .thread_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .turn_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .active_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .interrupted_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            status
+                .app_server_service
+                .persistence
+                .snapshot_updated_at
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string())
         ),
     ));
     checks.push(pass(
@@ -1243,7 +1292,7 @@ fn print_app_server_service_runtime(
     effective_gates: &chuang_agent::kernel_status::LiveAdapterGateStatus,
 ) {
     println!(
-        "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={}",
+        "app_server_service: name={} observation_state={} loaded={} active={} substate={} enabled={} main_pid={} restart_count={} fragment_path={} binary_summary={} caller_environment={} service_environment={} effective_environment={} persistence_state={} persistence_enabled={} schema={} lock_held={} threads={} turns={} active={} interrupted={} snapshot_updated_at={}",
         service.service_name,
         service.observation_state,
         service.loaded.as_deref().unwrap_or("none"),
@@ -1256,7 +1305,16 @@ fn print_app_server_service_runtime(
         service.binary_summary.as_deref().unwrap_or("none"),
         service.caller_environment.source,
         service.service_environment.as_ref().map(|environment| environment.source.as_str()).unwrap_or("unavailable"),
-        service.effective_environment
+        service.effective_environment,
+        service.persistence.observation_state,
+        service.persistence.persistence_enabled.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.schema.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.lock_held.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.thread_count.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.turn_count.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.active_count.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.interrupted_count.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string()),
+        service.persistence.snapshot_updated_at.map(|value| value.to_string()).unwrap_or_else(|| "unavailable".to_string())
     );
     println!(
         "effective_live_adapter_gates: source={} ok={} state={} gates={} enabled={} disabled={}",

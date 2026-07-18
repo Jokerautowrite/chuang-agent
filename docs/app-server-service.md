@@ -99,6 +99,17 @@ restarted and the old thread id continued successfully. The second turn reported
 The service remained `active/running` with `NRestarts=0`, probe succeeded, the socket stayed `0600`,
 and the SQLite snapshot contained one thread/two turns with no forbidden runtime keys.
 
+The 2026-07-18 persistence and service validation also confirmed:
+
+- SQLite uses one OS advisory exclusive lock per database, and a single daemon owns the lock for
+  the configured database.
+- `server/status` is a read-only aggregate operation.
+- `status` and `doctor` read real persistence state through the canonical socket; if that read
+  fails, the persistence state is reported only as `unavailable`.
+- A second daemon pointed at the same database returns `app_server_db_locked`.
+- The SQLite lock and canonical socket both use permission mode `0600`.
+- The service preserves persistence across a service restart.
+
 ## Health Check
 
 ```bash

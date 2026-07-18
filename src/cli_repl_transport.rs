@@ -28,6 +28,7 @@ pub(crate) struct ReplTurnTransport {
     socket: Option<PathBuf>,
     workspace_root: PathBuf,
     thread_id: Option<String>,
+    resume_latest_thread: bool,
 }
 
 impl ReplTurnTransport {
@@ -48,7 +49,7 @@ impl ReplTurnTransport {
         Self::from_parts(mode.as_deref(), stub, socket, workspace_root)
     }
 
-    fn from_parts(
+    pub(crate) fn from_parts(
         mode: Option<&str>,
         stub: bool,
         socket: PathBuf,
@@ -60,12 +61,14 @@ impl ReplTurnTransport {
                 socket: None,
                 workspace_root,
                 thread_id: None,
+                resume_latest_thread: false,
             }),
             ReplTransportKind::AppServerSocket => Ok(Self {
                 kind: ReplTransportKind::AppServerSocket,
                 socket: Some(socket),
                 workspace_root,
                 thread_id: None,
+                resume_latest_thread: true,
             }),
         }
     }
@@ -87,10 +90,16 @@ impl ReplTurnTransport {
                 let socket = self.socket.clone().expect("socket transport has socket");
                 let workspace_root = self.workspace_root.clone();
                 let thread_id = self.thread_id.clone();
+                let resume_latest_thread = self.resume_latest_thread;
                 spawn_repl_turn_task(
                     user_input.clone(),
                     true,
                     move |guidance_path, progress_path, live_control_gate| {
+                        let thread_id = match (thread_id.as_deref(), resume_latest_thread) {
+                            (Some(thread_id), _) => Some(thread_id.to_string()),
+                            (None, true) => resolve_latest_thread_id(&socket, &workspace_root)?,
+                            (None, false) => None,
+                        };
                         app_server_turn(
                             &socket,
                             &workspace_root,
@@ -119,7 +128,13 @@ impl ReplTurnTransport {
             .filter(|value| !value.trim().is_empty())
         {
             self.thread_id = Some(thread_id.to_string());
+            self.resume_latest_thread = true;
         }
+    }
+
+    pub(crate) fn start_new_thread(&mut self) {
+        self.thread_id = None;
+        self.resume_latest_thread = false;
     }
 
     pub(crate) fn workspace_root(&self) -> &Path {
@@ -191,6 +206,41 @@ fn app_server_turn(
         live_control_gate,
     )?;
     runtime_result_from_app_server_response(user_input, &response)
+}
+
+fn resolve_latest_thread_id(
+    socket: &Path,
+    workspace_root: &Path,
+) -> Result<Option<String>, String> {
+    let response = app_server_rpc_request(
+        socket,
+        json!({
+            "id": 1,
+            "method": "thread/list",
+            "params": {},
+        }),
+    )?;
+    let threads = response
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "app_server_client_thread_list_missing_data".to_string())?;
+    let workspace_root = workspace_root.to_string_lossy();
+    Ok(threads.iter().find_map(|thread| {
+        let thread_workspace = thread
+            .get("workspaceRoot")
+            .or_else(|| thread.get("cwd"))
+            .and_then(Value::as_str)
+            .map(str::trim)?;
+        if thread_workspace != workspace_root {
+            return None;
+        }
+        thread
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|thread_id| !thread_id.is_empty())
+            .map(str::to_string)
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -736,11 +786,15 @@ mod tests {
     }
 
     fn final_turn_response(request_id: &Value, answer: &str) -> Value {
+        final_turn_response_for_thread(request_id, "socket-thread-1", answer)
+    }
+
+    fn final_turn_response_for_thread(request_id: &Value, thread_id: &str, answer: &str) -> Value {
         json!({
             "id": request_id,
             "result": {
                 "thread": {
-                    "id": "socket-thread-1",
+                    "id": thread_id,
                     "turns": [{"items": [{"type": "agentMessage", "text": answer}]}]
                 },
                 "turn": {
@@ -790,19 +844,207 @@ mod tests {
     }
 
     #[test]
+    fn first_socket_turn_filters_thread_list_by_workspace() {
+        let socket = temp_socket("thread-workspace-filter");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let workspace = PathBuf::from("/tmp/chuang-workspace-filter");
+        let server_workspace = workspace.clone();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("thread/list should connect");
+            let mut reader = BufReader::new(stream.try_clone().expect("stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("thread/list request should read");
+            let list_request: Value =
+                serde_json::from_str(line.trim()).expect("thread/list request should be JSON");
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "id": list_request["id"],
+                    "result": {
+                        "data": [
+                            {
+                                "id": "other-workspace-thread",
+                                "workspaceRoot": "/tmp/other-workspace",
+                                "updatedAt": 200
+                            },
+                            {
+                                "id": "matching-workspace-thread",
+                                "workspaceRoot": server_workspace,
+                                "updatedAt": 100
+                            }
+                        ]
+                    }
+                })
+            )
+            .expect("thread/list response should write");
+
+            let (stream, _) = listener.accept().expect("turn/start should connect");
+            let mut reader = BufReader::new(stream.try_clone().expect("stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("turn/start request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+            let thread_id = request["params"]["threadId"]
+                .as_str()
+                .expect("selected thread id should be present")
+                .to_string();
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                final_turn_response_for_thread(&request["id"], &thread_id, "answer")
+            )
+            .expect("turn response should write");
+            (list_request, request)
+        });
+
+        let mut transport =
+            ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace.clone())
+                .expect("socket transport should construct");
+        let result = receive_turn(transport.spawn_turn(test_options(), "first".into(), Vec::new()));
+        transport.capture_result(&result);
+        let (list_request, turn_request) = server.join().expect("server should join");
+
+        assert_eq!(list_request["method"], "thread/list");
+        assert_eq!(
+            turn_request["params"]["threadId"],
+            "matching-workspace-thread"
+        );
+        assert_eq!(
+            turn_request["params"]["workspaceRoot"],
+            workspace.display().to_string()
+        );
+        assert_eq!(transport.thread_id(), Some("matching-workspace-thread"));
+    }
+
+    #[test]
+    fn new_thread_skips_auto_resume_and_reuses_the_new_thread_afterward() {
+        let socket = temp_socket("new-thread");
+        let listener = UnixListener::bind(&socket).expect("test socket should bind");
+        let workspace = PathBuf::from("/tmp/chuang-new-thread");
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("thread/list should connect");
+            let mut reader = BufReader::new(stream.try_clone().expect("stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("list request should read");
+            let list_request: Value =
+                serde_json::from_str(line.trim()).expect("list request should be JSON");
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "id": list_request["id"],
+                    "result": {
+                        "data": [{
+                            "id": "old-thread",
+                            "workspaceRoot": "/tmp/chuang-new-thread",
+                            "updatedAt": 10
+                        }]
+                    }
+                })
+            )
+            .expect("list response should write");
+
+            let mut requests = Vec::new();
+            for expected_thread_id in ["old-thread", "", "new-thread"] {
+                let (stream, _) = listener.accept().expect("turn/start should connect");
+                let mut reader =
+                    BufReader::new(stream.try_clone().expect("stream clone should work"));
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("turn/start request should read");
+                let request: Value =
+                    serde_json::from_str(line.trim()).expect("turn/start request should be JSON");
+                assert_eq!(request["params"]["threadId"], expected_thread_id);
+                let mut writer = stream;
+                let response_thread_id = if expected_thread_id.is_empty() {
+                    "new-thread"
+                } else {
+                    expected_thread_id
+                };
+                writeln!(
+                    writer,
+                    "{}",
+                    final_turn_response_for_thread(&request["id"], response_thread_id, "answer")
+                )
+                .expect("turn response should write");
+                requests.push(request);
+            }
+            requests
+        });
+
+        let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
+            .expect("socket transport should construct");
+        let first = receive_turn(transport.spawn_turn(test_options(), "first".into(), Vec::new()));
+        transport.capture_result(&first);
+        transport.start_new_thread();
+        assert_eq!(transport.thread_id(), None);
+
+        let second =
+            receive_turn(transport.spawn_turn(test_options(), "second".into(), Vec::new()));
+        transport.capture_result(&second);
+        let third = receive_turn(transport.spawn_turn(test_options(), "third".into(), Vec::new()));
+        transport.capture_result(&third);
+        let requests = server.join().expect("server should join");
+
+        assert_eq!(requests[0]["params"]["threadId"], "old-thread");
+        assert_eq!(requests[1]["params"]["threadId"], "");
+        assert_eq!(requests[2]["params"]["threadId"], "new-thread");
+        assert_eq!(transport.thread_id(), Some("new-thread"));
+    }
+
+    #[test]
     fn socket_transport_reuses_one_thread_and_maps_turn_metadata() {
         let socket = temp_socket("thread-reuse");
         let listener = UnixListener::bind(&socket).expect("test socket should bind");
         let server = thread::spawn(move || {
             let mut requests = Vec::new();
+            let (stream, _) = listener.accept().expect("thread/list should connect");
+            let mut reader = BufReader::new(stream.try_clone().expect("stream clone should work"));
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("thread/list request should read");
+            let request: Value =
+                serde_json::from_str(line.trim()).expect("thread/list request should be JSON");
+            requests.push(request.clone());
+            let mut writer = stream;
+            writeln!(
+                writer,
+                "{}",
+                json!({
+                    "id": request["id"],
+                    "result": {
+                        "data": [{
+                            "id": "socket-thread-1",
+                            "workspaceRoot": env::current_dir().expect("workspace should resolve"),
+                            "updatedAt": 2
+                        }]
+                    }
+                })
+            )
+            .expect("thread/list response should write");
+
             for index in 1..=2 {
-                let (stream, _) = listener.accept().expect("socket client should connect");
+                let (stream, _) = listener.accept().expect("turn socket should connect");
                 let mut reader =
                     BufReader::new(stream.try_clone().expect("stream clone should work"));
                 let mut line = String::new();
-                reader.read_line(&mut line).expect("request should read");
+                reader
+                    .read_line(&mut line)
+                    .expect("turn request should read");
                 let request: Value =
-                    serde_json::from_str(line.trim()).expect("request should be JSON");
+                    serde_json::from_str(line.trim()).expect("turn request should be JSON");
                 requests.push(request.clone());
                 let mut writer = stream;
                 writeln!(
@@ -871,14 +1113,15 @@ mod tests {
             receive_turn(transport.spawn_turn(test_options(), "second".into(), Vec::new()));
         transport.capture_result(&second);
         let requests = server.join().expect("server should join");
-        assert_eq!(requests[0]["params"]["threadId"], "");
+        assert_eq!(requests[0]["method"], "thread/list");
         assert_eq!(requests[1]["params"]["threadId"], "socket-thread-1");
+        assert_eq!(requests[2]["params"]["threadId"], "socket-thread-1");
         assert_eq!(
-            requests[0]["params"]["workspaceRoot"],
+            requests[1]["params"]["workspaceRoot"],
             workspace.display().to_string()
         );
         assert_eq!(
-            requests[1]["params"]["workspaceRoot"],
+            requests[2]["params"]["workspaceRoot"],
             workspace.display().to_string()
         );
     }
@@ -985,6 +1228,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
         assert!(turn.supports_live_control);
         let progress_path = turn.progress_path.clone();
@@ -1084,6 +1328,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
         let progress_path = turn.progress_path.clone();
         assert_eq!(
@@ -1177,6 +1422,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
         started_rx.recv().expect("turn should start");
         assert_eq!(
@@ -1221,6 +1467,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "first".into(), Vec::new());
         let progress_path = turn.progress_path.clone();
         ready_rx.recv().expect("start request should arrive");
@@ -1296,6 +1543,7 @@ mod tests {
         let mut transport =
             ReplTurnTransport::from_parts(Some("socket"), false, socket.clone(), workspace)
                 .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "do not fall back".into(), Vec::new());
         let error = turn
             .receiver
@@ -1328,6 +1576,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "do not fall back".into(), Vec::new());
         let error = turn
             .receiver
@@ -1372,6 +1621,7 @@ mod tests {
         let workspace = env::current_dir().expect("workspace should resolve");
         let mut transport = ReplTurnTransport::from_parts(Some("socket"), false, socket, workspace)
             .expect("socket transport should construct");
+        transport.start_new_thread();
         let turn = transport.spawn_turn(test_options(), "do not fall back".into(), Vec::new());
         let error = turn
             .receiver

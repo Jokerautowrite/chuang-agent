@@ -11,6 +11,7 @@ chrono = { version = "0.4", features = ["clock", "std"] }
 crossterm = "0.28"
 ratatui = "0.30"
 bytes = "1"
+fs2 = "0.4"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-rustls = "0.26"

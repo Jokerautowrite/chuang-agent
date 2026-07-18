@@ -365,6 +365,104 @@ fn app_server_daemon_probe_and_ask_use_canonical_socket() {
 }
 
 #[test]
+fn app_server_daemon_rejects_second_socket_for_same_normalized_database() {
+    let workspace = temp_workspace("daemon-single-instance");
+    write_basic_stub_workspace(&workspace);
+    let socket_one = app_server_socket("daemon-single-instance-one");
+    let socket_two = app_server_socket("daemon-single-instance-two");
+    let mut first = spawn_app_server_daemon(&socket_one, Some(&workspace));
+    wait_for_app_server_socket(&socket_one);
+
+    let mut second = spawn_app_server_daemon(&socket_two, Some(&workspace));
+    let status = loop {
+        if let Some(status) = second.try_wait().expect("second daemon should be waitable") {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let mut stderr = String::new();
+    second
+        .stderr
+        .take()
+        .expect("second daemon stderr should exist")
+        .read_to_string(&mut stderr)
+        .expect("second daemon stderr should read");
+
+    assert!(!status.success(), "second daemon should be rejected");
+    assert!(stderr.contains("app_server_db_locked"), "stderr={stderr}");
+    assert!(
+        workspace.join("data/chuang-agent.db.lock").is_file(),
+        "database lock file should be retained"
+    );
+
+    stop_app_server_daemon(&mut first);
+}
+
+#[test]
+fn app_server_server_status_reports_persistent_aggregate_without_snapshot_text() {
+    let workspace = temp_workspace("daemon-server-status");
+    write_basic_stub_workspace(&workspace);
+    let socket = app_server_socket("daemon-server-status");
+    let mut daemon = spawn_app_server_daemon(&socket, Some(&workspace));
+    wait_for_app_server_socket(&socket);
+
+    let first = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 1,
+            "method": "turn/start",
+            "params": {
+                "workspaceRoot": workspace,
+                "text": "first status turn"
+            }
+        }),
+    );
+    let thread_id = first["result"]["thread"]["id"]
+        .as_str()
+        .expect("first turn should create a thread")
+        .to_string();
+    let second = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 2,
+            "method": "turn/start",
+            "params": {
+                "workspaceRoot": workspace,
+                "threadId": thread_id,
+                "text": "second status turn"
+            }
+        }),
+    );
+    assert_eq!(second["result"]["turn"]["status"], "completed");
+
+    let status = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 3,
+            "method": "server/status",
+            "params": {}
+        }),
+    );
+    let persistence = &status["result"]["persistence"];
+    assert_eq!(persistence["enabled"], true);
+    assert_eq!(persistence["schema"], 1);
+    assert_eq!(persistence["lock_held"], true);
+    assert_eq!(persistence["thread_count"], 1);
+    assert_eq!(persistence["turn_count"], 2);
+    assert_eq!(persistence["active_count"], 0);
+    assert_eq!(persistence["interrupted_count"], 0);
+    assert!(persistence["snapshot_updated_at"].as_u64().is_some());
+
+    let rendered = serde_json::to_string(&status).expect("status should serialize");
+    assert!(!rendered.contains("first status turn"));
+    assert!(!rendered.contains("stubbed_post_ok"));
+    assert!(!rendered.contains("providerMeta"));
+    assert!(!rendered.contains("toolTrace"));
+
+    stop_app_server_daemon(&mut daemon);
+}
+
+#[test]
 fn app_server_daemon_recovers_sqlite_thread_and_recent_history_after_restart() {
     let workspace = temp_workspace("daemon-sqlite-restart-recovery");
     write_basic_stub_workspace(&workspace);

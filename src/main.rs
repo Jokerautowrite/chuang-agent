@@ -692,7 +692,7 @@ fn repl_interactive_loop_legacy(
                                 &mut verbose,
                                 &mut show_trace,
                                 &mut running,
-                                &conversation_history,
+                                &mut conversation_history,
                                 &mut pending_guidance,
                                 &mut pending_approval,
                                 &mut stats,
@@ -880,6 +880,23 @@ enum InputAction {
     Exit,
 }
 
+pub(crate) fn reset_repl_session_for_new(
+    running: bool,
+    conversation_history: &mut Vec<ConversationHistoryItem>,
+    pending_guidance: &mut Vec<String>,
+    pending_approval: &mut Option<ReplPendingApproval>,
+    transport: &mut ReplTurnTransport,
+) -> Result<(), String> {
+    if running {
+        return Err("repl_new_rejected_while_running".to_string());
+    }
+    conversation_history.clear();
+    pending_guidance.clear();
+    pending_approval.take();
+    transport.start_new_thread();
+    Ok(())
+}
+
 fn process_repl_input(
     raw_input: &str,
     options: &CliOptions,
@@ -887,7 +904,7 @@ fn process_repl_input(
     verbose: &mut bool,
     show_trace: &mut bool,
     running: &mut Option<RunningTurn>,
-    conversation_history: &[ConversationHistoryItem],
+    conversation_history: &mut Vec<ConversationHistoryItem>,
     pending_guidance: &mut Vec<String>,
     pending_approval: &mut Option<ReplPendingApproval>,
     stats: &mut ReplSessionStats,
@@ -911,6 +928,26 @@ fn process_repl_input(
         return Ok(InputAction::Exit);
     }
     if input.is_empty() {
+        return Ok(InputAction::Continue);
+    }
+
+    if input.eq_ignore_ascii_case("/new") {
+        match reset_repl_session_for_new(
+            running.is_some(),
+            conversation_history,
+            pending_guidance,
+            pending_approval,
+            transport,
+        ) {
+            Ok(()) => chrome.write_body(
+                stdout,
+                "已新建对话；本地上下文已清空，下一轮将创建新的 thread。\n",
+            )?,
+            Err(_) => chrome.write_body(
+                stdout,
+                "当前任务仍在运行，不能 /new；请先 /stop 或等待完成。\n",
+            )?,
+        }
         return Ok(InputAction::Continue);
     }
 
@@ -2085,7 +2122,7 @@ pub(crate) fn handle_repl_command(
         "/help" | "/?" => {
             writeln!(
                 out,
-                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /stop      在安全点停止当前任务\n  /trace     详细模式：显示准备步骤/思考轮次/技术汇总（排障用）\n  /notrace   对话默认：能快答就只出答复；有工具才显示在干嘛\n  /verbose   显示完整运行元数据\n  /quiet     关闭 verbose（不影响 /trace）\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n底部三行固定（对齐 Grok）：分隔线 · 输入框（> 打字）· 状态栏。\n应用自绘输入，支持中文；Enter 发送。不打印隐藏思维链和密钥。\n"
+                "\n命令\n  /help      查看帮助\n  /status    查看运行状态\n  /history   查看最近对话\n  /new       清空本地上下文并从新 thread 开始（仅空闲时）\n  /stop      在安全点停止当前任务\n  /trace     详细模式：显示准备步骤/思考轮次/技术汇总（排障用）\n  /notrace   对话默认：能快答就只出答复；有工具才显示在干嘛\n  /verbose   显示完整运行元数据\n  /quiet     关闭 verbose（不影响 /trace）\n  /clear     清屏\n  /exit      退出\n\n任务进行中\n  !补充内容  在下一个安全点补充要求\n  直接输入文字也会加入当前任务\n\n底部三行固定（对齐 Grok）：分隔线 · 输入框（> 打字）· 状态栏。\n应用自绘输入，支持中文；Enter 发送。不打印隐藏思维链和密钥。\n"
             )
             .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
@@ -2343,7 +2380,7 @@ fn render_repl_banner(
         .unwrap_or(false);
     if force_quiet || !fancy {
         return format!(
-            "{ANSI_BOLD}{ANSI_CYAN}chuang{ANSI_RESET}  {ANSI_DIM}{} · {} · {}{ANSI_RESET}\n{ANSI_DIM}/help · /stop · /exit · /trace{ANSI_RESET}\n",
+            "{ANSI_BOLD}{ANSI_CYAN}chuang{ANSI_RESET}  {ANSI_DIM}{} · {} · {}{ANSI_RESET}\n{ANSI_DIM}/help · /new · /stop · /exit · /trace{ANSI_RESET}\n",
             summary.model_name, summary.permission_profile, cwd_short
         );
     }
@@ -2360,7 +2397,7 @@ fn render_repl_banner(
             "{ANSI_DIM}{} · {} · {}{ANSI_RESET}",
             summary.model_name, summary.permission_profile, cwd_short
         ),
-        format!("{ANSI_DIM}/help · /stop · /exit · /trace{ANSI_RESET}"),
+        format!("{ANSI_DIM}/help · /new · /stop · /exit · /trace{ANSI_RESET}"),
         String::new(),
     ]
     .join("\n")
@@ -2954,6 +2991,49 @@ mod tests {
         ];
 
         assert!(recent_repl_conversation_history(&history, 0).is_empty());
+    }
+
+    #[test]
+    fn new_repl_session_clears_local_state_and_rejects_running_turns() {
+        let mut transport = ReplTurnTransport::from_parts(
+            Some("local"),
+            false,
+            PathBuf::from("/tmp/unused.sock"),
+            PathBuf::from("/tmp/chuang-test-workspace"),
+        )
+        .expect("local transport should construct");
+        let mut history = vec![ConversationHistoryItem {
+            role: "user".to_string(),
+            text: "old".to_string(),
+        }];
+        let mut guidance = vec!["queued".to_string()];
+        let mut approval = Some(approval_fixture("approval-1", "read", "reason"));
+
+        reset_repl_session_for_new(
+            false,
+            &mut history,
+            &mut guidance,
+            &mut approval,
+            &mut transport,
+        )
+        .expect("idle /new should reset the session");
+        assert!(history.is_empty());
+        assert!(guidance.is_empty());
+        assert!(approval.is_none());
+
+        history.push(ConversationHistoryItem {
+            role: "user".to_string(),
+            text: "keep".to_string(),
+        });
+        assert!(reset_repl_session_for_new(
+            true,
+            &mut history,
+            &mut guidance,
+            &mut approval,
+            &mut transport,
+        )
+        .is_err());
+        assert_eq!(history[0].text, "keep");
     }
 
     #[test]

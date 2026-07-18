@@ -52,3 +52,14 @@ Live responses may expose full runtime `providerMeta`, but the durable snapshot 
 tool surfaces, provider credentials, and other runtime-only metadata are not persisted. Approval
 turns use `status=human_input_required`; cancelled, failed, interrupted, and `provider_error` turns
 remain visible but are not injected into later model conversation history.
+
+## 2026-07-18 Acceptance
+
+- On the terminal's first socket turn, the REPL queries `thread/list`, filters threads by the exact
+  `workspaceRoot`/`cwd`, selects the latest matching thread, and automatically resumes it.
+- A `thread/list` query failure is reported explicitly as an error; the REPL never falls back to
+  the local runtime path.
+- Both legacy and Ratatui/TUI REPLs support `/new`. It clears the local terminal's current-thread
+  context and forces the next turn to create a new thread instead of resuming the previous one.
+- Real acceptance covered continuation with a canary phrase across a daemon restart, followed by
+  `/new` and verification that the next turn used a new thread.

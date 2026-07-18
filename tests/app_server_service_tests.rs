@@ -1,6 +1,12 @@
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::app_server_service::{
+    app_server_persistence_runtime_snapshot_from_socket,
     app_server_service_runtime_snapshot_from_evidence, effective_gate_value,
     AppServerServiceEvidence,
 };
@@ -125,4 +131,84 @@ fn active_service_without_readable_process_environment_falls_back_to_caller() {
         snapshot.observation_error.as_deref(),
         Some("service_process_environment_unreadable")
     );
+}
+
+#[test]
+fn persistence_snapshot_reads_only_aggregate_fields_from_canonical_socket() {
+    let socket = std::env::temp_dir().join(format!(
+        "chuang-agent-service-status-{}.sock",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos()
+    ));
+    let listener = UnixListener::bind(&socket).expect("status socket should bind");
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("status client should connect");
+        let mut reader = BufReader::new(stream.try_clone().expect("stream should clone"));
+        let mut request = String::new();
+        reader
+            .read_line(&mut request)
+            .expect("status request should read");
+        assert!(request.contains("\"server/status\""));
+        let mut stream = stream;
+        writeln!(
+            stream,
+            "{}",
+            serde_json::json!({
+                "id": 1,
+                "result": {
+                    "persistence": {
+                        "enabled": true,
+                        "schema": 1,
+                        "lock_held": true,
+                        "thread_count": 2,
+                        "turn_count": 5,
+                        "active_count": 1,
+                        "interrupted_count": 2,
+                        "snapshot_updated_at": 123456789,
+                    }
+                }
+            })
+        )
+        .expect("status response should write");
+    });
+
+    let snapshot = app_server_persistence_runtime_snapshot_from_socket(&socket);
+    server.join().expect("status server should finish");
+
+    assert_eq!(snapshot.observation_state, "available");
+    assert_eq!(snapshot.persistence_enabled, Some(true));
+    assert_eq!(snapshot.schema, Some(1));
+    assert_eq!(snapshot.lock_held, Some(true));
+    assert_eq!(snapshot.thread_count, Some(2));
+    assert_eq!(snapshot.turn_count, Some(5));
+    assert_eq!(snapshot.active_count, Some(1));
+    assert_eq!(snapshot.interrupted_count, Some(2));
+    assert_eq!(snapshot.snapshot_updated_at, Some(123456789));
+    let rendered = serde_json::to_string(&snapshot).expect("snapshot should serialize");
+    assert!(!rendered.contains("provider"));
+    assert!(!rendered.contains("tool"));
+    assert!(!rendered.contains("secret"));
+}
+
+#[test]
+fn persistence_snapshot_failure_is_unavailable_without_breaking_service_snapshot() {
+    let socket = PathBuf::from(format!(
+        "/tmp/chuang-agent-missing-status-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos()
+    ));
+    let persistence = app_server_persistence_runtime_snapshot_from_socket(&socket);
+    assert_eq!(persistence.observation_state, "unavailable");
+    assert!(persistence.persistence_enabled.is_none());
+
+    let snapshot = app_server_service_runtime_snapshot_from_evidence(
+        evidence(Some("inactive"), None, None),
+        BTreeMap::new(),
+    );
+    assert_eq!(snapshot.observation_state, "service_not_active");
+    assert_eq!(snapshot.persistence.observation_state, "unavailable");
 }

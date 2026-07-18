@@ -43,6 +43,7 @@ use crate::{
     insert_str_at, merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
     readable_runtime_error, recent_repl_conversation_history, record_repl_conversation_turn,
     render_approval_details, render_completion_metadata_line, render_repl_answer_text,
+    reset_repl_session_for_new,
     LiveControlEnqueueResult, ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
     StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
@@ -171,7 +172,7 @@ impl TuiApp {
             usage,
             model,
             elapsed: String::new(),
-            footer: "Enter 发送 · PgUp/PgDn 翻历史 · /help · /stop · /exit".to_string(),
+            footer: "Enter 发送 · PgUp/PgDn 翻历史 · /help · /new · /stop · /exit".to_string(),
             activity: String::new(),
             running: false,
             banner_cleared: false,
@@ -267,7 +268,7 @@ impl TuiApp {
         self.model = format_model_label(stats, effort, show_trace);
         self.usage = format_context_progress(stats.context_tokens, stats.context_max_tokens);
         self.elapsed.clear();
-        self.footer = "Enter 发送 · PgUp/PgDn 翻历史 · /help · /stop · /exit".to_string();
+        self.footer = "Enter 发送 · PgUp/PgDn 翻历史 · /help · /new · /stop · /exit".to_string();
         self.activity.clear();
     }
 
@@ -460,7 +461,7 @@ fn run_app(
                                     verbose,
                                     show_trace,
                                     &mut running,
-                                    &conversation_history,
+                                    &mut conversation_history,
                                     &mut pending_guidance,
                                     &mut pending_approval,
                                     &mut stats,
@@ -553,7 +554,7 @@ fn run_app(
                             verbose,
                             show_trace,
                             &mut running,
-                            &conversation_history,
+                            &mut conversation_history,
                             &mut pending_guidance,
                             &mut pending_approval,
                             &mut stats,
@@ -607,7 +608,7 @@ fn handle_submit(
     verbose: &mut bool,
     show_trace: &mut bool,
     running: &mut Option<RunningTurn>,
-    conversation_history: &[ConversationHistoryItem],
+    conversation_history: &mut Vec<ConversationHistoryItem>,
     pending_guidance: &mut Vec<String>,
     pending_approval: &mut Option<ReplPendingApproval>,
     stats: &mut ReplSessionStats,
@@ -630,6 +631,26 @@ fn handle_submit(
         return Ok(SubmitResult::Exit);
     }
     if input.is_empty() {
+        return Ok(SubmitResult::Continue);
+    }
+
+    if input.eq_ignore_ascii_case("/new") {
+        match reset_repl_session_for_new(
+            running.is_some(),
+            conversation_history,
+            pending_guidance,
+            pending_approval,
+            transport,
+        ) {
+            Ok(()) => app.push(
+                LineKind::System,
+                "已新建对话；本地上下文已清空，下一轮将创建新的 thread。",
+            ),
+            Err(_) => app.push(
+                LineKind::System,
+                "当前任务仍在运行，不能 /new；请先 /stop 或等待完成。",
+            ),
+        }
         return Ok(SubmitResult::Continue);
     }
 
@@ -912,6 +933,7 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/help", "查看帮助"),
     ("/status", "查看运行状态"),
     ("/history", "查看最近对话"),
+    ("/new", "新建对话（仅空闲时）"),
     ("/stop", "在安全点停止当前任务"),
     ("/trace", "详细过程模式（排障）"),
     ("/notrace", "恢复默认简洁过程"),

@@ -1,3 +1,12 @@
+# 2026-07-18 终端按 workspace 自动续接 + 同库单 daemon 状态面
+- 多代理并行完成两条互不重叠的实现线：REPL 自动续接与 `/new`；SQLite 单库 daemon 锁与真实 persistence 状态面。范围仅限 Chuang 终端，不涉及 Agent Hub、Feishu 或 Hermes。
+- `ReplTurnTransport` 在首次 socket turn 前调用 `thread/list`，按归一化 workspace 精确匹配并选择最新 thread；列表查询失败或协议异常会直接返回结构化错误，不降级 local。显式 `/new` 会清空本地会话状态并设置一次性 force-new 标记，下一轮创建新 thread。
+- `app-server daemon` 使用 `<normalized_db_path>.lock` 的 advisory exclusive lock 保证一个 SQLite 库只有一个 writer daemon；锁文件与 canonical socket 均固定 `0600`。第二 daemon 的稳定错误码为 `app_server_db_locked`。
+- 新增 `server/status` 只读 RPC 与 `app_server_service.persistence` 投影，状态/doctor 从 canonical socket 读取 schema、lock、thread/turn/active/interrupted 聚合；服务不可达时只显示 `unavailable`，且不会泄漏 snapshot 内容、provider metadata、tool output 或 secret。
+- 真实跨重启验收：无 thread id 的新终端自动取回旧暗号 `PERSIST_ANCHOR_20260718`；执行 `/new` 后得到 `NEW_THREAD_OK_20260718`。最终 live 聚合为 schema `1`、lock held=`true`、thread `2`、turn `4`、active `0`、interrupted `0`。
+- service 最终保持 `active/running`、PID `2436020`、`NRestarts=0`；lock/socket mode 均为 `0600`。同库第二 daemon 真实启动返回 `app_server_db_locked`、exit `1`。
+- 验证已完成且不再重复跑审计：完整隔离测试全绿；binary unit `123/123`、service `5/5`、doctor `4/4`；`cargo check --all-targets`、`cargo build`、focused rustfmt、`git diff --check` 通过。
+
 # 2026-07-18 app-server SQLite thread/turn snapshot 持久化
 - daemon 启动从 workspace runtime config 的归一化 `db_path` 加载 SQLite snapshot；thread/turn 状态以事务方式保存到 `app_server_snapshots`，并恢复 sequence floor，避免重启后复用 thread/turn id。
 - 保存范围收窄为 thread 基本字段与 turn 的用户文本、助手文本、模型名、状态、更新时间，以及 allowlist 后的 `pending_approval_id` / `pending_approval_path` / `app_server_interruption_reason` metadata。
