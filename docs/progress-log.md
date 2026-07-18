@@ -7,6 +7,7 @@
 - 完整测试、`cargo check --all-targets`、定向回归、build、rustfmt check 和 `git diff --check` 均通过。
 - 真实 systemd user service 已完成跨重启收据：旧 `chuang-thread-1` 在第二次重启后继续成功，第二轮 history injected=`true`、item count=`2`、turn count=`1`；服务 `active/running`、`NRestarts=0`、probe ok、socket `0600`。
 - live SQLite snapshot 为 schema `1`、thread `1`、turn `2`、forbidden runtime key `0`。支持拓扑限定为一个 `db_path` 对应一个 canonical daemon，不支持多个手工 daemon 共写同库。
+- 核心实现提交 `8ad4293 Persist app-server threads across restarts` 已推送到 `origin/main`，远端回读 HEAD 为 `8ad4293a1da9efb04d248b858e6729dfc21dc4c6`；无关工作区改动未暂存、未推送。
 
 # 2026-07-18 app-server streamed progress + guidance/interrupt
 - 多代理并行完成 daemon live turn 与 REPL socket control 两条实现线；持久化只做设计判断，本轮不和并发状态机混做。
@@ -19,7 +20,7 @@
 - 真实 interrupt：`/tmp/chuang-live-control-1784407434165014603`，ack=`interrupt_requested`、progress=`turn_cancelled`、final=`cancelled`。
 - 真实 guidance：`/tmp/chuang-live-guidance-1784407542279886083`，ack=`guidance_queued`、progress=`guidance_injected`、final=`completed`，答复含 `LIVE_GUIDANCE_OK_1784407542279886083`。
 - 完整隔离测试全绿；app-server `23/23`、Cargo `repl_` filter `51`、transport `11/11`，`cargo check --all-targets`、`cargo build`、focused rustfmt 与 `git diff --check` 通过。
-- 下一步：SQLite 持久化 daemon thread/turn snapshot；重启时把 running turn 收口为 interrupted，不自动重放。
+- 历史说明：这里记录的 SQLite 持久化下一步已由上方 `8ad4293` 完成并通过真实跨重启验收。
 
 # 2026-07-18 终端统一 app-server + 真实服务状态面（历史基线，以上方 live-turn 为准）
 - 并行完成并集成两条主线：剩余 context-budget 测试修复；交互 REPL 接入 Unix socket canonical app-server。没有改 Agent Hub、Feishu，也没有纳入 TN 站点或小策审计文档。
