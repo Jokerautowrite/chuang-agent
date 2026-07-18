@@ -27,11 +27,11 @@
       "kind": "control_adapter",
       "display_name": "Chuang Allowlisted Control Adapter",
       "command": "../scripts/chuang-real-control-adapter.py",
-      "config_path": "../config/control-allowlist.example.json",
+      "config_path": "../config/control-allowlist.json",
       "capabilities": ["service-control", "allowlist"],
       "enabled": false,
       "dry_run_default": true,
-      "notes": "Dry-run unless CHUANG_REAL_CONTROL_ENABLE=1."
+      "notes": "Dry-run unless CHUANG_REAL_CONTROL_ENABLE=1. Default allowlist has no Feishu units."
     },
     {
       "id": "chuang-real-actuator",

@@ -53,11 +53,24 @@ actuator_program = "sh"
 actuator_args = "./scripts/chuang-actuator-adapter-example.sh --json"
 actuator_timeout_ms = 30000
 
+# Protocol-safe example control (smoke). Operator machines should switch to the
+# real allowlisted adapter below (no Feishu units in default allowlist).
 control = "command"
 program = "sh"
 list_args = "./scripts/chuang-control-adapter-example.sh list --json"
 apply_args = "./scripts/chuang-control-adapter-example.sh apply --json"
 control_timeout_ms = 30000
+
+# Real allowlisted control (recommended local operator config):
+# control = "command"
+# program = "./scripts/chuang-real-control-adapter.py"
+# list_args = "list --json --allowlist ./config/control-allowlist.json"
+# apply_args = "apply --json --allowlist ./config/control-allowlist.json"
+# control_timeout_ms = 30000
+# Live apply still requires CHUANG_REAL_CONTROL_ENABLE=1 + governance/--approve.
+# Real actuator:
+# actuator_program = "./scripts/chuang-real-actuator-adapter.py"
+# actuator_args = "--json --allowlist ./config/actuator-allowlist.json"
 
 context_engine = "deterministic_budget"
 context_max_tokens = 272000
@@ -65,10 +78,3 @@ context_reserve_system_tokens = 32
 context_min_working_tokens = 1
 context_max_tool_results = 5
 context_max_memory_segments = 5
-
-# For a command-backed control plane:
-# control = "command"
-# program = "/path/to/chuang-control-adapter"
-# list_args = "list --json"
-# apply_args = "apply --json"
-# timeout_ms = 30000

@@ -12,7 +12,7 @@
       "metadata": {
         "channel": "systemd-user",
         "owner": "chuang",
-        "note": "Default allowlist excludes Feishu; add feishu unit only when explicitly enabled"
+        "note": "Feishu bridge intentionally excluded from default allowlist"
       }
     }
   ]

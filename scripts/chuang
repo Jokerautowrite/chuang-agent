@@ -60,7 +60,7 @@ show_usage() {
   chuang status --config config.toml [--json]
   chuang doctor --config config.toml
   chuang browser status|start|stop   无头 Chrome（CDP）；工具也可自动拉起
-  chuang field-accept            本机 15 项快速验收（RTK/规范/goal/浏览器…）
+  chuang field-accept            本机 20 项快速验收（RTK/control/spawn/knowledge…）
   chuang stub                    启动 stub REPL，只验证本地链路
   chuang mainchain-accept        跑真实标准主链总验收
   chuang natural-accept          跑真实自然语言任务验收

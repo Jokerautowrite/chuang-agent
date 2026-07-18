@@ -247,22 +247,159 @@ else
   bad "16 doctor" "$(tail -c 160 "$TMPDIR_RUN/doctor.err" | tr '\n' ' ')"
 fi
 
-# 17 config.toml materialize: abs paths + foreign cwd + bare program=sh untouched
+# 17 config.toml materialize: abs paths + foreign cwd + path-like program absolutized
 if [[ -f "$ROOT/scripts/chuang-materialize-runtime-config.py" ]]; then
   MAT="$TMPDIR_RUN/mat.toml"
   if python3 "$ROOT/scripts/chuang-materialize-runtime-config.py" \
       --root "$ROOT" --src "$CFG" --out "$MAT" >/dev/null 2>"$TMPDIR_RUN/mat.err" \
     && grep -q 'permission_profile = "full_local_workspace"' "$MAT" \
-    && grep -q 'program = "sh"' "$MAT" \
+    && grep -q "$ROOT/scripts/chuang-real-control-adapter.py" "$MAT" \
+    && grep -q "$ROOT/config/control-allowlist.json" "$MAT" \
     && grep -q "$ROOT/rules/core.md" "$MAT" \
     && (cd /tmp && timeout 30 "$BIN" status --config "$MAT" >"$TMPDIR_RUN/mat-status.out" 2>"$TMPDIR_RUN/mat-status.err") \
     && grep -q 'provider: openai_compatible' "$TMPDIR_RUN/mat-status.out"; then
-    ok "17 config materialize（cwd 无关 + permission 不丢）"
+    ok "17 config materialize（cwd 无关 + real control 路径）"
   else
     bad "17 config materialize" "$(tail -c 180 "$TMPDIR_RUN/mat.err" "$TMPDIR_RUN/mat-status.err" 2>/dev/null | tr '\n' ' ')"
   fi
 else
   skip "17 config materialize" "无 materialize 脚本"
+fi
+
+# 18 control real adapter list（只读；allowlist 不含飞书）
+if timeout 30 "$BIN" control list --config "$CFG" --json \
+    >"$TMPDIR_RUN/control-list.json" 2>"$TMPDIR_RUN/control-list.err"; then
+  if python3 - "$TMPDIR_RUN/control-list.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+units=d if isinstance(d,list) else d.get("units") or d.get("items") or []
+if not units:
+    raise SystemExit("empty units")
+ids=[u.get("unit_id","") for u in units]
+if any("feishu" in i.lower() for i in ids):
+    raise SystemExit("feishu unit still allowlisted: "+ ",".join(ids))
+if not any("app-server" in i for i in ids):
+    raise SystemExit("missing app-server unit: "+ ",".join(ids))
+meta=(units[0].get("metadata") or {})
+adapter=str(meta.get("adapter") or "")
+if adapter and adapter != "chuang-real-control":
+    raise SystemExit("unexpected adapter="+adapter)
+print(",".join(ids))
+PY
+  then
+    ok "18 control list 真 adapter（无飞书）"
+  else
+    bad "18 control list" "$(python3 -c "print(open('$TMPDIR_RUN/control-list.json').read()[:200])" 2>/dev/null || true) $(head -c 120 "$TMPDIR_RUN/control-list.err" | tr '\n' ' ')"
+  fi
+else
+  bad "18 control list" "$(head -c 160 "$TMPDIR_RUN/control-list.err" | tr '\n' ' ')"
+fi
+
+# 19 spawn 主链：dispatch → run-loop(codex) → collect + admission
+export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-1}"
+SPAWN_Q="$TMPDIR_RUN/subagent-queue-field"
+mkdir -p "$SPAWN_Q"
+RUNNER="$ROOT/scripts/chuang-codex-runner.py"
+if [[ ! -x "$RUNNER" && ! -f "$RUNNER" ]]; then
+  skip "19 spawn dispatch/run-loop/collect" "无 codex runner"
+elif [[ -z "${CHUANG_PROXY_API_KEY:-}" && "${SKIP_LIVE:-0}" == "1" ]]; then
+  skip "19 spawn dispatch/run-loop/collect" "SKIP_LIVE 且无 API key"
+elif [[ -z "${CHUANG_PROXY_API_KEY:-}" ]]; then
+  skip "19 spawn dispatch/run-loop/collect" "无 API key"
+else
+  DISP_OUT="$TMPDIR_RUN/spawn-dispatch.json"
+  if timeout 60 "$BIN" subagent dispatch \
+      --config "$CFG" \
+      --subagent-queue-root "$SPAWN_Q" \
+      --task "field-accept: reply with exactly the package name from Cargo.toml package.name only" \
+      --policy analyze \
+      --requires-capability rust \
+      --json >"$DISP_OUT" 2>"$TMPDIR_RUN/spawn-dispatch.err"; then
+    RUN_ID="$(python3 -c "import json; d=json.load(open('$DISP_OUT')); print(d.get('run_id') or d.get('dispatch',{}).get('run_id') or '')" 2>/dev/null || true)"
+    if [[ -z "$RUN_ID" ]]; then
+      # text fallback
+      RUN_ID="$(grep -oE 'run_id[=:][[:space:]]*[A-Za-z0-9._-]+' "$DISP_OUT" "$TMPDIR_RUN/spawn-dispatch.err" 2>/dev/null | head -1 | sed -E 's/.*[=:][[:space:]]*//')"
+    fi
+    if [[ -z "$RUN_ID" ]]; then
+      bad "19 spawn dispatch" "no run_id in $(head -c 160 "$DISP_OUT" | tr '\n' ' ')"
+    elif timeout 300 "$BIN" subagent run-loop \
+        --config "$CFG" \
+        --subagent-queue-root "$SPAWN_Q" \
+        --runner command \
+        --runner-command "$RUNNER" \
+        --capability rust \
+        --max-runs 1 \
+        --approve-exec \
+        >"$TMPDIR_RUN/spawn-loop.out" 2>"$TMPDIR_RUN/spawn-loop.err"; then
+      if timeout 60 "$BIN" subagent collect \
+          --config "$CFG" \
+          --subagent-queue-root "$SPAWN_Q" \
+          --run-id "$RUN_ID" \
+          --json >"$TMPDIR_RUN/spawn-collect.json" 2>"$TMPDIR_RUN/spawn-collect.err"; then
+        if python3 - "$TMPDIR_RUN/spawn-collect.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+blob=json.dumps(d,ensure_ascii=False)
+# admission accepted or success path
+ok_markers=("Accepted","admission","chuang-agent","Success","success","report")
+if not any(m in blob for m in ok_markers):
+    raise SystemExit("collect missing success markers")
+# hard fail markers
+low=blob.lower()
+if "rejected" in low and "accepted" not in low:
+    raise SystemExit("admission rejected")
+print("ok", d.get("run_id") or d.get("status") or "collect")
+PY
+        then
+          ok "19 spawn dispatch→run-loop→collect"
+        else
+          bad "19 spawn collect admission" "$(head -c 200 "$TMPDIR_RUN/spawn-collect.json" | tr '\n' ' ')"
+        fi
+      else
+        bad "19 spawn collect" "$(head -c 160 "$TMPDIR_RUN/spawn-collect.err" | tr '\n' ' ')"
+      fi
+    else
+      bad "19 spawn run-loop" "$(tail -c 200 "$TMPDIR_RUN/spawn-loop.err" | tr '\n' ' ')"
+    fi
+  else
+    bad "19 spawn dispatch" "$(head -c 160 "$TMPDIR_RUN/spawn-dispatch.err" | tr '\n' ' ')"
+  fi
+fi
+
+# 20 knowledge 本地 preview 可用；live wiki/GBrain 明确未接（非飞书缺口口径）
+# knowledge 子命令不吃 --config；本地 search 只读目录。
+if timeout 30 "$BIN" memory knowledge status --json \
+    >"$TMPDIR_RUN/know-status.json" 2>"$TMPDIR_RUN/know-status.err"; then
+  KNOW_ROOT="$ROOT/identity"
+  if timeout 30 "$BIN" memory knowledge search \
+      --root "$KNOW_ROOT" \
+      --query "SOUL" \
+      --limit 3 \
+      --json >"$TMPDIR_RUN/know-search.json" 2>"$TMPDIR_RUN/know-search.err" \
+    && python3 - "$TMPDIR_RUN/know-status.json" "$TMPDIR_RUN/know-search.json" <<'PY'
+import json,sys
+st=json.load(open(sys.argv[1]))
+se=json.load(open(sys.argv[2]))
+if not isinstance(st, dict) or st.get("adapter") != "external_knowledge":
+    raise SystemExit("bad knowledge status adapter")
+if st.get("connects_real_service") is True:
+    raise SystemExit("status must not claim real service without endpoints")
+hits = se.get("hits") if isinstance(se, dict) else None
+if not isinstance(hits, list) or len(hits) < 1:
+    raise SystemExit("local search expected >=1 hit under identity/")
+if se.get("adapter") != "local_external_knowledge":
+    raise SystemExit("search adapter mismatch")
+if se.get("connects_real_service") is True:
+    raise SystemExit("search must stay local-only")
+print("hits", len(hits))
+PY
+  then
+    ok "20 knowledge 本地 search/status（live wiki/GBrain 未装属预期）"
+  else
+    bad "20 knowledge local" "$(head -c 160 "$TMPDIR_RUN/know-search.err" "$TMPDIR_RUN/know-status.err" 2>/dev/null | tr '\n' ' ')"
+  fi
+else
+  bad "20 knowledge status" "$(head -c 160 "$TMPDIR_RUN/know-status.err" | tr '\n' ' ')"
 fi
 
 echo

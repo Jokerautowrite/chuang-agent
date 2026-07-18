@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 # Keys whose entire string value is a filesystem path.
-# Do NOT include bare binaries like control `program = "sh"`.
+# `program` is included: looks_like_path() still leaves bare binaries (sh) alone.
 PATH_VALUE_KEYS = {
     "db_path",
     "identity_memory_root",
@@ -31,6 +31,7 @@ PATH_VALUE_KEYS = {
     "permission_workspace_root",
     "subagent_queue_root",
     "actuator_program",
+    "program",
 }
 
 # Keys that may embed relative paths inside a shell/arg string.
