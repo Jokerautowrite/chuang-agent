@@ -120,6 +120,8 @@ struct TuiApp {
     /// 本轮用户消息行下标：优先钉在视口顶；本轮内容超出高度后才跟底。
     /// 这是「发的话显示在最上面」的核心，勿删、勿被 follow=scroll_max 覆盖。
     turn_top: Option<usize>,
+    /// 最近一次 transcript 区高度（行），供 PageUp/PageDown 分页步长。
+    last_transcript_h: u16,
     /// 输入框右上角外：仅用量（不进输入框内）。
     usage: String,
     /// 界面右下角：模型名（不进输入框内）。
@@ -145,6 +147,7 @@ impl TuiApp {
             scroll: 0,
             follow: true,
             turn_top: None,
+            last_transcript_h: 0,
             usage,
             model,
             elapsed: String::new(),
@@ -383,7 +386,7 @@ fn run_app(
         }
 
         terminal
-            .draw(|frame| draw_ui(frame, &app))
+            .draw(|frame| draw_ui(frame, &mut app))
             .map_err(|e| format!("draw_failed: {e}"))?;
 
         if !event::poll(Duration::from_millis(120)).map_err(|e| format!("poll_failed: {e}"))? {
@@ -444,7 +447,7 @@ fn run_app(
                                     SubmitResult::Continue => {}
                                     SubmitResult::Exit => {
                                         app.push(LineKind::System, "bye.");
-                                        let _ = terminal.draw(|frame| draw_ui(frame, &app));
+                                        let _ = terminal.draw(|frame| draw_ui(frame, &mut app));
                                         return Ok(());
                                     }
                                 }
@@ -455,6 +458,26 @@ fn run_app(
                     }
                 }
                 // Scroll transcript（手动滚会清掉 turn_top 钉顶）
+                // PageUp/PageDown（含 Ctrl）在 slash 菜单打开时仍滚对话区，放在 sticky 之前。
+                match key.code {
+                    KeyCode::PageUp => {
+                        app.follow = false;
+                        app.turn_top = None;
+                        app.scroll = app
+                            .scroll
+                            .saturating_sub(page_scroll_step(app.last_transcript_h));
+                        continue;
+                    }
+                    KeyCode::PageDown => {
+                        app.follow = false;
+                        app.turn_top = None;
+                        app.scroll = app
+                            .scroll
+                            .saturating_add(page_scroll_step(app.last_transcript_h));
+                        continue;
+                    }
+                    _ => {}
+                }
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     match key.code {
                         KeyCode::Up => {
@@ -498,7 +521,7 @@ fn run_app(
                         } else {
                             app.push(LineKind::System, "bye.");
                             // one last frame
-                            let _ = terminal.draw(|frame| draw_ui(frame, &app));
+                            let _ = terminal.draw(|frame| draw_ui(frame, &mut app));
                             return Ok(());
                         }
                     }
@@ -522,7 +545,7 @@ fn run_app(
                             SubmitResult::Continue => {}
                             SubmitResult::Exit => {
                                 app.push(LineKind::System, "bye.");
-                                let _ = terminal.draw(|frame| draw_ui(frame, &app));
+                                let _ = terminal.draw(|frame| draw_ui(frame, &mut app));
                                 return Ok(());
                             }
                         }
@@ -853,7 +876,7 @@ fn filtered_slash_commands(draft: &str) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
-fn draw_ui(frame: &mut ratatui::Frame, app: &TuiApp) {
+fn draw_ui(frame: &mut ratatui::Frame, app: &mut TuiApp) {
     let area = frame.area();
     // 整屏纯黑底板，盖住终端主题灰/默认色
     frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
@@ -887,6 +910,7 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &TuiApp) {
         ])
         .split(padded);
 
+    app.last_transcript_h = chunks[0].height;
     draw_transcript(frame, chunks[0], app);
     if menu_h > 0 {
         draw_slash_menu(frame, chunks[1], app, &slash_items);
@@ -942,26 +966,8 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     // No outer border — conversation should feel open, not caged.
     let height = area.height.max(1) as usize;
     let total = app.lines.len();
-    let max_scroll = total.saturating_sub(height);
-    // 视口策略（Grok）：
-    // 1) 有 turn_top 且本轮内容不超过一屏 → 用户话钉在最上面，下面留空
-    // 2) 有 turn_top 但本轮已超一屏 → 跟底看最新输出
-    // 3) 无 turn_top：follow 跟底 / 否则用手动 scroll
-    let scroll = if let Some(top) = app.turn_top {
-        let top = top.min(total.saturating_sub(1));
-        let from_top = total.saturating_sub(top);
-        if app.follow && from_top > height {
-            max_scroll
-        } else if app.follow {
-            top // 钉顶
-        } else {
-            (app.scroll as usize).min(max_scroll)
-        }
-    } else if app.follow {
-        max_scroll
-    } else {
-        (app.scroll as usize).min(max_scroll)
-    };
+    // 视口策略（Grok）：见 resolve_scroll
+    let scroll = resolve_scroll(total, height, app.turn_top, app.follow, app.scroll);
 
     let width = area.width;
     let visible = app
@@ -1345,7 +1351,7 @@ fn truncate_to_width(s: &str, max: usize) -> String {
     let mut w = 0usize;
     let mut out = String::new();
     for c in s.chars() {
-        let cw = if c <= '\u{7e}' { 1 } else { 2 };
+        let cw = char_display_width(c);
         if w + cw > max.saturating_sub(1) {
             out.push('…');
             break;
@@ -1374,4 +1380,108 @@ fn strip_ansi(s: &str) -> String {
         out.push(c);
     }
     out.trim().to_string()
+}
+
+/// 视口滚动位置：钉顶 / 超屏跟底 / 手动 / 无锚跟底。
+///
+/// 策略（Grok）：
+/// 1) 有 turn_top 且本轮内容不超过一屏 → 用户话钉在最上面
+/// 2) 有 turn_top 但本轮已超一屏且 follow → 跟底看最新输出
+/// 3) 无 turn_top：follow 跟底 / 否则用手动 scroll
+fn resolve_scroll(
+    total: usize,
+    height: usize,
+    turn_top: Option<usize>,
+    follow: bool,
+    manual_scroll: u16,
+) -> usize {
+    let height = height.max(1);
+    let max_scroll = total.saturating_sub(height);
+    if let Some(top) = turn_top {
+        let top = top.min(total.saturating_sub(1));
+        let from_top = total.saturating_sub(top);
+        if follow && from_top > height {
+            max_scroll
+        } else if follow {
+            top
+        } else {
+            (manual_scroll as usize).min(max_scroll)
+        }
+    } else if follow {
+        max_scroll
+    } else {
+        (manual_scroll as usize).min(max_scroll)
+    }
+}
+
+/// PageUp/PageDown 步长：一屏减一行；尚未 layout 过则 10。
+fn page_scroll_step(transcript_h: u16) -> u16 {
+    if transcript_h == 0 {
+        10
+    } else {
+        transcript_h.saturating_sub(1).max(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_scroll_pin_top_when_turn_fits() {
+        // total 20, height 10, turn at 12 → from_top=8 <= 10 → pin at 12
+        assert_eq!(resolve_scroll(20, 10, Some(12), true, 0), 12);
+    }
+
+    #[test]
+    fn resolve_scroll_overflow_follow_goes_bottom() {
+        // total 30, height 10, turn at 5 → from_top=25 > 10 → max_scroll=20
+        assert_eq!(resolve_scroll(30, 10, Some(5), true, 0), 20);
+    }
+
+    #[test]
+    fn resolve_scroll_manual_respects_scroll() {
+        assert_eq!(resolve_scroll(30, 10, Some(5), false, 7), 7);
+        assert_eq!(resolve_scroll(30, 10, Some(5), false, 99), 20);
+        assert_eq!(resolve_scroll(30, 10, None, false, 3), 3);
+    }
+
+    #[test]
+    fn resolve_scroll_no_anchor_follow_bottom() {
+        assert_eq!(resolve_scroll(30, 10, None, true, 0), 20);
+        assert_eq!(resolve_scroll(5, 10, None, true, 0), 0);
+    }
+
+    #[test]
+    fn display_width_mixed_cjk() {
+        assert_eq!(display_width("ab"), 2);
+        assert_eq!(display_width("你好"), 4);
+        assert_eq!(display_width("a中b"), 4);
+        assert_eq!(display_width("█"), 1); // block glyph stays half-width for banner
+    }
+
+    #[test]
+    fn truncate_to_width_matches_display_width() {
+        let s = "你好世界";
+        let t = truncate_to_width(s, 5);
+        // max 5 with ellipsis room: fits chars until remaining for …
+        assert!(display_width(&t) <= 5);
+        assert!(t.ends_with('…') || display_width(s) <= 5);
+        // short string unchanged
+        assert_eq!(truncate_to_width("ab", 5), "ab");
+        // pure ASCII path consistent
+        let ascii = truncate_to_width("abcdefgh", 5);
+        assert!(display_width(&ascii) <= 5);
+        // CJK: one full char = 2, so max 3 → one CJK + …
+        let cjk = truncate_to_width("你好", 3);
+        assert_eq!(display_width(&cjk), 3); // '你' (2) + '…' (1) if … is width 1
+        assert!(cjk.contains('…'));
+    }
+
+    #[test]
+    fn page_scroll_step_uses_height_or_default() {
+        assert_eq!(page_scroll_step(0), 10);
+        assert_eq!(page_scroll_step(1), 1);
+        assert_eq!(page_scroll_step(20), 19);
+    }
 }

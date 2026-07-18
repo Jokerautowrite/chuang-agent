@@ -102,32 +102,38 @@ else
 fi
 
 # 8 browser CDP via CLI (after ensure path exists)
+# 一次 stop + navigate 偶发 CDP 竞态：失败时再 stop 重试一轮，避免假 SKIP。
 if [[ "${SKIP_BROWSER:-0}" == "1" ]]; then
   skip "8 无头浏览器" "SKIP_BROWSER=1"
 elif [[ -f "$ROOT/scripts/chuang-headless-chrome.sh" ]]; then
-  timeout 90 "$BIN" browser stop >"$TMPDIR_RUN/chrome.stop" 2>&1 || true
-  # Autostart path: do not pre-start; navigate test should bring CDP up.
-  if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test tool_runtime_tests \
-    browser_navigate_and_read -- --nocapture >"$TMPDIR_RUN/browser.autostart.out" 2>"$TMPDIR_RUN/browser.autostart.err"; then
-    if timeout 20 "$BIN" browser status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" \
-      && grep -qE 'cdp_reachable=1|resolved_cdp_port=[0-9]+' "$TMPDIR_RUN/chrome.out"; then
-      ok "8 browser 自动拉起 + CDP reachable"
-      chrome_ok=1
-    else
+  chrome_ok=0
+  for browser_try in 1 2; do
+    timeout 90 "$BIN" browser stop >"$TMPDIR_RUN/chrome.stop" 2>&1 || true
+    # Autostart path: do not pre-start; navigate test should bring CDP up.
+    if cargo test -q --manifest-path "$ROOT/Cargo.toml" --test tool_runtime_tests \
+      browser_navigate_and_read -- --nocapture >"$TMPDIR_RUN/browser.autostart.out" 2>"$TMPDIR_RUN/browser.autostart.err"; then
+      if timeout 20 "$BIN" browser status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" \
+        && grep -qE 'cdp_reachable=1|resolved_cdp_port=[0-9]+' "$TMPDIR_RUN/chrome.out"; then
+        ok "8 browser 自动拉起 + CDP reachable"
+        chrome_ok=1
+        break
+      fi
       # test passed but status flaky — still count navigate success
       if ! grep -qi 'skipped/failed' "$TMPDIR_RUN/browser.autostart.out" "$TMPDIR_RUN/browser.autostart.err" 2>/dev/null; then
         ok "8 browser 自动拉起（navigate 测试通过）"
         chrome_ok=1
-        # best-effort status snapshot
         timeout 20 "$BIN" browser status >"$TMPDIR_RUN/chrome.out" 2>"$TMPDIR_RUN/chrome.err" || true
-      else
-        skip "8 无头浏览器" "navigate 测试跳过/失败"
-        chrome_ok=0
+        break
       fi
     fi
-  else
-    skip "8 无头浏览器" "browser 测试失败"
-    chrome_ok=0
+    [[ "$browser_try" -eq 1 ]] && sleep 1
+  done
+  if [[ "$chrome_ok" -ne 1 ]]; then
+    if [[ -s "$TMPDIR_RUN/browser.autostart.err" ]] || [[ -s "$TMPDIR_RUN/browser.autostart.out" ]]; then
+      skip "8 无头浏览器" "browser 测试失败（已重试）"
+    else
+      skip "8 无头浏览器" "browser 测试失败"
+    fi
   fi
 else
   skip "8 无头浏览器" "无脚本"

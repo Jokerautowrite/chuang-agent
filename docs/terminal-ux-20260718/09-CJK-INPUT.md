@@ -15,3 +15,7 @@
 
 ## 取舍
 「绝对钉在窗口最底」先让位于「中文能正常打/删」。对话结束后仍会再印 `就绪 + ❯`。
+
+
+## Ratatui 路径（2026-07-18 Task B）
+默认 REPL 走 `cli_repl_tui.rs`：显示宽度用 `char_display_width`（与 `truncate_to_width` 一致）；**PageUp/PageDown** 手动分页并 **清掉 turn_top** 钉顶，步长≈ transcript 高度−1。
