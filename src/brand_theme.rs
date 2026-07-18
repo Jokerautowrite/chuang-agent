@@ -8,6 +8,9 @@
 
 use ratatui::style::Color;
 
+/// 终端底板 · 纯黑（整屏底，不用主题灰）
+pub const BG: Color = Color::Rgb(0, 0, 0);
+
 /// 主色 · 雷蛇绿（边框、提示符、thinking、强调）
 pub const BRAND: Color = Color::Rgb(68, 214, 44);
 

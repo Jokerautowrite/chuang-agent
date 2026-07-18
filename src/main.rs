@@ -176,14 +176,8 @@ impl ReplChrome {
 
         // Border box width = full terminal.
         let inner = cols.saturating_sub(2).max(8); // between │ … │
-        let top_border = format!(
-            "{ANSI_DIM}╭{}╮{ANSI_RESET}",
-            "─".repeat(inner)
-        );
-        let bot_border = format!(
-            "{ANSI_DIM}╰{}╯{ANSI_RESET}",
-            "─".repeat(inner)
-        );
+        let top_border = format!("{ANSI_DIM}╭{}╮{ANSI_RESET}", "─".repeat(inner));
+        let bot_border = format!("{ANSI_DIM}╰{}╯{ANSI_RESET}", "─".repeat(inner));
 
         // Right chip (model · state), truncated.
         let chip_plain = fit_display(&ansi_plain(status_line), (inner / 3).max(12).min(36));
@@ -232,7 +226,10 @@ impl ReplChrome {
         // Shortcuts footer — Grok puts these under the box, left-aligned.
         let foot = format!(
             "{ANSI_DIM}{}{ANSI_RESET}",
-            fit_display("Enter发送 · /stop取消 · /help · /trace · /exit", cols.saturating_sub(1))
+            fit_display(
+                "Enter发送 · /stop取消 · /help · /trace · /exit",
+                cols.saturating_sub(1)
+            )
         );
 
         write!(
@@ -277,8 +274,10 @@ fn fit_display_ansi(s: &str, max_cols: usize) -> String {
 }
 
 mod app_server;
+mod brand_theme;
 mod cli_approval;
 mod cli_args;
+mod cli_browser;
 mod cli_channel;
 mod cli_config;
 mod cli_console;
@@ -291,10 +290,8 @@ mod cli_goal;
 mod cli_memory;
 mod cli_output;
 mod cli_plugin;
-mod cli_runtime;
-mod cli_browser;
-mod brand_theme;
 mod cli_repl_tui;
+mod cli_runtime;
 mod cli_skill;
 mod cli_subagent;
 mod cli_types;
@@ -309,6 +306,7 @@ use chuang_agent::terminal_event::TerminalEvent;
 use chuang_agent::tool_loop_meta::ToolLoopMeta;
 use cli_approval::{approval_command, resume_local_tty_approval};
 use cli_args::*;
+use cli_browser::browser_command;
 use cli_channel::channel_command;
 use cli_config::config_command;
 use cli_console::console_command;
@@ -325,7 +323,6 @@ use cli_output::{
 };
 use cli_plugin::plugin_command;
 use cli_runtime::{kernel_config_from_runtime, run_with_options};
-use cli_browser::browser_command;
 use cli_skill::skill_command;
 use cli_subagent::subagent_command;
 use cli_types::*;
@@ -391,10 +388,7 @@ fn field_accept_command(args: &[String]) -> Result<(), String> {
         .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
     let script = root.join("scripts/chuang-field-accept-10.sh");
     if !script.is_file() {
-        return Err(format!(
-            "field-accept script missing: {}",
-            script.display()
-        ));
+        return Err(format!("field-accept script missing: {}", script.display()));
     }
     let status = Command::new("bash")
         .arg(&script)
@@ -405,9 +399,8 @@ fn field_accept_command(args: &[String]) -> Result<(), String> {
         )
         .env(
             "CHUANG_FIELD_CONFIG",
-            std::env::var("CHUANG_FIELD_CONFIG").unwrap_or_else(|_| {
-                root.join("config.toml").display().to_string()
-            }),
+            std::env::var("CHUANG_FIELD_CONFIG")
+                .unwrap_or_else(|_| root.join("config.toml").display().to_string()),
         )
         .status()
         .map_err(|e| format!("field-accept spawn failed: {e}"))?;
@@ -567,6 +560,7 @@ fn repl_interactive_loop_legacy(
     let mut pending_approval: Option<ReplPendingApproval> = None;
     let mut chrome = ReplChrome::detect(true);
     let mut draft = String::new();
+    let mut draft_cursor: usize = 0;
 
     chrome.enable(stdout)?;
     chrome.write_body(
@@ -663,7 +657,7 @@ fn repl_interactive_loop_legacy(
                     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                         continue;
                     }
-                    match handle_sticky_key(key, &mut draft)? {
+                    match handle_sticky_key(key, &mut draft, &mut draft_cursor)? {
                         StickyKeyAction::None | StickyKeyAction::Redraw => {
                             print_repl_prompt(
                                 stdout,
@@ -679,6 +673,7 @@ fn repl_interactive_loop_legacy(
                         }
                         StickyKeyAction::Submit(line) => {
                             draft.clear();
+                            draft_cursor = 0;
                             match process_repl_input(
                                 &line,
                                 &options,
@@ -734,7 +729,14 @@ pub(crate) enum StickyKeyAction {
     Exit,
 }
 
-pub(crate) fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<StickyKeyAction, String> {
+/// `cursor` is a **char index** into `draft` (0..=draft.chars().count()).
+pub(crate) fn handle_sticky_key(
+    key: KeyEvent,
+    draft: &mut String,
+    cursor: &mut usize,
+) -> Result<StickyKeyAction, String> {
+    *cursor = (*cursor).min(draft.chars().count());
+
     // Ctrl+C / Ctrl+D
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
@@ -743,11 +745,23 @@ pub(crate) fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<Sti
                     return Ok(StickyKeyAction::Exit);
                 }
                 draft.clear();
+                *cursor = 0;
                 return Ok(StickyKeyAction::Redraw);
             }
             KeyCode::Char('d') if draft.is_empty() => return Ok(StickyKeyAction::Exit),
             KeyCode::Char('u') => {
                 draft.clear();
+                *cursor = 0;
+                return Ok(StickyKeyAction::Redraw);
+            }
+            KeyCode::Char('a') => {
+                // 行首
+                *cursor = 0;
+                return Ok(StickyKeyAction::Redraw);
+            }
+            KeyCode::Char('e') => {
+                // 行尾
+                *cursor = draft.chars().count();
                 return Ok(StickyKeyAction::Redraw);
             }
             _ => {}
@@ -762,17 +776,41 @@ pub(crate) fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<Sti
             }
             Ok(StickyKeyAction::Submit(line))
         }
+        KeyCode::Left => {
+            *cursor = cursor.saturating_sub(1);
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::Right => {
+            let max = draft.chars().count();
+            if *cursor < max {
+                *cursor += 1;
+            }
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::Home => {
+            *cursor = 0;
+            Ok(StickyKeyAction::Redraw)
+        }
+        KeyCode::End => {
+            *cursor = draft.chars().count();
+            Ok(StickyKeyAction::Redraw)
+        }
         KeyCode::Backspace => {
-            draft.pop(); // pops one Unicode scalar (one Chinese char)
+            if *cursor > 0 {
+                remove_char_at(draft, *cursor - 1);
+                *cursor -= 1;
+            }
             Ok(StickyKeyAction::Redraw)
         }
         KeyCode::Delete => {
-            // No cursor motion yet — treat like backspace for simplicity.
-            draft.pop();
+            if *cursor < draft.chars().count() {
+                remove_char_at(draft, *cursor);
+            }
             Ok(StickyKeyAction::Redraw)
         }
         KeyCode::Esc => {
             draft.clear();
+            *cursor = 0;
             Ok(StickyKeyAction::Redraw)
         }
         KeyCode::Char(c) => {
@@ -780,11 +818,34 @@ pub(crate) fn handle_sticky_key(key: KeyEvent, draft: &mut String) -> Result<Sti
             if !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT)
             {
-                draft.push(c);
+                insert_char_at(draft, *cursor, c);
+                *cursor += 1;
             }
             Ok(StickyKeyAction::Redraw)
         }
         _ => Ok(StickyKeyAction::None),
+    }
+}
+
+fn char_byte_range(s: &str, char_idx: usize) -> Option<(usize, usize)> {
+    let mut it = s.char_indices().nth(char_idx)?;
+    let start = it.0;
+    let end = start + it.1.len_utf8();
+    Some((start, end))
+}
+
+fn insert_char_at(draft: &mut String, char_idx: usize, c: char) {
+    let byte = draft
+        .char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(draft.len());
+    draft.insert(byte, c);
+}
+
+fn remove_char_at(draft: &mut String, char_idx: usize) {
+    if let Some((start, end)) = char_byte_range(draft, char_idx) {
+        draft.replace_range(start..end, "");
     }
 }
 
@@ -876,10 +937,7 @@ fn process_repl_input(
                 pending_approval.take();
             }
             "3" => {
-                chrome.write_body(
-                    stdout,
-                    &format!("{}\n", render_approval_details(approval)),
-                )?;
+                chrome.write_body(stdout, &format!("{}\n", render_approval_details(approval)))?;
             }
             _ => {
                 chrome.write_body(stdout, "请输入 1、2 或 3。\n")?;
@@ -1170,10 +1228,7 @@ fn poll_progress_events(
                 if show_trace {
                     chrome.write_body(
                         stdout,
-                        &format!(
-                            "{ANSI_DIM}  过程 · {}{ANSI_RESET}\n",
-                            stats.model_name
-                        ),
+                        &format!("{ANSI_DIM}  过程 · {}{ANSI_RESET}\n", stats.model_name),
                     )?;
                 }
                 cursor.section_opened = true;
@@ -1294,7 +1349,10 @@ pub(crate) fn format_progress_event(line: &str, show_trace: bool) -> Option<Prog
                 .get("code")
                 .and_then(|value| value.as_str())
                 .unwrap_or("unknown");
-            Some(display_progress(&format!("协议提示：{}", compact_preview(code, 24))))
+            Some(display_progress(&format!(
+                "协议提示：{}",
+                compact_preview(code, 24)
+            )))
         }
         "protocol_error" => None,
         "tool_started" => Some(display_tool(
@@ -1492,7 +1550,10 @@ impl ReplSessionStats {
         self.turn_running = true;
     }
 
-    pub(crate) fn update_from_result(&mut self, result: &chuang_agent::agent_runtime::RuntimeResult) {
+    pub(crate) fn update_from_result(
+        &mut self,
+        result: &chuang_agent::agent_runtime::RuntimeResult,
+    ) {
         self.model_name = result.response.model_name.clone();
         self.context_tokens = u64::from(result.packed_token_count);
         self.last_input_tokens =
@@ -1782,10 +1843,7 @@ fn render_sticky_status_line(
         let elapsed = turn_started
             .map(|started| format_short_duration(started.elapsed()))
             .unwrap_or_else(|| "0s".to_string());
-        let mut parts = vec![
-            stats.model_name.clone(),
-            format!("运行中 {elapsed}"),
-        ];
+        let mut parts = vec![stats.model_name.clone(), format!("运行中 {elapsed}")];
         if guidance_count > 0 {
             parts.push(format!("+{guidance_count}"));
         }
@@ -1865,13 +1923,8 @@ pub(crate) fn handle_repl_command(
                     .map_err(|e| format!("stdout_write_failed: {e}"))?;
             } else {
                 for item in conversation_history {
-                    writeln!(
-                        out,
-                        "{}: {}",
-                        item.role,
-                        compact_preview(&item.text, 160)
-                    )
-                    .map_err(|e| format!("stdout_write_failed: {e}"))?;
+                    writeln!(out, "{}: {}", item.role, compact_preview(&item.text, 160))
+                        .map_err(|e| format!("stdout_write_failed: {e}"))?;
                 }
             }
         }
@@ -1906,11 +1959,8 @@ pub(crate) fn handle_repl_command(
         }
         "/notrace" => {
             *show_trace = false;
-            writeln!(
-                out,
-                "已恢复默认显示：过程保持人话；结束不再附技术汇总。"
-            )
-            .map_err(|e| format!("stdout_write_failed: {e}"))?;
+            writeln!(out, "已恢复默认显示：过程保持人话；结束不再附技术汇总。")
+                .map_err(|e| format!("stdout_write_failed: {e}"))?;
         }
         "/quiet" => {
             *verbose = false;
@@ -2322,7 +2372,9 @@ pub(crate) fn render_approval_details(approval: &ReplPendingApproval) -> String 
     )
 }
 
-pub(crate) fn humanize_approval_record(record: &chuang_agent::tool_runtime::ToolExecutionRecord) -> String {
+pub(crate) fn humanize_approval_record(
+    record: &chuang_agent::tool_runtime::ToolExecutionRecord,
+) -> String {
     if record.ok {
         format!(
             "{}成功，耗时 {}ms",
@@ -2600,8 +2652,7 @@ mod tests {
             "思考中…"
         );
         assert!(
-            format_progress_event(&step, true)
-                .is_some_and(|d| d.message.contains("准备上下文")),
+            format_progress_event(&step, true).is_some_and(|d| d.message.contains("准备上下文")),
             "trace still shows lifecycle steps"
         );
     }

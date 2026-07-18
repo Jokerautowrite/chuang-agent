@@ -2,12 +2,20 @@
 //!
 //! Product look (定稿):
 //! - 主基调雷蛇绿，见 `brand_theme`；禁止再散落其它主色
-//! - Open transcript · one green input box · quiet footer
+//! - 启动字模仅空会话展示，首条用户消息后清掉
+//! - **用户发送后：本轮用户话钉在对话区顶部**（Grok 式）；本轮内容超出视口才跟到底
+//! - thinking / 用量在输入框上方（外），模型名在右下角；框内只有 `>` + 光标
+//! - 助手正文左缩进 2 格；用户消息右侧显示时间
+//! - 输入 `/` 弹出 slash 命令菜单（筛选 / ↑↓ / Tab 补全 / Enter 执行）
+//! - 输入光标可左右移动
 //! - Runtime stays in existing chuang paths; this module only paints.
+//!
+//! 改 TUI 时勿破坏上述行为；优先加字段/分支，禁止 silently 改回 scroll=MAX 跟底。
 
 use std::io::{self, Stdout};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::{Local, Timelike};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -17,12 +25,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Terminal;
 
 use crate::brand_theme::{
-    ASSIST_FG, BRAND, BRAND_DIM, BRAND_MUTED, BRAND_SOFT, DANGER, INPUT_FG, PLACEHOLDER, USER_BG,
-    USER_FG,
+    ASSIST_FG, BG, BRAND, BRAND_DIM, BRAND_MUTED, BRAND_SOFT, DANGER, INPUT_FG, USER_BG, USER_FG,
 };
 use crate::cli_approval::resume_local_tty_approval;
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
@@ -82,75 +89,132 @@ enum LineKind {
 struct TranscriptLine {
     kind: LineKind,
     text: String,
+    /// 用户消息最右侧时钟，如 `5:14 am`（仅首行）。
+    time: Option<String>,
+}
+
+fn transcript_line(kind: LineKind, text: impl Into<String>) -> TranscriptLine {
+    TranscriptLine {
+        kind,
+        text: text.into(),
+        time: None,
+    }
+}
+
+/// 本地 12 小时制，如 `5:14 am` / `12:03 pm`。
+fn format_clock_now() -> String {
+    let now = Local::now();
+    let (is_pm, hour) = now.hour12();
+    let ampm = if is_pm { "pm" } else { "am" };
+    format!("{hour}:{:02} {ampm}", now.minute())
 }
 
 struct TuiApp {
     lines: Vec<TranscriptLine>,
     draft: String,
+    /// 输入光标：字符下标（0..=draft.chars().count()），支持左右移动。
+    draft_cursor: usize,
     scroll: u16,
+    /// 手动滚动时 false；true 表示自动管理视口（配合 turn_top）。
     follow: bool,
-    /// Right side of the input box (Grok-style model chip).
-    chip: String,
-    /// Dim footer under the input box (shortcuts only).
+    /// 本轮用户消息行下标：优先钉在视口顶；本轮内容超出高度后才跟底。
+    /// 这是「发的话显示在最上面」的核心，勿删、勿被 follow=scroll_max 覆盖。
+    turn_top: Option<usize>,
+    /// 输入框右上角外：仅用量（不进输入框内）。
+    usage: String,
+    /// 界面右下角：模型名（不进输入框内）。
+    model: String,
+    /// 运行用时，跟在 thinking··· 后面（如 `3s`）。
+    elapsed: String,
+    /// 底栏左侧快捷键。
     footer: String,
     activity: String,
     running: bool,
+    /// 启动字模只在空会话展示；首条用户消息后清掉，避免常驻顶栏。
+    banner_cleared: bool,
+    /// slash 菜单当前高亮（相对过滤后列表）。
+    slash_sel: usize,
 }
 
 impl TuiApp {
-    fn new(chip: String) -> Self {
+    fn new(model: String, usage: String) -> Self {
         let mut app = Self {
             lines: Vec::new(),
             draft: String::new(),
+            draft_cursor: 0,
             scroll: 0,
             follow: true,
-            chip,
-            footer: "Enter 发送 · /help · /stop · /exit · /trace".to_string(),
+            turn_top: None,
+            usage,
+            model,
+            elapsed: String::new(),
+            footer: "Enter 发送 · /help · /stop · /exit · /trace · 输入 / 看命令".to_string(),
             activity: String::new(),
             running: false,
+            banner_cleared: false,
+            slash_sel: 0,
         };
         app.push_startup_banner();
         app
     }
 
-    /// 启动横幅：实心块字 CHUANG，字母间距约 10px，整行居中，雷蛇绿。
+    /// 启动横幅：只在尚未对话时出现，随首条用户消息清掉。
     fn push_startup_banner(&mut self) {
-        self.lines.push(TranscriptLine {
-            kind: LineKind::Meta,
-            text: String::new(),
-        });
+        self.lines.push(transcript_line(LineKind::Meta, ""));
         for row in compose_chuang_banner() {
-            self.lines.push(TranscriptLine {
-                kind: LineKind::Banner,
-                text: row,
-            });
+            self.lines.push(transcript_line(LineKind::Banner, row));
         }
-        self.lines.push(TranscriptLine {
-            kind: LineKind::Meta,
-            text: String::new(),
-        });
+        self.lines.push(transcript_line(LineKind::Meta, ""));
+    }
+
+    /// 首条用户话后去掉字模，对话区像 Grok 一样只剩消息流。
+    fn clear_startup_banner(&mut self) {
+        if self.banner_cleared {
+            return;
+        }
+        self.lines.retain(|l| l.kind != LineKind::Banner);
+        while self
+            .lines
+            .first()
+            .is_some_and(|l| l.kind == LineKind::Meta && l.text.is_empty())
+        {
+            self.lines.remove(0);
+        }
+        self.banner_cleared = true;
     }
 
     fn push(&mut self, kind: LineKind, text: impl Into<String>) {
+        if matches!(kind, LineKind::User) {
+            self.clear_startup_banner();
+        }
         let text = text.into();
         // Breathing room before user / assistant turns.
         if matches!(kind, LineKind::User | LineKind::Assistant)
             && self.lines.last().is_some_and(|l| !l.text.is_empty())
         {
-            self.lines.push(TranscriptLine {
-                kind: LineKind::Meta,
-                text: String::new(),
-            });
+            self.lines.push(transcript_line(LineKind::Meta, ""));
         }
-        for line in text.lines() {
+        let clock = matches!(kind, LineKind::User).then(format_clock_now);
+        // 用户行真正写入前的下标 = 钉顶锚点（空行呼吸在其前，不占锚点）
+        let user_anchor = matches!(kind, LineKind::User).then_some(self.lines.len());
+        for (i, line) in text.lines().enumerate() {
             self.lines.push(TranscriptLine {
                 kind,
                 text: line.to_string(),
+                // 时间只挂在用户消息首行最右侧
+                time: if i == 0 { clock.clone() } else { None },
             });
         }
-        if self.follow {
+        if let Some(anchor) = user_anchor {
+            // 新用户话：钉在视口顶（Grok）；不要 scroll=MAX 把话沉到底
+            self.turn_top = Some(anchor);
+            self.follow = true;
+            self.scroll = anchor.min(u16::MAX as usize) as u16;
+        } else if self.turn_top.is_none() && self.follow {
+            // 无本轮锚点时才跟底（例如启动期 system 行）
             self.scroll = u16::MAX;
         }
+        // 有 turn_top 时视口由 draw_transcript 按高度计算，此处不强制跟底
     }
 
     fn push_unique_tool(&mut self, ok: bool, message: &str) {
@@ -160,11 +224,7 @@ impl TuiApp {
             LineKind::ToolFail
         };
         // Drop projector chrome like "正在…" noise length; keep human title.
-        let message = message
-            .trim()
-            .trim_start_matches('·')
-            .trim()
-            .to_string();
+        let message = message.trim().trim_start_matches('·').trim().to_string();
         if message.is_empty() {
             return;
         }
@@ -181,9 +241,20 @@ impl TuiApp {
 
     fn set_idle_chrome(&mut self, stats: &ReplSessionStats, effort: &str, show_trace: bool) {
         self.running = false;
-        self.chip = format_chip(stats, effort, "就绪", None, show_trace);
-        self.footer = "Enter 发送 · /help · /stop · /exit · /trace".to_string();
+        self.model = format_model_label(stats, effort, show_trace);
+        self.usage = format_context_progress(stats.context_tokens, stats.context_max_tokens);
+        self.elapsed.clear();
+        self.footer = "Enter 发送 · /help · /stop · /exit · /trace · 输入 / 看命令".to_string();
         self.activity.clear();
+    }
+
+    fn clamp_slash_sel(&mut self) {
+        let n = filtered_slash_commands(&self.draft).len();
+        if n == 0 {
+            self.slash_sel = 0;
+        } else if self.slash_sel >= n {
+            self.slash_sel = n - 1;
+        }
     }
 
     fn set_running_chrome(
@@ -194,38 +265,38 @@ impl TuiApp {
         show_trace: bool,
     ) {
         self.running = true;
-        self.chip = format_chip(stats, effort, &format!("运行中 {elapsed}"), None, show_trace);
+        self.model = format_model_label(stats, effort, show_trace);
+        self.elapsed = elapsed.to_string();
+        // 右上角只留用量；用时跟在左侧 thinking 后面
+        self.usage = format_context_progress(stats.context_tokens, stats.context_max_tokens);
         self.footer = "/stop 取消 · Enter 也可补充要求".to_string();
     }
 
     fn set_approval_chrome(&mut self, stats: &ReplSessionStats, effort: &str) {
         self.running = false;
-        self.chip = format_chip(stats, effort, "待确认", None, false);
+        self.model = format_model_label(stats, effort, false);
+        self.elapsed.clear();
+        self.usage = format!(
+            "待确认 · {}",
+            format_context_progress(stats.context_tokens, stats.context_max_tokens)
+        );
         self.footer = "1 允许 · 2 拒绝 · 3 详情".to_string();
     }
 }
 
-/// Right-side chip: `model (max) · 就绪 · 12k/272k（4%）`
-fn format_chip(
-    stats: &ReplSessionStats,
-    effort: &str,
-    state: &str,
-    _extra: Option<&str>,
-    show_trace: bool,
-) -> String {
+/// 右下角模型名：`gpt-5.6-terra (max)`
+fn format_model_label(stats: &ReplSessionStats, effort: &str, show_trace: bool) -> String {
     let model = stats.model_name.as_str();
     let effort = effort.trim();
-    let head = if effort.is_empty() {
+    let mut head = if effort.is_empty() {
         model.to_string()
     } else {
         format!("{model} ({effort})")
     };
-    let ctx = format_context_progress(stats.context_tokens, stats.context_max_tokens);
-    let mut parts = vec![head, state.to_string(), ctx];
     if show_trace {
-        parts.push("trace".to_string());
+        head.push_str(" · trace");
     }
-    parts.join(" · ")
+    head
 }
 
 fn format_context_progress(used: u64, max: u64) -> String {
@@ -280,7 +351,10 @@ fn run_app(
     let mut stats = ReplSessionStats::from_summary(&summary);
     let mut pending_approval: Option<ReplPendingApproval> = None;
 
-    let mut app = TuiApp::new(format_chip(&stats, &effort, "就绪", None, false));
+    let mut app = TuiApp::new(
+        format_model_label(&stats, &effort, false),
+        format_context_progress(stats.context_tokens, stats.context_max_tokens),
+    );
 
     loop {
         // --- progress / completion while turn runs ---
@@ -321,36 +395,106 @@ fn run_app(
                 if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     continue;
                 }
-                // Scroll transcript
+                // slash 菜单：↑↓ 选择 · Tab 补全 · Enter 执行选中项
+                if slash_menu_active(&app.draft) && !key.modifiers.contains(KeyModifiers::CONTROL) {
+                    let matches = filtered_slash_commands(&app.draft);
+                    if !matches.is_empty() {
+                        match key.code {
+                            KeyCode::Up => {
+                                app.slash_sel = app.slash_sel.saturating_sub(1);
+                                continue;
+                            }
+                            KeyCode::Down => {
+                                let max = matches.len().saturating_sub(1);
+                                if app.slash_sel < max {
+                                    app.slash_sel += 1;
+                                }
+                                continue;
+                            }
+                            KeyCode::Tab => {
+                                if let Some((cmd, _)) = matches.get(app.slash_sel) {
+                                    app.draft = (*cmd).to_string();
+                                    app.draft_cursor = app.draft.chars().count();
+                                    app.slash_sel = 0;
+                                    app.clamp_slash_sel();
+                                }
+                                continue;
+                            }
+                            KeyCode::Enter => {
+                                let line = matches
+                                    .get(app.slash_sel)
+                                    .map(|(cmd, _)| (*cmd).to_string())
+                                    .unwrap_or_else(|| app.draft.trim().to_string());
+                                app.draft.clear();
+                                app.draft_cursor = 0;
+                                app.slash_sel = 0;
+                                match handle_submit(
+                                    &line,
+                                    &options,
+                                    &summary,
+                                    verbose,
+                                    show_trace,
+                                    &mut running,
+                                    &conversation_history,
+                                    &mut pending_guidance,
+                                    &mut pending_approval,
+                                    &mut stats,
+                                    &mut app,
+                                )? {
+                                    SubmitResult::Continue => {}
+                                    SubmitResult::Exit => {
+                                        app.push(LineKind::System, "bye.");
+                                        let _ = terminal.draw(|frame| draw_ui(frame, &app));
+                                        return Ok(());
+                                    }
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // Scroll transcript（手动滚会清掉 turn_top 钉顶）
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     match key.code {
                         KeyCode::Up => {
                             app.follow = false;
+                            app.turn_top = None;
                             app.scroll = app.scroll.saturating_sub(1);
                             continue;
                         }
                         KeyCode::Down => {
+                            app.follow = false;
+                            app.turn_top = None;
                             app.scroll = app.scroll.saturating_add(1);
                             continue;
                         }
                         KeyCode::Home => {
                             app.follow = false;
+                            app.turn_top = None;
                             app.scroll = 0;
                             continue;
                         }
                         KeyCode::End => {
                             app.follow = true;
+                            app.turn_top = None;
                             app.scroll = u16::MAX;
                             continue;
                         }
                         _ => {}
                     }
                 }
-                match handle_sticky_key(key, &mut app.draft)? {
-                    StickyKeyAction::None | StickyKeyAction::Redraw => {}
+                match handle_sticky_key(key, &mut app.draft, &mut app.draft_cursor)? {
+                    StickyKeyAction::None => {}
+                    StickyKeyAction::Redraw => {
+                        app.clamp_slash_sel();
+                    }
                     StickyKeyAction::Exit => {
                         if running.is_some() {
-                            app.push(LineKind::System, "任务仍在运行；先 /stop 或等结束，再 /exit。");
+                            app.push(
+                                LineKind::System,
+                                "任务仍在运行；先 /stop 或等结束，再 /exit。",
+                            );
                         } else {
                             app.push(LineKind::System, "bye.");
                             // one last frame
@@ -360,6 +504,8 @@ fn run_app(
                     }
                     StickyKeyAction::Submit(line) => {
                         app.draft.clear();
+                        app.draft_cursor = 0;
+                        app.slash_sel = 0;
                         match handle_submit(
                             &line,
                             &options,
@@ -475,6 +621,17 @@ fn handle_submit(
     }
 
     if input.starts_with('/') {
+        // TUI 清屏：直接清空对话区（legacy 的 form-feed 在 alt screen 里没用）
+        if input.eq_ignore_ascii_case("/clear") {
+            app.lines.clear();
+            app.banner_cleared = true;
+            app.follow = true;
+            app.turn_top = None;
+            app.scroll = 0;
+            let effort = reasoning_effort_label(summary);
+            app.set_idle_chrome(stats, &effort, *show_trace);
+            return Ok(SubmitResult::Continue);
+        }
         let mut buf: Vec<u8> = Vec::new();
         handle_repl_command(
             input,
@@ -486,7 +643,14 @@ fn handle_submit(
         )?;
         let text = String::from_utf8_lossy(&buf);
         if !text.trim().is_empty() {
-            app.push(LineKind::System, text.trim_end());
+            // 多行帮助按行推入，避免挤成一块
+            for line in text.trim_end().lines() {
+                if line.is_empty() {
+                    app.push(LineKind::Meta, "");
+                } else {
+                    app.push(LineKind::System, line);
+                }
+            }
         }
         let effort = reasoning_effort_label(summary);
         app.set_idle_chrome(stats, &effort, *show_trace);
@@ -524,7 +688,7 @@ fn handle_submit(
     let user_input = merge_repl_guidance(input, pending_guidance);
     pending_guidance.clear();
     app.push(LineKind::User, format!("> {user_input}"));
-    app.follow = true;
+    // turn_top 已在 push(User) 里设好；不要在这里 follow 跟底盖掉钉顶
     let history = recent_repl_conversation_history(conversation_history, REPL_HISTORY_MAX_TURNS);
     *running = Some(spawn_repl_turn(options.clone(), user_input, history));
     stats.mark_turn_started();
@@ -594,7 +758,10 @@ fn poll_finish_turn(
     let elapsed_ms = turn.started_at.elapsed().as_millis();
     let timing = progress_cursor.finish_timing();
     let _ = turn.handle.join();
-    match turn.result.unwrap_or(Err("repl_turn_missing_result".into())) {
+    match turn
+        .result
+        .unwrap_or(Err("repl_turn_missing_result".into()))
+    {
         Ok(result) => {
             stats.update_from_result(&result);
             *turn_count += 1;
@@ -639,16 +806,58 @@ fn poll_finish_turn(
         Err(error) => {
             stats.mark_turn_finished();
             app.push(LineKind::ToolFail, readable_runtime_error(&error));
-            app.push(LineKind::Meta, format!("  {}", format_ms_duration(elapsed_ms)));
+            app.push(
+                LineKind::Meta,
+                format!("  {}", format_ms_duration(elapsed_ms)),
+            );
         }
     }
     progress_cursor.reset_for_idle();
     Ok(true)
 }
 
+/// 与 `handle_repl_command` 对齐的 slash 命令表（菜单用）。
+const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/help", "查看帮助"),
+    ("/status", "查看运行状态"),
+    ("/history", "查看最近对话"),
+    ("/stop", "在安全点停止当前任务"),
+    ("/trace", "详细过程模式（排障）"),
+    ("/notrace", "恢复默认简洁过程"),
+    ("/verbose", "显示完整运行元数据"),
+    ("/quiet", "关闭 verbose"),
+    ("/clear", "清屏"),
+    ("/exit", "退出"),
+];
+
+fn slash_menu_active(draft: &str) -> bool {
+    let d = draft.trim_end();
+    d.starts_with('/') && !d.contains(' ')
+}
+
+fn filtered_slash_commands(draft: &str) -> Vec<(&'static str, &'static str)> {
+    if !slash_menu_active(draft) {
+        return Vec::new();
+    }
+    let q = draft.trim_end().to_ascii_lowercase();
+    SLASH_COMMANDS
+        .iter()
+        .copied()
+        .filter(|(cmd, _)| {
+            if q == "/" {
+                true
+            } else {
+                cmd.to_ascii_lowercase().starts_with(&q)
+            }
+        })
+        .collect()
+}
+
 fn draw_ui(frame: &mut ratatui::Frame, app: &TuiApp) {
     let area = frame.area();
-    // Grok-like: open chat · one input box · thin shortcut footer.
+    // 整屏纯黑底板，盖住终端主题灰/默认色
+    frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
+    // Grok-like: open chat · chrome above input · clean box · footer.
     // Padding left/right so it doesn't glue to the window edge.
     let padded = Layout::default()
         .direction(Direction::Horizontal)
@@ -658,27 +867,97 @@ fn draw_ui(frame: &mut ratatui::Frame, app: &TuiApp) {
             Constraint::Length(1),
         ])
         .split(area)[1];
+
+    let slash_items = filtered_slash_commands(&app.draft);
+    let menu_h = if slash_items.is_empty() {
+        0u16
+    } else {
+        // 标题 1 行 + 命令行（最多 10）
+        (1 + slash_items.len().min(10)) as u16
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(4),    // transcript — no cage
-            Constraint::Length(1), // gap
-            Constraint::Length(3), // the input box
-            Constraint::Length(1), // shortcuts
+            Constraint::Min(4),         // transcript
+            Constraint::Length(menu_h), // slash 菜单（无则 0）
+            Constraint::Length(1),      // thinking + 用量
+            Constraint::Length(3),      // 输入框：上边 + 内容 + 下边（高度保持 3 行）
+            Constraint::Length(1),      // 快捷键 + 模型
         ])
         .split(padded);
 
     draw_transcript(frame, chunks[0], app);
-    draw_input(frame, chunks[2], app);
-    draw_footer(frame, chunks[3], app);
+    if menu_h > 0 {
+        draw_slash_menu(frame, chunks[1], app, &slash_items);
+    }
+    draw_input_chrome(frame, chunks[2], app);
+    draw_input(frame, chunks[3], app);
+    draw_footer(frame, chunks[4], app);
+}
+
+fn draw_slash_menu(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    app: &TuiApp,
+    items: &[(&'static str, &'static str)],
+) {
+    if area.width == 0 || area.height == 0 || items.is_empty() {
+        return;
+    }
+    let width = area.width as usize;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        pad_line_bg("  命令  ↑↓选择  Tab补全  Enter执行", width),
+        Style::default().fg(BRAND_MUTED).bg(BG),
+    )));
+
+    let max_rows = area.height.saturating_sub(1) as usize;
+    let sel = app.slash_sel.min(items.len().saturating_sub(1));
+    // 保证选中项在可见窗口内
+    let start = if sel + 1 > max_rows {
+        sel + 1 - max_rows
+    } else {
+        0
+    };
+    for (i, (cmd, desc)) in items.iter().enumerate().skip(start).take(max_rows) {
+        let marker = if i == sel { "› " } else { "  " };
+        let raw = format!("{marker}{cmd:<10} {desc}");
+        let text = pad_line_bg(&raw, width);
+        let style = if i == sel {
+            Style::default()
+                .fg(BG)
+                .bg(BRAND)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(BRAND_SOFT).bg(BG)
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+
+    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(BG)), area);
 }
 
 fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
     // No outer border — conversation should feel open, not caged.
-    let height = area.height as usize;
+    let height = area.height.max(1) as usize;
     let total = app.lines.len();
-    let max_scroll = total.saturating_sub(height.max(1));
-    let scroll = if app.follow {
+    let max_scroll = total.saturating_sub(height);
+    // 视口策略（Grok）：
+    // 1) 有 turn_top 且本轮内容不超过一屏 → 用户话钉在最上面，下面留空
+    // 2) 有 turn_top 但本轮已超一屏 → 跟底看最新输出
+    // 3) 无 turn_top：follow 跟底 / 否则用手动 scroll
+    let scroll = if let Some(top) = app.turn_top {
+        let top = top.min(total.saturating_sub(1));
+        let from_top = total.saturating_sub(top);
+        if app.follow && from_top > height {
+            max_scroll
+        } else if app.follow {
+            top // 钉顶
+        } else {
+            (app.scroll as usize).min(max_scroll)
+        }
+    } else if app.follow {
         max_scroll
     } else {
         (app.scroll as usize).min(max_scroll)
@@ -689,61 +968,108 @@ fn draw_transcript(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
         .lines
         .iter()
         .skip(scroll)
-        .take(height.max(1))
+        .take(height)
         .map(|line| styled_line(line, width))
         .collect::<Vec<_>>();
 
-    let para = Paragraph::new(visible).wrap(Wrap { trim: false });
+    // 不足一屏时用空行垫满，黑底，避免露底；用户话仍在顶部
+    let mut lines = visible;
+    while lines.len() < height {
+        lines.push(Line::from(Span::styled(
+            " ".repeat(width as usize),
+            Style::default().bg(BG),
+        )));
+    }
+
+    let para = Paragraph::new(lines)
+        .style(Style::default().bg(BG))
+        .wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 
 fn styled_line(line: &TranscriptLine, width: u16) -> Line<'static> {
     match line.kind {
-        // 启动横幅：品牌绿 + 水平居中
+        // 启动横幅：只给实心块上色，空格保持纯黑底
         LineKind::Banner => {
             let centered = center_line(&line.text, width as usize);
-            Line::from(Span::styled(
-                centered,
-                Style::default()
-                    .fg(BRAND)
-                    .add_modifier(Modifier::BOLD),
-            ))
+            let brand = Style::default()
+                .fg(BRAND)
+                .bg(BG)
+                .add_modifier(Modifier::BOLD);
+            let empty = Style::default().bg(BG);
+            let spans: Vec<Span<'static>> = centered
+                .chars()
+                .map(|c| {
+                    if c == ' ' {
+                        Span::styled(" ", empty)
+                    } else {
+                        Span::styled(c.to_string(), brand)
+                    }
+                })
+                .collect();
+            Line::from(spans)
         }
-        // 你的话：品牌绿字 + 淡绿底
+        // 你的话：品牌绿字 + 淡绿底；最右侧时钟 `5:14 am`
         LineKind::User => {
-            let raw = format!(" {} ", line.text);
-            let padded = pad_line_bg(&raw, width as usize);
-            Line::from(Span::styled(
-                padded,
-                Style::default()
-                    .fg(USER_FG)
-                    .bg(USER_BG)
-                    .add_modifier(Modifier::BOLD),
-            ))
+            let w = width as usize;
+            let time = line.time.as_deref().unwrap_or("");
+            let time_w = display_width(time);
+            let gap = if time_w > 0 { 2 } else { 0 }; // 正文与时间之间至少 2 空格
+            let left_budget = w.saturating_sub(time_w).saturating_sub(gap);
+            let left_raw = format!(" {} ", line.text);
+            let left = if display_width(&left_raw) > left_budget {
+                // 给时间留位，正文过长则截断
+                let mut t = truncate_to_width(&left_raw, left_budget.saturating_sub(1));
+                if !t.ends_with(' ') {
+                    t.push(' ');
+                }
+                t
+            } else {
+                left_raw
+            };
+            let left_w = display_width(&left);
+            let pad_w = w.saturating_sub(left_w).saturating_sub(time_w);
+            let body_style = Style::default()
+                .fg(USER_FG)
+                .bg(USER_BG)
+                .add_modifier(Modifier::BOLD);
+            let time_style = Style::default().fg(BRAND_MUTED).bg(USER_BG);
+            let mut spans = vec![Span::styled(left, body_style)];
+            if pad_w > 0 {
+                spans.push(Span::styled(
+                    " ".repeat(pad_w),
+                    Style::default().bg(USER_BG),
+                ));
+            }
+            if time_w > 0 {
+                spans.push(Span::styled(time.to_string(), time_style));
+            }
+            Line::from(spans)
         }
         LineKind::Tool => Line::from(Span::styled(
             format!("  · {}", line.text),
-            Style::default().fg(BRAND_DIM),
+            Style::default().fg(BRAND_DIM).bg(BG),
         )),
         LineKind::ToolFail => Line::from(Span::styled(
             format!("  ✗ {}", line.text),
-            Style::default().fg(DANGER),
+            Style::default().fg(DANGER).bg(BG),
         )),
+        // 助手正文：左缩进 2 格，不顶界面最左
         LineKind::Assistant => Line::from(Span::styled(
-            line.text.clone(),
-            Style::default().fg(ASSIST_FG),
+            format!("  {}", line.text),
+            Style::default().fg(ASSIST_FG).bg(BG),
         )),
         LineKind::System => Line::from(Span::styled(
-            line.text.clone(),
-            Style::default().fg(BRAND_SOFT),
+            format!("  {}", line.text),
+            Style::default().fg(BRAND_SOFT).bg(BG),
         )),
         LineKind::Meta => {
             if line.text.is_empty() {
-                Line::from("")
+                Line::from(Span::styled("", Style::default().bg(BG)))
             } else {
                 Line::from(Span::styled(
                     format!("  {}", line.text),
-                    Style::default().fg(BRAND_MUTED),
+                    Style::default().fg(BRAND_MUTED).bg(BG),
                 ))
             }
         }
@@ -773,26 +1099,28 @@ fn center_line(s: &str, width: usize) -> String {
     format!("{}{s}", " ".repeat(left))
 }
 
-/// 字母间距：2 半角格 ≈ 10px（用户认可够用）。
-const LETTER_GAP: &str = "  ";
+/// 字母间距：1 半角格（实心字模比半块更宽，间距收一点更紧凑清晰）。
+const LETTER_GAP: &str = " ";
 
-/// OpenCode 同款扁字：3 行 × 4 列，█/▀/▄/_ 半块拼字（实体但扁，不是 7 行厚方块）。
-/// 参考 anomalyco/opencode `packages/tui/src/logo.ts`。
+/// 实心点阵字：5 行 × 5 列，只用 `█` 与空格。
+///
+/// 不用 ▀/▄/_ ：半块锯齿 + 下划线当「空」时整行刷绿，看起来糊、丑。
+/// 纯 █ 点阵更接近终端原生字的清晰度（Grok 级「能读清字母」）。
 fn letter_glyphs() -> [&'static [&'static str]; 6] {
-    // C H U A N G — 每字 4 列 × 3 行
+    // C H U A N G
     [
-        // C  （同 OpenCode 的 C/O 系：顶框、中空、底框）
-        &["█▀▀█", "█___", "▀▀▀▀"],
+        // C
+        &[" ███ ", "█   █", "█    ", "█   █", " ███ "],
         // H
-        &["█__█", "█▀▀█", "█__█"],
+        &["█   █", "█   █", "█████", "█   █", "█   █"],
         // U
-        &["█__█", "█__█", "▀▀▀▀"],
+        &["█   █", "█   █", "█   █", "█   █", " ███ "],
         // A
-        &["█▀▀█", "█▀▀█", "█__█"],
+        &[" ███ ", "█   █", "█████", "█   █", "█   █"],
         // N
-        &["█__█", "█▀▄█", "█__█"],
+        &["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
         // G
-        &["█▀▀█", "█_▄█", "▀▀▀▀"],
+        &[" ███ ", "█    ", "█  ██", "█   █", " ███ "],
     ]
 }
 
@@ -820,104 +1148,163 @@ fn compose_chuang_banner() -> Vec<String> {
     out
 }
 
-fn thinking_title() -> String {
-    // Animate dots so it feels alive while the model works.
+/// `thinking` + 三位宽动态点（· / ·· / ··· 循环），宽度固定避免布局抖动。
+fn thinking_dots() -> String {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| (d.as_millis() / 400) % 4)
+        .map(|d| (d.as_millis() / 350) % 3)
         .unwrap_or(0) as usize;
-    let dots = match n {
-        0 => "·",
-        1 => "··",
-        2 => "···",
-        _ => "····",
+    // 右侧用空格补齐到 3 列，elapsed 位置不跟着跳
+    match n {
+        0 => "·  ".to_string(),
+        1 => "·· ".to_string(),
+        _ => "···".to_string(),
+    }
+}
+
+/// 输入框上方一行：左 `thinking··· 3s`，右仅用量。
+fn draw_input_chrome(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let left = if app.running {
+        let mut s = format!("thinking{}", thinking_dots());
+        if !app.elapsed.is_empty() {
+            s.push(' ');
+            s.push_str(&app.elapsed);
+        }
+        s
+    } else {
+        String::new()
     };
-    format!(" thinking{dots} ")
+    let right = app.usage.clone();
+    let left_w = display_width(&left);
+    let right_w = display_width(&right);
+    let width = area.width as usize;
+    let mut spans = Vec::new();
+    if !left.is_empty() {
+        spans.push(Span::styled(
+            left,
+            Style::default()
+                .fg(BRAND)
+                .bg(BG)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    let pad = width.saturating_sub(left_w).saturating_sub(right_w);
+    spans.push(Span::styled(" ".repeat(pad), Style::default().bg(BG)));
+    if !right.is_empty() {
+        spans.push(Span::styled(right, Style::default().fg(BRAND_MUTED).bg(BG)));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(BG)),
+        area,
+    );
 }
 
 fn draw_input(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    // 产品主色边框；思考时左上角 thinking···
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(
-            Style::default()
-                .fg(BRAND)
-                .add_modifier(if app.running {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        );
-    if app.running {
-        block = block.title(thinking_title()).title_style(
-            Style::default()
-                .fg(BRAND)
-                .add_modifier(Modifier::BOLD),
-        );
-    }
+    // 完整四边细框（上/下/左/右都要有）。高度 3 行：顶线 + 内容 + 底线。
+    // 绝不能再用 LEFT|RIGHT|BOTTOM 漏掉顶边。线细：Plain + 不加粗。
+    let _ = app.running;
+    let block = Block::default()
+        .borders(Borders::TOP | Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
+        .border_type(BorderType::Plain)
+        .style(Style::default().bg(BG))
+        .border_style(Style::default().fg(BRAND).bg(BG));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let chip = app.chip.clone();
-    let chip_w = display_width(&chip) as u16;
-    let gap = 2u16;
-    let left_budget = inner
-        .width
-        .saturating_sub(chip_w)
-        .saturating_sub(gap)
-        .saturating_sub(2); // "> "
-
-    let draft_vis = truncate_to_width(&app.draft, left_budget as usize);
+    let left_budget = inner.width.saturating_sub(2); // "> "
+                                                     // 光标在字符下标；显示宽度按光标前缀计算（支持中文）
+    let cursor = app.draft_cursor.min(app.draft.chars().count());
+    let before: String = app.draft.chars().take(cursor).collect();
+    let full = app.draft.clone();
+    let draft_vis = if display_width(&full) <= left_budget as usize {
+        full.clone()
+    } else {
+        // 超长时从左侧截断，尽量保住光标右侧可见
+        let mut chars: Vec<char> = full.chars().collect();
+        while !chars.is_empty()
+            && display_width(&chars.iter().collect::<String>()) > left_budget as usize
+        {
+            chars.remove(0);
+        }
+        chars.iter().collect()
+    };
     let mut spans = vec![Span::styled(
         "> ",
-        Style::default().fg(BRAND).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(BRAND)
+            .bg(BG)
+            .add_modifier(Modifier::BOLD),
     )];
-    if draft_vis.is_empty() {
-        spans.push(Span::styled("说点什么…", Style::default().fg(PLACEHOLDER)));
-    } else {
+    if !draft_vis.is_empty() {
         spans.push(Span::styled(
             draft_vis.clone(),
             Style::default()
                 .fg(INPUT_FG)
+                .bg(BG)
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // 填满输入行剩余空白，避免露主题底色
+    let used = 2 + display_width(&draft_vis);
+    let rest = (inner.width as usize).saturating_sub(used);
+    if rest > 0 {
+        spans.push(Span::styled(" ".repeat(rest), Style::default().bg(BG)));
+    }
 
-    // Pad so chip sits on the right edge of the input row.
-    let left_w = 2 + if app.draft.is_empty() {
-        display_width("说点什么…")
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(BG)),
+        inner,
+    );
+
+    // 光标列："> " + 光标前缀显示宽（若左侧被截断则贴在可见区）
+    let prefix_w = display_width(&before);
+    let full_w = display_width(&full);
+    let caret_in_vis = if full_w <= left_budget as usize {
+        prefix_w
     } else {
-        display_width(&draft_vis)
+        // 左侧截断了 (full_w - vis_w) 个显示列
+        let cut = full_w.saturating_sub(display_width(&draft_vis));
+        prefix_w.saturating_sub(cut)
     };
-    let pad_w = (inner.width as usize)
-        .saturating_sub(left_w)
-        .saturating_sub(display_width(&chip));
-    spans.push(Span::raw(" ".repeat(pad_w)));
-    // Chip：暗绿，不抢主色边框
-    spans.push(Span::styled(chip, Style::default().fg(BRAND_MUTED)));
-
-    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
-
-    let caret_cols = 2 + if app.draft.is_empty() {
-        0
-    } else {
-        display_width(&draft_vis)
-    };
+    let caret_cols = 2 + caret_in_vis;
     let caret_x = (inner.x as usize + caret_cols) as u16;
     let caret_x = caret_x.min(inner.x + inner.width.saturating_sub(1));
     frame.set_cursor_position((caret_x, inner.y));
 }
 
 fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &TuiApp) {
-    let mut text = app.footer.clone();
-    if app.running && !app.activity.is_empty() {
-        text = format!("{}  ·  {}", text, compact_preview(&app.activity, 36));
+    if area.width == 0 || area.height == 0 {
+        return;
     }
-    let para = Paragraph::new(Line::from(Span::styled(
-        text,
-        Style::default().fg(BRAND_MUTED),
-    )));
-    frame.render_widget(para, area);
+    let mut left = app.footer.clone();
+    if app.running && !app.activity.is_empty() {
+        left = format!("{}  ·  {}", left, compact_preview(&app.activity, 28));
+    }
+    let right = app.model.clone();
+    let left_w = display_width(&left);
+    let right_w = display_width(&right);
+    let width = area.width as usize;
+    // 左快捷键过长时截断，给模型名留位
+    let left_max = width.saturating_sub(right_w.saturating_add(1));
+    let left = if left_w > left_max {
+        truncate_to_width(&left, left_max)
+    } else {
+        left
+    };
+    let left_w = display_width(&left);
+    let pad = width.saturating_sub(left_w).saturating_sub(right_w);
+    let spans = vec![
+        Span::styled(left, Style::default().fg(BRAND_MUTED).bg(BG)),
+        Span::styled(" ".repeat(pad), Style::default().bg(BG)),
+        Span::styled(right, Style::default().fg(BRAND_MUTED).bg(BG)),
+    ];
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(BG)),
+        area,
+    );
 }
 
 fn display_width(s: &str) -> usize {
