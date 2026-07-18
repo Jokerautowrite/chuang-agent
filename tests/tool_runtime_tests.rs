@@ -1600,6 +1600,17 @@ else:
         "summary={}",
         record.summary
     );
+    assert!(
+        record.summary.contains("first_run=run-1"),
+        "success summary should carry first_run: {}",
+        record.summary
+    );
+    assert!(
+        record.summary.contains("first=worker_completed")
+            || record.summary.contains("first=worker"),
+        "success summary should carry first report summary token: {}",
+        record.summary
+    );
     let output = record.output.expect("subagent output should exist");
     assert!(
         output.contains("\"result_preview\":\"verified\"")
@@ -1608,6 +1619,18 @@ else:
         "output={output}"
     );
     assert!(output.contains("\"worker_model\":\"gpt-5.6-luna\"") || output.contains("gpt-5.6-luna"));
+    assert!(
+        output.contains("\"admission\":\"accepted\""),
+        "output should include admission status: {output}"
+    );
+    assert!(
+        output.contains("admission_reason_code") || output.contains("\"admission_reason\""),
+        "output should include admission reason fields: {output}"
+    );
+    assert!(
+        output.contains("\"queue_root\""),
+        "output should include queue_root: {output}"
+    );
 }
 
 #[test]

@@ -2419,6 +2419,18 @@ fn execute_spawn_subagent(
             .and_then(enum_json_name)
             .as_deref()
             == Some("Accepted");
+        let admission_reason_code = collected
+            .pointer("/report_admission/reason_code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let admission_reason = collected
+            .pointer("/report_admission/reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
         let report_status = collected
             .pointer("/report/status")
             .and_then(enum_json_name)
@@ -2441,6 +2453,8 @@ fn execute_spawn_subagent(
             "task_preview": redact_sensitive_text("subagent_task", &job_list[index]).text,
             "status": report_status,
             "admission": if accepted { "accepted" } else { "rejected" },
+            "admission_reason_code": admission_reason_code,
+            "admission_reason": redact_sensitive_text("subagent_admission_reason", &admission_reason).text,
             "ok": ok,
             "summary": redact_sensitive_text("subagent_summary", summary).text,
             "result_preview": redact_sensitive_text("subagent_output", stdout_preview).text,
@@ -2452,6 +2466,7 @@ fn execute_spawn_subagent(
         "max_concurrency": concurrency,
         "worker_model": subagent.worker_model,
         "workspace_root": workspace_root.display().to_string(),
+        "queue_root": queue_root_text,
         "results": results,
     })
     .to_string();
@@ -2465,13 +2480,24 @@ fn execute_spawn_subagent(
         let first_status = first
             .and_then(|item| item.get("status").and_then(|v| v.as_str()))
             .unwrap_or("unknown");
+        let first_admission = first
+            .and_then(|item| item.get("admission").and_then(|v| v.as_str()))
+            .unwrap_or("unknown");
+        let first_reason_code = first
+            .and_then(|item| item.get("admission_reason_code").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .trim();
         let first_summary = first
             .and_then(|item| item.get("summary").and_then(|v| v.as_str()))
             .unwrap_or("")
             .trim();
         // Keep first= a single whitespace-free token so CLI humanizers can parse it.
         let first_summary = if first_summary.is_empty() {
-            first_status.to_string()
+            if !first_reason_code.is_empty() {
+                first_reason_code.to_string()
+            } else {
+                first_status.to_string()
+            }
         } else {
             first_summary
                 .split_whitespace()
@@ -2482,18 +2508,37 @@ fn execute_spawn_subagent(
                 .collect::<String>()
         };
         let short = format!(
-            "subagent_batch_partial_failure workers={} failed={} concurrency={concurrency} first_status={first_status} first={first_summary}",
+            "subagent_batch_partial_failure workers={} failed={} concurrency={concurrency} first_status={first_status} first_admission={first_admission} first={first_summary}",
             job_list.len(),
             failed.len(),
         );
         return failed_record_with_output(registry, call, short, Some(output));
     }
 
+    let first = results.first();
+    let first_run = first
+        .and_then(|item| item.get("run_id").and_then(|v| v.as_str()))
+        .unwrap_or("-");
+    let first_summary = first
+        .and_then(|item| item.get("summary").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .trim();
+    let first_summary_token = if first_summary.is_empty() {
+        "ok".to_string()
+    } else {
+        first_summary
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join("_")
+            .chars()
+            .take(72)
+            .collect::<String>()
+    };
     success_record(
         registry,
         call,
         format!(
-            "subagent_batch_completed workers={} concurrency={concurrency} admission=accepted",
+            "subagent_batch_completed workers={} concurrency={concurrency} admission=accepted first_run={first_run} first={first_summary_token}",
             job_list.len()
         ),
         Some(output),

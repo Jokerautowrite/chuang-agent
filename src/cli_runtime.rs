@@ -1752,11 +1752,21 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
             .to_string();
     }
 
-    // Codex runner 执行失败（调度已成功，工人跑挂）
+    // 调度已成功；失败分叉：报告 admission 拒收 vs Codex 工人跑挂
     if summary.contains("subagent_batch_partial_failure")
         || failure_class == "subagent_batch_partial_failure"
     {
         let detail = humanize_tool_failure_summary(summary, failure_class);
+        if summary_token_eq(summary, "first_admission", "rejected")
+            || detail.contains("admission 拒收")
+            || detail.contains("admission拒收")
+        {
+            return format!(
+                "子代理已经跑完了，但报告验收（admission）没过：{detail}\n\n\
+这不是「派不出去」，是回执/协议被拒。看 reason_code 与 `data/subagent-queue/*/reports/`；\n\
+修好报告契约后再派，或 `chuang subagent collect --run-id …` 看拒收原因。"
+            );
+        }
         return format!(
             "子代理已经派出去了（admission 往往已通过），但 Codex 工人执行失败：{detail}\n\n\
 这通常是 runner/模型瞬时错误，不是「不能派工」。可直接再试一次「派子代理…」；\n\
@@ -1837,7 +1847,7 @@ fn humanize_tool_failure_summary(summary: &str, failure_class: &str) -> String {
 }
 
 /// Turn
-/// `subagent_batch_partial_failure workers=2 failed=1 … first_status=Failed first=…`
+/// `subagent_batch_partial_failure workers=2 failed=1 … first_status=Failed first_admission=… first=…`
 /// into a short operator line.
 fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
     if !summary.contains("subagent_batch_partial_failure")
@@ -1849,6 +1859,7 @@ fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
     let mut workers: Option<&str> = None;
     let mut failed: Option<&str> = None;
     let mut first_status: Option<&str> = None;
+    let mut first_admission: Option<&str> = None;
     let mut first: Option<&str> = None;
     for part in summary.split_whitespace() {
         if let Some(v) = part.strip_prefix("workers=") {
@@ -1857,6 +1868,8 @@ fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
             failed = Some(v);
         } else if let Some(v) = part.strip_prefix("first_status=") {
             first_status = Some(v);
+        } else if let Some(v) = part.strip_prefix("first_admission=") {
+            first_admission = Some(v);
         } else if let Some(v) = part.strip_prefix("first=") {
             first = Some(v);
         }
@@ -1866,6 +1879,13 @@ fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
         (Some(w), Some(f)) => bits.push(format!("{f}/{w} 工人失败")),
         (Some(w), None) => bits.push(format!("workers={w}")),
         _ => {}
+    }
+    if first_admission == Some("rejected") {
+        bits.push("admission 拒收".to_string());
+    } else if let Some(adm) = first_admission {
+        if adm != "unknown" && adm != "accepted" {
+            bits.push(format!("admission {adm}"));
+        }
     }
     if let Some(status) = first_status {
         if status != "unknown" {
@@ -1882,6 +1902,13 @@ fn humanize_subagent_batch_summary(summary: &str) -> Option<String> {
     } else {
         Some(bits.join(" · "))
     }
+}
+
+fn summary_token_eq(summary: &str, key: &str, expected: &str) -> bool {
+    let prefix = format!("{key}=");
+    summary
+        .split_whitespace()
+        .any(|part| part.strip_prefix(prefix.as_str()) == Some(expected))
 }
 
 /// Drop raw tool-call JSON that models sometimes dump as FINAL.
@@ -7625,6 +7652,77 @@ allowed_channels = ["app-server"]
         assert!(
             !answer.contains("subagent_batch_partial_failure workers="),
             "should not dump raw machine summary blob: {answer}"
+        );
+    }
+
+    #[test]
+    fn terminal_tool_failure_answer_admission_rejected_is_distinct_from_runner_fail() {
+        let record = ToolExecutionRecord {
+            call: ToolCall::SpawnSubagent {
+                task: "读包名".into(),
+                tasks: None,
+                agent_name: None,
+                policy: None,
+                token_budget: None,
+                timeout_ms: None,
+                max_concurrency: None,
+            },
+            tool_name: "spawn_subagent".into(),
+            atomic_tool_name: None,
+            ok: false,
+            summary: "subagent_batch_partial_failure workers=1 failed=1 concurrency=1 first_status=Failed first_admission=rejected first=command_protocol_report_rejected".into(),
+            decision: None,
+            duration_ms: 12,
+            retryable: true,
+            target_path: None,
+            resolved_path: None,
+            cwd: None,
+            command: None,
+            entries: vec![],
+            output_bytes: None,
+            output_lines: None,
+            stderr_bytes: None,
+            stderr_lines: None,
+            output: None,
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            changed_files: vec![],
+            write_before_bytes: None,
+            write_after_bytes: None,
+            write_changed: None,
+            write_operation: None,
+            write_diff_preview: None,
+            write_diff_truncated: false,
+            failure_class: Some("subagent_batch_partial_failure".into()),
+            output_redacted: false,
+            stdout_redacted: false,
+            stderr_redacted: false,
+            output_truncated: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
+        };
+        assert!(terminal_tool_failure(&record));
+        let answer = terminal_tool_failure_answer(&record);
+        assert!(
+            answer.contains("admission") || answer.contains("验收"),
+            "{answer}"
+        );
+        assert!(
+            answer.contains("拒收") || answer.contains("没过") || answer.contains("被拒"),
+            "{answer}"
+        );
+        assert!(
+            answer.contains("command_protocol_report_rejected") || answer.contains("1/1"),
+            "{answer}"
+        );
+        assert!(
+            !answer.contains("Codex 工人执行失败"),
+            "admission reject must not look like runner crash: {answer}"
+        );
+        assert!(
+            !answer.contains("subagent_batch_partial_failure workers="),
+            "{answer}"
         );
     }
 

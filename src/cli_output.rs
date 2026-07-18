@@ -982,7 +982,7 @@ fn is_bulky_runtime_meta_key(key: &str) -> bool {
 }
 
 /// Compact human line for successful/failed `spawn_subagent` batches.
-/// Example: `派工 2工人·accepted·luna` or `派工 1工人·失败·Failed·timeout…`.
+/// Example: `派工 2工人·accepted·luna·worker_done` or `派工 1工人·失败·admission拒收·…`.
 fn spawn_dispatch_hint_from_meta(
     extra: &std::collections::BTreeMap<String, String>,
 ) -> Option<String> {
@@ -995,8 +995,10 @@ fn spawn_dispatch_hint_from_meta(
     let mut workers = 0u64;
     let mut accepted = 0u64;
     let mut failed = 0u64;
+    let mut admission_rejected = 0u64;
     let mut model: Option<String> = None;
     let mut first_fail: Option<String> = None;
+    let mut first_ok_summary: Option<String> = None;
     for call in arr {
         let tool = call
             .get("tool_name")
@@ -1024,11 +1026,19 @@ fn spawn_dispatch_hint_from_meta(
                 for r in results {
                     let adm = r.get("admission").and_then(|v| v.as_str()).unwrap_or("");
                     let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                    if ok || (adm == "accepted" && r.get("status").and_then(|v| v.as_str()) == Some("Success"))
+                    if ok
+                        || (adm == "accepted"
+                            && r.get("status").and_then(|v| v.as_str()) == Some("Success"))
                     {
                         accepted = accepted.saturating_add(1);
+                        if first_ok_summary.is_none() {
+                            first_ok_summary = spawn_ok_summary_snippet(r, summary);
+                        }
                     } else if !ok {
                         failed = failed.saturating_add(1);
+                        if adm == "rejected" {
+                            admission_rejected = admission_rejected.saturating_add(1);
+                        }
                         if first_fail.is_none() {
                             first_fail = spawn_first_fail_snippet(r, summary);
                         }
@@ -1054,18 +1064,33 @@ fn spawn_dispatch_hint_from_meta(
                 if ok_n > 0 {
                     accepted = accepted.saturating_add(ok_n);
                 }
+                if summary.contains("first_admission=rejected") {
+                    admission_rejected = admission_rejected.saturating_add(1);
+                }
                 if first_fail.is_none() {
                     first_fail = spawn_first_fail_from_summary(summary);
                 }
+                if first_ok_summary.is_none() && ok_n > 0 {
+                    first_ok_summary = spawn_ok_summary_from_summary(summary);
+                }
             } else if summary.contains("admission=accepted") {
                 accepted = accepted.saturating_add(caps);
+                if first_ok_summary.is_none() {
+                    first_ok_summary = spawn_ok_summary_from_summary(summary);
+                }
             }
         } else {
             workers = workers.saturating_add(1);
             if call.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
                 accepted = accepted.saturating_add(1);
+                if first_ok_summary.is_none() {
+                    first_ok_summary = spawn_ok_summary_from_summary(summary);
+                }
             } else {
                 failed = failed.saturating_add(1);
+                if summary.contains("first_admission=rejected") {
+                    admission_rejected = admission_rejected.saturating_add(1);
+                }
                 if first_fail.is_none() {
                     first_fail = spawn_first_fail_from_summary(summary);
                 }
@@ -1077,6 +1102,8 @@ fn spawn_dispatch_hint_from_meta(
     }
     let status = if failed == 0 && accepted > 0 {
         "accepted"
+    } else if accepted == 0 && admission_rejected > 0 && admission_rejected >= failed {
+        "报告拒收"
     } else if accepted == 0 {
         "失败"
     } else {
@@ -1092,11 +1119,47 @@ fn spawn_dispatch_hint_from_meta(
         if let Some(reason) = first_fail {
             parts.push(reason);
         }
+    } else if let Some(ok_sum) = first_ok_summary {
+        parts.push(ok_sum);
     }
     Some(parts.join("·"))
 }
 
+fn spawn_ok_summary_snippet(result: &serde_json::Value, summary: &str) -> Option<String> {
+    let detail = result
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if !detail.is_empty() {
+        return Some(compact_spawn_token(detail, 36));
+    }
+    spawn_ok_summary_from_summary(summary)
+}
+
+fn spawn_ok_summary_from_summary(summary: &str) -> Option<String> {
+    for part in summary.split_whitespace() {
+        if let Some(v) = part.strip_prefix("first=") {
+            let t = v.trim();
+            if !t.is_empty() && t != "ok" && t != "unknown" {
+                return Some(t.chars().take(36).collect());
+            }
+        }
+    }
+    None
+}
+
 fn spawn_first_fail_snippet(result: &serde_json::Value, summary: &str) -> Option<String> {
+    let admission = result
+        .get("admission")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let reason_code = result
+        .get("admission_reason_code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     let status = result
         .get("status")
         .and_then(|v| v.as_str())
@@ -1108,11 +1171,19 @@ fn spawn_first_fail_snippet(result: &serde_json::Value, summary: &str) -> Option
         .unwrap_or("")
         .trim();
     let mut bits = Vec::new();
+    if admission == "rejected" {
+        bits.push("admission拒收".to_string());
+        if !reason_code.is_empty() {
+            bits.push(reason_code.chars().take(40).collect());
+        }
+    }
     if !status.is_empty() && status != "Success" {
         bits.push(status.to_string());
     }
     if !detail.is_empty() {
         bits.push(detail.chars().take(48).collect::<String>());
+    } else if admission != "rejected" && !reason_code.is_empty() {
+        bits.push(reason_code.chars().take(40).collect());
     }
     if bits.is_empty() {
         spawn_first_fail_from_summary(summary)
@@ -1123,15 +1194,21 @@ fn spawn_first_fail_snippet(result: &serde_json::Value, summary: &str) -> Option
 
 fn spawn_first_fail_from_summary(summary: &str) -> Option<String> {
     let mut first_status: Option<&str> = None;
+    let mut first_admission: Option<&str> = None;
     let mut first: Option<&str> = None;
     for part in summary.split_whitespace() {
         if let Some(v) = part.strip_prefix("first_status=") {
             first_status = Some(v);
+        } else if let Some(v) = part.strip_prefix("first_admission=") {
+            first_admission = Some(v);
         } else if let Some(v) = part.strip_prefix("first=") {
             first = Some(v);
         }
     }
     let mut bits = Vec::new();
+    if first_admission == Some("rejected") {
+        bits.push("admission拒收".to_string());
+    }
     if let Some(s) = first_status {
         if s != "unknown" {
             bits.push(s.to_string());
@@ -1156,6 +1233,16 @@ fn spawn_first_fail_from_summary(summary: &str) -> Option<String> {
     }
 }
 
+fn compact_spawn_token(input: &str, max_chars: usize) -> String {
+    input
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
 #[cfg(test)]
 mod spawn_hint_tests {
     use super::spawn_dispatch_hint_from_meta;
@@ -1166,12 +1253,16 @@ mod spawn_hint_tests {
         let mut extra = BTreeMap::new();
         extra.insert(
             "tool_calls_json".to_string(),
-            r#"[{"tool_name":"spawn_subagent","ok":true,"summary":"subagent_batch_completed workers=2 concurrency=2 admission=accepted","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true},{\"admission\":\"accepted\",\"ok\":true}]}"}]"#.to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":true,"summary":"subagent_batch_completed workers=2 concurrency=2 admission=accepted first_run=run-1 first=worker_completed","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true,\"summary\":\"worker completed\"},{\"admission\":\"accepted\",\"ok\":true,\"summary\":\"worker completed\"}]}"}]"#.to_string(),
         );
         let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
         assert!(hint.contains("派工 2工人"), "{hint}");
         assert!(hint.contains("accepted"), "{hint}");
         assert!(hint.contains("luna"), "{hint}");
+        assert!(
+            hint.contains("worker_completed") || hint.contains("worker"),
+            "success hint should carry report summary: {hint}"
+        );
     }
 
     #[test]
@@ -1179,7 +1270,7 @@ mod spawn_hint_tests {
         let mut extra = BTreeMap::new();
         extra.insert(
             "tool_calls_json".to_string(),
-            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=2 failed=1 concurrency=2 first_status=Failed first=codex_timed_out","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true,\"status\":\"Success\"},{\"admission\":\"accepted\",\"ok\":false,\"status\":\"Failed\",\"summary\":\"codex timed out\"}]}"}]"#.to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=2 failed=1 concurrency=2 first_status=Failed first_admission=accepted first=codex_timed_out","output":"{\"worker_count\":2,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"accepted\",\"ok\":true,\"status\":\"Success\"},{\"admission\":\"accepted\",\"ok\":false,\"status\":\"Failed\",\"summary\":\"codex timed out\"}]}"}]"#.to_string(),
         );
         let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
         assert!(hint.contains("派工 2工人"), "{hint}");
@@ -1191,11 +1282,30 @@ mod spawn_hint_tests {
     }
 
     #[test]
+    fn spawn_hint_admission_rejected_is_distinct() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "tool_calls_json".to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=1 failed=1 concurrency=1 first_status=Failed first_admission=rejected first=command_protocol_report_rejected","output":"{\"worker_count\":1,\"worker_model\":\"gpt-5.6-luna\",\"results\":[{\"admission\":\"rejected\",\"admission_reason_code\":\"command_protocol_report_rejected\",\"ok\":false,\"status\":\"Failed\",\"summary\":\"report rejected\"}]}"}]"#.to_string(),
+        );
+        let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
+        assert!(hint.contains("派工 1工人"), "{hint}");
+        assert!(
+            hint.contains("报告拒收") || hint.contains("admission拒收"),
+            "{hint}"
+        );
+        assert!(
+            hint.contains("command_protocol_report_rejected") || hint.contains("rejected"),
+            "{hint}"
+        );
+    }
+
+    #[test]
     fn spawn_hint_from_short_summary_without_output_json() {
         let mut extra = BTreeMap::new();
         extra.insert(
             "tool_calls_json".to_string(),
-            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=1 failed=1 concurrency=1 first_status=Failed first=runner_boom"}]"#.to_string(),
+            r#"[{"tool_name":"spawn_subagent","ok":false,"summary":"subagent_batch_partial_failure workers=1 failed=1 concurrency=1 first_status=Failed first_admission=accepted first=runner_boom"}]"#.to_string(),
         );
         let hint = spawn_dispatch_hint_from_meta(&extra).expect("hint");
         assert!(hint.contains("派工 1工人"), "{hint}");
