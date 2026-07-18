@@ -41,8 +41,14 @@ The compatibility stdio mode keeps its existing JSON-lines request/response beha
 live control is not promised there; the canonical terminal live-control path is the Unix socket
 daemon.
 
-Thread state is daemon-local. A caller must omit `threadId` to start a new thread; an unknown or
-stale id is rejected instead of silently creating a replacement. Completed thread snapshots retain
-`providerMeta`, including pending-approval metadata, and approval turns use
-`status=human_input_required`. Cancelled, failed, and `provider_error` turns remain visible in
-snapshots but are not injected into later model conversation history.
+The canonical socket daemon persists thread/turn state in the runtime configuration's SQLite
+`db_path`. A caller must omit `threadId` to start a new thread; an unknown or stale id is rejected
+instead of silently creating a replacement. After daemon restart, completed history remains
+resumable and sequence floors prevent thread/turn id reuse. A persisted `active` turn becomes
+`interrupted` and is not replayed.
+
+Live responses may expose full runtime `providerMeta`, but the durable snapshot retains only
+`pending_approval_id`, `pending_approval_path`, and `app_server_interruption_reason`. Tool traces,
+tool surfaces, provider credentials, and other runtime-only metadata are not persisted. Approval
+turns use `status=human_input_required`; cancelled, failed, interrupted, and `provider_error` turns
+remain visible but are not injected into later model conversation history.

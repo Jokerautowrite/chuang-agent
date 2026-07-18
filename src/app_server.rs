@@ -12,6 +12,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::cli_runtime::kernel_config_from_runtime;
@@ -33,6 +35,7 @@ use chuang_agent::tool_loop_meta::{parse_json_value, ToolLoopMeta};
 use chuang_agent::tool_runtime::{ToolExecutionRecord, ToolProtocolError};
 
 static APP_SERVER_TURN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const APP_SERVER_SNAPSHOT_SCHEMA_VERSION: i64 = 1;
 
 #[derive(Debug, Default)]
 struct AppServerState {
@@ -40,6 +43,7 @@ struct AppServerState {
     next_turn_seq: u64,
     threads: BTreeMap<String, ThreadState>,
     active_turns: BTreeMap<String, ActiveTurn>,
+    snapshot_store: Option<AppServerSnapshotStore>,
 }
 
 type SharedAppServerState = Arc<Mutex<AppServerState>>;
@@ -72,6 +76,40 @@ struct TurnState {
     provider_meta: BTreeMap<String, String>,
     tool_trace: String,
     tool_surface: Option<Value>,
+    updated_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct AppServerSnapshotStore {
+    db_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppServerSnapshot {
+    schema_version: i64,
+    next_thread_seq: u64,
+    next_turn_seq: u64,
+    threads: BTreeMap<String, AppServerSnapshotThread>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppServerSnapshotThread {
+    id: String,
+    workspace_root: String,
+    display_name: String,
+    created_at: u64,
+    updated_at: u64,
+    turns: Vec<AppServerSnapshotTurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppServerSnapshotTurn {
+    id: String,
+    user_text: String,
+    assistant_text: String,
+    model_name: String,
+    status: String,
+    provider_meta: BTreeMap<String, String>,
     updated_at: u64,
 }
 
@@ -168,7 +206,7 @@ fn serve_json_lines<R: BufRead, W: Write>(
 fn app_server_daemon_command(args: &[String]) -> Result<(), String> {
     let socket = parse_socket_only_args(args, "daemon")?;
     let listener = bind_app_server_socket(&socket)?;
-    let state = Arc::new(Mutex::new(AppServerState::default()));
+    let state = Arc::new(Mutex::new(load_daemon_app_server_state()?));
 
     for stream in listener.incoming() {
         match stream {
@@ -235,9 +273,11 @@ fn serve_daemon_json_lines<R: BufRead, W: Write>(
         let result = match method {
             "initialize" => Ok(handle_initialize()),
             "model/list" => handle_model_list(&params),
-            "thread/start" => {
-                with_app_server_state(&state, |state| handle_thread_start(state, &params))
-            }
+            "thread/start" => with_app_server_state(&state, |state| {
+                let result = handle_thread_start(state, &params)?;
+                persist_app_server_state(state)?;
+                Ok(result)
+            }),
             "thread/resume" => {
                 with_app_server_state(&state, |state| handle_thread_resume(state, &params))
             }
@@ -274,6 +314,280 @@ fn with_app_server_state<T>(
         .lock()
         .map_err(|_| "app_server_state_lock_poisoned".to_string())?;
     action(&mut state)
+}
+
+impl AppServerSnapshotStore {
+    fn open(db_path: PathBuf) -> Result<Self, String> {
+        if let Some(parent) = db_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "app_server_snapshot_parent_create_failed: path={} error={error}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let store = Self { db_path };
+        let conn = store.connection()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS app_server_snapshots (
+                snapshot_id INTEGER PRIMARY KEY CHECK (snapshot_id = 1),
+                schema_version INTEGER NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            ",
+        )
+        .map_err(|error| format!("app_server_snapshot_schema_failed: {error}"))?;
+        Ok(store)
+    }
+
+    fn connection(&self) -> Result<Connection, String> {
+        Connection::open(&self.db_path).map_err(|error| {
+            format!(
+                "app_server_snapshot_open_failed: path={} error={error}",
+                self.db_path.display()
+            )
+        })
+    }
+
+    fn load(&self) -> Result<Option<AppServerSnapshot>, String> {
+        let conn = self.connection()?;
+        let row = conn
+            .query_row(
+                "SELECT schema_version, snapshot_json
+                 FROM app_server_snapshots
+                 WHERE snapshot_id = 1",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("app_server_snapshot_load_failed: {error}"))?;
+        let Some((schema_version, snapshot_json)) = row else {
+            return Ok(None);
+        };
+        if schema_version != APP_SERVER_SNAPSHOT_SCHEMA_VERSION {
+            return Err(format!(
+                "app_server_snapshot_schema_unsupported: found={schema_version} supported={APP_SERVER_SNAPSHOT_SCHEMA_VERSION}"
+            ));
+        }
+        let snapshot: AppServerSnapshot = serde_json::from_str(&snapshot_json)
+            .map_err(|error| format!("app_server_snapshot_decode_failed: {error}"))?;
+        if snapshot.schema_version != APP_SERVER_SNAPSHOT_SCHEMA_VERSION {
+            return Err(format!(
+                "app_server_snapshot_payload_schema_unsupported: found={} supported={APP_SERVER_SNAPSHOT_SCHEMA_VERSION}",
+                snapshot.schema_version
+            ));
+        }
+        Ok(Some(snapshot))
+    }
+
+    fn save(&self, snapshot: &AppServerSnapshot) -> Result<(), String> {
+        let snapshot_json = serde_json::to_string(snapshot)
+            .map_err(|error| format!("app_server_snapshot_encode_failed: {error}"))?;
+        let mut conn = self.connection()?;
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| format!("app_server_snapshot_begin_failed: {error}"))?;
+        transaction
+            .execute(
+                "
+                INSERT INTO app_server_snapshots (
+                    snapshot_id,
+                    schema_version,
+                    snapshot_json,
+                    updated_at
+                )
+                VALUES (1, ?1, ?2, ?3)
+                ON CONFLICT(snapshot_id) DO UPDATE SET
+                    schema_version = excluded.schema_version,
+                    snapshot_json = excluded.snapshot_json,
+                    updated_at = excluded.updated_at
+                ",
+                params![
+                    APP_SERVER_SNAPSHOT_SCHEMA_VERSION,
+                    snapshot_json,
+                    now_millis()
+                ],
+            )
+            .map_err(|error| format!("app_server_snapshot_write_failed: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("app_server_snapshot_commit_failed: {error}"))?;
+        Ok(())
+    }
+}
+
+impl AppServerSnapshot {
+    fn from_state(state: &AppServerState) -> Self {
+        Self {
+            schema_version: APP_SERVER_SNAPSHOT_SCHEMA_VERSION,
+            next_thread_seq: state.next_thread_seq,
+            next_turn_seq: state.next_turn_seq,
+            threads: state
+                .threads
+                .iter()
+                .map(|(thread_id, thread)| {
+                    (
+                        thread_id.clone(),
+                        AppServerSnapshotThread {
+                            id: thread.id.clone(),
+                            workspace_root: thread.workspace_root.clone(),
+                            display_name: thread.display_name.clone(),
+                            created_at: thread.created_at,
+                            updated_at: thread.updated_at,
+                            turns: thread
+                                .turns
+                                .iter()
+                                .map(|turn| AppServerSnapshotTurn {
+                                    id: turn.id.clone(),
+                                    user_text: turn.user_text.clone(),
+                                    assistant_text: turn.assistant_text.clone(),
+                                    model_name: turn.model_name.clone(),
+                                    status: turn.status.clone(),
+                                    provider_meta: app_server_snapshot_provider_meta(
+                                        &turn.provider_meta,
+                                    ),
+                                    updated_at: turn.updated_at,
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn into_state(self, snapshot_store: AppServerSnapshotStore) -> AppServerState {
+        let mut state = AppServerState {
+            next_thread_seq: self.next_thread_seq,
+            next_turn_seq: self.next_turn_seq,
+            threads: self
+                .threads
+                .into_iter()
+                .map(|(thread_id, thread)| {
+                    (
+                        thread_id,
+                        ThreadState {
+                            id: thread.id,
+                            workspace_root: thread.workspace_root,
+                            display_name: thread.display_name,
+                            created_at: thread.created_at,
+                            updated_at: thread.updated_at,
+                            turns: thread
+                                .turns
+                                .into_iter()
+                                .map(|turn| TurnState {
+                                    id: turn.id,
+                                    user_text: turn.user_text,
+                                    assistant_text: turn.assistant_text,
+                                    model_name: turn.model_name,
+                                    status: turn.status,
+                                    provider_meta: turn.provider_meta,
+                                    tool_trace: String::new(),
+                                    tool_surface: None,
+                                    updated_at: turn.updated_at,
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+            active_turns: BTreeMap::new(),
+            snapshot_store: Some(snapshot_store),
+        };
+        restore_app_server_sequence_floors(&mut state);
+        state
+    }
+}
+
+fn load_daemon_app_server_state() -> Result<AppServerState, String> {
+    let workspace_root = app_server_config_workspace_root("");
+    let runtime = build_runtime_for_workspace_with_options(
+        &workspace_root,
+        RuntimeConfigFileOptions::allow_missing_env(),
+    )?;
+    load_app_server_state_from_db(runtime.db_path)
+}
+
+fn load_app_server_state_from_db(db_path: PathBuf) -> Result<AppServerState, String> {
+    let snapshot_store = AppServerSnapshotStore::open(db_path)?;
+    let mut state = match snapshot_store.load()? {
+        Some(snapshot) => snapshot.into_state(snapshot_store),
+        None => AppServerState {
+            snapshot_store: Some(snapshot_store),
+            ..AppServerState::default()
+        },
+    };
+    if recover_interrupted_app_server_turns(&mut state) {
+        persist_app_server_state(&state)?;
+    }
+    Ok(state)
+}
+
+fn persist_app_server_state(state: &AppServerState) -> Result<(), String> {
+    let Some(snapshot_store) = &state.snapshot_store else {
+        return Ok(());
+    };
+    snapshot_store.save(&AppServerSnapshot::from_state(state))
+}
+
+fn recover_interrupted_app_server_turns(state: &mut AppServerState) -> bool {
+    let now = now_millis();
+    let mut recovered = false;
+    for thread in state.threads.values_mut() {
+        for turn in &mut thread.turns {
+            if turn.status == "active" {
+                turn.status = "interrupted".to_string();
+                turn.provider_meta.insert(
+                    "app_server_interruption_reason".to_string(),
+                    "daemon_restarted_before_turn_completion".to_string(),
+                );
+                turn.updated_at = now;
+                thread.updated_at = now;
+                recovered = true;
+            }
+        }
+    }
+    recovered
+}
+
+fn restore_app_server_sequence_floors(state: &mut AppServerState) {
+    for thread in state.threads.values() {
+        state.next_thread_seq = state
+            .next_thread_seq
+            .max(app_server_sequence_from_id(&thread.id, "chuang-thread-"));
+        for turn in &thread.turns {
+            state.next_turn_seq = state
+                .next_turn_seq
+                .max(app_server_sequence_from_id(&turn.id, "chuang-turn-"));
+        }
+    }
+}
+
+fn app_server_sequence_from_id(id: &str, prefix: &str) -> u64 {
+    id.strip_prefix(prefix)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn app_server_snapshot_provider_meta(
+    provider_meta: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    provider_meta
+        .iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "pending_approval_id" | "pending_approval_path" | "app_server_interruption_reason"
+            )
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 fn parse_socket_only_args(args: &[String], command: &str) -> Result<PathBuf, String> {
@@ -1296,7 +1610,9 @@ fn handle_live_turn_start(
             }
         }),
     ) {
-        unregister_active_turn(&state, &prepared.thread_id, &prepared.turn_id);
+        if record_live_turn_failure(&state, &prepared, "cancelled").is_err() {
+            unregister_active_turn(&state, &prepared.thread_id, &prepared.turn_id);
+        }
         return Err(error);
     }
 
@@ -1351,7 +1667,7 @@ fn handle_live_turn_start(
             } else {
                 "failed"
             };
-            record_live_turn_failure(&state, &prepared, status);
+            record_live_turn_failure(&state, &prepared, status)?;
             if let Some(stream_error) = stream_error {
                 return Err(stream_error);
             }
@@ -1421,6 +1737,7 @@ fn prepare_live_turn(
                 .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
             let turn_id = next_turn_id(state);
             let conversation_history = recent_thread_history(state, &thread_id, 6);
+            persist_app_server_state(state)?;
 
             Ok((thread_id, turn_id, workspace_root, conversation_history))
         })?;
@@ -1439,6 +1756,30 @@ fn prepare_live_turn(
                 guidance_writer: Arc::clone(&storage.guidance_writer),
             },
         );
+        let now = now_millis();
+        let thread = state
+            .threads
+            .get_mut(&thread_id)
+            .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
+        thread.updated_at = now;
+        thread.turns.push(TurnState {
+            id: turn_id.clone(),
+            user_text: input_text.clone(),
+            assistant_text: String::new(),
+            model_name: String::new(),
+            status: "active".to_string(),
+            provider_meta: BTreeMap::new(),
+            tool_trace: String::new(),
+            tool_surface: None,
+            updated_at: now,
+        });
+        if let Err(error) = persist_app_server_state(state) {
+            remove_active_turn(state, &thread_id, &turn_id);
+            if let Some(thread) = state.threads.get_mut(&thread_id) {
+                thread.turns.retain(|turn| turn.id != turn_id);
+            }
+            return Err(error);
+        }
 
         Ok(PreparedLiveTurn {
             thread_id,
@@ -1682,20 +2023,23 @@ fn record_live_turn_success(
                 .get_mut(&prepared.thread_id)
                 .ok_or_else(|| format!("unknown_thread: {}", prepared.thread_id))?;
             thread.updated_at = now;
-            thread.turns.push(TurnState {
-                id: prepared.turn_id.clone(),
-                user_text: prepared.input_text.clone(),
-                assistant_text: result.response.body.clone(),
-                model_name: result.response.model_name.clone(),
-                status,
-                provider_meta: result.response.meta.extra.clone(),
-                tool_trace: live_turn.tool_run.tool_trace.clone(),
-                tool_surface: live_turn.tool_run.tool_surface.clone(),
-                updated_at: now,
-            });
+            let turn = thread
+                .turns
+                .iter_mut()
+                .find(|turn| turn.id == prepared.turn_id)
+                .ok_or_else(|| format!("unknown_turn: {}", prepared.turn_id))?;
+            turn.user_text = prepared.input_text.clone();
+            turn.assistant_text = result.response.body.clone();
+            turn.model_name = result.response.model_name.clone();
+            turn.status = status;
+            turn.provider_meta = result.response.meta.extra.clone();
+            turn.tool_trace = live_turn.tool_run.tool_trace.clone();
+            turn.tool_surface = live_turn.tool_run.tool_surface.clone();
+            turn.updated_at = now;
             thread.clone()
         };
         remove_active_turn(state, &prepared.thread_id, &prepared.turn_id);
+        persist_app_server_state(state)?;
         Ok(thread)
     })
 }
@@ -1704,26 +2048,25 @@ fn record_live_turn_failure(
     state: &SharedAppServerState,
     prepared: &PreparedLiveTurn,
     status: &str,
-) {
-    let _ = with_app_server_state(state, |state| {
+) -> Result<(), String> {
+    with_app_server_state(state, |state| {
         let now = now_millis();
-        if let Some(thread) = state.threads.get_mut(&prepared.thread_id) {
-            thread.updated_at = now;
-            thread.turns.push(TurnState {
-                id: prepared.turn_id.clone(),
-                user_text: prepared.input_text.clone(),
-                assistant_text: String::new(),
-                model_name: String::new(),
-                status: status.to_string(),
-                provider_meta: BTreeMap::new(),
-                tool_trace: String::new(),
-                tool_surface: None,
-                updated_at: now,
-            });
-        }
+        let thread = state
+            .threads
+            .get_mut(&prepared.thread_id)
+            .ok_or_else(|| format!("unknown_thread: {}", prepared.thread_id))?;
+        thread.updated_at = now;
+        let turn = thread
+            .turns
+            .iter_mut()
+            .find(|turn| turn.id == prepared.turn_id)
+            .ok_or_else(|| format!("unknown_turn: {}", prepared.turn_id))?;
+        turn.status = status.to_string();
+        turn.updated_at = now;
         remove_active_turn(state, &prepared.thread_id, &prepared.turn_id);
+        persist_app_server_state(state)?;
         Ok(())
-    });
+    })
 }
 
 fn unregister_active_turn(state: &SharedAppServerState, thread_id: &str, turn_id: &str) {
@@ -2838,6 +3181,118 @@ fn provider_config_model_name(provider: &ProviderConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_snapshot_recovers_active_turn_and_preserves_safe_history() {
+        let db_path = std::env::temp_dir().join(format!(
+            "chuang-agent-app-server-snapshot-test-{}-{}.db",
+            process::id(),
+            APP_SERVER_TURN_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let snapshot_store =
+            AppServerSnapshotStore::open(db_path.clone()).expect("snapshot store should open");
+        let mut state = AppServerState {
+            snapshot_store: Some(snapshot_store),
+            ..AppServerState::default()
+        };
+        let thread = create_thread(
+            &mut state,
+            "/tmp/workspace".to_string(),
+            "workspace".to_string(),
+        );
+        let thread_id = thread.id;
+        let turn_id = next_turn_id(&mut state);
+        state
+            .threads
+            .get_mut(&thread_id)
+            .expect("thread should exist")
+            .turns
+            .push(TurnState {
+                id: turn_id,
+                user_text: "remember this".to_string(),
+                assistant_text: String::new(),
+                model_name: String::new(),
+                status: "active".to_string(),
+                provider_meta: BTreeMap::from([
+                    (
+                        "pending_approval_id".to_string(),
+                        "approval-safe".to_string(),
+                    ),
+                    (
+                        "pending_approval_path".to_string(),
+                        "/tmp/approval-safe".to_string(),
+                    ),
+                    (
+                        "tool_calls_json".to_string(),
+                        "sensitive-tool-output".to_string(),
+                    ),
+                    ("api_key".to_string(), "sensitive-api-key".to_string()),
+                ]),
+                tool_trace: "sensitive tool trace".to_string(),
+                tool_surface: Some(json!({"secret": "sensitive-tool-surface"})),
+                updated_at: 1,
+            });
+        persist_app_server_state(&state).expect("snapshot should save");
+
+        let restored = load_app_server_state_from_db(db_path.clone())
+            .expect("snapshot should reload after daemon restart");
+        let restored_turn = &restored
+            .threads
+            .get(&thread_id)
+            .expect("thread should restore")
+            .turns[0];
+        assert_eq!(restored_turn.status, "interrupted");
+        assert_eq!(
+            restored_turn
+                .provider_meta
+                .get("app_server_interruption_reason"),
+            Some(&"daemon_restarted_before_turn_completion".to_string())
+        );
+        assert_eq!(
+            restored_turn.provider_meta.get("pending_approval_id"),
+            Some(&"approval-safe".to_string())
+        );
+        assert_eq!(restored_turn.tool_trace, "");
+        assert!(restored_turn.tool_surface.is_none());
+
+        let restored_again = load_app_server_state_from_db(db_path.clone())
+            .expect("recovered snapshot should reload a second time");
+        assert_eq!(
+            restored_again
+                .threads
+                .get(&thread_id)
+                .expect("thread should survive a second restart")
+                .turns[0]
+                .provider_meta
+                .get("app_server_interruption_reason"),
+            Some(&"daemon_restarted_before_turn_completion".to_string())
+        );
+
+        let mut restored = restored_again;
+        assert_eq!(
+            create_thread(
+                &mut restored,
+                "/tmp/workspace".to_string(),
+                "workspace".to_string()
+            )
+            .id,
+            "chuang-thread-2"
+        );
+        assert_eq!(next_turn_id(&mut restored), "chuang-turn-2");
+
+        let conn = Connection::open(db_path).expect("snapshot database should open");
+        let snapshot_json: String = conn
+            .query_row(
+                "SELECT snapshot_json FROM app_server_snapshots WHERE snapshot_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("snapshot row should exist");
+        assert!(!snapshot_json.contains("tool_calls_json"));
+        assert!(!snapshot_json.contains("sensitive-api-key"));
+        assert!(!snapshot_json.contains("sensitive tool trace"));
+        assert!(!snapshot_json.contains("sensitive-tool-surface"));
+    }
 
     #[test]
     fn pending_approval_turn_status_requires_human_input() {

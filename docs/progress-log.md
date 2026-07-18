@@ -1,3 +1,13 @@
+# 2026-07-18 app-server SQLite thread/turn snapshot 持久化
+- daemon 启动从 workspace runtime config 的归一化 `db_path` 加载 SQLite snapshot；thread/turn 状态以事务方式保存到 `app_server_snapshots`，并恢复 sequence floor，避免重启后复用 thread/turn id。
+- 保存范围收窄为 thread 基本字段与 turn 的用户文本、助手文本、模型名、状态、更新时间，以及 allowlist 后的 `pending_approval_id` / `pending_approval_path` / `app_server_interruption_reason` metadata。
+- 明确不保存 `tool_trace`、`tool_surface`、`tool_calls_json`、API key 或其它 runtime secrets；stdio JSON-lines 兼容路径保持原有内存行为。
+- daemon 重启时将遗留 `active` turn 标记为 `interrupted`，写入 `daemon_restarted_before_turn_completion` 原因，不自动重放 provider 请求；已完成历史可正常续接。
+- 新增 restart 黑盒回归 `app_server_daemon_recovers_sqlite_thread_and_recent_history_after_restart`，并新增敏感字段/active recovery 单测 `daemon_snapshot_recovers_active_turn_and_preserves_safe_history`。
+- 完整测试、`cargo check --all-targets`、定向回归、build、rustfmt check 和 `git diff --check` 均通过。
+- 真实 systemd user service 已完成跨重启收据：旧 `chuang-thread-1` 在第二次重启后继续成功，第二轮 history injected=`true`、item count=`2`、turn count=`1`；服务 `active/running`、`NRestarts=0`、probe ok、socket `0600`。
+- live SQLite snapshot 为 schema `1`、thread `1`、turn `2`、forbidden runtime key `0`。支持拓扑限定为一个 `db_path` 对应一个 canonical daemon，不支持多个手工 daemon 共写同库。
+
 # 2026-07-18 app-server streamed progress + guidance/interrupt
 - 多代理并行完成 daemon live turn 与 REPL socket control 两条实现线；持久化只做设计判断，本轮不和并发状态机混做。
 - daemon 改为每客户端独立线程，active-turn registry 拒绝同 thread 并发 turn；`turn/started` 在 runtime 前发送，TerminalEvent JSONL 通过 `turn/progress` 实时转发。

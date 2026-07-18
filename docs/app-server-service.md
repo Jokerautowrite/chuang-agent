@@ -67,6 +67,38 @@ Guidance and interrupt writes share a per-turn file mutex. Active-turn validatio
 also occur inside one app-server state-lock interval, so the operation has one linearization point:
 it either writes and returns a queued response, or returns `turn_not_active` without writing.
 
+## SQLite Thread/Turn Snapshots
+
+The socket daemon loads the workspace runtime configuration at startup and uses its normalized
+`db_path` for the app-server snapshot store. The store is SQLite-backed and keeps one transactional
+snapshot of daemon thread state, including sequence floors, thread identity/workspace/display
+metadata, and turn records.
+
+Persisted turn fields are limited to user text, assistant text, model name, status, timestamps, and
+the allowlisted metadata `pending_approval_id`, `pending_approval_path`, and
+`app_server_interruption_reason`. Runtime `tool_trace`, `tool_surface`, `tool_calls_json`, provider
+credentials, and other runtime secrets are never written to the snapshot. On restore, those
+runtime-only fields remain empty or absent.
+
+When the daemon starts after a process restart, any persisted `active` turn is changed to
+`interrupted` with reason `daemon_restarted_before_turn_completion`. The daemon does not replay the
+provider request. Completed history remains resumable and can be injected into a later turn under
+the existing history-admission rules.
+
+The compatibility JSON-lines stdio mode remains in-memory and does not open the daemon snapshot
+store. The restart recovery and sensitive-field boundaries are covered by focused unit and black-box
+tests.
+
+The snapshot store is owned by the one canonical app-server service for a configured `db_path`.
+Running multiple manually launched daemons against the same database is outside the supported
+service topology.
+
+The installed user service was accepted on 2026-07-18: after one completed turn, the service was
+restarted and the old thread id continued successfully. The second turn reported
+`recent_conversation_history_injected=true`, history item count `2`, and history turn count `1`.
+The service remained `active/running` with `NRestarts=0`, probe succeeded, the socket stayed `0600`,
+and the SQLite snapshot contained one thread/two turns with no forbidden runtime keys.
+
 ## Health Check
 
 ```bash

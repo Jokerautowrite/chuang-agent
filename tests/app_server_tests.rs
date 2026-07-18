@@ -365,6 +365,177 @@ fn app_server_daemon_probe_and_ask_use_canonical_socket() {
 }
 
 #[test]
+fn app_server_daemon_recovers_sqlite_thread_and_recent_history_after_restart() {
+    let workspace = temp_workspace("daemon-sqlite-restart-recovery");
+    write_basic_stub_workspace(&workspace);
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("provider listener should bind");
+    let address = listener
+        .local_addr()
+        .expect("provider listener address should exist");
+    let (requests_tx, requests_rx) = std::sync::mpsc::channel();
+    let provider = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for (index, assistant_text) in [
+            "FIRST_COMPLETION: anchor persisted",
+            "SECOND_COMPLETION: history restored",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let (mut stream, _) = listener.accept().expect("provider request should arrive");
+            requests.push(
+                String::from_utf8(read_http_request(&mut stream))
+                    .expect("provider request should be UTF-8"),
+            );
+            let body = serde_json::json!({
+                "id": format!("restart-recovery-{index}"),
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": assistant_text,
+                    },
+                    "finish_reason": "stop",
+                }],
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("provider response should write");
+        }
+        requests_tx
+            .send(requests)
+            .expect("captured provider requests should send");
+    });
+    fs::write(
+        workspace.join("config.toml"),
+        format!(
+            r#"
+db_path = "./data/chuang-agent.db"
+identity_memory_root = "./data/hermes-memory"
+identity_root = "./identity"
+soul_path = "./identity/SOUL.md"
+story_path = "./identity/STORY.md"
+first_wake_path = "./identity/FIRST_WAKE.md"
+agents_registry_path = "./identity/agents.toml"
+rules_root = "./rules"
+rules_core_path = "./rules/core.md"
+
+provider = "openai_compatible"
+provider_id = "app-server-restart-recovery"
+base_url = "http://{address}/v1"
+model = "gpt-app-server-restart-recovery"
+api_key_env = "CHUANG_AGENT_APP_SERVER_TEST_API_KEY"
+transport = "http"
+"#,
+        ),
+    )
+    .expect("restart recovery config should write");
+
+    let socket = app_server_socket("daemon-sqlite-restart-recovery");
+    let mut first_daemon = spawn_app_server_daemon(&socket, Some(&workspace));
+    wait_for_app_server_socket(&socket);
+    let first_turn = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 1,
+            "method": "turn/start",
+            "params": {
+                "workspaceRoot": workspace,
+                "text": "记住这个重启暗号：restart_anchor_alpha"
+            }
+        }),
+    );
+    let thread_id = first_turn["result"]["thread"]["id"]
+        .as_str()
+        .expect("first turn should return a thread id")
+        .to_string();
+    assert_eq!(first_turn["result"]["turn"]["status"], "completed");
+    assert!(workspace.join("data/chuang-agent.db").is_file());
+
+    stop_app_server_daemon(&mut first_daemon);
+
+    let mut second_daemon = spawn_app_server_daemon(&socket, Some(&workspace));
+    wait_for_app_server_socket(&socket);
+    let listed = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 2,
+            "method": "thread/list",
+            "params": {}
+        }),
+    );
+    assert!(listed["result"]["data"]
+        .as_array()
+        .expect("thread list data should be an array")
+        .iter()
+        .any(|thread| thread["id"] == thread_id));
+
+    let resumed = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 3,
+            "method": "thread/resume",
+            "params": {
+                "threadId": thread_id
+            }
+        }),
+    );
+    let restored_turns = resumed["result"]["thread"]["turns"]
+        .as_array()
+        .expect("resumed thread turns should be an array");
+    assert_eq!(restored_turns.len(), 1);
+    assert_eq!(restored_turns[0]["id"], first_turn["result"]["turn"]["id"]);
+    assert_eq!(restored_turns[0]["status"], "completed");
+
+    let second_turn = daemon_request(
+        &socket,
+        serde_json::json!({
+            "id": 4,
+            "method": "turn/start",
+            "params": {
+                "workspaceRoot": workspace,
+                "threadId": thread_id,
+                "text": "重启后，刚才的暗号是什么？"
+            }
+        }),
+    );
+    assert_eq!(second_turn["result"]["thread"]["id"], thread_id);
+    assert_eq!(second_turn["result"]["turn"]["status"], "completed");
+    assert_eq!(
+        second_turn["result"]["turn"]["providerMeta"]["recent_conversation_history_item_count"],
+        "2"
+    );
+    assert_eq!(
+        second_turn["result"]["turn"]["providerMeta"]["recent_conversation_history_injected"],
+        "true"
+    );
+
+    let requests = requests_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("provider should receive both turns");
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].contains("[recent-conversation-history]"),
+        "second provider request should include the history context"
+    );
+    assert!(
+        requests[1].contains("restart_anchor_alpha"),
+        "second provider request should include the prior user turn"
+    );
+    provider.join().expect("provider should finish");
+
+    stop_app_server_daemon(&mut second_daemon);
+}
+
+#[test]
 fn app_server_daemon_streams_live_turn_progress_and_accepts_cross_connection_controls() {
     let workspace = temp_workspace("daemon-live-turn-controls");
     let runtime_dir = temp_workspace("daemon-live-turn-runtime");
