@@ -8,7 +8,10 @@ import sys
 
 STATUSES = {
     "active": "Running",
+    "activating": "Running",
+    "reloading": "Running",
     "inactive": "Stopped",
+    "deactivating": "Stopped",
     "failed": "Failed",
 }
 
@@ -184,7 +187,12 @@ def live_enabled() -> bool:
 
 
 def live_status_enabled() -> bool:
-    return os.environ.get("CHUANG_REAL_CONTROL_STATUS_ENABLE") == "1"
+    # Explicit STATUS_ENABLE wins; otherwise follow CONTROL_ENABLE so list reflects reality
+    # once the operator has opted into real control.
+    explicit = os.environ.get("CHUANG_REAL_CONTROL_STATUS_ENABLE")
+    if explicit is not None:
+        return explicit == "1"
+    return live_enabled()
 
 
 if __name__ == "__main__":
