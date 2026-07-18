@@ -2359,7 +2359,7 @@ fn build_subagent_readiness(
     };
     let model_tool_worker_reason = if model_tool_worker_available {
         format!(
-            "spawn_subagent can execute the governed local Codex worker through {}; this does not imply every external worker pool or live adapter is ready",
+            "CAN_DISPATCH: spawn_subagent runs governed local Codex workers via {} (CHUANG_CODEX_RUNNER_ENABLE=1). live_worker_available=false only means external live adapter pool is off — not that dispatch is broken",
             model_tool_runner.display()
         )
     } else if !queued {
@@ -2496,8 +2496,13 @@ fn build_subagent_readiness(
     } else if slots.subagent == "fake" {
         "subagent slot is fake; ready layers only prove local contracts and do not provide a live worker"
             .to_string()
+    } else if queued && model_tool_worker_available {
+        // Do not say "cannot start workers" — models misread that as spawn broken.
+        format!(
+            "queued_external dispatch is ready: model tool spawn_subagent can start local Codex workers; live_worker_available=false only excludes external live adapter pools (not local spawn)"
+        )
     } else if queued {
-        "queued_external provides durable dispatch/report contracts, but no live worker adapter is available yet"
+        "queued_external provides durable dispatch/report contracts; local spawn_subagent needs runner+codex; no external live worker adapter yet"
             .to_string()
     } else {
         "subagent runtime is contract-only until an audited live worker adapter is configured"
@@ -2509,6 +2514,9 @@ fn build_subagent_readiness(
         "one or more subagent readiness layers are blocked".to_string()
     } else if slots.subagent == "fake" {
         "live_worker_unavailable: subagent slot is fake; local contracts are visible but no live worker can run"
+            .to_string()
+    } else if queued && model_tool_worker_available {
+        "live_adapter_pool_unavailable_only: local spawn_subagent/Codex path is available; external live adapter pool is not"
             .to_string()
     } else if queued {
         "live_worker_unavailable: queued_external has durable dispatch/report contracts but no live worker adapter"

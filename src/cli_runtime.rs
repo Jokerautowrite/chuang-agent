@@ -533,6 +533,49 @@ where
 
         match parse_tool_model_output(&body) {
             ToolModelOutput::FinalAnswer(final_answer) => {
+                // 「派子代理…」必须真调用 spawn_subagent，不能只 doctor/code_execute 后胡说不能派。
+                if should_require_spawn_subagent(&original_input)
+                    && !tool_calls
+                        .iter()
+                        .any(|record| matches!(record.call, ToolCall::SpawnSubagent { .. }))
+                {
+                    let error = ToolProtocolError {
+                        code: "missing_required_spawn_subagent".to_string(),
+                        message: "user asked to exercise spawn_subagent; doctor/status alone is not enough — call spawn_subagent before FINAL"
+                            .to_string(),
+                        raw: final_answer,
+                    };
+                    transcript.push(format!(
+                        "protocol_error code={} message={} rejected_unverified_answer=true",
+                        error.code, error.message
+                    ));
+                    tool_events.push(ToolLoopEvent {
+                        round: round_index + 1,
+                        kind: "protocol_error".to_string(),
+                        tool_name: None,
+                        atomic_tool_name: None,
+                        decision: None,
+                        ok: None,
+                        failure_class: None,
+                        duration_ms: None,
+                        retryable: None,
+                        summary: None,
+                        protocol_error_code: Some(error.code.clone()),
+                        protocol_error_message: Some(error.message.clone()),
+                    });
+                    protocol_errors.push(error);
+                    write_terminal_event(
+                        progress_path,
+                        &TerminalEvent::ProtocolError {
+                            round: round_index + 1,
+                            code: "missing_required_spawn_subagent".to_string(),
+                        },
+                    )?;
+                    current_input =
+                        tool_protocol_repair_prompt_for_spawn(&original_input, &transcript);
+                    last_turn = Some(turn);
+                    continue;
+                }
                 if tool_calls.is_empty() && should_require_action_for_local_task(&original_input) {
                     let error = ToolProtocolError {
                         code: "missing_required_action".to_string(),
@@ -775,32 +818,40 @@ where
                 continue;
             }
             ToolModelOutput::PlainText(_) => {
-                let requires_local_action =
-                    should_require_action_for_local_task(&original_input) && tool_calls.is_empty();
+                let requires_spawn = should_require_spawn_subagent(&original_input)
+                    && !tool_calls_include_spawn(&tool_calls);
+                let requires_local_action = !requires_spawn
+                    && should_require_action_for_local_task(&original_input)
+                    && tool_calls.is_empty();
                 if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
-                    if !requires_local_action {
+                    if !requires_local_action && !requires_spawn {
                         insert_tool_surface_metadata(&mut turn, workspace_root)?;
                         return Ok(turn);
                     }
                 }
-                if !requires_local_action {
+                if !requires_local_action && !requires_spawn {
                     last_plain_text_answer = Some(body.clone());
                 }
                 let raw = body.clone();
                 let error = ToolProtocolError {
-                    code: if requires_local_action {
+                    code: if requires_spawn {
+                        "missing_required_spawn_subagent".to_string()
+                    } else if requires_local_action {
                         "missing_required_action".to_string()
                     } else {
                         "plain_text_response".to_string()
                     },
-                    message: if requires_local_action {
+                    message: if requires_spawn {
+                        "user asked to exercise spawn_subagent; call spawn_subagent before FINAL"
+                            .to_string()
+                    } else if requires_local_action {
                         "local task requires at least one ACTION tool call before FINAL".to_string()
                     } else {
                         "tool loop requires ACTION or FINAL; plain text is not accepted".to_string()
                     },
                     raw,
                 };
-                if requires_local_action {
+                if requires_local_action || requires_spawn {
                     transcript.push(format!(
                         "protocol_error code={} message={} rejected_unverified_answer=true",
                         error.code, error.message
@@ -836,11 +887,16 @@ where
                             .unwrap_or_default(),
                     },
                 )?;
-                current_input = tool_protocol_repair_prompt(
-                    &original_input,
-                    &transcript,
-                    should_require_action_for_local_task(&original_input) && tool_calls.is_empty(),
-                );
+                current_input = if requires_spawn {
+                    tool_protocol_repair_prompt_for_spawn(&original_input, &transcript)
+                } else {
+                    tool_protocol_repair_prompt(
+                        &original_input,
+                        &transcript,
+                        should_require_action_for_local_task(&original_input)
+                            && tool_calls.is_empty(),
+                    )
+                };
                 last_turn = Some(turn);
                 continue;
             }
@@ -849,6 +905,26 @@ where
 
     if let Some(answer) = last_plain_text_answer {
         if let Some(mut turn) = last_turn.take() {
+            if should_require_spawn_subagent(&original_input)
+                && !tool_calls_include_spawn(&tool_calls)
+            {
+                turn.result.response.body =
+                    missing_required_spawn_exhausted_answer(&original_input);
+                turn.user_input = original_input;
+                insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                insert_tool_metadata_with_status(
+                    &mut turn,
+                    workspace_root,
+                    max_tool_rounds,
+                    &tool_calls,
+                    &protocol_errors,
+                    &tool_events,
+                    &transcript,
+                    "missing_required_spawn_subagent",
+                )?;
+                insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+                return Ok(turn);
+            }
             if should_require_action_for_local_task(&original_input) && tool_calls.is_empty() {
                 turn.result.response.body =
                     missing_required_action_exhausted_answer(&original_input, max_tool_rounds);
@@ -886,6 +962,24 @@ where
     }
 
     if let Some(mut turn) = last_turn {
+        if should_require_spawn_subagent(&original_input) && !tool_calls_include_spawn(&tool_calls)
+        {
+            turn.result.response.body = missing_required_spawn_exhausted_answer(&original_input);
+            turn.user_input = original_input;
+            insert_tool_surface_metadata(&mut turn, workspace_root)?;
+            insert_tool_metadata_with_status(
+                &mut turn,
+                workspace_root,
+                max_tool_rounds,
+                &tool_calls,
+                &protocol_errors,
+                &tool_events,
+                &transcript,
+                "missing_required_spawn_subagent",
+            )?;
+            insert_runtime_event_ledger_metadata(&mut turn, &runtime_event_ledger)?;
+            return Ok(turn);
+        }
         if should_require_action_for_local_task(&original_input) && tool_calls.is_empty() {
             turn.result.response.body =
                 missing_required_action_exhausted_answer(&original_input, max_tool_rounds);
@@ -1643,13 +1737,11 @@ fn terminal_tool_failure_answer(record: &ToolExecutionRecord) -> String {
         || decision.contains("needs_approval")
         || decision.contains("RequireExplicit");
 
-    // 子代理未接线：常见于「体检」误走 spawn_subagent；不是权限拦截。
+    // 子代理上下文未装配（实现缺口）；不是「live_worker=false 所以不能派」。
     if summary.contains("subagent_runtime_unavailable") {
-        return "本轮想派子代理，但子代理运行时还没接通（不是权限拦住你）。\n\n\
-自检/体检请改用本地命令，例如：\n\
-· chuang doctor\n\
-· SKIP_LIVE=1 chuang field-accept\n\n\
-你可以说「用本地 doctor 体检」，我会直接跑本地检查。"
+        return "本轮 spawn_subagent 上下文没装上（不是权限，也不是 live adapter 的锅）。\n\n\
+正常路径：入口应带 CHUANG_CODEX_RUNNER_ENABLE=1，且本机有 codex + scripts/chuang-codex-runner.py。\n\
+可先：`chuang doctor` 看 subagent_model_tool_worker=available；或重试「派子代理读 Cargo.toml」。"
             .to_string();
     }
 
@@ -1813,8 +1905,60 @@ fn should_auto_observe_desktop(user_input: &str) -> bool {
     asks_observation && (!asks_mutation || asks_read_only)
 }
 
+/// User is testing/using model-tool dispatch — must call `spawn_subagent`, not only doctor.
+fn should_require_spawn_subagent(user_input: &str) -> bool {
+    let text = user_input.to_lowercase();
+    let needles = [
+        "派子代理",
+        "派个子代理",
+        "spawn_subagent",
+        "spawn subagent",
+        "子代理体检",
+        "测子代理",
+        "测试子代理",
+        "测一下子代理",
+        "子代理派",
+        "dispatch subagent",
+        "spawn worker",
+    ];
+    needles
+        .iter()
+        .any(|n| text.contains(&n.to_lowercase()) || user_input.contains(n))
+}
+
+fn tool_calls_include_spawn(tool_calls: &[ToolExecutionRecord]) -> bool {
+    tool_calls
+        .iter()
+        .any(|record| matches!(record.call, ToolCall::SpawnSubagent { .. }))
+}
+
+fn tool_protocol_repair_prompt_for_spawn(original_input: &str, transcript: &[String]) -> String {
+    format!(
+        "原始用户请求:\n{}\n\n工具协议错误:\n{}\n\n用户在测/要求派子代理。status 里 live_worker_available=false 只表示外部 live adapter 未接，**不能**据此说「子代理不能启动」。\n\
+本机派工主路径是 spawn_subagent（queued_external + Codex runner）。\n\
+下一条回复必须只输出一条 ACTION：spawn_subagent（policy=analyze 即可），例如：\n\
+ACTION: {{\"schema_version\":1,\"type\":\"tool_call\",\"call\":{{\"tool\":\"spawn_subagent\",\"policy\":\"analyze\",\"task\":\"只读 Cargo.toml 的 package.name，只返回包名\"}}}}\n\
+不要只跑 doctor/code_execute 就 FINAL；不要解释 live_worker。只输出一个 ACTION。",
+        original_input,
+        transcript.join("\n")
+    )
+}
+
+fn missing_required_spawn_exhausted_answer(original_input: &str) -> String {
+    format!(
+        "这次没有真正派子代理：没有成功调用 spawn_subagent。\n\n\
+你的请求：{original_input}\n\n\
+说明：live_worker_available=false 不等于不能派工；日常派工走 spawn_subagent + 本机 Codex。\n\
+请再说一次「派子代理读一下 Cargo.toml 包名」，或检查 CHUANG_CODEX_RUNNER_ENABLE=1 与 doctor 里的 subagent_model_tool_worker。"
+    )
+}
+
 fn should_require_action_for_local_task(user_input: &str) -> bool {
     let text = user_input.to_lowercase();
+    // Spawn-specific probes are handled by should_require_spawn_subagent.
+    if should_require_spawn_subagent(user_input) {
+        return true;
+    }
     let asks_runtime_health_check = [
         "体检",
         "自检",
@@ -7187,6 +7331,28 @@ allowed_channels = ["app-server"]
         assert!(answer.contains("最终结论没有生成成功"));
         assert!(answer.contains("已完成的操作不会自动重复"));
         assert!(answer.contains("输入 /trace"));
+    }
+
+    #[test]
+    fn should_require_spawn_subagent_detects_probe_phrases() {
+        assert!(should_require_spawn_subagent(
+            "在？派子代理体检一下 我测你的功能"
+        ));
+        assert!(should_require_spawn_subagent(
+            "spawn_subagent 读 Cargo.toml"
+        ));
+        assert!(should_require_spawn_subagent("测试子代理能不能派"));
+        assert!(!should_require_spawn_subagent("给自己做个体检"));
+        assert!(!should_require_spawn_subagent("看一下 git 状态"));
+    }
+
+    #[test]
+    fn spawn_repair_prompt_rejects_live_worker_misread() {
+        let prompt =
+            tool_protocol_repair_prompt_for_spawn("派子代理体检", &["protocol_error".into()]);
+        assert!(prompt.contains("spawn_subagent"));
+        assert!(prompt.contains("live_worker_available=false"));
+        assert!(prompt.contains("不能") || prompt.contains("不等于"));
     }
 
     #[test]

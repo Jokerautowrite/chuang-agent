@@ -119,9 +119,11 @@ fn run_doctor(runtime: &RuntimeConfig) -> Result<DoctorCliOutput, String> {
     checks.push(pass(
         "subagent_readiness",
         &format!(
-            "state={} mode={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} worker_runtime_state={} worker_runtime_reason={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
+            "state={} mode={} model_tool_worker={} model_tool_reason={} layers={} ready={} partial={} deferred={} blocked={} live_worker_available={} (false≠cannot_dispatch) worker_runtime_state={} worker_runtime_reason={} worker_runtime_blocked_reason={} capability_route_state={} capability_mismatch_blocks_live={} capability_mismatch_reason={}",
             status.subagent_readiness.overall_state,
             status.subagent_readiness.mode,
+            status.subagent_readiness.model_tool_worker_state,
+            status.subagent_readiness.model_tool_worker_reason,
             status.subagent_readiness.layer_count,
             status.subagent_readiness.ready_count,
             status.subagent_readiness.partial_count,
