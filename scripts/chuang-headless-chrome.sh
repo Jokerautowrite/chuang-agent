@@ -136,8 +136,9 @@ cmd_start() {
 
   # --headless=new is the modern headless mode; remote debugging for CDP.
   # --no-first-run / --disable-gpu keep cold starts quiet on servers/desktops.
-  nohup "$chrome" \
+  setsid "$chrome" \
     --headless=new \
+    --disable-gpu \
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port="$PORT" \
     --user-data-dir="$USER_DATA_DIR" \
