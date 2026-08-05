@@ -89,6 +89,23 @@ ROOT = os.environ["ROOT"]
 REQUEST_ID = os.environ["REQUEST_ID"]
 SKIP_STATUS = os.environ.get("SKIP_STATUS", "0") == "1"
 CDP_PORT_RAW = os.environ.get("CDP_PORT", "").strip()
+if not CDP_PORT_RAW:
+    state_dir = os.environ.get(
+        "CHUANG_HEADLESS_STATE_DIR",
+        os.path.join(
+            os.environ.get("XDG_STATE_HOME", os.path.join(os.path.expanduser("~"), ".local", "state")),
+            "chuang-agent",
+            "headless-chrome",
+        ),
+    )
+    port_path = os.path.join(state_dir, "cdp.port")
+    try:
+        with open(port_path, "r", encoding="utf-8") as handle:
+            raw_port = handle.read().strip()
+        if raw_port:
+            CDP_PORT_RAW = raw_port
+    except OSError:
+        pass
 STATUS_JSON_RAW = os.environ.get("STATUS_JSON_RAW", "")
 STATUS_ERROR = os.environ.get("STATUS_ERROR", "")
 STATUS_SOURCE = os.environ.get("STATUS_SOURCE", "cargo run --quiet -- status --json")
