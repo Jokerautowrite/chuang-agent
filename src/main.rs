@@ -1982,7 +1982,50 @@ pub(crate) fn readable_runtime_error(error: &str) -> String {
     if error.contains("repl_turn_disconnected") {
         return "当前任务意外中断，已有结果没有被删除。".to_string();
     }
+    if error.contains("PROVIDER_HTTP_ERROR") {
+        if error.contains("status_code=401") || error.contains("status_code=403") {
+            return "模型服务拒绝了密钥（401/403）：请检查模型接入配置的 API key 是否有效。".to_string();
+        }
+        if error.contains("status_code=429") {
+            return "模型服务当前限流（429），请稍等几秒后重试。".to_string();
+        }
+        if error.contains("status_code=408")
+            || error.contains("status_code=504")
+            || error.contains("status_code=502")
+        {
+            return "模型服务超时或网关错误，请稍后重试。".to_string();
+        }
+        return "模型服务调用失败，详细原因可通过 /trace 查看。".to_string();
+    }
     "本轮处理没有完成，详细错误可通过 /trace 查看。".to_string()
+}
+
+#[cfg(test)]
+mod readable_runtime_error_tests {
+    use super::readable_runtime_error;
+
+    #[test]
+    fn provider_401_names_api_key() {
+        let msg = readable_runtime_error(
+            "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=401 error=Invalid API key",
+        );
+        assert!(msg.contains("API key"), "got: {msg}");
+        assert!(msg.contains("401"), "got: {msg}");
+    }
+
+    #[test]
+    fn provider_429_names_rate_limit() {
+        let msg = readable_runtime_error(
+            "PROVIDER_HTTP_ERROR: provider=x model=y status_code=429 error=rate limited",
+        );
+        assert!(msg.contains("429"), "got: {msg}");
+    }
+
+    #[test]
+    fn unknown_error_still_falls_back_to_turn_message() {
+        let msg = readable_runtime_error("some_other_internal_failure");
+        assert!(msg.contains("本轮处理没有完成"), "got: {msg}");
+    }
 }
 
 pub(crate) fn recent_repl_conversation_history(
