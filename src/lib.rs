@@ -3,6 +3,7 @@ pub mod agent_runtime;
 pub mod app_server_service;
 pub mod atomic_tool;
 pub mod benchmark;
+pub mod benchmark_evaluator;
 pub mod browser_read;
 /// Adapter/plugin line for browser-backed external workers.
 ///

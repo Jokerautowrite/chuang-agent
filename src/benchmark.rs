@@ -131,6 +131,7 @@ impl From<BenchmarkError> for String {
     }
 }
 
+#[derive(Clone)]
 pub struct BenchmarkStore {
     root: PathBuf,
 }

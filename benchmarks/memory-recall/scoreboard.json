@@ -2,47 +2,47 @@
   "benchmark_id": "memory-recall",
   "version": 1,
   "best": {
-    "run_id": "run-1785962633",
+    "run_id": "run-1785966549869",
     "benchmark_id": "memory-recall",
     "version": 1,
-    "tested_at": "run-1785962633",
+    "tested_at": "run-1785966549869",
     "case_scores": [
       {
         "case_id": "case-001",
         "score": 2,
         "max_score": 2,
-        "reason": "recalled concise Chinese preference"
+        "reason": "准确说出中文和简洁直接，并明确说明这是记忆中记录的沟通偏好。"
       },
       {
         "case_id": "case-002",
-        "score": 1,
+        "score": 2,
         "max_score": 2,
-        "reason": "identity boundary partially correct"
+        "reason": "完整区分了小创与小承、小云、小策的系统归属，并正确说明子代理不能直接写入核心记忆，只能产出报告或记忆提案。"
       }
     ],
-    "total_score": 3,
+    "total_score": 4,
     "max_score": 4
   },
   "latest": {
-    "run_id": "run-1785962633",
+    "run_id": "run-1785966549869",
     "benchmark_id": "memory-recall",
     "version": 1,
-    "tested_at": "run-1785962633",
+    "tested_at": "run-1785966549869",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 1,
+        "score": 2,
         "max_score": 2,
-        "reason": "regression: answered but vague"
+        "reason": "准确说出中文和简洁直接，并明确说明这是记忆中记录的沟通偏好。"
       },
       {
         "case_id": "case-002",
-        "score": 1,
+        "score": 2,
         "max_score": 2,
-        "reason": "same partial boundary"
+        "reason": "完整区分了小创与小承、小云、小策的系统归属，并正确说明子代理不能直接写入核心记忆，只能产出报告或记忆提案。"
       }
     ],
-    "total_score": 2,
+    "total_score": 4,
     "max_score": 4
   },
   "history": [
@@ -88,6 +88,28 @@
         }
       ],
       "total_score": 2,
+      "max_score": 4
+    },
+    {
+      "run_id": "run-1785966549869",
+      "benchmark_id": "memory-recall",
+      "version": 1,
+      "tested_at": "run-1785966549869",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "准确说出中文和简洁直接，并明确说明这是记忆中记录的沟通偏好。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "完整区分了小创与小承、小云、小策的系统归属，并正确说明子代理不能直接写入核心记忆，只能产出报告或记忆提案。"
+        }
+      ],
+      "total_score": 4,
       "max_score": 4
     }
   ]

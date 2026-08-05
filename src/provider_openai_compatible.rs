@@ -40,6 +40,7 @@ pub struct OpenAICompatibleRequestEnvelope {
     pub instructions: String,
     pub input: String,
     pub store: bool,
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +160,7 @@ pub struct OpenAICompatibleProviderAdapter {
     api_key: String,
     transport: ProviderTransport,
     reasoning_effort: Option<ReasoningEffort>,
+    max_output_tokens: Option<u32>,
     request_timeout_ms: u64,
     tls_ca_cert_path: Option<PathBuf>,
 }
@@ -179,6 +181,7 @@ impl OpenAICompatibleProviderAdapter {
             api_key: api_key.into(),
             transport: ProviderTransport::Stub,
             reasoning_effort: None,
+            max_output_tokens: None,
             request_timeout_ms: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
             tls_ca_cert_path: None,
         }
@@ -191,6 +194,11 @@ impl OpenAICompatibleProviderAdapter {
 
     pub fn with_reasoning_effort(mut self, reasoning_effort: Option<ReasoningEffort>) -> Self {
         self.reasoning_effort = reasoning_effort;
+        self
+    }
+
+    pub fn with_max_output_tokens(mut self, max_output_tokens: Option<u32>) -> Self {
+        self.max_output_tokens = max_output_tokens;
         self
     }
 
@@ -235,6 +243,7 @@ impl OpenAICompatibleProviderAdapter {
             instructions: request.prompt.clone(),
             input: request.user_input.clone(),
             store: false,
+            max_output_tokens: self.max_output_tokens,
         })
     }
 
@@ -252,6 +261,9 @@ impl OpenAICompatibleProviderAdapter {
         });
         if let Some(reasoning_effort) = self.reasoning_effort {
             body["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
+        }
+        if let Some(max_output_tokens) = envelope.max_output_tokens {
+            body["max_output_tokens"] = json!(max_output_tokens);
         }
         let body_json = body.to_string();
 
