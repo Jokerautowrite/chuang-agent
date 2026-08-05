@@ -1,3 +1,15 @@
+# 2026-08-06 Phase A 第二刀：自动 Evaluator + 4 个 benchmark + 实验联动
+
+- 自动 Evaluator（`benchmark evaluate`）：模型按私有 rubric 给被测回答评分，解析结构化 JSON；
+  `--record` 一步完成「评分 → 记入记分牌」。单测 4/4（JSON 解析容错、rubric 仅评审员可见）。
+- 关键修复：example-provider 网关对 `input=""` 返回 502 → 评分规则放 instructions、被测回答放 input（非空）；
+  provider adapter 新增 `with_max_output_tokens`（evaluator 512），解决长输出 120s 超时。
+- 新增 3 个 benchmark（codex 子代理产出、人工复核）：governance-intercept、subagent-dispatch、
+  norm-compliance，各 3 case，全部 `verify: ok`。加上 memory-recall 共 4 个能力题。
+- 实验联动（`benchmark experiment`）：读 scoreboard best → 自动建 self-experiment 计划
+  （goal=超越当前 best，成功标准=严格提升，Penguin 规则），形成「测→改→再测」闭环。
+- 真实闭环验证：memory-recall answers-v3 两题各 2/2，`--record` accepted_as_best=true。
+
 # 2026-08-06 Phase A 第一刀：能力 Benchmark 原型（Penguin 方法论落地）
 
 - 新增 `src/benchmark.rs`（BenchmarkStore）+ `src/cli_benchmark.rs`（`benchmark` 子命令）。

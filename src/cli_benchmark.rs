@@ -7,6 +7,7 @@ use chuang_agent::benchmark::{
 use chuang_agent::benchmark_evaluator::{BenchmarkEvaluator, CaseAnswer, EvaluateRequest};
 use chuang_agent::runtime_config::{OpenAICompatibleConfig, RuntimeConfig};
 use chuang_agent::runtime_config_file::load_runtime_config_file;
+use chuang_agent::self_experiment::{ExperimentRequest, SelfExperimentPlanner};
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 
@@ -20,6 +21,7 @@ pub(crate) fn benchmark_command(args: &[String]) -> Result<(), String> {
         Some("run") => benchmark_run_command(&args[1..]),
         Some("show") => benchmark_show_command(&args[1..]),
         Some("evaluate") => benchmark_evaluate_command(&args[1..]),
+        Some("experiment") => benchmark_experiment_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -458,4 +460,85 @@ fn provider_transport(runtime: &RuntimeConfig) -> chuang_agent::provider_openai_
     provider_from_runtime(runtime)
         .map(|c| c.transport)
         .unwrap_or(chuang_agent::provider_openai_compatible::ProviderTransport::Native)
+}
+
+fn benchmark_experiment_command(args: &[String]) -> Result<(), String> {
+    let mut benchmark_id: Option<String> = None;
+    let mut root = PathBuf::from(DEFAULT_BENCHMARK_ROOT);
+    let mut experiment_root = PathBuf::from("./experiments");
+    let mut time_budget_minutes = 30u16;
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--id" => {
+                benchmark_id = Some(take_value(args, &mut index, "--id")?);
+            }
+            "--root" => {
+                root = PathBuf::from(take_value(args, &mut index, "--root")?);
+            }
+            "--experiment-root" => {
+                experiment_root = PathBuf::from(take_value(args, &mut index, "--experiment-root")?);
+            }
+            "--time-budget-minutes" => {
+                let value = take_value(args, &mut index, "--time-budget-minutes")?;
+                time_budget_minutes = value
+                    .parse::<u16>()
+                    .map_err(|_| format!("invalid --time-budget-minutes: {value}"))?;
+            }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    let benchmark_id =
+        benchmark_id.ok_or_else(|| "benchmark experiment requires --id <benchmark-id>".to_string())?;
+    let store = BenchmarkStore::new(&root);
+    let def = store.load_def(&benchmark_id)?;
+    let board = store.load_scoreboard(&benchmark_id)?;
+    let Some(best) = &board.best else {
+        return Err(format!(
+            "benchmark {benchmark_id} has no best score yet; run `benchmark evaluate --record` first"
+        ));
+    };
+
+    let goal = format!(
+        "提升能力{}-{}分数至超越{}-{}",
+        def.capability, def.id, best.total_score, best.max_score
+    );
+    let success_criteria = format!(
+        "benchmark {} 的 scoreboard best 总分严格超过 {}/{}（Penguin：无严格提升不视为成功）",
+        def.id, best.total_score, best.max_score
+    );
+
+    let planner = SelfExperimentPlanner::new(&experiment_root);
+    let receipt = planner.create_plan(&ExperimentRequest {
+        goal,
+        success_criteria,
+        time_budget_minutes,
+    })?;
+
+    match output {
+        ControlOutputFormat::Text => {
+            println!("benchmark_experiment_planned: {}", receipt.experiment_id);
+            println!("benchmark_id: {benchmark_id}");
+            println!("benchmark_capability: {}", def.capability);
+            println!("benchmark_best: {}/{}", best.total_score, best.max_score);
+            println!("experiment_plan_path: {}", receipt.plan_path);
+            println!("experiment_time_budget_minutes: {}", receipt.time_budget_minutes);
+            println!("next: 完成改进后用 benchmark evaluate --record 复测；达标后 experiment complete --outcome success");
+        }
+        ControlOutputFormat::Json => print_json(&serde_json::json!({
+            "benchmark_id": benchmark_id,
+            "capability": def.capability,
+            "best_score": best.total_score,
+            "max_score": best.max_score,
+            "experiment": &receipt,
+        }))?,
+    }
+    Ok(())
 }
