@@ -677,137 +677,185 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
             format!("len:{}", self.api_key.len())
         };
 
-        match self.execute_transport(request) {
-            Ok(call) => {
-                let response_body = call.response_body_json();
-                let status_code = call.status_code();
-                if !http_status_is_success(status_code) {
-                    let error_message = extract_provider_error_message(response_body)
-                        .unwrap_or_else(|| format!("status_code={status_code}"));
+        for attempt in 0..MAX_PROVIDER_ATTEMPTS {
+            match self.execute_transport(request) {
+                Ok(call) => {
+                    let status_code = call.status_code();
+                    if !http_status_is_success(status_code) {
+                        // Transient gateway/limit errors are retried with
+                        // backoff; auth and other hard errors are not.
+                        if attempt + 1 < MAX_PROVIDER_ATTEMPTS
+                            && RETRYABLE_STATUS_CODES.contains(&status_code)
+                        {
+                            std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
+                            continue;
+                        }
+                        return self.build_http_error_response(request, call, &masked_key);
+                    }
+                    return self.build_success_response(request, call, &masked_key);
+                }
+                Err(error) => {
+                    let preview = self.build_http_request_preview(request).ok();
+
                     return ProviderAdapterResponse {
                         body: format!(
-                            "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",
-                            self.identity.provider_id,
-                            self.identity.model_name,
-                            call.transport().as_str(),
-                            status_code,
-                            error_message
+                            "CONFIG_ERROR: openai-compatible provider invalid field={} reason={}",
+                            error.field, error.message
                         ),
                         trace: format!(
-                            "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={} provider_http_error={}",
+                            "transport=openai-compatible provider={} model={} config_error_field={} reason={}",
                             self.identity.provider_id,
                             self.identity.model_name,
-                            self.base_url,
-                            masked_key,
-                            request.recall_hit_count,
-                            request_message_count(call.request_body_json()),
-                            call.url(),
-                            status_code,
-                            call.transport().as_str(),
-                            error_message,
+                            error.field,
+                            error.message
                         ),
-                        finish_reason: Some(format!("http-error-{status_code}")),
-                        extra_meta: {
-                            let mut meta = build_success_meta(&call);
-                            meta.insert("provider_response_ok".to_string(), "false".to_string());
-                            meta.insert("provider_error_class".to_string(), "http_status".to_string());
-                            meta.insert("provider_error_message".to_string(), error_message.clone());
-                            insert_provider_failure_meta(
-                                &mut meta,
-                                Some(status_code),
-                                "http_status",
-                                Some(&error_message),
-                            );
-                            insert_provider_timeout_meta(&mut meta, Some(status_code), "http_status", Some(&error_message));
-                            meta
-                        },
+                        finish_reason: Some("invalid-config".to_string()),
+                        extra_meta: build_config_error_meta(
+                            &error,
+                            preview.as_ref(),
+                            self.transport.as_str(),
+                            self.request_timeout_ms,
+                        ),
                     };
                 }
-
-                let assistant_content = extract_assistant_content(response_body);
-                let mut extra_meta = build_success_meta(&call);
-                let (body, finish_reason) = if let Some(content) = assistant_content {
-                    extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
-                    (
-                        content,
-                        extract_finish_reason(response_body).or_else(|| {
-                            Some(default_finish_reason_for_transport(call.transport()).to_string())
-                        }),
-                    )
-                } else {
-                    extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
-                    extra_meta.insert(
-                        "provider_error_class".to_string(),
-                        "missing_content".to_string(),
-                    );
-                    extra_meta.insert(
-                        "provider_error_message".to_string(),
-                        "missing assistant content in successful provider response".to_string(),
-                    );
-                    extra_meta.insert("provider_retryable".to_string(), "false".to_string());
-                    insert_provider_failure_meta(
-                        &mut extra_meta,
-                        Some(call.status_code()),
-                        "missing_content",
-                        Some("missing assistant content in successful provider response"),
-                    );
-                    (
-                        format!(
-                            "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
-                            self.identity.provider_id,
-                            self.identity.model_name,
-                            call.transport().as_str(),
-                            call.status_code(),
-                            extra_meta
-                                .get("response_kind")
-                                .map(String::as_str)
-                                .unwrap_or("unknown")
-                        ),
-                        Some("provider-error-missing-content".to_string()),
-                    )
-                };
-                ProviderAdapterResponse {
-                    body,
-                    trace: format!(
-                        "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={}",
-                        self.identity.provider_id,
-                        self.identity.model_name,
-                        self.base_url,
-                        masked_key,
-                        request.recall_hit_count,
-                        request_message_count(call.request_body_json()),
-                        call.url(),
-                        call.status_code(),
-                        call.transport().as_str(),
-                    ),
-                    finish_reason,
-                    extra_meta,
-                }
             }
-            Err(error) => {
-                let preview = self.build_http_request_preview(request).ok();
+        }
+        unreachable!("provider respond loop always returns")
+    }
+}
 
-                ProviderAdapterResponse {
-                    body: format!(
-                        "CONFIG_ERROR: openai-compatible provider invalid field={} reason={}",
-                        error.field, error.message
-                    ),
-                    trace: format!(
-                        "transport=openai-compatible provider={} model={} config_error_field={} reason={}",
-                        self.identity.provider_id,
-                        self.identity.model_name,
-                        error.field,
-                        error.message
-                    ),
-                    finish_reason: Some("invalid-config".to_string()),
-                    extra_meta: build_config_error_meta(
-                        &error,
-                        preview.as_ref(),
-                        self.transport.as_str(),
-                        self.request_timeout_ms,
-                    ),
-                }
-            }
+const RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504];
+const MAX_PROVIDER_ATTEMPTS: usize = 3;
+
+fn backoff_ms(attempt: usize) -> u64 {
+    match attempt {
+        0 => 500,
+        1 => 1500,
+        _ => 3000,
+    }
+}
+
+impl OpenAICompatibleProviderAdapter {
+    fn build_success_response(
+        &self,
+        request: &ResponderRequest,
+        call: TransportCallResult,
+        masked_key: &str,
+    ) -> ProviderAdapterResponse {
+        let response_body = call.response_body_json();
+        let assistant_content = extract_assistant_content(response_body);
+        let mut extra_meta = build_success_meta(&call);
+        let (body, finish_reason) = if let Some(content) = assistant_content {
+            extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
+            (
+                content,
+                extract_finish_reason(response_body).or_else(|| {
+                    Some(default_finish_reason_for_transport(call.transport()).to_string())
+                }),
+            )
+        } else {
+            extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
+            extra_meta.insert(
+                "provider_error_class".to_string(),
+                "missing_content".to_string(),
+            );
+            extra_meta.insert(
+                "provider_error_message".to_string(),
+                "missing assistant content in successful provider response".to_string(),
+            );
+            extra_meta.insert("provider_retryable".to_string(), "false".to_string());
+            insert_provider_failure_meta(
+                &mut extra_meta,
+                Some(call.status_code()),
+                "missing_content",
+                Some("missing assistant content in successful provider response"),
+            );
+            (
+                format!(
+                    "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
+                    self.identity.provider_id,
+                    self.identity.model_name,
+                    call.transport().as_str(),
+                    call.status_code(),
+                    extra_meta
+                        .get("response_kind")
+                        .map(String::as_str)
+                        .unwrap_or("unknown")
+                ),
+                Some("provider-error-missing-content".to_string()),
+            )
+        };
+        ProviderAdapterResponse {
+            body,
+            trace: format!(
+                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={}",
+                self.identity.provider_id,
+                self.identity.model_name,
+                self.base_url,
+                masked_key,
+                request.recall_hit_count,
+                request_message_count(call.request_body_json()),
+                call.url(),
+                call.status_code(),
+                call.transport().as_str(),
+            ),
+            finish_reason,
+            extra_meta,
+        }
+    }
+
+    fn build_http_error_response(
+        &self,
+        request: &ResponderRequest,
+        call: TransportCallResult,
+        masked_key: &str,
+    ) -> ProviderAdapterResponse {
+        let response_body = call.response_body_json();
+        let status_code = call.status_code();
+        let error_message =
+            extract_provider_error_message(response_body).unwrap_or_else(|| format!("status_code={status_code}"));
+        ProviderAdapterResponse {
+            body: format!(
+                "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",
+                self.identity.provider_id,
+                self.identity.model_name,
+                call.transport().as_str(),
+                status_code,
+                error_message
+            ),
+            trace: format!(
+                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={} provider_http_error={}",
+                self.identity.provider_id,
+                self.identity.model_name,
+                self.base_url,
+                masked_key,
+                request.recall_hit_count,
+                request_message_count(call.request_body_json()),
+                call.url(),
+                status_code,
+                call.transport().as_str(),
+                error_message,
+            ),
+            finish_reason: Some(format!("http-error-{status_code}")),
+            extra_meta: {
+                let mut meta = build_success_meta(&call);
+                meta.insert("provider_response_ok".to_string(), "false".to_string());
+                meta.insert("provider_error_class".to_string(), "http_status".to_string());
+                meta.insert("provider_error_message".to_string(), error_message.clone());
+                insert_provider_failure_meta(
+                    &mut meta,
+                    Some(status_code),
+                    "http_status",
+                    Some(&error_message),
+                );
+                insert_provider_timeout_meta(
+                    &mut meta,
+                    Some(status_code),
+                    "http_status",
+                    Some(&error_message),
+                );
+                meta
+            },
         }
     }
 }
@@ -1479,7 +1527,17 @@ fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static
 mod tests {
     use super::extract_assistant_content_from_value;
     use super::extract_finish_reason;
+    use super::{backoff_ms, MAX_PROVIDER_ATTEMPTS, RETRYABLE_STATUS_CODES};
     use serde_json::json;
+
+    #[test]
+    fn retry_policy_covers_transient_http_errors() {
+        assert!(RETRYABLE_STATUS_CODES.contains(&502));
+        assert!(RETRYABLE_STATUS_CODES.contains(&503));
+        assert!(RETRYABLE_STATUS_CODES.contains(&429));
+        assert!(MAX_PROVIDER_ATTEMPTS >= 2);
+        assert!(backoff_ms(0) < backoff_ms(1));
+    }
 
     #[test]
     fn extracts_openai_chat_completion_content() {

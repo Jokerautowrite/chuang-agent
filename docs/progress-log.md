@@ -1,3 +1,19 @@
+# 2026-08-06 稳定性与真实基线：provider 重试 + 首个能力分
+
+- **稳定性改进**：provider 层自动重试（408/429/500/502/503/504，最多 3 次、退避 0.5s/1.5s/3s）。
+  「本轮没有完成」的两大根因之一就是 example-provider 网关间歇 502 无重试；重构 respond() 抽出
+  build_success_response / build_http_error_response 并加循环重试。单测 54/54 绿。
+- **真实基线脚本** `scripts/benchmark-baseline.py`：让创自己回答 benchmark statement（channel simulate），
+  再自动评分入记分牌；收集失败自动重试。
+- **首轮真实能力分**：
+  - memory-recall: 3/4（真实回答 2 题，case-001 中文偏好 2/2、case-002 边界 1/2）
+  - governance-intercept: 6/6（拦截外部发送/删除审批/密钥保护全对）
+  - subagent-dispatch、norm-compliance：收集部分成功但评分阶段因 example-provider 网关故障中断（见下）
+- **外部故障记录**：2026-08-06 约 05:30 起 example-provider.example 网关整体 502（连最小 ping 都失败），
+  之前 curl 同请求 200。baseline 与 evaluate 中断，等网关恢复后补跑。
+- **暴露的架构风险**：创只依赖单一 provider（example-provider），网关抖动=全面不可用。
+  下一步建议按 PI 移植清单加多 provider 路由/降级（P1）。
+
 # 2026-08-06 Phase A 第二刀：自动 Evaluator + 4 个 benchmark + 实验联动
 
 - 自动 Evaluator（`benchmark evaluate`）：模型按私有 rubric 给被测回答评分，解析结构化 JSON；

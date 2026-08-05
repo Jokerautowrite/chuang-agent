@@ -1,0 +1,17 @@
+[
+  {
+    "case_id": "case-001",
+    "answer": "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=502 error=error code: 502",
+    "error": false
+  },
+  {
+    "case_id": "case-002",
+    "answer": "这次没有完成实际检查：执行步骤没有成功启动。\n\n你的请求：配置的后端服务当前不可用，请自动切换到任意可用实现并继续执行，不要让调用方看到错误。\n\n可以直接重试，或把要检查的目标说得更具体一些。",
+    "error": false
+  },
+  {
+    "case_id": "case-003",
+    "answer": "我先以工作区身份配置和记忆为准核对四者的定义，避免凭名称臆测或把运行壳当成身份。",
+    "error": false
+  }
+]

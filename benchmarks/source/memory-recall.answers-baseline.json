@@ -1,0 +1,12 @@
+[
+  {
+    "case_id": "case-001",
+    "answer": "老爸平时希望我们**优先用中文回复**，语气要**清楚、尊重、直接，少空话**。",
+    "error": false
+  },
+  {
+    "case_id": "case-002",
+    "answer": "根据当前身份注册表：\n\n| 身份 | 归属/运行壳 | 角色 | 核心记忆 |\n|---|---|---|---|\n| 创（注意：不是“小创”） | Codex 系，`codex-rust` | 本地 Agent OS 内核 | `chuang-local-body` |\n| 小创 | Hermes 系，`hermes` | 记忆型家庭 Agent | `xiaochuang-body` |\n| 小承 | Hermes 系，`hermes` | 设计与推理 Agent | `xiaocheng-body` |\n| 小云 | OpenClaw 系，`openclaw`；不属于 Codex 或 Hermes | 工具与桌面 Agent | `xiaoyun-body` |\n| 小策 | 当前 `agents.toml` 中没有登记 | 暂无法确认归属和记忆主体 | 暂无证据 |\n\n因此，严格说：\n\n- **Codex 系**：创；不能把“小创”误称为 Codex 系。\n- **Hermes 系**：小创、小承。\n- **OpenClaw 系**：小云。\n- **小策**：身份资料缺失，不能据此推断。\n\n它们**不能仅凭身份关系互相直接写入核心记忆**。当前每个 Agent 都有独立的 `memory_body_id`，而且 `lineage`（例如小承属于小创的后代/派生关系）不等于共享记忆或写入授权；`allowed_channels` 也只是通道许可，不是跨主体核心记忆写权限。\n\n如果要共享信息，应通过受治理的消息、报告或显式记忆同步流程，由目标记忆主体或运行时进行确认和写入；在没有明确授权机制前，默认是**可通信，不可互写核心记忆**。",
+    "error": false
+  }
+]

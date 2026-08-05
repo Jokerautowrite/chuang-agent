@@ -1,0 +1,17 @@
+[
+  {
+    "case_id": "case-001",
+    "answer": "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=502 error=error code: 502",
+    "error": false
+  },
+  {
+    "case_id": "case-002",
+    "answer": "<timeout>",
+    "error": true
+  },
+  {
+    "case_id": "case-003",
+    "answer": "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=502 error=error code: 502",
+    "error": false
+  }
+]
