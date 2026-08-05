@@ -1,3 +1,34 @@
+# 2026-08-06 7 项 canonical real-live receipt 全部收口（global_real_live_ready）
+
+- 7 个 slot 全部 verified：feishu、provider、subagent_live_rehearsal、desktop、browser、wiki、gbrain；
+  全局聚合 `can_mark_real_live_ready=true`、`gap_count=0`，状态面 `live_readiness.overall_state=global_real_live_ready`、
+  `third_test_candidate.real_live_ready=true`、release `connects/verifies_real_external_services=true`。
+- 修复 `chuang-feishu-bot.service` 崩溃循环：bridge.sh 默认 `CHUANG_FEISHU_SDK_NODE_MODULES` 指向不存在的
+  `codex-feishu-bridge/node_modules`，改为 `-current` symlink（v0.2.4）；桥恢复 active/running、ws ready，
+  真实飞书回合（你好）写盘 inbound/outbound 事件日志，feishu live receipt verified。
+- 修复 managed headless Chrome 秒退：`--disable-gpu` + `setsid`（nohup 子进程随会话被回收）；CDP 9222 稳定，
+  browser live receipt verified（cdp_connected）；browser receipt 无 env 时回退读 `cdp.port` state file。
+- provider live request opt-in 跑通：真实 `/v1/responses` 200、无 fallback、api_key `<set>`，receipt verified。
+- desktop live receipt 新增 `--live` 模式（要求 `CHUANG_REAL_ACTUATOR_ENABLE=1`），真实执行 open_app Chrome，
+  `real_execution=true`；全局聚合新增 `--include-desktop-live` opt-in，rehearsal 默认保持 dry-run。
+- wiki/gbrain receipt 支持真实本地数据源：wiki 读 `/opt/agent-hub/data/brain/wiki/index.md`（local_filesystem）；
+  gbrain 走 `agent-hub-brain-query semantic` Unix socket（local_unix_socket，hybrid 检索 top score 0.89）。
+  均显式标注 source_mode，HTTP 配置优先、本地为显式回退，不静默降级。
+- 收口产物：`data/receipts/global-real-live-verified-2026-08-06.json`（operator=xiaochuang，
+  全部 7 项 service verified）；经 `CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE` 注入状态面生效。
+- 提交：`e2d3b3c`（feishu 桥修复）、`82aaa4a`（chrome setsid+disable-gpu）、`c07fbf4`（browser state-file 回退）、
+  `907e3ae`（desktop live）、`eb53ceb`（wiki/gbrain 本地源）。
+- 验证：receipt 合同测试全绿；`env -u CHUANG_AGENT_WORKSPACE_ROOT cargo test -q -- --test-threads=1`
+  除 `app_server_daemon_preserves_stale_socket_before_binding` 外全绿（该测试因运行中 canonical daemon
+  持 db 锁按设计返回 `app_server_db_locked`，为既有环境冲突，非本轮回归）。
+
+# 2026-07-19 飞书最小修复：复用 canonical app-server
+# 2026-07-19 飞书最小修复：复用 canonical app-server
+- 飞书 bridge 不再 `cargo run` 或自行拉起 stdio app-server，改为连接现有 canonical Unix socket；保留 `/new`、session store、卡片输出和原调用接口，socket 不可用时明确报错且不 fallback。
+- user service 只增加对 `chuang-agent-app-server.service` 的顺序依赖；重复的 unit preflight 已移除，bridge 仅用现有二进制检查一次。没有新增守护层、没有迁移私有配置、没有让 Agent Hub 接管 Chuang。
+- 受控重启后 `chuang-feishu-bot.service` 为 `active/running`、`NRestarts=0`、WebSocket ready，进程树只有 Node bridge；canonical persistence 为 schema `1`、lock held、thread/turn `2/4`，配置模型为 `gpt-5.6-terra`。
+- Agent Hub 仅补 Chuang 两项 service health、persistence 只读检查和 model-routing contract；当前 live model evidence 仍为 pending，等待一次真实飞书回合确认。
+
 # 2026-07-18 终端按 workspace 自动续接 + 同库单 daemon 状态面
 - 多代理并行完成两条互不重叠的实现线：REPL 自动续接与 `/new`；SQLite 单库 daemon 锁与真实 persistence 状态面。范围仅限 Chuang 终端，不涉及 Agent Hub、Feishu 或 Hermes。
 - `ReplTurnTransport` 在首次 socket turn 前调用 `thread/list`，按归一化 workspace 精确匹配并选择最新 thread；列表查询失败或协议异常会直接返回结构化错误，不降级 local。显式 `/new` 会清空本地会话状态并设置一次性 force-new 标记，下一轮创建新 thread。
