@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${1:-}" != "--json" ]]; then
-  printf 'usage: %s --json\n' "$0" >&2
-  exit 2
-fi
+FORMAT="text"
+LIVE_MODE="0"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json)
+      FORMAT="json"
+      ;;
+    --live)
+      LIVE_MODE="1"
+      ;;
+    -h|--help)
+      cat <<'EOF'
+usage: scripts/chuang-desktop-action-rehearsal-receipt.sh [--json] [--live]
+
+Rehearsal (default): always dry-run, live gate stays closed.
+--live: perform one real allowlisted desktop action (open_app Chrome) and
+        emit a desktop_action_live_receipt with real_execution=true. The
+        live gate env CHUANG_REAL_ACTUATOR_ENABLE is required.
+EOF
+      exit 0
+      ;;
+    *)
+      printf 'unknown argument: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADAPTER_REL="scripts/chuang-real-actuator-adapter.py"
@@ -21,10 +46,21 @@ GOVERNANCE_REASON="profile=full_local_workspace action=local desktop interaction
 
 REQUEST_JSON='{"action":"open_app","open_app":{"app_name":"Chrome"}}'
 
-ADAPTER_RESPONSE="$(
-  printf '%s' "$REQUEST_JSON" \
-    | env -u CHUANG_REAL_ACTUATOR_ENABLE "$ADAPTER" --json --allowlist "$ALLOWLIST"
-)"
+if [ "$LIVE_MODE" = "1" ]; then
+  if [ "${CHUANG_REAL_ACTUATOR_ENABLE:-}" != "1" ]; then
+    printf '%s\n' "desktop live receipt requires CHUANG_REAL_ACTUATOR_ENABLE=1" >&2
+    exit 2
+  fi
+  ADAPTER_RESPONSE="$(
+    printf '%s' "$REQUEST_JSON" \
+      | "$ADAPTER" --json --allowlist "$ALLOWLIST"
+  )"
+else
+  ADAPTER_RESPONSE="$(
+    printf '%s' "$REQUEST_JSON" \
+      | env -u CHUANG_REAL_ACTUATOR_ENABLE "$ADAPTER" --json --allowlist "$ALLOWLIST"
+  )"
+fi
 
 export ADAPTER_RESPONSE
 export ADAPTER_REL
@@ -36,6 +72,7 @@ export AUDIT_LABEL
 export GOVERNANCE_ACTION_KIND
 export GOVERNANCE_DECISION
 export GOVERNANCE_REASON
+export LIVE_MODE
 
 python3 - <<'PY'
 import json
@@ -54,10 +91,13 @@ def message_bool(message, key, default=False):
 response = json.loads(os.environ["ADAPTER_RESPONSE"])
 message = str(response.get("message") or "")
 app_handle = response.get("app_handle") or {}
+live_mode = os.environ.get("LIVE_MODE", "0") == "1"
+dry_run = message_bool(message, "dry_run", default=not live_mode)
+real_execution = message_bool(message, "real_execution", default=live_mode)
 
 receipt = {
     "schema_version": 1,
-    "receipt_kind": "desktop_action_rehearsal_receipt",
+    "receipt_kind": "desktop_action_live_receipt" if live_mode else "desktop_action_rehearsal_receipt",
     "tested_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "action": os.environ["ACTION"],
     "app_name": os.environ["APP_NAME"],
@@ -67,10 +107,10 @@ receipt = {
     "allowlist_path": os.environ["ALLOWLIST_REL"],
     "audit_label": os.environ["AUDIT_LABEL"],
     "required_env": os.environ["REQUIRED_ENV"],
-    "live_gate_env_state": "<missing>",
-    "dry_run": message_bool(message, "dry_run", default=True),
-    "real_execution": message_bool(message, "real_execution", default=False),
-    "performs_desktop_action": False,
+    "live_gate_env_state": "<set>" if live_mode else "<missing>",
+    "dry_run": dry_run,
+    "real_execution": real_execution,
+    "performs_desktop_action": live_mode,
     "adapter_response": {
         "allowed": message_bool(message, "allowed", default=False),
         "action": os.environ["ACTION"],
@@ -86,8 +126,8 @@ receipt = {
         "uses_actuator_adapter": True,
         "uses_allowlist": True,
         "requires_live_gate_for_real_execution": True,
-        "live_gate_closed_for_rehearsal": True,
-        "performs_desktop_action": False,
+        "live_gate_closed_for_rehearsal": not live_mode,
+        "performs_desktop_action": live_mode,
         "connects_real_provider": False,
         "connects_real_feishu": False,
         "modifies_repo": False,

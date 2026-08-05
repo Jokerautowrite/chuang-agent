@@ -5,6 +5,7 @@ FORMAT="text"
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 BASE_FILE=""
 INCLUDE_PROVIDER_LIVE="${CHUANG_GLOBAL_RECEIPT_INCLUDE_PROVIDER_LIVE:-0}"
+INCLUDE_DESKTOP_LIVE="${CHUANG_GLOBAL_RECEIPT_INCLUDE_DESKTOP_LIVE:-0}"
 WORK_DIR="${CHUANG_GLOBAL_RECEIPT_WORK_DIR:-}"
 
 FEISHU_FILE=""
@@ -20,7 +21,7 @@ usage() {
 usage: scripts/chuang-global-real-live-receipt.sh [--json] [--base-file PATH]
        [--feishu-file PATH] [--provider-file PATH] [--subagent-file PATH]
        [--desktop-file PATH] [--browser-file PATH] [--wiki-file PATH] [--gbrain-file PATH]
-       [--include-provider-live]
+       [--include-provider-live] [--include-desktop-live]
 
 Collect or consume per-service live receipts, map them to the canonical 7-slot
 global receipt overlay, then delegate final readiness derivation to
@@ -29,7 +30,9 @@ chuang-live-operator-receipt-collect.sh.
 Default boundaries:
   provider live request is not executed unless --include-provider-live or
   CHUANG_GLOBAL_RECEIPT_INCLUDE_PROVIDER_LIVE=1 is set.
-  desktop dry-run rehearsal is not promoted to real_execution=true.
+  desktop dry-run rehearsal is not promoted to real_execution=true unless
+  --include-desktop-live or CHUANG_GLOBAL_RECEIPT_INCLUDE_DESKTOP_LIVE=1
+  (which also requires CHUANG_REAL_ACTUATOR_ENABLE=1).
   no service restart, no repository mutation, no file deletion.
 USAGE
 }
@@ -130,6 +133,9 @@ while [ "$#" -gt 0 ]; do
     --include-provider-live)
       INCLUDE_PROVIDER_LIVE="1"
       ;;
+    --include-desktop-live)
+      INCLUDE_DESKTOP_LIVE="1"
+      ;;
     --work-dir)
       if [ "$#" -lt 2 ]; then
         echo "missing value for --work-dir" >&2
@@ -196,7 +202,11 @@ fi
 
 if [ -z "$DESKTOP_FILE" ]; then
   DESKTOP_FILE="$(receipt_path desktop)"
-  run_receipt_script "$DESKTOP_FILE" bash "$ROOT/scripts/chuang-desktop-action-rehearsal-receipt.sh" --json
+  if [ "$INCLUDE_DESKTOP_LIVE" = "1" ]; then
+    run_receipt_script "$DESKTOP_FILE" bash "$ROOT/scripts/chuang-desktop-action-rehearsal-receipt.sh" --json --live
+  else
+    run_receipt_script "$DESKTOP_FILE" bash "$ROOT/scripts/chuang-desktop-action-rehearsal-receipt.sh" --json
+  fi
 fi
 
 if [ -z "$BROWSER_FILE" ]; then
