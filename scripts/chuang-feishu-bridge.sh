@@ -4,7 +4,7 @@ set -eu
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 ENV_FILE="${CHUANG_FEISHU_ENV_FILE:-$HOME/.codex-im/chuang-feishu-bridge.env}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
-FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-/home/user/.codex/codex-feishu-bridge/node_modules}"
+FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-/home/user/.codex/codex-feishu-bridge-current/node_modules}"
 
 detect_desktop_env() {
   uid="$(id -u)"
@@ -54,6 +54,7 @@ fi
 ROOT="${CHUANG_AGENT_ROOT:-$ROOT}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$PROVIDER_ENV_FILE}"
 FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-$FEISHU_SDK_MODULES}"
+BIN="${CHUANG_BIN:-$ROOT/target/debug/chuang-agent}"
 
 if [ -f "$PROVIDER_ENV_FILE" ]; then
   set -a
@@ -63,7 +64,12 @@ fi
 
 detect_desktop_env
 
-cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- channel feishu-check \
+if [ ! -x "$BIN" ]; then
+  printf '%s\n' "chuang-agent binary is missing or not executable: $BIN" >&2
+  exit 1
+fi
+
+"$BIN" channel feishu-check \
   --env-file "$ENV_FILE" \
   --json >/dev/null
 

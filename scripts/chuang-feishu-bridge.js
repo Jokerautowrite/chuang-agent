@@ -3,8 +3,6 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const readline = require("readline");
-const { spawn } = require("child_process");
 const { spawnSync } = require("child_process");
 
 const dotenv = require("dotenv");
@@ -43,6 +41,9 @@ const {
   listDisallowedProviderEnvNames,
   listForbiddenCredentialEnvNames,
 } = require("./chuang-feishu-bridge-config");
+const {
+  AppServerClient,
+} = require("./chuang-app-server-client");
 
 const DEFAULT_ROOT = path.resolve(__dirname, "..");
 let ROOT = process.env.CHUANG_AGENT_ROOT || DEFAULT_ROOT;
@@ -106,166 +107,6 @@ function loadProviderEnvReadonly(providerEnvPath) {
     if (!Object.prototype.hasOwnProperty.call(process.env, name)) {
       process.env[name] = value;
     }
-  }
-}
-
-class AppServerClient {
-  constructor(rootDir) {
-    this.rootDir = normalizeWorkspaceRoot(rootDir);
-    this.nextId = 1;
-    this.pending = new Map();
-    this.buffer = "";
-    this.startedAt = "";
-    this.lastError = "";
-    this.restart();
-  }
-
-  restart() {
-    if (this.child) {
-      this.child.kill();
-    }
-    const childEnv = {
-      ...process.env,
-      CHUANG_AGENT_WORKSPACE_ROOT: this.rootDir,
-      CHUANG_FEISHU_WORKSPACE_ROOT: this.rootDir,
-    };
-    this.child = spawn("cargo", ["run", "--quiet", "--manifest-path", path.join(ROOT, "Cargo.toml"), "--", "app-server"], {
-      cwd: this.rootDir,
-      env: childEnv,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.startedAt = new Date().toISOString();
-    this.lastError = "";
-    this.child.stdout.on("data", (chunk) => this.handleStdout(chunk));
-    this.child.stderr.on("data", (chunk) => {
-      const text = chunk.toString().trimEnd();
-      if (text) {
-        console.error(`[chuang-feishu] app-server: ${text}`);
-        this.lastError = truncateText(text, 240);
-      }
-    });
-    this.child.on("exit", (code, signal) => {
-      const error = new Error(`app-server exited: code=${code} signal=${signal || ""}`.trim());
-      this.lastError = error.message;
-      this.child = null;
-      for (const [, pending] of this.pending.entries()) {
-        pending.reject(error);
-      }
-      this.pending.clear();
-    });
-  }
-
-  handleStdout(chunk) {
-    this.buffer += chunk.toString();
-    let newlineIndex = this.buffer.indexOf("\n");
-    while (newlineIndex >= 0) {
-      const rawLine = this.buffer.slice(0, newlineIndex).trim();
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-      newlineIndex = this.buffer.indexOf("\n");
-      if (!rawLine) {
-        continue;
-      }
-      let payload;
-      try {
-        payload = JSON.parse(rawLine);
-      } catch {
-        continue;
-      }
-      if (payload && Object.prototype.hasOwnProperty.call(payload, "id")) {
-        const pending = this.pending.get(String(payload.id));
-        if (!pending) {
-          continue;
-        }
-        this.pending.delete(String(payload.id));
-        if (payload.error) {
-          pending.reject(new Error(payload.error.message || "app-server request failed"));
-          continue;
-        }
-        pending.resolve(payload.result || {});
-      }
-    }
-  }
-
-  request(method, params) {
-    const id = String(this.nextId++);
-    const payload = JSON.stringify({ id, method, params });
-    return new Promise((resolve, reject) => {
-      if (!this.child || this.child.exitCode !== null || this.child.killed) {
-        try {
-          this.restart();
-        } catch (error) {
-          reject(error);
-          return;
-        }
-      }
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${payload}\n`);
-    });
-  }
-
-  status() {
-    return {
-      running: Boolean(this.child && this.child.exitCode === null && !this.child.killed),
-      startedAt: this.startedAt,
-      workspaceRoot: this.rootDir,
-      childWorkspaceRoot: this.rootDir,
-      configuredWorkspaceRoot: WORKSPACE_ROOT,
-      workspaceRootMatchesConfig: this.rootDir === WORKSPACE_ROOT,
-      pendingCount: this.pending.size,
-      lastError: this.lastError,
-    };
-  }
-
-  async turnStart(inbound) {
-    const result = await this.request("turn/start", {
-      threadId: inbound.threadId || "",
-      workspaceRoot: inbound.workspaceRoot,
-      text: inbound.text,
-      channel: inbound.channel,
-      channelMessageId: inbound.messageId,
-      senderId: inbound.senderId,
-    });
-    const thread = result.thread || {};
-    const turn = result.turn || {};
-    const turns = Array.isArray(thread.turns) ? thread.turns : [];
-    const lastTurn = turns[turns.length - 1] || {};
-    const items = Array.isArray(lastTurn.items) ? lastTurn.items : [];
-    const assistant = items.find((item) => item && item.type === "agentMessage") || {};
-    const replyText = normalizeText(assistant.text || assistant.content?.[0]?.text || lastTurn.preview || "");
-    const footer = buildStatusFooter(turn);
-    const process = buildProcessSection(turn);
-    const parts = [replyText || "已收到。"];
-    if (footer) {
-      parts.push(footer);
-    }
-    if (process) {
-      parts.push(process);
-    }
-    const fullText = parts.join("\n\n");
-    return {
-      threadId: thread.id || inbound.threadId || inbound.messageId,
-      replyText: fullText,
-      modelName: assistant.model || result.model || "unknown",
-      runtimeReportId: normalizeText(turn.runtimeReportId || turn.runtime_report_id || turn.runtimeObservability?.runtime_report_id || turn.providerMeta?.runtime_report_id),
-      sessionMemoryWriteStatus: normalizeText(
-        turn.sessionMemoryWriteStatus ||
-          turn.runtimeObservability?.session_memory_write_status ||
-          turn.providerMeta?.session_memory_write_status
-      ),
-      sessionMemoryWriteError: normalizeText(
-        turn.sessionMemoryWriteError ||
-          turn.runtimeObservability?.session_memory_write_error ||
-          turn.providerMeta?.session_memory_write_error
-      ),
-    };
-  }
-
-  async startThread(workspaceRoot, displayName) {
-    const result = await this.request("thread/start", {
-      cwd: workspaceRoot,
-      displayName,
-    });
-    return result.thread || {};
   }
 }
 
