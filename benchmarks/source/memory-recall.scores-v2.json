@@ -1,0 +1,4 @@
+[
+  {"case_id": "case-001", "score": 1, "max_score": 2, "reason": "regression: answered but vague"},
+  {"case_id": "case-002", "score": 1, "max_score": 2, "reason": "same partial boundary"}
+]

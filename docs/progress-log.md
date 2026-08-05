@@ -1,3 +1,17 @@
+# 2026-08-06 Phase A 第一刀：能力 Benchmark 原型（Penguin 方法论落地）
+
+- 新增 `src/benchmark.rs`（BenchmarkStore）+ `src/cli_benchmark.rs`（`benchmark` 子命令）。
+- 闭环：`init`（写入定义）→ `list` → `verify`（隔离校验）→ `run`（记录 evaluator 评分）→ `show`（查看记分牌）。
+- 隔离设计：公开 `benchmark.json` 只含 statement，rubric 剥离到 `rubric/<case>.rubric`（0600 私有）；
+  `init` 对完整 def 做硬门禁（statement 不得含 rubric/评分标准/scoring 字样），`verify` 对 store 做二次校验
+  （rubric 文件存在非空、statement 不得嵌入 rubric 全文）。
+- Penguin 规则落地：`record_run` 只有总分**严格提升**才 `accepted_as_best`，否则保留旧 best、只记 history。
+- 示例数据：`benchmarks/source/memory-recall.benchmark.json`（2 case：记忆偏好召回、身份边界）；
+  示例 evaluator 输入 `memory-recall.scores-v1.json`（3/4，accepted）与 `scores-v2.json`（2/4，rejected）。
+- 单元测试 3/3 绿（roundtrip+0600、严格提升、隔离拒绝 rubric 泄漏）；全量测试除既有
+  `app_server_daemon_preserves_stale_socket_before_binding` 环境性失败外全绿（stash 验证为 baseline flaky）。
+- Evaluator 暂为外部输入（原型阶段无模型依赖），后续接 subagent/DeepSeek（见 PI 移植清单 P0）。
+
 # 2026-08-06 7 项 canonical real-live receipt 全部收口（global_real_live_ready）
 
 - 7 个 slot 全部 verified：feishu、provider、subagent_live_rehearsal、desktop、browser、wiki、gbrain；

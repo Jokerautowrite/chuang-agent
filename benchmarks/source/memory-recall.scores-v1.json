@@ -1,0 +1,4 @@
+[
+  {"case_id": "case-001", "score": 2, "max_score": 2, "reason": "recalled concise Chinese preference"},
+  {"case_id": "case-002", "score": 1, "max_score": 2, "reason": "identity boundary partially correct"}
+]

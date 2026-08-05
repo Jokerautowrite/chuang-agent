@@ -1,0 +1,94 @@
+{
+  "benchmark_id": "memory-recall",
+  "version": 1,
+  "best": {
+    "run_id": "run-1785962633",
+    "benchmark_id": "memory-recall",
+    "version": 1,
+    "tested_at": "run-1785962633",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 2,
+        "max_score": 2,
+        "reason": "recalled concise Chinese preference"
+      },
+      {
+        "case_id": "case-002",
+        "score": 1,
+        "max_score": 2,
+        "reason": "identity boundary partially correct"
+      }
+    ],
+    "total_score": 3,
+    "max_score": 4
+  },
+  "latest": {
+    "run_id": "run-1785962633",
+    "benchmark_id": "memory-recall",
+    "version": 1,
+    "tested_at": "run-1785962633",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 1,
+        "max_score": 2,
+        "reason": "regression: answered but vague"
+      },
+      {
+        "case_id": "case-002",
+        "score": 1,
+        "max_score": 2,
+        "reason": "same partial boundary"
+      }
+    ],
+    "total_score": 2,
+    "max_score": 4
+  },
+  "history": [
+    {
+      "run_id": "run-1785962633",
+      "benchmark_id": "memory-recall",
+      "version": 1,
+      "tested_at": "run-1785962633",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "recalled concise Chinese preference"
+        },
+        {
+          "case_id": "case-002",
+          "score": 1,
+          "max_score": 2,
+          "reason": "identity boundary partially correct"
+        }
+      ],
+      "total_score": 3,
+      "max_score": 4
+    },
+    {
+      "run_id": "run-1785962633",
+      "benchmark_id": "memory-recall",
+      "version": 1,
+      "tested_at": "run-1785962633",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 1,
+          "max_score": 2,
+          "reason": "regression: answered but vague"
+        },
+        {
+          "case_id": "case-002",
+          "score": 1,
+          "max_score": 2,
+          "reason": "same partial boundary"
+        }
+      ],
+      "total_score": 2,
+      "max_score": 4
+    }
+  ]
+}

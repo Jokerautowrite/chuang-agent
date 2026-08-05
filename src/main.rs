@@ -279,6 +279,7 @@ mod app_server;
 mod brand_theme;
 mod cli_approval;
 mod cli_args;
+mod cli_benchmark;
 mod cli_browser;
 mod cli_channel;
 mod cli_config;
@@ -309,6 +310,7 @@ use chuang_agent::terminal_event::TerminalEvent;
 use chuang_agent::tool_loop_meta::ToolLoopMeta;
 use cli_approval::{approval_command, resume_local_tty_approval};
 use cli_args::*;
+use cli_benchmark::benchmark_command;
 use cli_browser::browser_command;
 use cli_channel::channel_command;
 use cli_config::config_command;
@@ -379,6 +381,7 @@ fn run_cli() -> Result<(), String> {
         Some("browser") => browser_command(&args[2..]),
         Some("field-accept") | Some("field") => field_accept_command(&args[2..]),
         Some("experiment") => experiment_command(&args[2..]),
+        Some("benchmark") => benchmark_command(&args[2..]),
         Some("external-ai") => external_ai_command(&args[2..]),
         Some("app-server") => app_server::app_server_command(&args[2..]),
         Some("approval") => approval_command(&args[2..]),
