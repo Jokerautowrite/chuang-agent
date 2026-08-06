@@ -288,6 +288,7 @@ mod cli_control;
 mod cli_doctor;
 mod cli_experiment;
 mod cli_external_ai;
+mod cli_emotion;
 mod cli_genesis;
 mod cli_goal;
 mod cli_memory;
@@ -376,6 +377,7 @@ fn run_cli() -> Result<(), String> {
         Some("genesis") => genesis_command(&args[2..]),
         Some("goal") => goal_command(&args[2..]),
         Some("memory") => memory_command(&args[2..]),
+        Some("emotion") => cli_emotion::emotion_command(&args[2..]),
         Some("plugin") => plugin_command(&args[2..]),
         Some("skill") => skill_command(&args[2..]),
         Some("browser") => browser_command(&args[2..]),

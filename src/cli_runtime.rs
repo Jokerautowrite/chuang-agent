@@ -327,9 +327,24 @@ fn persist_emotion_state(emotion: &EmotionSlotRuntime, path: &std::path::Path) {
     let Ok(snapshot) = emotion.snapshot() else {
         return;
     };
+    // 合并式读写：保留心跳记账（last_proactive_at / 当日计数），只更新五轴与心跳时间。
+    let previous = EmotionStateFile::new(path)
+        .load()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| PersistedEmotionState {
+            axes: snapshot.axes,
+            saved_at: None,
+            last_proactive_at: None,
+            proactive_count_date: None,
+            proactive_count_day: 0,
+        });
     let state = PersistedEmotionState {
         axes: snapshot.axes,
         saved_at: Some(chuang_agent::emotion_slot::now_rfc3339()),
+        last_proactive_at: previous.last_proactive_at,
+        proactive_count_date: previous.proactive_count_date,
+        proactive_count_day: previous.proactive_count_day,
     };
     let _ = EmotionStateFile::new(path).save(&state);
 }

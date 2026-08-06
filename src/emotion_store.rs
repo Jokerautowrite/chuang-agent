@@ -21,6 +21,15 @@ pub struct PersistedEmotionState {
     /// RFC3339 上次心跳时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved_at: Option<String>,
+    /// RFC3339 上次主动联系时间（心跳冷却用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_proactive_at: Option<String>,
+    /// 主动联系计数日期（YYYY-MM-DD，本地时区）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proactive_count_date: Option<String>,
+    /// 当日已主动联系次数。
+    #[serde(default)]
+    pub proactive_count_day: u32,
 }
 
 /// 情感状态文件存储。
@@ -100,6 +109,9 @@ mod tests {
                 immersion: 0.5,
             },
             saved_at: Some("2026-08-07T10:00:00+08:00".to_string()),
+            last_proactive_at: None,
+            proactive_count_date: None,
+            proactive_count_day: 0,
         };
         store.save(&state).expect("save should succeed");
         let loaded = store

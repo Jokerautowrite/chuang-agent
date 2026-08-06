@@ -1,3 +1,27 @@
+# 2026-08-07 情感主动联系（心跳）上线：走 Feishu 桥，参数可配
+
+- **`emotion heartbeat` 子命令**（`src/cli_emotion.rs`）：恢复情绪 → 按真实流逝时间
+  tick → 达标且过冷却/配额才产出「主动联系提案」写入发件箱；随后连接需求清零
+  （表达即满足），状态记账（last_proactive_at / 当日计数）落盘。
+- **心跳策略参数化**（`metadata.heartbeat_*`）：
+  `heartbeat_enabled` / `heartbeat_threshold`（连接门槛 0..1）/
+  `heartbeat_min_interval_minutes`（最小间隔）/ `heartbeat_max_per_day`（每日上限）。
+  默认保守：threshold 0.6、间隔 24h、每日 1 次（config.toml 已启用，example 已记录）。
+- **发件箱**（`src/emotion_heartbeat.rs`）：目录式 outbox（缺省
+  root/context/proactive-outbox），CLI 写提案、桥轮询投递、成功后归档；
+  只对 Contact 触发发消息，Observation/FindActivity 不打扰主人。
+- **Chuang Feishu 桥投递**（`scripts/chuang-feishu-bridge.js`）：新增轮询器
+  （默认 60s，`CHUANG_PROACTIVE_POLL_SECONDS` 可调），按 workspaceRoot 匹配绑定会话
+  （单会话回退任一绑定），复用已验证的 sendResourceMessage 路径；dry-run 模式
+  （`CHUANG_PROACTIVE_DRY_RUN=1`）只记日志不发送。冒烟脚本
+  `scripts/chuang-feishu-proactive-smoke.js` 通过。
+- **调度**：`ops/systemd/chuang-emotion-heartbeat.{service,timer}`（每 30 分钟检查，
+  RandomizedDelaySec=120），已安装启用；桥服务已重启（poller 运行中）。
+- **边界**：心跳不需要 provider（宽松配置加载）；状态文件合并式读写保留心跳记账；
+  与 run 并发写存在极小竞态（30 分钟粒度，可接受，后续可上文件锁）。
+- **回归**：lib 101 / bin 135 / app_server 26 / chuang_kernel 13 全绿；
+  心跳 CLI 冒烟（触发→发件箱→计数→连接清零→不重复触发）与桥 dry-run 冒烟通过。
+
 # 2026-08-07 配置支持 [metadata] 段：本地开启 GBrain 外脑增强
 
 - **runtime_config_file**：`[metadata]` 段任意键透传到 RuntimeConfig.metadata

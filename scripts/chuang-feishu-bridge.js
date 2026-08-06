@@ -125,7 +125,128 @@ class ChuangFeishuBridge {
     this.validateConfig();
     this.initializeSdk();
     this.startLongConnection();
+    this.startProactivePoller();
     console.log(`[chuang-feishu] bridge ready for app ${maskSecret(process.env.CHUANG_FEISHU_APP_ID)}`);
+  }
+
+  // ===== 情感主动联系（心跳）投递 =====
+  // CLI `emotion heartbeat` 把主动联系提案写入发件箱（context/proactive-outbox/），
+  // 桥轮询读取并发送到绑定会话；投递成功后归档，失败保留待下轮重试。
+  startProactivePoller() {
+    const rawSeconds = parseInt(process.env.CHUANG_PROACTIVE_POLL_SECONDS || "60", 10);
+    const seconds = Number.isFinite(rawSeconds) && rawSeconds > 0 ? rawSeconds : 60;
+    this.proactivePollSeconds = seconds;
+    this.proactiveTimer = setInterval(() => {
+      this.pollProactiveOutbox().catch((error) => {
+        console.error(`[chuang-feishu] proactive poll failed: ${error.message}`);
+      });
+    }, seconds * 1000);
+    // 启动后稍等立即查一次（不等一个周期）。
+    setTimeout(() => {
+      this.pollProactiveOutbox().catch((error) => {
+        console.error(`[chuang-feishu] proactive initial poll failed: ${error.message}`);
+      });
+    }, 5 * 1000);
+    console.log(`[chuang-feishu] proactive poller every ${seconds}s`);
+  }
+
+  proactiveOutboxDir() {
+    return (
+      process.env.CHUANG_PROACTIVE_OUTBOX_DIR ||
+      path.join(ROOT, "context", "proactive-outbox")
+    );
+  }
+
+  async pollProactiveOutbox() {
+    const dir = this.proactiveOutboxDir();
+    const dryRun = process.env.CHUANG_PROACTIVE_DRY_RUN === "1";
+    let fileNames;
+    try {
+      fileNames = fs.readdirSync(dir).filter((name) => name.endsWith(".json"));
+    } catch {
+      return;
+    }
+    for (const fileName of fileNames) {
+      const fullPath = path.join(dir, fileName);
+      let entry;
+      try {
+        if (!fs.statSync(fullPath).isFile()) {
+          continue;
+        }
+        entry = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+      } catch {
+        continue;
+      }
+      if (!entry || typeof entry.text !== "string" || !entry.text.trim()) {
+        continue;
+      }
+      const chatId = this.resolveProactiveChatId(entry);
+      if (!chatId) {
+        appendEventLog("proactive_skip", {
+          id: entry.id || "unknown",
+          reason: "no_bound_chat",
+        });
+        continue;
+      }
+      if (dryRun) {
+        appendEventLog("proactive_dry_run", {
+          id: entry.id || "unknown",
+          chatId,
+          text: truncateText(entry.text, 120),
+        });
+        this.archiveProactiveEntry(fullPath);
+        continue;
+      }
+      try {
+        await this.adapter.sendResourceMessage({
+          chatId,
+          replyToMessageId: "",
+          replyInThread: false,
+          msgType: "text",
+          content: JSON.stringify({ text: entry.text }),
+        });
+        appendEventLog("proactive_sent", {
+          id: entry.id || "unknown",
+          chatId,
+          text: truncateText(entry.text, 120),
+        });
+        this.archiveProactiveEntry(fullPath);
+      } catch (error) {
+        appendEventLog("proactive_failed", {
+          id: entry.id || "unknown",
+          reason: truncateText(error.message, 240),
+        });
+      }
+    }
+  }
+
+  resolveProactiveChatId(entry) {
+    const bindings = this.sessionStore.state.bindings || {};
+    const keys = Object.keys(bindings);
+    if (!keys.length) {
+      return "";
+    }
+    const workspaceRoot = String(entry.workspaceRoot || "").trim();
+    if (workspaceRoot) {
+      const match = keys.find(
+        (key) => String(bindings[key].workspaceRoot || "").trim() === workspaceRoot
+      );
+      if (match) {
+        return match;
+      }
+    }
+    // 单用户/单工作区场景：无精确匹配时投递到任一绑定会话。
+    return keys[0];
+  }
+
+  archiveProactiveEntry(fullPath) {
+    try {
+      const archiveDir = path.join(path.dirname(fullPath), "archive");
+      fs.mkdirSync(archiveDir, { recursive: true });
+      fs.renameSync(fullPath, path.join(archiveDir, path.basename(fullPath)));
+    } catch (error) {
+      console.error(`[chuang-feishu] proactive archive failed: ${error.message}`);
+    }
   }
 
   validateConfig() {
@@ -710,6 +831,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ChuangFeishuBridge,
   buildProcessSection,
   buildStatusFooter,
   listForbiddenCredentialEnvNames,
