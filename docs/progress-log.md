@@ -1,3 +1,18 @@
+# 2026-08-07 情感模块备选 1 落地：JiwenEmotionSlot + GBrain 外脑桥接
+
+- **JiwenEmotionSlot（真实实现）**：完整移植 jiwen 五轴连续状态数学（MIT）——
+  connection 分段增长 + valence 耦合 + 沉浸阻尼；pride 防御/回归/侵蚀；valence 回归/锁定/
+  connection 驱动下沉；arousal 回归 + 等待攀升 + pride 冲突两力竞争；阈值触发
+  observation/contact（forced）/find_activity（pride_block/low_valence/high_arousal）。
+  默认参数与上游一致（耦合参数默认关闭）。+8 个移植测试。
+- **EmotionTrigger 扩展**：Contact 加 forced、FindActivity 加 reason（忠实 jiwen 语义）。
+- **emotion_brain.rs（GBrain 桥接）**：只读查询本机 `agent-hub-brain-query semantic`，
+  解析 JSON 命中（title/slug/摘要点），`augment_prompt_context` 把外脑记忆摘要追加到
+  情感快照 prompt（摘要点 + slug，不贴原文）。+3 单测 + 1 live 集成测试（真实调用通过）。
+- **边界**：情感核心不依赖外脑（可拔插）；私人情绪记忆走创自己的 MemoryStore，GBrain 只做
+  脱敏共享知识增强（遵守 wiki 红线）。
+- **回归**：lib 76 / bin 130 / app_server 26 全绿。
+
 # 2026-08-06 方向定调 + 情感陪伴调研（新赛道）
 
 - **战略定调**（老爸）：不做最强通用 Agent，创做「最懂主人的个人情感助手」；编程等能力靠接入，
