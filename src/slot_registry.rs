@@ -379,10 +379,19 @@ impl Responder for ProviderSlot {
                         "provider_fallback_configured".to_string(),
                         "true".to_string(),
                     );
-                    primary_output
+                    // A nested chain may already have recovered at an inner
+                    // level. Preserve that fact instead of overwriting it
+                    // with this level's own "no fallback" status.
+                    if !primary_output
                         .meta
                         .extra
-                        .insert("provider_fallback_used".to_string(), "false".to_string());
+                        .contains_key("provider_fallback_used")
+                    {
+                        primary_output.meta.extra.insert(
+                            "provider_fallback_used".to_string(),
+                            "false".to_string(),
+                        );
+                    }
                     return primary_output;
                 }
 
@@ -750,10 +759,19 @@ mod tests {
         assert!(output.body.contains("m2-ok"), "{}", output.body);
         // The inner level-1 fallback already recovered, so the outer chain
         // must NOT fall through to its own leaf. Correct multi-level
-        // behavior: recover at the first available level.
+        // behavior: recover at the first available level, and the final
+        // meta must still report that a fallback was used (at an inner hop).
         assert_eq!(
             output.meta.extra.get("provider_fallback_used").map(String::as_str),
-            Some("false")
+            Some("true")
+        );
+        assert_eq!(
+            output
+                .meta
+                .extra
+                .get("provider_fallback_from")
+                .map(String::as_str),
+            Some("primary")
         );
     }
 }
