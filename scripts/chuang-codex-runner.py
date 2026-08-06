@@ -37,7 +37,9 @@ def run_dispatch(dispatch: dict) -> dict:
     enabled = os.environ.get("CHUANG_CODEX_RUNNER_ENABLE") == "1"
     codex_bin = os.environ.get("CHUANG_CODEX_BIN", "codex")
     workspace = os.environ.get("CHUANG_CODEX_RUNNER_WORKSPACE", os.getcwd())
-    model = os.environ.get("CHUANG_CODEX_RUNNER_MODEL", "gpt-5.6-luna")
+    # 默认模型对齐 example-provider/zen-sub2 账号组实际支持的模型（deepseek-v4-flash）。
+    # 可拔插：用 CHUANG_CODEX_RUNNER_MODEL 环境变量覆盖即可换 worker 模型。
+    model = os.environ.get("CHUANG_CODEX_RUNNER_MODEL", "deepseek-v4-flash")
     timeout_ms = int(dispatch.get("idle_timeout_ms") or 30000)
 
     if not enabled:
