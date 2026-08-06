@@ -1,3 +1,16 @@
+# 2026-08-06 多 provider 容错落地：example-provider 挂时自动切 deepseek
+
+- **现状**：example-provider.example 网关整体故障（连 ping 502）期间，创通过已内建但未启用的 Fallback 槽位
+  自动切换到本地 ccswitch 代理的 deepseek-v4-flash（HTTP 200 实测），正常对话。
+- **配置**（config.toml，可拔插）：`fallback_provider=openai_compatible`、`fallback_base_url=http://127.0.0.1:15721/v1`、
+  `fallback_model=deepseek-v4-flash`、`fallback_transport=http`、policy `retryable=true` + status_codes 408/429/5xx。
+- **实测证据**：`fallback_used=true`、`fallback_from=example-provider`、`fallback_reason=status_code=502`、`fallback_configured=true`；
+  回答正常（finish_reason=stop）。
+- **架构说明**：Fallback 槽位（ProviderConfig::Fallback + slot_registry 切换逻辑）此前已存在，
+  本轮只补齐配置与备用通道（provider.env / bridge env 加 CHUANG_FALLBACK_API_KEY，运行时配置不入库）。
+- **剩余**：备用通道是本地代理，依赖 ccswitch_proxy 进程；建议后续再接一个远程独立 OpenAI 兼容服务
+  作为第二级备用（P1）。
+
 # 2026-08-06 稳定性与真实基线：provider 重试 + 首个能力分
 
 - **稳定性改进**：provider 层自动重试（408/429/500/502/503/504，最多 3 次、退避 0.5s/1.5s/3s）。
