@@ -358,18 +358,36 @@ fn parse_provider(
     values: &BTreeMap<String, String>,
     options: RuntimeConfigFileOptions,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
-    let primary = parse_primary_provider(values, options)?;
-    if values.contains_key("fallback_provider") || values.contains_key("fallback.provider.kind") {
-        let fallback = parse_fallback_provider(values, options)?;
-        let policy = parse_fallback_policy(values)?;
-        return Ok(ProviderConfig::Fallback {
-            primary: Box::new(primary),
+    // Build the provider chain: primary -> fallback -> fallback2 -> ...
+    // Each level uses its own prefix (fallback_, fallback2_, ...) so the
+    // chain depth is unbounded while staying backwards compatible with the
+    // original single-level fallback_* keys.
+    let mut provider = parse_primary_provider(values, options)?;
+    let mut level = 1u32;
+    loop {
+        let prefix = if level == 1 {
+            "fallback".to_string()
+        } else {
+            format!("fallback{level}")
+        };
+        let kind_keys = [
+            format!("{prefix}.provider.kind"),
+            format!("{prefix}_provider"),
+        ];
+        if !has_any(values, &kind_keys.iter().map(String::as_str).collect::<Vec<_>>()) {
+            break;
+        }
+        let fallback = parse_prefixed_fallback_provider(&prefix, values, options)?;
+        let policy = parse_prefixed_fallback_policy(&prefix, values)?;
+        provider = ProviderConfig::Fallback {
+            primary: Box::new(provider),
             fallback: Box::new(fallback),
             policy,
-        });
+        };
+        level += 1;
     }
 
-    Ok(primary)
+    Ok(provider)
 }
 
 fn parse_primary_provider(
@@ -447,49 +465,83 @@ fn parse_primary_provider(
     }
 }
 
-fn parse_fallback_provider(
+fn parse_prefixed_fallback_provider(
+    prefix: &str,
     values: &BTreeMap<String, String>,
     options: RuntimeConfigFileOptions,
 ) -> Result<ProviderConfig, RuntimeConfigFileError> {
-    let kind = get_any(values, &["fallback.provider.kind", "fallback_provider"])
+    let kind = get_any(
+        values,
+        &[
+            &format!("{prefix}.provider.kind"),
+            &format!("{prefix}_provider"),
+        ],
+    )
         .map(String::as_str)
         .unwrap_or("fake");
     match kind {
         "fake" => Ok(ProviderConfig::Fake {
-            provider_id: get_any(values, &["fallback.provider.id", "fallback_provider_id"])
-                .cloned()
-                .unwrap_or_else(|| "fallback-fake-runtime".to_string()),
-            model_name: get_any(values, &["fallback.provider.model", "fallback_model"])
-                .cloned()
-                .unwrap_or_else(|| "fallback-stub-responder".to_string()),
+            provider_id: get_any(
+                values,
+                &[
+                    &format!("{prefix}.provider.id"),
+                    &format!("{prefix}_provider_id"),
+                ],
+            )
+            .cloned()
+            .unwrap_or_else(|| format!("{prefix}-fake-runtime")),
+            model_name: get_any(
+                values,
+                &[&format!("{prefix}.provider.model"), &format!("{prefix}_model")],
+            )
+            .cloned()
+            .unwrap_or_else(|| format!("{prefix}-stub-responder")),
         }),
         "openai_compatible" => {
             let api_key_env = required_any(
                 values,
-                &["fallback.provider.api_key_env", "fallback_api_key_env"],
+                &[
+                    &format!("{prefix}.provider.api_key_env"),
+                    &format!("{prefix}_api_key_env"),
+                ],
             )?;
             let api_key = resolve_api_key_env(&api_key_env, options)?;
             Ok(ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
-                provider_id: get_any(values, &["fallback.provider.id", "fallback_provider_id"])
-                    .cloned()
-                    .unwrap_or_else(|| "fallback-openai-compatible".to_string()),
-                base_url: required_any(
+                provider_id: get_any(
                     values,
-                    &["fallback.provider.base_url", "fallback_base_url"],
-                )?,
+                    &[
+                        &format!("{prefix}.provider.id"),
+                        &format!("{prefix}_provider_id"),
+                    ],
+                )
+                .cloned()
+                .unwrap_or_else(|| format!("{prefix}-openai-compatible")),
+                base_url: required_any(values, &[
+                    &format!("{prefix}.provider.base_url"),
+                    &format!("{prefix}_base_url"),
+                ])?,
                 api_key,
-                model_name: required_any(values, &["fallback.provider.model", "fallback_model"])?,
+                model_name: required_any(values, &[
+                    &format!("{prefix}.provider.model"),
+                    &format!("{prefix}_model"),
+                ])?,
                 transport: get_any(
                     values,
-                    &["fallback.provider.transport", "fallback_transport"],
+                    &[
+                        &format!("{prefix}.provider.transport"),
+                        &format!("{prefix}_transport"),
+                    ],
                 )
                 .map(|value| value.parse::<ProviderTransport>())
                 .transpose()
                 .map_err(|_| RuntimeConfigFileError::InvalidValue {
-                    key: "fallback.provider.transport".to_string(),
+                    key: format!("{prefix}.provider.transport"),
                     value: get_any(
                         values,
-                        &["fallback.provider.transport", "fallback_transport"],
+                        &[
+                            &format!("{prefix}.provider.transport"),
+                            &format!("{prefix}_transport"),
+                        ],
                     )
                     .cloned()
                     .unwrap_or_default(),
@@ -497,15 +549,21 @@ fn parse_fallback_provider(
                 .unwrap_or(ProviderTransport::Stub),
                 endpoint: get_any(
                     values,
-                    &["fallback.provider.endpoint", "fallback_endpoint"],
+                    &[
+                        &format!("{prefix}.provider.endpoint"),
+                        &format!("{prefix}_endpoint"),
+                    ],
                 )
                 .map(|value| value.parse::<ProviderApiEndpoint>())
                 .transpose()
                 .map_err(|_| RuntimeConfigFileError::InvalidValue {
-                    key: "fallback.provider.endpoint".to_string(),
+                    key: format!("{prefix}.provider.endpoint"),
                     value: get_any(
                         values,
-                        &["fallback.provider.endpoint", "fallback_endpoint"],
+                        &[
+                            &format!("{prefix}.provider.endpoint"),
+                            &format!("{prefix}_endpoint"),
+                        ],
                     )
                     .cloned()
                     .unwrap_or_default(),
@@ -514,19 +572,19 @@ fn parse_fallback_provider(
                 reasoning_effort: get_any(
                     values,
                     &[
-                        "fallback.provider.reasoning_effort",
-                        "fallback_reasoning_effort",
+                        &format!("{prefix}.provider.reasoning_effort"),
+                        &format!("{prefix}_reasoning_effort"),
                     ],
                 )
                 .map(|value| value.parse::<ReasoningEffort>())
                 .transpose()
                 .map_err(|_| RuntimeConfigFileError::InvalidValue {
-                    key: "fallback.provider.reasoning_effort".to_string(),
+                    key: format!("{prefix}.provider.reasoning_effort"),
                     value: get_any(
                         values,
                         &[
-                            "fallback.provider.reasoning_effort",
-                            "fallback_reasoning_effort",
+                            &format!("{prefix}.provider.reasoning_effort"),
+                            &format!("{prefix}_reasoning_effort"),
                         ],
                     )
                     .cloned()
@@ -535,59 +593,54 @@ fn parse_fallback_provider(
                 request_timeout_ms: get_any(
                     values,
                     &[
-                        "fallback.provider.request_timeout_ms",
-                        "fallback_provider_timeout_ms",
+                        &format!("{prefix}.provider.request_timeout_ms"),
+                        &format!("{prefix}_provider_timeout_ms"),
                     ],
                 )
-                .map(|value| parse_u64("fallback.provider.request_timeout_ms", value))
+                .map(|value| parse_u64(&format!("{prefix}.provider.request_timeout_ms"), value))
                 .transpose()?,
                 tls_ca_cert_path: get_any(
                     values,
-                    &["fallback.provider.tls_ca_path", "fallback_tls_ca_path"],
+                    &[
+                        &format!("{prefix}.provider.tls_ca_path"),
+                        &format!("{prefix}_tls_ca_path"),
+                    ],
                 )
                 .map(PathBuf::from),
             }))
         }
         other => Err(RuntimeConfigFileError::InvalidValue {
-            key: "fallback.provider.kind".to_string(),
+            key: format!("{prefix}.provider.kind"),
             value: other.to_string(),
         }),
     }
 }
 
-fn parse_fallback_policy(
+fn parse_prefixed_fallback_policy(
+    prefix: &str,
     values: &BTreeMap<String, String>,
 ) -> Result<ProviderFallbackPolicy, RuntimeConfigFileError> {
     Ok(ProviderFallbackPolicy {
         on_retryable: get_any(
             values,
             &[
-                "fallback.on_retryable",
-                "fallback_on_retryable",
-                "provider.fallback_on_retryable",
+                &format!("{prefix}.on_retryable"),
+                &format!("{prefix}_on_retryable"),
             ],
         )
-        .map(|value| parse_bool("fallback.on_retryable", value))
+        .map(|value| parse_bool(&format!("{prefix}.on_retryable"), value))
         .transpose()?
         .unwrap_or(true),
         status_codes: get_any(
             values,
-            &[
-                "fallback.status_codes",
-                "fallback_status_codes",
-                "provider.fallback_status_codes",
-            ],
+            &[&format!("{prefix}.status_codes"), &format!("{prefix}_status_codes")],
         )
-        .map(|value| parse_status_codes("fallback.status_codes", value))
+        .map(|value| parse_status_codes(&format!("{prefix}.status_codes"), value))
         .transpose()?
         .unwrap_or_else(|| vec![401, 402]),
         error_classes: get_any(
             values,
-            &[
-                "fallback.error_classes",
-                "fallback_error_classes",
-                "provider.fallback_error_classes",
-            ],
+            &[&format!("{prefix}.error_classes"), &format!("{prefix}_error_classes")],
         )
         .map(|value| parse_csv_strings(value))
         .unwrap_or_default(),
@@ -850,4 +903,114 @@ fn parse_csv_strings(raw: &str) -> Vec<String> {
         .filter(|token| !token.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn values_from(content: &str) -> BTreeMap<String, String> {
+        let mut values = BTreeMap::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim().trim_matches('"').to_string();
+            values.insert(key.trim().to_string(), value);
+        }
+        values
+    }
+
+    fn options() -> RuntimeConfigFileOptions {
+        RuntimeConfigFileOptions {
+            allow_missing_env: true,
+        }
+    }
+
+    #[test]
+    fn single_level_fallback_parses_as_before() {
+        let values = values_from(
+            r#"
+            provider = openai_compatible
+            base_url = "https://primary.example/v1"
+            model = "m1"
+            api_key_env = "TEST_KEY_A"
+            transport = curl
+            fallback_provider = openai_compatible
+            fallback_base_url = "http://127.0.0.1:9000/v1"
+            fallback_model = "m2"
+            fallback_api_key_env = "TEST_KEY_B"
+            fallback_transport = curl
+            "#,
+        );
+        let config = parse_provider(&values, options()).expect("parse");
+        match config {
+            ProviderConfig::Fallback {
+                primary,
+                fallback,
+                policy,
+            } => {
+                assert!(policy.on_retryable);
+                assert!(matches!(*primary, ProviderConfig::OpenAICompatible(_)));
+                assert!(matches!(*fallback, ProviderConfig::OpenAICompatible(_)));
+                // The fallback itself must NOT be another Fallback.
+                assert!(matches!(*fallback, ProviderConfig::OpenAICompatible(_)));
+            }
+            other => panic!("expected fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn two_level_fallback_builds_chain() {
+        let values = values_from(
+            r#"
+            provider = openai_compatible
+            base_url = "https://primary.example/v1"
+            model = "m1"
+            api_key_env = "TEST_KEY_A"
+            transport = curl
+            fallback_provider = openai_compatible
+            fallback_base_url = "http://127.0.0.1:9000/v1"
+            fallback_model = "m2"
+            fallback_api_key_env = "TEST_KEY_B"
+            fallback_transport = curl
+            fallback2_provider = openai_compatible
+            fallback2_base_url = "http://127.0.0.1:9001/v1"
+            fallback2_model = "m3"
+            fallback2_api_key_env = "TEST_KEY_C"
+            fallback2_transport = curl
+            "#,
+        );
+        let config = parse_provider(&values, options()).expect("parse");
+        match config {
+            ProviderConfig::Fallback {
+                primary, fallback, ..
+            } => {
+                // With a two-level chain the outer primary is itself a
+                // Fallback (primary -> fallback -> fallback2).
+                match *primary {
+                    ProviderConfig::Fallback {
+                        primary: inner_primary,
+                        fallback: inner_fallback,
+                        ..
+                    } => {
+                        assert!(matches!(*inner_primary, ProviderConfig::OpenAICompatible(_)));
+                        assert!(matches!(*inner_fallback, ProviderConfig::OpenAICompatible(_)));
+                    }
+                    other => panic!("expected nested primary, got {other:?}"),
+                }
+                // fallback must itself be a Fallback (nested chain).
+                match *fallback {
+                    ProviderConfig::OpenAICompatible(_) => {}
+                    other => panic!("expected leaf fallback, got {other:?}"),
+                }
+            }
+            other => panic!("expected fallback chain, got {other:?}"),
+        }
+    }
 }

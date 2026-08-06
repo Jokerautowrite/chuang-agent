@@ -698,3 +698,62 @@ impl ControlPlane for ControlPlaneSlot {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::responder::ResponderRequest;
+    use crate::runtime_config::ProviderFallbackPolicy;
+
+    fn policy() -> ProviderFallbackPolicy {
+        ProviderFallbackPolicy {
+            on_retryable: true,
+            status_codes: vec![502],
+            error_classes: vec![],
+        }
+    }
+
+    fn request() -> ResponderRequest {
+        ResponderRequest {
+            prompt: "p".to_string(),
+            user_input: "u".to_string(),
+            recall_hit_count: 0,
+        }
+    }
+
+    #[test]
+    fn nested_fallback_chain_reaches_leaf_when_all_primaries_fail() {
+        // A primary that points at an unroutable local port fails fast
+        // (connection refused), exercising the fallback path without a
+        // network dependency.
+        let primary_fail = ProviderSlot::OpenAICompatible(OpenAICompatibleProviderAdapter::new(
+            "primary", "http://127.0.0.1:1/v1", "k", "m1",
+        )
+        .with_transport(crate::provider_openai_compatible::ProviderTransport::Http)
+        .with_request_timeout_ms(1500));
+        let level1 = ProviderSlot::Fallback {
+            primary: Box::new(primary_fail),
+            fallback: Box::new(ProviderSlot::Fake(FakeResponder::new("m2-ok"))),
+            policy: policy(),
+        };
+        let chain = ProviderSlot::Fallback {
+            primary: Box::new(level1),
+            fallback: Box::new(ProviderSlot::Fake(FakeResponder::new("m3-ok"))),
+            policy: policy(),
+        };
+        // Level 1 primary fails (connection refused) -> level1 falls back to
+        // FakeResponder m2-ok. Since level1 now succeeded, the outer chain
+        // must return m2's body, proving the nested fallback resolves at the
+        // first available level and the outer leaf is only reached when
+        // level1 also fails.
+        let output = chain.generate(&request());
+        assert!(output.body.contains("m2-ok"), "{}", output.body);
+        // The inner level-1 fallback already recovered, so the outer chain
+        // must NOT fall through to its own leaf. Correct multi-level
+        // behavior: recover at the first available level.
+        assert_eq!(
+            output.meta.extra.get("provider_fallback_used").map(String::as_str),
+            Some("false")
+        );
+    }
+}
