@@ -8,6 +8,10 @@ use crate::control_plane::{
     CommandControlPlane, ControlError, ControlPlane, ControlReceipt, ControlRequest,
     FakeControlPlane, ManagedUnit,
 };
+use crate::emotion_slot::{
+    EmotionDelta, EmotionSlot, EmotionSlotError, EmotionStateSnapshot, FakeEmotionSlot,
+    JiwenEmotionSlot,
+};
 use crate::genesis_actuator::{AutoCliGenesisActuator, GenesisConfig, SystemGenesisCommandRunner};
 use crate::genesis_actuator::{
     GenesisActuator, GenesisAskRequest, GenesisAskResponse, GenesisCommandSpec, GenesisError,
@@ -46,6 +50,7 @@ pub struct RuntimeSlots {
     pub subagent: SubagentRuntimeSlot,
     pub evolution: EvolutionSlot,
     pub control_plane: ControlPlaneSlot,
+    pub emotion: EmotionSlotRuntime,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +130,50 @@ pub enum SubagentRuntimeSlot {
     },
 }
 
+/// 情感槽位：先 Fake 后真实；真实实现默认 JiwenEmotionSlot（五轴连续状态）。
+#[derive(Debug, Clone)]
+pub enum EmotionSlotRuntime {
+    Fake(FakeEmotionSlot),
+    Jiwen(JiwenEmotionSlot),
+}
+
+impl EmotionSlotRuntime {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Fake(_) => "fake",
+            Self::Jiwen(_) => "jiwen",
+        }
+    }
+
+    pub fn snapshot(&self) -> Result<EmotionStateSnapshot, EmotionSlotError> {
+        match self {
+            Self::Fake(slot) => slot.snapshot(),
+            Self::Jiwen(slot) => slot.snapshot(),
+        }
+    }
+
+    pub fn observe_delta(&mut self, delta: &EmotionDelta) -> Result<(), EmotionSlotError> {
+        match self {
+            Self::Fake(slot) => slot.observe_delta(delta),
+            Self::Jiwen(slot) => slot.observe_delta(delta),
+        }
+    }
+
+    pub fn reset_connection(&mut self) -> Result<(), EmotionSlotError> {
+        match self {
+            Self::Fake(slot) => slot.reset_connection(),
+            Self::Jiwen(slot) => slot.reset_connection(),
+        }
+    }
+
+    pub fn tick(&mut self, minutes_elapsed: f64) -> Result<Vec<crate::emotion_slot::EmotionTrigger>, EmotionSlotError> {
+        match self {
+            Self::Fake(slot) => slot.tick(minutes_elapsed),
+            Self::Jiwen(slot) => slot.tick(minutes_elapsed),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeSlotsSummary {
     pub provider: String,
@@ -147,6 +196,7 @@ pub fn build_runtime_slots(config: &RuntimeConfig) -> Result<RuntimeSlots, Confi
         subagent: build_subagent(config)?,
         evolution: build_evolution(&config.evolution)?,
         control_plane: build_control_plane(&config.control_plane)?,
+        emotion: EmotionSlotRuntime::Jiwen(JiwenEmotionSlot::default()),
     })
 }
 

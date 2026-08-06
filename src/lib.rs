@@ -22,6 +22,7 @@ pub mod control_workflow;
 pub mod display_projector;
 pub mod emotion_slot;
 pub mod emotion_brain;
+pub mod emotion_delta;
 pub mod external_ai_dispatch;
 pub mod external_knowledge;
 pub mod genesis_actuator;

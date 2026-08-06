@@ -17,7 +17,7 @@ use chuang_agent::runtime_config::{
 use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
 use chuang_agent::slot_registry::{
     build_genesis_actuator, build_provider_responder, build_runtime_slots, summarize_runtime_slots,
-    SubagentRuntimeSlot,
+    EmotionSlotRuntime, SubagentRuntimeSlot,
 };
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
 use chuang_agent::subagent_spawner::{
@@ -1050,4 +1050,43 @@ fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {
         truncated: false,
         skill_proposals: vec![],
     }
+}
+
+#[test]
+fn emotion_slot_runtime_observes_delta_and_resets_connection() {
+    let mut emotion = EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
+    assert_eq!(emotion.kind(), "jiwen");
+
+    let snapshot = emotion.snapshot().expect("snapshot should build");
+    assert!(snapshot.prompt_context.contains("当前情绪状态"));
+
+    // 正向对话 delta：愉悦度上升。
+    emotion
+        .observe_delta(&chuang_agent::emotion_slot::EmotionDelta {
+            connection: Some(-0.1),
+            pride: Some(0.2),
+            valence: Some(0.3),
+            arousal: Some(0.1),
+            immersion: Some(0.2),
+        })
+        .expect("observe delta should succeed");
+
+    let after = emotion.snapshot().expect("snapshot after delta should build");
+    assert!(after.axes.valence > 0.2);
+    assert!(after.axes.pride > 0.1);
+    assert_eq!(after.axes.connection, 0.0, "主人来对话后连接需求应重置");
+
+    // 时间流逝 tick：连接需求增长（jiwen 语义）。
+    let triggers = emotion.tick(60.0).expect("tick should succeed");
+    let after_tick = emotion.snapshot().expect("snapshot after tick should build");
+    assert!(after_tick.axes.connection > 0.0);
+    // 60 分钟 < 阈值，不应触发主动联系。
+    assert!(triggers.is_empty());
+}
+
+#[test]
+fn build_runtime_slots_installs_jiwen_emotion_slot_by_default() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let slots = build_runtime_slots(&config).expect("default slots should build");
+    assert_eq!(slots.emotion.kind(), "jiwen");
 }

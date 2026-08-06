@@ -1,3 +1,25 @@
+# 2026-08-07 情感模块接线：EmotionSlot 进 turn + 对话 delta 提取器
+
+- **EmotionDeltaExtractor（可拔插）**：新模块 `src/emotion_delta.rs`。
+  - 规则版 `RuleEmotionDeltaExtractor`：中文情感词表（正向/负向/强度/夸奖/亲昵）+
+    感叹/长度启发式 → 五轴 delta，零模型成本、完全确定。默认接入。
+  - 模型版 `ModelEmotionDeltaExtractor<R: Responder>`：复用现有 provider 通道，只让模型
+    回五个 delta 值（jiwen 三层成本模型第 2 层）；`parse_delta_json` 宽容解析
+    （容忍 ```json 围栏、前缀文本、越界 clamp），失败返回全 None 不阻断。
+  - +10 单测。
+- **EmotionSlot 进 turn 主流程**（`run_with_options`）：
+  - `RuntimeSlots` 新增 `emotion: EmotionSlotRuntime`（Fake / Jiwen 两态，默认 Jiwen）。
+  - 每轮 turn 前：`snapshot()` → 高优先级 context segment（`SegmentSource::Emotion`，
+    priority 246：治理之后、身份用户之前）注入 prompt。
+  - 每轮 turn 后：规则提取器从「主人输入 + 创回复」取 delta → `observe_delta` →
+    `reset_connection`（主人主动来找 → 连接需求满足）。
+  - 情感元数据（slot 类型 / axes / 状态人话）写入 turn meta（可审计、可回放）。
+  - 情感模块失败永远静默（可拔插陪伴增强，不是硬依赖）。
+- **GBrain 外脑增强**：`metadata.emotion_brain=1` 开启；开启后快照 prompt 追加主人相关
+  记忆摘要（只读，摘要点 + slug），外脑不可用静默降级为纯本地快照。默认关闭（测试确定性）。
+- **回归**：lib 88 / bin 132 / app_server 26 全绿；slot_registry 集成测试 22 过、
+  2 个 provider 本地 HTTP 失败为基线已存在的环境性问题（4ab31c1 上复现，与本次无关）。
+
 # 2026-08-07 情感模块备选 1 落地：JiwenEmotionSlot + GBrain 外脑桥接
 
 - **JiwenEmotionSlot（真实实现）**：完整移植 jiwen 五轴连续状态数学（MIT）——

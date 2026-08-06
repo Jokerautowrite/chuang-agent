@@ -30,6 +30,8 @@ pub enum SegmentSource {
     ToolResult,
     Goal,
     System,
+    /// 情感状态快照（EmotionSlot 注入，可拔插）。
+    Emotion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

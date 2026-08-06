@@ -12,6 +12,8 @@ use chuang_agent::chuang_kernel::{
     IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
+use chuang_agent::emotion_delta::{EmotionDeltaExtractor, RuleEmotionDeltaExtractor};
+use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
@@ -28,7 +30,6 @@ use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEvent, RuntimeEventLedger,
 };
 use chuang_agent::session_archive::SqliteSessionArchive;
-use chuang_agent::slot_registry::build_runtime_slots;
 use chuang_agent::subagent_queue::FileSubagentQueueConfig;
 use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
@@ -143,6 +144,9 @@ pub(crate) fn run_with_options(
     );
     let mut slots = build_runtime_slots(&runtime)
         .map_err(|err| format!("config_invalid: {}: {}", err.field, err.message))?;
+    // 情感槽位从 slots 中移出（provider 会被移入 kernel；情感状态在本轮存活，
+    // 跨轮持久化由上层接入 EmotionSlot 快照读写，见 emotion_slot.rs）。
+    let mut emotion_slot = slots.emotion;
     let mut store = SqliteMemoryStore::open(&runtime.db_path)
         .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
     seed_default_memory_if_empty(&mut store)?;
@@ -156,8 +160,12 @@ pub(crate) fn run_with_options(
     if let Some(preview) = &knowledge_preview {
         runtime_context.extend(knowledge_preview_context_segments(preview));
     }
+    // 情感状态注入：快照作为高优先级 context segment（可拔插；失败静默跳过）。
+    if let Some(segment) = emotion_context_segment(&emotion_slot, &runtime, &request.user_input) {
+        runtime_context.push(segment);
+    }
 
-    run_governed_turn_with_tools_live(
+    let mut turn = run_governed_turn_with_tools_live(
         &mut kernel,
         &mut slots.governance,
         &tool_workspace_root,
@@ -180,12 +188,93 @@ pub(crate) fn run_with_options(
         request.live_guidance_path.as_deref(),
         request.progress_path.as_deref(),
     )
-    .map_err(|e| format!("runtime_failed: {e:?}"))
-    .and_then(|mut turn| {
-        insert_knowledge_context_metadata(&mut turn, knowledge_preview.as_ref())?;
-        insert_conversation_history_metadata(&mut turn, &request.conversation_history);
-        remember_turn_if_requested(&request.options, &mut kernel, turn, request)
+    .map_err(|e| format!("runtime_failed: {e:?}"))?;
+    insert_knowledge_context_metadata(&mut turn, knowledge_preview.as_ref())?;
+    insert_conversation_history_metadata(&mut turn, &request.conversation_history);
+    // 情感观察：从本轮对话提取 delta 喂给 EmotionSlot，再重置连接需求。
+    // 情感模块永远不阻断主流程（可拔插的陪伴增强，不是硬依赖）。
+    observe_turn_emotion(
+        &mut emotion_slot,
+        &request.user_input,
+        &turn.result.response.body,
+    );
+    insert_emotion_metadata(&mut turn, &emotion_slot);
+    remember_turn_if_requested(&request.options, &mut kernel, turn, request)
+}
+
+/// 是否启用 GBrain 外脑增强（默认关；metadata.emotion_brain=1 打开）。
+fn emotion_brain_enabled(runtime: &RuntimeConfig) -> bool {
+    runtime
+        .metadata
+        .get("emotion_brain")
+        .map(|value| value == "1")
+        .unwrap_or(false)
+}
+
+/// 情感快照 → 高优先级 context segment（priority 246：治理之后、身份用户之前）。
+/// 外脑可用时把主人相关记忆摘要追加进 prompt；不可用静默退化为纯本地快照。
+fn emotion_context_segment(
+    emotion: &EmotionSlotRuntime,
+    runtime: &RuntimeConfig,
+    user_input: &str,
+) -> Option<ContextSegment> {
+    let snapshot = emotion.snapshot().ok()?;
+    let mut content = snapshot.prompt_context.clone();
+    let mut brain_hit_count = 0usize;
+    if emotion_brain_enabled(runtime) {
+        let hits = chuang_agent::emotion_brain::brain_query_semantic(
+            &chuang_agent::emotion_brain::EmotionBrainConfig::default(),
+            &format!("主人 当前心情 偏好 {user_input}"),
+            3,
+        );
+        brain_hit_count = hits.len();
+        content = chuang_agent::emotion_brain::augment_prompt_context(&snapshot, &hits);
+    }
+    let now = default_cli_context_timestamp();
+    Some(ContextSegment {
+        id: "emotion-state".to_string(),
+        source: SegmentSource::Emotion,
+        tokens: None,
+        content,
+        priority: 246,
+        created_at: now,
+        last_accessed: now,
+        metadata: std::collections::HashMap::from([
+            ("kind".to_string(), "emotion_state".to_string()),
+            ("emotion_slot".to_string(), emotion.kind().to_string()),
+            ("brain_hit_count".to_string(), brain_hit_count.to_string()),
+        ]),
     })
+}
+
+/// 从本轮对话提取五轴 delta 并喂给 EmotionSlot；随后重置连接需求
+/// （主人主动来找 → 连接需求满足）。情感失败不阻断主流程。
+fn observe_turn_emotion(
+    emotion: &mut EmotionSlotRuntime,
+    user_input: &str,
+    assistant_reply: &str,
+) {
+    let delta = RuleEmotionDeltaExtractor::default().extract(user_input, assistant_reply);
+    let _ = emotion.observe_delta(&delta);
+    let _ = emotion.reset_connection();
+}
+
+/// 把情感快照与 delta 写入 turn 元数据（可审计、可回放）。
+fn insert_emotion_metadata(turn: &mut ChuangKernelTurn, emotion: &EmotionSlotRuntime) {
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert("emotion_slot".to_string(), emotion.kind().to_string());
+    match emotion.snapshot() {
+        Ok(snapshot) => {
+            extra.insert(
+                "emotion_axes".to_string(),
+                serde_json::to_string(&snapshot.axes).unwrap_or_default(),
+            );
+            extra.insert("emotion_state".to_string(), snapshot.prompt_context);
+        }
+        Err(error) => {
+            extra.insert("emotion_error".to_string(), error.message);
+        }
+    }
 }
 
 pub(crate) fn kernel_config_from_runtime(
@@ -8578,5 +8667,100 @@ allowed_channels = ["app-server"]
         fs::create_dir_all(identity_root).expect("identity root should be created");
         fs::write(identity_root.join("agents.toml"), content)
             .expect("agents registry should write");
+    }
+
+    #[test]
+    fn run_with_options_wires_emotion_slot_into_turn() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-emotion-wire-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["cli", "app-server"]
+"#,
+        );
+
+        let mut runtime = test_runtime(temp_dir.join("memory.db"), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "今天好开心，你真棒！".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (result, _) = run_with_options(&request).expect("run should succeed");
+        let extra = &result.response.meta.extra;
+        assert_eq!(extra.get("emotion_slot").map(String::as_str), Some("jiwen"));
+        let state = extra
+            .get("emotion_state")
+            .expect("emotion_state metadata should be present");
+        assert!(state.contains("当前情绪状态"));
+        let axes = extra
+            .get("emotion_axes")
+            .expect("emotion_axes metadata should be present");
+        assert!(axes.contains("connection"));
+        assert!(axes.contains("valence"));
+    }
+
+    #[test]
+    fn emotion_context_segment_injects_below_governance_priority() {
+        let mut runtime = test_runtime(
+            std::env::temp_dir().join(format!(
+                "chuang-agent-emotion-segment-test-{}",
+                unique_record_suffix_for_test()
+            )),
+            std::env::temp_dir().join(format!(
+                "chuang-agent-emotion-segment-identity-{}",
+                unique_record_suffix_for_test()
+            )),
+        );
+        let emotion = EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
+        let segment = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样")
+            .expect("emotion segment should build");
+        assert_eq!(segment.id, "emotion-state");
+        assert_eq!(segment.priority, 246);
+        assert!(segment.content.contains("当前情绪状态"));
+        assert_eq!(
+            segment.metadata.get("emotion_slot").map(String::as_str),
+            Some("jiwen")
+        );
+        assert_eq!(
+            segment.metadata.get("brain_hit_count").map(String::as_str),
+            Some("0"),
+            "外脑默认关闭时不应发起查询"
+        );
+
+        // 外脑开启时：本机 GBrain 不可用必须静默降级（不阻断 segment 生成）。
+        runtime
+            .metadata
+            .insert("emotion_brain".to_string(), "1".to_string());
+        let augmented =
+            emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样").expect("segment");
+        assert_eq!(augmented.priority, 246);
+        assert!(augmented.content.contains("当前情绪状态"));
     }
 }
