@@ -1,3 +1,14 @@
+# 2026-08-06 P2 真实链路冒烟复验：三级 provider 全部可用
+
+- **场景**：真实 app-server 单轮 turn + 真实模型调用（非 fixture）。
+- **结果**：
+  - primary 直连：example-provider / deepseek-v4-flash → 200，`runtime_report_status: Success`。
+  - 故障注入 primary（死端口）→ 自动落 fallback1 ccswitch-local (15721) → 200 Success。
+  - 故障注入 primary+fallback1 → 自动落 fallback2 cli-proxy-api (8317) → 200 Success。
+- **验证方式**：`cargo run -- run --config config.toml --db <tmp> --input ...`；故障注入用临时
+  config（仅把 base_url 指向 127.0.0.1:1，不改真实 config.toml）。
+- **结论**：provider 链稳定、fallback 语义（最内层先恢复）符合预期；P2 冒烟通过。
+
 # 2026-08-06 P2 稳定性：app_server 集成测试环境隔离修复（26/26 绿）
 
 - **现象**：`cargo test` 全量跑时 app_server_tests 6 个失败（1 daemon + 5 stdio）。
