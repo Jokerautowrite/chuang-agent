@@ -58,6 +58,15 @@ fn find_header_end(bytes: &[u8]) -> Option<usize> {
     bytes.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
+fn app_server_command() -> Command {
+    // Tests must not inherit the outer shell's workspace env var, otherwise
+    // app-server config resolution reads the project-root config.toml instead
+    // of the test's params.workspaceRoot.
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
+    cmd.env_remove("CHUANG_AGENT_WORKSPACE_ROOT");
+    cmd
+}
+
 fn write_identity_registry(workspace: &PathBuf) {
     fs::write(
         workspace.join("identity/agents.toml"),
@@ -137,7 +146,7 @@ fn spawn_app_server_daemon_with_runtime_dir(
             .expect("socket path should have a parent directory"),
     )
     .expect("socket parent should create");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
+    let mut command = app_server_command();
     command
         .args(["app-server", "daemon", "--socket"])
         .arg(socket)
@@ -204,7 +213,7 @@ fn daemon_request(socket: &PathBuf, request: serde_json::Value) -> serde_json::V
 
 #[test]
 fn app_server_without_args_keeps_stdio_json_lines_compatibility() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -232,7 +241,7 @@ fn app_server_without_args_keeps_stdio_json_lines_compatibility() {
 
 #[test]
 fn app_server_turn_interrupt_reports_unsupported_instead_of_fake_success() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -262,7 +271,7 @@ fn app_server_turn_interrupt_reports_unsupported_instead_of_fake_success() {
 #[test]
 fn app_server_rejects_unknown_thread_instead_of_recreating_it() {
     let workspace = temp_workspace("unknown-thread");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -304,7 +313,7 @@ fn app_server_daemon_probe_and_ask_use_canonical_socket() {
         & 0o777;
     assert_eq!(permissions, 0o600);
 
-    let probe = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let probe = app_server_command()
         .args(["app-server", "probe", "--socket"])
         .arg(&socket)
         .arg("--json")
@@ -324,7 +333,7 @@ fn app_server_daemon_probe_and_ask_use_canonical_socket() {
     );
 
     let ask = |text: &str, thread_id: Option<&str>| {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
+        let mut command = app_server_command();
         command
             .args(["app-server", "ask", "--socket"])
             .arg(&socket)
@@ -960,6 +969,8 @@ transport = "http"
 
 #[test]
 fn app_server_daemon_preserves_stale_socket_before_binding() {
+    let workspace = temp_workspace("stale-preservation");
+    write_basic_stub_workspace(&workspace);
     let socket = app_server_socket("stale-preservation");
     std::fs::create_dir_all(
         socket
@@ -970,7 +981,7 @@ fn app_server_daemon_preserves_stale_socket_before_binding() {
     let stale_listener = UnixListener::bind(&socket).expect("stale socket should bind");
     drop(stale_listener);
 
-    let mut daemon = spawn_app_server_daemon(&socket, None);
+    let mut daemon = spawn_app_server_daemon(&socket, Some(&workspace));
     wait_for_app_server_socket(&socket);
 
     let stale_prefix = format!(
@@ -1047,7 +1058,7 @@ fn app_server_turn_rejects_identity_without_app_server_channel_permission() {
     )
     .expect("registry should remove app-server channel");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -1123,7 +1134,7 @@ transport = "stub"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -1751,7 +1762,7 @@ transport = "http"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -1856,7 +1867,7 @@ fn app_server_second_turn_injects_recent_thread_history() {
     let workspace = temp_workspace("recent-thread-history");
     write_basic_stub_workspace(&workspace);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2006,7 +2017,7 @@ transport = "http"
     )
     .expect("provider history config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2065,7 +2076,7 @@ fn app_server_rejects_workspace_change_for_existing_thread() {
     write_basic_stub_workspace(&workspace);
     write_basic_stub_workspace(&other_workspace);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2151,7 +2162,7 @@ transport = "stub"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2252,18 +2263,22 @@ fn app_server_turn_surfaces_provider_fallback_diagnostics() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let _ = read_http_request(&mut stream);
+        // 429 is retryable, so the provider may open up to MAX_PROVIDER_ATTEMPTS
+        // connections before surfacing the final error.
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let _ = read_http_request(&mut stream);
 
-        let body = r#"{"error":{"message":"rate limited"}}"#;
-        let response = format!(
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+            let body = r#"{"error":{"message":"rate limited"}}"#;
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
     });
 
     fs::write(
@@ -2295,7 +2310,7 @@ fallback_model = "gpt-app-server-fallback"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2441,7 +2456,7 @@ fallback_error_classes = "config"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2540,18 +2555,22 @@ fn app_server_turn_surfaces_capacity_metadata_on_plain_text_429() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let _ = read_http_request(&mut stream);
+        // 429 is retryable, so the provider may open up to MAX_PROVIDER_ATTEMPTS
+        // connections before surfacing the final error.
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let _ = read_http_request(&mut stream);
 
-        let body = "at capacity";
-        let response = format!(
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+            let body = "at capacity";
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
     });
 
     fs::write(
@@ -2579,7 +2598,7 @@ transport = "http"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2706,7 +2725,7 @@ transport = "http"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2821,7 +2840,7 @@ transport = "curl"
     )
     .expect("config should write");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let mut child = app_server_command()
         .arg("app-server")
         .env("CHUANG_AGENT_APP_SERVER_TEST_API_KEY", "test-key")
         .stdin(Stdio::piped())
@@ -2949,7 +2968,7 @@ transport = "stub"
     )
     .expect("config should write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let output = app_server_command()
         .args([
             "app-server",
             "health",
@@ -3507,7 +3526,7 @@ fn app_server_health_reports_workspace_config_mismatch() {
     let configured_workspace = temp_workspace("health-configured-workspace");
     write_basic_stub_workspace(&workspace);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let output = app_server_command()
         .args([
             "app-server",
             "health",
@@ -3592,7 +3611,7 @@ transport = "stub"
     )
     .expect("config should write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let output = app_server_command()
         .args([
             "app-server",
             "health",
@@ -3789,7 +3808,7 @@ transport = "stub"
     )
     .expect("config should write");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+    let output = app_server_command()
         .args([
             "app-server",
             "health",

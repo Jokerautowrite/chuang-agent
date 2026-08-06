@@ -1,3 +1,19 @@
+# 2026-08-06 P2 稳定性：app_server 集成测试环境隔离修复（26/26 绿）
+
+- **现象**：`cargo test` 全量跑时 app_server_tests 6 个失败（1 daemon + 5 stdio）。
+- **根因（已确认）**：测试子进程继承外层 shell 的 `CHUANG_AGENT_WORKSPACE_ROOT`，app-server
+  配置解析优先读 env 而不是 `params.workspaceRoot` → 所有测试都在项目根 config.toml 上跑；
+  项目根 config 有 fallback 段（`CHUANG_FALLBACK_API_KEY` 未设）→ `runtime_config_missing_env`；
+  daemon 测试还被真实运行中的服务锁住 db。stash 验证：失败在最近 3 个 commit 之前就存在。
+- **修复**：`tests/app_server_tests.rs` 新增 `app_server_command()` helper，spawn 时显式
+  `env_remove("CHUANG_AGENT_WORKSPACE_ROOT")`，替换全部 23 个 spawn 点；stale-socket daemon
+  测试补 workspace（不再依赖 env 污染）；两个 429 mock 改为 accept 3 次连接（429 是重试状态码，
+  provider 重试 3 次后才暴露错误，单次 accept 导致重试被拒误判为 transport 错误）。
+- **结果**：app_server_tests 26/26 绿，lib 59/59 绿；无回归。
+- **启示（记给 P2 后续）**：测试进程环境隔离是前提，后续所有 spawn 子进程的测试统一走
+  `app_server_command()` helper；本地 shell 常驻 `CHUANG_AGENT_WORKSPACE_ROOT` 会在全量测试时
+  造成类偶发失败，排查“本轮没有完成”类问题前先确认 env。
+
 # 2026-08-06 多 provider 三级冗余落地：example-provider → ccswitch → cli-proxy-api
 
 - **需求**：主备同源 deepseek，抖动同步；需接独立服务商做真冗余（PI 移植清单模型接入项）。
