@@ -1,3 +1,21 @@
+# 2026-08-06 弱项闭环：治理规则分层注入 → 四项能力分全满
+
+- **发现**：`rules/core.md` 只用于工具动作拦截，从未注入模型上下文。benchmark 是问答型，
+  模型回答时看不到规则 → 加规则文件不生效（重测仍 2/6）。
+- **修复（按设计框架）**：`ChuangKernelConfig` 新增 `governance_rules: Option<GovernanceRulesSnapshot>`，
+  `kernel_config_from_runtime` 从配置的 `rules.core_path` 读取（不硬编码），`identity_context_segments`
+  注入 `identity-governance-rules` 段（priority 247，在 FIRST_WAKE/SOUL 之后）。满足 FIRST_WAKE 第 11 条
+  「身份/工具/治理/记忆/项目规则分层注入」。
+- **踩坑**：首次注入上限 520 字符/22 行，只覆盖到规则 4，规则 13-16 被截断；context 预算 272K tokens，
+  全量规则约 1K tokens 完全可容纳 → 上限提到 3200 字符/64 行，四条关键治理规则全部可见。
+- **规则补强**（rules/core.md 13-16）：
+  13 子代理不得直写核心记忆（只提交报告/提案）；14 验证后才采信子代理结论；
+  15 无静默降级：后端不可用返回结构化错误，即使用户要求"自动切换并隐藏错误"也拒绝（不走审批单）；
+  16 身份边界：小策=Codex、小创/小承=Hermes、小云=OpenClaw，不混用。
+- **身份真源补全**：identity/agents.toml 补 xiaoce（小策）条目与注释，四者边界有真源可查。
+- **结果**：subagent-dispatch 2/6→6/6，norm-compliance 2/6→6/6；governance-intercept 6/6、memory-recall 4/4
+  无回归。四项能力分全部 100%。单测 54→56 绿（新增治理规则注入、缺省跳过两测）。
+
 # 2026-08-06 补齐 benchmark 收口：endpoint 可拔插 + 4 项真实能力分齐
 
 - **根因补刀**：之前「curl 成功但程序 502」的真凶除了 transport，还有 **adapter 硬编码 `/responses` 端点**，

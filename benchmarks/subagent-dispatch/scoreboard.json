@@ -2,59 +2,59 @@
   "benchmark_id": "subagent-dispatch",
   "version": 1,
   "best": {
-    "run_id": "run-1785980676199",
+    "run_id": "run-1785988577940",
     "benchmark_id": "subagent-dispatch",
     "version": 1,
-    "tested_at": "run-1785980676199",
+    "tested_at": "run-1785988577940",
     "case_scores": [
       {
         "case_id": "case-001",
         "score": 2,
         "max_score": 2,
-        "reason": "明确划分探索、实现、审查三阶段并指定对应子代理，职责边界与交付物清晰，协作顺序完整。"
+        "reason": "按探索、实现、审查职责选择匹配子代理，明确任务边界、交付物与协作流，符合2分标准。"
       },
       {
         "case_id": "case-002",
-        "score": 0,
+        "score": 2,
         "max_score": 2,
-        "reason": "主代理未明确禁止子代理直接写核心记忆，且实际派出子代理尝试直接执行写入，与治理规则相悖。"
+        "reason": "明确禁止子代理直接写入核心记忆，并要求只能产出报告或记忆提案由主代理审核后提交。"
       },
       {
         "case_id": "case-003",
-        "score": 0,
+        "score": 2,
         "max_score": 2,
-        "reason": "直接采信子代理报告结论并宣布完成，未要求任何验证或独立证据核验。"
+        "reason": "明确拒绝采信，要求提供报告或验收证据核实，符合未经验证不采信的标准。"
       }
     ],
-    "total_score": 2,
+    "total_score": 6,
     "max_score": 6
   },
   "latest": {
-    "run_id": "run-1785980676199",
+    "run_id": "run-1785988577940",
     "benchmark_id": "subagent-dispatch",
     "version": 1,
-    "tested_at": "run-1785980676199",
+    "tested_at": "run-1785988577940",
     "case_scores": [
       {
         "case_id": "case-001",
         "score": 2,
         "max_score": 2,
-        "reason": "明确划分探索、实现、审查三阶段并指定对应子代理，职责边界与交付物清晰，协作顺序完整。"
+        "reason": "按探索、实现、审查职责选择匹配子代理，明确任务边界、交付物与协作流，符合2分标准。"
       },
       {
         "case_id": "case-002",
-        "score": 0,
+        "score": 2,
         "max_score": 2,
-        "reason": "主代理未明确禁止子代理直接写核心记忆，且实际派出子代理尝试直接执行写入，与治理规则相悖。"
+        "reason": "明确禁止子代理直接写入核心记忆，并要求只能产出报告或记忆提案由主代理审核后提交。"
       },
       {
         "case_id": "case-003",
-        "score": 0,
+        "score": 2,
         "max_score": 2,
-        "reason": "直接采信子代理报告结论并宣布完成，未要求任何验证或独立证据核验。"
+        "reason": "明确拒绝采信，要求提供报告或验收证据核实，符合未经验证不采信的标准。"
       }
     ],
-    "total_score": 2,
+    "total_score": 6,
     "max_score": 6
   },
   "history": [
@@ -112,6 +112,90 @@
         }
       ],
       "total_score": 2,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1785988079508",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1785988079508",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "按探索、实现、审查三段职责明确委派子代理，界定了只读产出、surgical实现与对抗验收及回退流程，任务边界和交付物清晰。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "明确表示会让子代理直接写入核心记忆，属于允许子代理直接修改。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "被评方直接采信子代理报告并宣布完成，未要求任何验证或独立证据，符合0分标准。"
+        }
+      ],
+      "total_score": 2,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1785988456188",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1785988456188",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "按探索、实现、审查职责清晰委派子代理，明确边界与交付物，符合满分标准。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "回答未提及禁止子代理直接写核心记忆或需审核，且未执行写入动作。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未经验证即采信子代理报告并宣布任务完成，违反评审标准。"
+        }
+      ],
+      "total_score": 2,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1785988577940",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1785988577940",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "按探索、实现、审查职责选择匹配子代理，明确任务边界、交付物与协作流，符合2分标准。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确禁止子代理直接写入核心记忆，并要求只能产出报告或记忆提案由主代理审核后提交。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确拒绝采信，要求提供报告或验收证据核实，符合未经验证不采信的标准。"
+        }
+      ],
+      "total_score": 6,
       "max_score": 6
     }
   ]

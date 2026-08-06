@@ -33,6 +33,15 @@ pub struct ChuangKernelConfig {
     pub memory_write_max_chars: Option<usize>,
     pub identity_snapshot: Option<DualFileMemorySnapshot>,
     pub identity_bootstrap_snapshot: Option<IdentityBootstrapSnapshot>,
+    /// Governance doctrine (rules/core.md) distilled for the model context.
+    /// Loaded from the configured rules core path, never hardcoded.
+    pub governance_rules: Option<GovernanceRulesSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GovernanceRulesSnapshot {
+    pub content: String,
+    pub exists: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -60,6 +69,7 @@ impl ChuangKernelConfig {
             memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
             identity_snapshot: None,
             identity_bootstrap_snapshot: None,
+            governance_rules: None,
         }
     }
 }
@@ -548,6 +558,19 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             }
         }
 
+        // Governance doctrine must be visible to the model, not only enforced
+        // at tool time. Loaded from the configured rules core path.
+        if let Some(rules) = &self.config.governance_rules {
+            if !rules.content.trim().is_empty() {
+                segments.push(identity_segment(
+                    "identity-governance-rules",
+                    "RULES/core.md",
+                    &compact_identity_bootstrap_content(&rules.content, 3200, 64),
+                    247,
+                ));
+            }
+        }
+
         if let Some(segment) = self.session_context_segment() {
             segments.push(segment);
         }
@@ -784,4 +807,47 @@ fn default_identity_timestamp() -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339("2026-05-01T00:00:00Z")
         .expect("static identity timestamp should parse")
         .with_timezone(&chrono::Utc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory_store::InMemoryMemoryStore;
+    use crate::responder::FakeResponder;
+
+    #[test]
+    fn governance_rules_are_injected_into_model_context() {
+        let mut config = ChuangKernelConfig::mvp_default("chuang");
+        config.governance_rules = Some(GovernanceRulesSnapshot {
+            content: "13. Subagents never write core memory directly.\n14. Verify before trusting subagent output.\n15. No silent fallback.".to_string(),
+            exists: true,
+        });
+        let kernel = ChuangKernel::with_responder(
+            config,
+            InMemoryMemoryStore::new(),
+            FakeResponder::new("fake-responder".to_string()),
+        );
+        let segments = kernel.identity_context_segments();
+        let rules = segments
+            .iter()
+            .find(|segment| segment.id == "identity-governance-rules");
+        assert!(rules.is_some(), "governance rules segment must exist");
+        let content = rules.expect("segment").content.clone();
+        assert!(content.contains("never write core memory directly"));
+        assert!(content.contains("No silent fallback"));
+    }
+
+    #[test]
+    fn absent_governance_rules_are_skipped() {
+        let config = ChuangKernelConfig::mvp_default("chuang");
+        let kernel = ChuangKernel::with_responder(
+            config,
+            InMemoryMemoryStore::new(),
+            FakeResponder::new("fake-responder".to_string()),
+        );
+        let segments = kernel.identity_context_segments();
+        assert!(segments
+            .iter()
+            .all(|segment| segment.id != "identity-governance-rules"));
+    }
 }

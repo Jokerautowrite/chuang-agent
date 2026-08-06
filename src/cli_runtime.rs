@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::chuang_kernel::{
-    ChuangKernel, ChuangKernelConfig, ChuangKernelTurn, IdentityBootstrapSnapshot,
-    DEFAULT_MEMORY_WRITE_MAX_CHARS,
+    ChuangKernel, ChuangKernelConfig, ChuangKernelTurn, GovernanceRulesSnapshot,
+    IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
 use chuang_agent::goal_mode::GoalSpec;
@@ -143,6 +143,7 @@ pub(crate) fn kernel_config_from_runtime(
         .snapshot()
         .map_err(|e| format!("identity_memory_snapshot_failed: {e:?}"))?;
     let identity_bootstrap_snapshot = load_identity_bootstrap_snapshot(runtime)?;
+    let governance_rules = load_governance_rules_snapshot(runtime);
     let agent_id = identity_bootstrap_snapshot
         .active_identity
         .as_ref()
@@ -159,7 +160,22 @@ pub(crate) fn kernel_config_from_runtime(
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: Some(identity_snapshot),
         identity_bootstrap_snapshot: Some(identity_bootstrap_snapshot),
+        governance_rules: Some(governance_rules),
     })
+}
+
+fn load_governance_rules_snapshot(runtime: &RuntimeConfig) -> GovernanceRulesSnapshot {
+    let path = &runtime.rules.core_path;
+    match fs::read_to_string(path) {
+        Ok(content) => GovernanceRulesSnapshot {
+            content,
+            exists: true,
+        },
+        Err(_) => GovernanceRulesSnapshot {
+            content: String::new(),
+            exists: false,
+        },
+    }
 }
 
 pub(crate) fn default_db_path() -> PathBuf {
@@ -7643,7 +7659,10 @@ allowed_channels = ["app-server"]
         };
         assert!(terminal_tool_failure(&record));
         let answer = terminal_tool_failure_answer(&record);
-        assert!(answer.contains("已经派出去") || answer.contains("工人执行失败"), "{answer}");
+        assert!(
+            answer.contains("已经派出去") || answer.contains("工人执行失败"),
+            "{answer}"
+        );
         assert!(
             answer.contains("1/2") || answer.contains("codex_boom") || answer.contains("Failed"),
             "{answer}"
