@@ -1,3 +1,15 @@
+# 2026-08-06 「本轮没有完成」真相与根治：模型不存在 + transport 不兼容
+
+- **真相链**（逐层定位）：
+  1. example-provider.example `/v1/models` 现在只提供 `deepseek-v4-flash`；创原配置 `gpt-5.6-terra` 已不存在 → 全部 502。
+  2. 换 deepseek-v4-flash 后，native/http transport 仍高概率 502（6/6 失败），但**同一请求 curl 3/3 成功**——
+     native/hyper 与 example-provider 网关不兼容。
+  3. 切 `transport = "curl"` 后：6 轮对话 5 成功 1 失败（双通道同源 deepseek 偶发同步抖动）。
+- **修复**：config.toml primary=example-provider/deepseek-v4-flash + fallback=ccswitch/deepseek-v4-flash，均 `transport=curl`。
+- **模型事实**：ccswitch 列表含 claude-opus-4-6 但调用 502（无权限）；当前唯一可用模型 deepseek-v4-flash。
+- **剩余风险**：双通道同一上游（deepseek），抖动同步；真正的多上游冗余需再接独立服务商（P1）。
+- 验证：`finish_reason=stop` 正常；失败时 fallback_used/reason 可观测。
+
 # 2026-08-06 多 provider 容错落地：example-provider 挂时自动切 deepseek
 
 - **现状**：example-provider.example 网关整体故障（连 ping 502）期间，创通过已内建但未启用的 Fallback 槽位
