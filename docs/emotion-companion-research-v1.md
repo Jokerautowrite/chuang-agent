@@ -120,3 +120,69 @@
 4. 之后再考虑心跳时机引擎与 governance 规则。
 
 > 备注：`FunAudioLLM/emotion2vec`、`FunAudioLLM/CosyVoice` 仓库名已变动（404/301），接入时需重新确认。
+
+---
+
+## 6. 补充调研 v2（Firecrawl 爬虫，2026-08-06 晚）
+
+> 用服务器 Firecrawl（`https://firecrawl.chuangagent.eu.cc`）抓取 9 个 GitHub topic 页
+> （ai-companion / emotional-support / digital-life / llm-memory / ai-girlfriend /
+> emotion-recognition / ai-voice / roleplay / sentiment-analysis）+ 2 个精选列表，
+> 按 stars 排序。补充高星候选如下。
+
+### 6.1 高星对比表（按对创的价值分层）
+
+**A. 情感内核 / 状态机（宜移植内核，中星但最匹配）**
+
+| 仓库 | Stars | 定位 | 对创的价值 |
+|---|---|---|---|
+| `Shitsuten/jiwen` 积温 | - | 五维情绪漂移轴触发行为，~500 行零依赖 MIT | **首选移植**：EmotionSlot 内核 |
+| `A1batr055/Drivesoid` | - | HTTP sidecar 情感驱动力（疲劳/渴望/焦虑/亲密） | 参考接口设计（HTTP 解耦） |
+| `Lynpoint/CyberVerse` | 1.5k | 数字生命/人格容器 | 人格状态设计参考 |
+| `chuli1122/Eventide` | - | 身体状态机（驱动力+事件+梦境） | 状态模型参考（注意非商用） |
+
+**B. 记忆 / 人格（学思路；创已有记忆底座，不移植整库）**
+
+| 仓库 | Stars | 定位 | 对创的价值 |
+|---|---|---|---|
+| `alibaba/zvec` | 15.4k | 记忆/检索向量体系 | 记忆召回技术参考 |
+| `memodb-io/memobase` | 2.8k | 记忆数据库 | 情感记忆分层参考 |
+| `memohai/Memoh` | 2.0k | 记忆助手 | 记忆生命周期参考 |
+| `P0luz/Ombre-Brain` | - | valence/arousal 情感标签+遗忘曲线（MCP） | **情感记忆模板** |
+| `bowen-upenn/PersonaMem` | 184 | 人格记忆 | 人格一致性参考 |
+| `steve02081504/fount` | 721 | 角色/人格管理系统 | 人格卡格式参考 |
+
+**C. 对话 / 角色 / 全栈（接入而非移植——创做指挥者）**
+
+| 仓库 | Stars | 定位 | 接入方式 |
+|---|---|---|---|
+| `SillyTavern/SillyTavern` | 31.7k | 角色扮演前端 | 人格卡格式借鉴；或作为前端接入 |
+| `moeru-ai/airi` | 47.1k | 自托管陪伴外壳（Live2D/VRM+实时语音） | **外壳接入**（创保持大脑，airi 做身体） |
+| `Open-LLM-VTuber/Open-LLM-VTuber` | 13.1k | VTuber 实时交互 | 外壳接入候选 |
+| `duixcom/Duix-Mobile` | 8.2k | 数字人移动端 | 手机端外壳候选 |
+| `EniasCailliau/GirlfriendGPT` | 2.7k | 陪伴对话（含情绪状态） | 状态+提示词参考 |
+| `heshengtao/super-agent-party` | 2.6k | 多 agent 聚会 | 多角色协作参考 |
+| `kwaroran/Risuai` | 1.6k | 角色扮演网页端 | 前端参考 |
+| `jofizcd/Soul-of-Waifu` | 1.1k | 二次元陪伴 | 参考 |
+
+**D. 语音 / 情感识别（接入模型，不自研）**
+
+| 仓库 | Stars | 定位 | 用途 |
+|---|---|---|---|
+| `RVC-Boss/GPT-SoVITS` | 60.5k | 声音克隆 | 主人定制嗓音 |
+| `modelscope/FunASR` | 19.7k | 阿里语音全家桶（**含 SenseVoice 情感标签**） | 听懂主人说话情绪 |
+| `declare-lab/conv-emotion` | 1.5k | 对话情感识别 | 情绪识别候选 |
+| `MiteshPuthran/Speech-Emotion-Analyzer` | 1.4k | 语音情感分析 | 情绪识别候选 |
+
+### 6.2 结论（对创的取舍）
+
+1. **内核自己写**：情感状态机移植 jiwen（五轴）+ Drivesoid 接口思路 → EmotionSlot。这些是
+   「心」，必须长在创身上，不能外包。
+2. **记忆学思路**：Ombre-Brain 的 valence/arousal + 遗忘曲线、Memobase 分层写入 → 增强创已有记忆，
+   不换底座。
+3. **外壳/声音/识别全部接入**：airi（身体）、GPT-SoVITS（声音）、FunASR/SenseVoice（感知）、
+   EmoLLM/OmniDimen-Emotion（情感模型，走现有 provider fallback 链）。符合「做指挥者，不重新造轮子」。
+4. **主动性**：jiwen 阈值触发 + revive-companion 时机引擎，governance 把关主动消息。
+
+> 备注：`FunAudioLLM/emotion2vec`、`FunAudioLLM/CosyVoice` 仓库名已变动（404/301），
+> CosyVoice 归属需重查；emotion2vec 能力已并入 FunASR/SenseVoice 生态。
