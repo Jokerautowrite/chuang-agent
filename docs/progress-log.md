@@ -1,3 +1,15 @@
+# 2026-08-06 P2 daemon 长稳测试：真实 daemon 多轮 / 重启恢复 / 断连重连
+
+- **Phase A 连续多轮（真实 canonical daemon）**：5 轮真实 turn 全 completed/stop，provider=example-provider。
+  真实 daemon 的 turn status 字段是 `completed`（不是测试环境的 `Success`），判定脚本按此修正。
+- **Phase B 重启恢复（独立临时 daemon）**：独立 XDG_RUNTIME_DIR + 独立 db，避免干扰真实服务
+  （daemon 会 probe canonical socket，发现已有实例即退出——用独立 XDG_RUNTIME_DIR 绕开）。
+  kill -TERM → 重启 → 5 轮全过（含"上一轮你说了什么"历史延续轮）。
+- **Phase C 断连重连**：中途断开（无请求）/ 无效 payload 断开 / 重连正常 turn / 连续 3 次断连重连
+  全部 PASS，daemon 稳定存活。
+- **坑**：后台 `nohup ... &` 启动 daemon 会快速退出（stdio 归属问题），改用前台 exec session 稳定。
+- **结论**：真实 daemon 长稳达标，重启后 db/recent history 正常恢复。
+
 # 2026-08-06 P2 真实链路冒烟复验：三级 provider 全部可用
 
 - **场景**：真实 app-server 单轮 turn + 真实模型调用（非 fixture）。
