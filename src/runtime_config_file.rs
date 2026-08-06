@@ -58,6 +58,15 @@ pub fn parse_runtime_config_file_with_options(
             .unwrap_or_else(|| "./data/chuang-agent.db".to_string()),
     ));
 
+    // [metadata] 段 → RuntimeConfig.metadata（任意键透传，如 emotion_brain=1）。
+    for (key, value) in values.iter() {
+        if let Some(metadata_key) = key.strip_prefix("metadata.") {
+            config
+                .metadata
+                .insert(metadata_key.to_string(), value.clone());
+        }
+    }
+
     if let Some(value) = get_any(&values, &["permission.profile", "permission_profile"]) {
         config.permission.profile = value.to_string();
     }
@@ -1012,5 +1021,28 @@ mod tests {
             }
             other => panic!("expected fallback chain, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn metadata_section_passes_through_to_runtime_metadata() {
+        let content = r#"
+            db_path = "./data/t.db"
+            provider = fake
+            model_name = "stub"
+
+            [metadata]
+            emotion_brain = "1"
+            channel = "cli"
+        "#;
+        let config = parse_runtime_config_file_with_options(content, options()).expect("parse");
+        assert_eq!(
+            config.metadata.get("emotion_brain").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            config.metadata.get("channel").map(String::as_str),
+            Some("cli")
+        );
+        assert!(config.metadata.get("config_path").is_none());
     }
 }

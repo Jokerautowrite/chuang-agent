@@ -1,3 +1,14 @@
+# 2026-08-07 配置支持 [metadata] 段：本地开启 GBrain 外脑增强
+
+- **runtime_config_file**：`[metadata]` 段任意键透传到 RuntimeConfig.metadata
+  （如 `emotion_brain = "1"`），向后兼容（无该段时行为不变）。+1 单测。
+- **本地启用**：config.toml（gitignored，不入库）追加
+  `[metadata] emotion_brain = "1"` —— 真实链路每轮情感快照自动带外脑记忆摘要；
+  GBrain 不可用时静默降级为纯本地快照。
+- **live 冒烟**：真实 provider 一轮通过（200），emotion_slot=jiwen，
+  emotion_axes/state 进入完成元数据；GBrain CLI 直查正常（hybrid 命中）。
+- **回归**：lib 96 / bin 135 / app_server 26 全绿。
+
 # 2026-08-07 情感记忆标签 + 修复连续 --remember 撞主键（live 冒烟发现）
 
 - **情感记忆标签**（调研路线①记忆情绪）：`remember_turn_with_metadata_tags` 把本轮
