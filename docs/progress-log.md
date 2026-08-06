@@ -1,3 +1,18 @@
+# 2026-08-06 方向定调 + 情感陪伴调研（新赛道）
+
+- **战略定调**（老爸）：不做最强通用 Agent，创做「最懂主人的个人情感助手」；编程等能力靠接入，
+  创做指挥者。与核心论点「Memory is body / dispatcher not strongest worker」一致。
+- **调研**：GitHub 全景调研（awesome-ai-companion 索引 + 单仓库确认），输出
+  `docs/emotion-companion-research-v1.md`：
+  - 情感状态机：jiwen（五轴漂移，~500 行 MIT，最宜移植）、Drivesoid、Eventide/Tidefall、Aura
+  - 情感记忆：Ombre-Brain（valence/arousal + 遗忘曲线）、paramecium、Aelios、kiwi-mem
+  - 情感/语音模型：EmoLLM（1771★）、GPT-SoVITS（60k★）、CosyVoice、EmotiVoice、Callhome（SenseVoice 情感标签）
+  - 心跳主动：revive-companion（时机引擎）、dylan-heartbeat、cyberboss
+  - 外壳：SillyTavern、AIRI、LingChat、ai-live2d-body
+- **接入方案**：情感模块 = 4 个可拔插接入点（EmotionSlot / ContextSegment 注入 / 情感记忆标签 /
+  心跳时机引擎 + governance 把关），贴合创的可拔插、解耦、先 fake 后 real 铁律。
+- **落地路线**：①记忆情绪 → ②状态机+遗忘曲线 → ③主动性 → ④语音/视觉外壳。
+
 # 2026-08-06 P2 发布记录：推送 origin/main（4 commits）
 
 - 远程：`https://github.com/Jokerautowrite/chuang-agent.git`，`main`。
