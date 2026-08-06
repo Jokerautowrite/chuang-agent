@@ -1,3 +1,17 @@
+# 2026-08-07 心跳调优：白天窗口 + 2 小时间隔 + 模型自由发挥话术
+
+- **时段窗口**：新增 `heartbeat_start_hour` / `heartbeat_end_hour`（本地时间含两端），
+  窗口外绝不触发（夜间安静）。默认 9..=22，config.toml 已启用。
+- **节奏**：`heartbeat_min_interval_minutes=120`、`max_per_day=7`；
+  systemd 定时器改为 9/11/13/15/17/19/21 整点（RandomizedDelaySec=60）。
+- **话术自由发挥**：触发时用模型（现有 provider）按「此刻感受 + 主人相关外脑记忆 +
+  当前时间」自由生成一句话（≤50 字要求），不再固定模板；provider 缺失/失败
+  （含 502）自动回退模板兜底；输出经清洗（拒绝 PROVIDER_* 错误体/JSON/超长）。
+- **心跳服务**加 `EnvironmentFile=provider.env`（模型生成需要 provider 密钥）。
+- **冒烟**：真实 provider 生成「周五早上好呀，今天要不要给自己安排点小惊喜？少忙一点也行！」；
+  6 点跑心跳正确不触发（窗口生效）；服务手动触发成功。
+- **回归**：lib 103 / bin 135 / app_server 26 全绿。
+
 # 2026-08-07 情感主动联系（心跳）上线：走 Feishu 桥，参数可配
 
 - **`emotion heartbeat` 子命令**（`src/cli_emotion.rs`）：恢复情绪 → 按真实流逝时间

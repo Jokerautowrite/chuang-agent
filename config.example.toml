@@ -84,10 +84,13 @@ context_max_memory_segments = 5
 [metadata]
 # GBrain 外脑增强：情感快照 prompt 追加主人相关记忆摘要；外脑不可用静默降级。
 emotion_brain = "1"
-# 心跳主动联系：连接需求≥门槛 且 距上次主动≥最小间隔 才触发，
-# 每日最多 max_per_day 次；投递走 Chuang Feishu 桥轮询发件箱。
+# 心跳主动联系：仅本地时间 start_hour..=end_hour 窗口内触发（夜间安静），
+# 连接需求≥门槛 且 距上次主动≥最小间隔 才触发，每日最多 max_per_day 次；
+# 投递走 Chuang Feishu 桥轮询发件箱；消息文本由模型自由生成（失败回退模板）。
 heartbeat_enabled = "1"
 heartbeat_threshold = "0.6"
-heartbeat_min_interval_minutes = "1440"
-heartbeat_max_per_day = "1"
+heartbeat_min_interval_minutes = "120"
+heartbeat_max_per_day = "7"
+heartbeat_start_hour = "9"
+heartbeat_end_hour = "22"
 # heartbeat_outbox_dir = "/path/to/outbox"   # 缺省 root/context/proactive-outbox

@@ -3,15 +3,21 @@
 use std::path::PathBuf;
 
 use chuang_agent::emotion_heartbeat::{
-    evaluate_heartbeat, restore_jiwen_from_state, HeartbeatPolicy, ProactiveOutbox,
+    build_proactive_prompt, evaluate_heartbeat, restore_jiwen_from_state, HeartbeatPolicy,
+    ProactiveOutbox,
 };
-use chuang_agent::emotion_slot::{now_rfc3339, EmotionSlot};
+use chuang_agent::emotion_brain::{brain_query_semantic, BrainHit, EmotionBrainConfig};
+use chuang_agent::emotion_slot::{now_rfc3339, EmotionSlot, EmotionStateSnapshot};
 use chuang_agent::emotion_store::{
     resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState,
 };
+use chuang_agent::responder::{Responder, ResponderRequest};
+use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::runtime_config_file::{
-    load_runtime_config_file_with_options, RuntimeConfigFileOptions,
+    load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
+    RuntimeConfigFileOptions,
 };
+use chuang_agent::slot_registry::build_provider_responder;
 
 pub fn emotion_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -48,19 +54,71 @@ fn wants_json(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--json")
 }
 
-fn load_runtime(args: &[String]) -> Result<chuang_agent::runtime_config::RuntimeConfig, String> {
+fn resolve_config_path(args: &[String]) -> Result<PathBuf, String> {
     let config_path = parse_config_path(args)?
         .unwrap_or_else(|| PathBuf::from("config.toml"));
-    let config_path = if config_path.is_absolute() {
+    Ok(if config_path.is_absolute() {
         config_path
     } else {
         std::env::current_dir()
             .map_err(|error| format!("cwd_failed: {error}"))?
             .join(config_path)
-    };
+    })
+}
+
+fn load_runtime(args: &[String]) -> Result<RuntimeConfig, String> {
+    let config_path = resolve_config_path(args)?;
     // 心跳/状态不需要 provider：宽松加载，缺 provider env 也不报错。
     load_runtime_config_file_with_options(&config_path, RuntimeConfigFileOptions::allow_missing_env())
         .map_err(|error| format!("config_load_failed: {error:?}"))
+}
+
+/// 严格加载（provider env 齐全才 Some）；仅缺 env 时返回 None（回退模板消息）。
+fn load_runtime_strict(args: &[String]) -> Result<Option<RuntimeConfig>, String> {
+    let config_path = resolve_config_path(args)?;
+    match load_runtime_config_file(&config_path) {
+        Ok(runtime) => Ok(Some(runtime)),
+        Err(RuntimeConfigFileError::MissingEnv { .. }) => Ok(None),
+        Err(error) => Err(format!("config_load_failed: {error:?}")),
+    }
+}
+
+fn emotion_brain_enabled(metadata: &std::collections::BTreeMap<String, String>) -> bool {
+    metadata
+        .get("emotion_brain")
+        .map(|value| value == "1")
+        .unwrap_or(false)
+}
+
+/// 用模型自由发挥生成主动消息；失败返回 None（调用方回退模板）。
+fn generate_proactive_text(
+    runtime: &RuntimeConfig,
+    snapshot: &EmotionStateSnapshot,
+    hits: &[BrainHit],
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<String> {
+    let provider = build_provider_responder(&runtime.provider).ok()?;
+    let prompt = build_proactive_prompt(snapshot, hits, now);
+    let output = provider.generate(&ResponderRequest {
+        prompt,
+        user_input: String::new(),
+        recall_hit_count: 0,
+    });
+    sanitize_proactive_text(&output.body)
+}
+
+fn sanitize_proactive_text(body: &str) -> Option<String> {
+    let trimmed = body.trim().trim_matches('"').trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 200 {
+        return None;
+    }
+    if trimmed.starts_with("PROVIDER_")
+        || trimmed.to_lowercase().contains("provider error")
+        || (trimmed.contains('{') && trimmed.contains('}'))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 fn default_persisted_state(now: &str) -> PersistedEmotionState {
@@ -75,7 +133,11 @@ fn default_persisted_state(now: &str) -> PersistedEmotionState {
 
 fn heartbeat_command(args: &[String]) -> Result<(), String> {
     let json = wants_json(args);
-    let runtime = load_runtime(args)?;
+    let strict_runtime = load_runtime_strict(args)?;
+    let runtime = match &strict_runtime {
+        Some(runtime) => runtime.clone(),
+        None => load_runtime(args)?,
+    };
     let policy = HeartbeatPolicy::from_metadata(&runtime.metadata);
     let workspace_root = if runtime.permission.workspace_root.as_os_str().is_empty() {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
@@ -111,7 +173,22 @@ fn heartbeat_command(args: &[String]) -> Result<(), String> {
         proactive_count_day: state.proactive_count_day,
     };
 
-    if let Some((message, today)) = decision {
+    if let Some((mut message, today)) = decision {
+        // 主动消息用模型自由发挥（不固定话术）；provider 缺失/失败回退模板。
+        if let Some(runtime) = &strict_runtime {
+            let hits = if emotion_brain_enabled(&runtime.metadata) {
+                brain_query_semantic(
+                    &EmotionBrainConfig::default(),
+                    &format!("主人 最近 心情 喜好 关心"),
+                    3,
+                )
+            } else {
+                Vec::new()
+            };
+            if let Some(text) = generate_proactive_text(runtime, &snapshot, &hits, now) {
+                message.text = text;
+            }
+        }
         let outbox = ProactiveOutbox::new(ProactiveOutbox::resolve_dir(
             &runtime.metadata,
             &workspace_root,

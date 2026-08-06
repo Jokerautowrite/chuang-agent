@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::emotion_slot::{
@@ -29,6 +29,9 @@ pub struct HeartbeatPolicy {
     pub min_interval_minutes: u64,
     /// 每天最多主动联系次数。
     pub max_per_day: u32,
+    /// 允许主动联系的小时段（本地时间，含两端；如 9..=22）。
+    pub start_hour: u32,
+    pub end_hour: u32,
 }
 
 impl Default for HeartbeatPolicy {
@@ -38,6 +41,8 @@ impl Default for HeartbeatPolicy {
             threshold: 0.6,
             min_interval_minutes: 24 * 60,
             max_per_day: 1,
+            start_hour: 9,
+            end_hour: 22,
         }
     }
 }
@@ -64,11 +69,23 @@ impl HeartbeatPolicy {
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(defaults.max_per_day)
             .max(1);
+        let start_hour = metadata
+            .get("heartbeat_start_hour")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(defaults.start_hour)
+            .min(23);
+        let end_hour = metadata
+            .get("heartbeat_end_hour")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(defaults.end_hour)
+            .min(24);
         Self {
             enabled,
             threshold,
             min_interval_minutes,
             max_per_day,
+            start_hour,
+            end_hour,
         }
     }
 
@@ -93,6 +110,11 @@ impl HeartbeatPolicy {
             return true;
         }
         count < self.max_per_day
+    }
+
+    /// 是否在允许主动联系的时间窗内（本地小时，含两端）。
+    pub fn in_time_window(&self, local_hour: u32) -> bool {
+        local_hour >= self.start_hour && local_hour <= self.end_hour
     }
 }
 
@@ -245,6 +267,10 @@ pub fn evaluate_heartbeat(
     ) {
         return None;
     }
+    let local_hour = now.with_timezone(&chrono::Local).hour();
+    if !policy.in_time_window(local_hour) {
+        return None;
+    }
 
     let text = render_proactive_text(snapshot, trigger);
     let id = format!(
@@ -266,6 +292,34 @@ pub fn evaluate_heartbeat(
         source: "emotion-heartbeat".to_string(),
     };
     Some((message, today))
+}
+
+/// 构建「主动找主人说话」的模型 prompt（自由发挥，不固定话术）。
+pub fn build_proactive_prompt(
+    snapshot: &EmotionStateSnapshot,
+    hits: &[crate::emotion_brain::BrainHit],
+    now: chrono::DateTime<Utc>,
+) -> String {
+    let local = now.with_timezone(&chrono::Local);
+    let weekday = local.format("%A").to_string();
+    let time = local.format("%H:%M").to_string();
+    let mut memory_lines = String::new();
+    if !hits.is_empty() {
+        memory_lines.push_str("\n主人相关记忆（可能有用）：\n");
+        for hit in hits.iter().take(3) {
+            memory_lines.push_str(&format!("- {}: {}\n", hit.title, hit.snippet));
+        }
+    }
+    format!(
+        "你是创，一个陪伴型助手，正在主动找主人说句话。\n\
+         现在：{weekday} {time}（本地时间）。\n\
+         你此刻的感受：{}\n\
+         {}[要求] 像真人一样自然地说一句话，想说什么说什么；\
+         没有特别想说的就随口关心/聊点日常也行。\
+         不要固定模板、不要解释这是系统触发的、不要堆套话；\
+         不超过 50 字；直接输出要发给主人的那句话。",
+        snapshot.prompt_context, memory_lines
+    )
 }
 
 #[cfg(test)]
@@ -356,7 +410,10 @@ mod tests {
 
     #[test]
     fn evaluate_heartbeat_respects_policy_and_threshold() {
-        let now = Utc::now();
+        // 固定为本地 15:00（在默认 9..=22 窗口内），避免测试运行时段影响结果。
+        let now = chrono::DateTime::parse_from_rfc3339("2026-08-07T15:00:00+08:00")
+            .expect("fixed time should parse")
+            .with_timezone(&Utc);
         let snapshot = EmotionStateSnapshot {
             axes: EmotionAxes {
                 connection: 0.8,
@@ -425,5 +482,72 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn evaluate_heartbeat_respects_time_window() {
+        let enabled = HeartbeatPolicy::from_metadata(&metadata_pairs(&[
+            ("heartbeat_enabled", "1"),
+            ("heartbeat_start_hour", "9"),
+            ("heartbeat_end_hour", "22"),
+        ]));
+        let snapshot = EmotionStateSnapshot {
+            axes: EmotionAxes {
+                connection: 0.8,
+                ..Default::default()
+            },
+            prompt_context: String::new(),
+            style_guidance: String::new(),
+            last_tick_at: None,
+        };
+        let triggers = vec![EmotionTrigger::Contact {
+            urgency: 0.4,
+            forced: false,
+        }];
+        let state = PersistedEmotionState {
+            axes: snapshot.axes,
+            saved_at: Some("2026-08-06T10:00:00+08:00".to_string()),
+            last_proactive_at: None,
+            proactive_count_date: None,
+            proactive_count_day: 0,
+        };
+        let ws = Path::new("/tmp/ws");
+
+        // 白天 10:00 → 允许。
+        let day = chrono::DateTime::parse_from_rfc3339("2026-08-07T10:00:00+08:00")
+            .expect("day time")
+            .with_timezone(&Utc);
+        assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, day).is_some());
+
+        // 夜间 23:00 → 不触发（即使连接达标）。
+        let night = chrono::DateTime::parse_from_rfc3339("2026-08-07T23:00:00+08:00")
+            .expect("night time")
+            .with_timezone(&Utc);
+        assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, night).is_none());
+
+        // 早上 8:00 → 不触发。
+        let early = chrono::DateTime::parse_from_rfc3339("2026-08-07T08:00:00+08:00")
+            .expect("early time")
+            .with_timezone(&Utc);
+        assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, early).is_none());
+    }
+
+    #[test]
+    fn policy_parses_time_window_metadata() {
+        let policy = HeartbeatPolicy::from_metadata(&metadata_pairs(&[
+            ("heartbeat_start_hour", "9"),
+            ("heartbeat_end_hour", "22"),
+        ]));
+        assert!(policy.in_time_window(9));
+        assert!(policy.in_time_window(15));
+        assert!(policy.in_time_window(22));
+        assert!(!policy.in_time_window(8));
+        assert!(!policy.in_time_window(23));
+        let bad = HeartbeatPolicy::from_metadata(&metadata_pairs(&[
+            ("heartbeat_start_hour", "99"),
+            ("heartbeat_end_hour", "-1"),
+        ]));
+        assert!(bad.start_hour <= 23);
+        assert!(bad.end_hour <= 24);
     }
 }
