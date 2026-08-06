@@ -3166,3 +3166,11 @@
 - 验证：`chuang-agent doctor` 显示 `governance_decisions: read_only/dangerous_write/dangerous_shell/secret_shell=allowed`；app-server 冒烟 `approval_requested_count=0`，code_execute 直接执行。
 - 服务已重启：chuang-agent-app-server.service + chuang-feishu-bot.service。
 - 说明：残留 `.chuang/runtime/pending-approvals/*.json`（7 个历史审批单）未删除，unrestricted 模式下不再产生新审批单，旧文件无害留档。
+
+# 2026-08-07 真实执行链路测试（A 心跳 / B 子代理 / C 记忆 / D 自愈）
+- A 心跳：06:53 不在 9-22 窗口 → triggered=false（夜间不打扰验证通过）；手动塞 outbox 消息 → 桥 poll 投递成功（proactive_sent，消息已归档）。
+- B 子代理：初测失败，根因 worker 模型 gpt-5.6-luna 在 example-provider 404。curl /v1/models 确认 example-provider 该账号组仅支持 deepseek-v4-flash。
+  - 修复：scripts/chuang-codex-runner.py 默认模型 → deepseek-v4-flash；src/tool_runtime.rs DEFAULT_SUBAGENT_WORKER_MODEL → deepseek-v4-flash；config.toml fallback_model → deepseek-v4-flash（保留 CHUANG_CODEX_RUNNER_MODEL 覆盖，可拔插）。
+  - 复测：spawn_subagent execution_succeeded=true，worker report status=Success model=deepseek-v4-flash provider=zen-sub2，创正确回收并总结。
+- C 记忆：全新轮次凭长期记忆回答身份（"我是创，叫你老爸，记忆是本体 runtime 只是壳"），身份记忆跨会话持久有效；session recall hit=0（经历记忆待长期聊天积累）。
+- D 自愈：kill -9 app-server → systemd 5s 自动拉起；主 provider ccswitch 200；fallback 通道（example-provider deepseek-v4-flash）经 B 实证可用。
