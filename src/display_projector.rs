@@ -167,6 +167,17 @@ impl DisplayProjector {
                 )
             }),
             TerminalEvent::ModelFinished { .. } => None,
+            TerminalEvent::ModelRetried {
+                attempt,
+                reason,
+                ..
+            } => Some(DisplayEvent::new(
+                DisplayEventKind::Progress,
+                DisplayState::Running,
+                DisplayProminence::Secondary,
+                true,
+                format!("模型服务暂时不可用（{reason}），自动重试第 {attempt} 次…"),
+            )),
             TerminalEvent::ToolStarted {
                 tool,
                 activity_title,

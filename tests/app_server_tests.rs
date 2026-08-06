@@ -1959,38 +1959,47 @@ fn app_server_provider_error_turn_is_excluded_from_recent_thread_history() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
-        let (mut first, _) = listener.accept().expect("first request should arrive");
-        let _ = read_http_request(&mut first);
-        let first_body = "at capacity";
-        let first_response = format!(
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            first_body.len(),
-            first_body
-        );
-        first
-            .write_all(first_response.as_bytes())
-            .expect("first response should write");
-
-        let (mut second, _) = listener.accept().expect("second request should arrive");
-        let _ = read_http_request(&mut second);
-        let second_body = serde_json::json!({
-            "id": "history-after-provider-error",
-            "object": "response",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "FINAL: recovered"},
-                "finish_reason": "stop"
-            }]
-        })
-        .to_string();
-        let second_response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            second_body.len(),
-            second_body
-        );
-        second
-            .write_all(second_response.as_bytes())
-            .expect("second response should write");
+        // The provider retries 429 (and the cli runtime auto-retries transient
+        // provider failures before any tool runs), so the first turn can open
+        // several connections. Distinguish turns by request content instead of
+        // hard-coding connection counts: "first" always gets 429, "second"
+        // gets a healthy 200. Both provider-level retries and turn-level
+        // auto-retries keep receiving 429 until the first turn is surfaced as
+        // a provider error and excluded from recent thread history.
+        loop {
+            let (mut stream, _) = listener.accept().expect("request should arrive");
+            let request = read_http_request(&mut stream);
+            if String::from_utf8_lossy(&request).contains("second") {
+                let second_body = serde_json::json!({
+                    "id": "history-after-provider-error",
+                    "object": "response",
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "FINAL: recovered"},
+                        "finish_reason": "stop"
+                    }]
+                })
+                .to_string();
+                let second_response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    second_body.len(),
+                    second_body
+                );
+                stream
+                    .write_all(second_response.as_bytes())
+                    .expect("second response should write");
+                break;
+            }
+            let first_body = "at capacity";
+            let first_response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                first_body.len(),
+                first_body
+            );
+            stream
+                .write_all(first_response.as_bytes())
+                .expect("first response should write");
+        }
     });
     fs::write(
         workspace.join("config.toml"),
@@ -2557,7 +2566,12 @@ fn app_server_turn_surfaces_capacity_metadata_on_plain_text_429() {
     let server = thread::spawn(move || {
         // 429 is retryable, so the provider may open up to MAX_PROVIDER_ATTEMPTS
         // connections before surfacing the final error.
-        for _ in 0..3 {
+        // Provider retries transient 429 (3 attempts per model call) and the
+        // cli runtime auto-retries transient provider failures before any tool
+        // runs (2 extra model calls), so the mock must accept up to 9
+        // connections all returning 429 before the turn is surfaced as a
+        // provider error.
+        for _ in 0..9 {
             let (mut stream, _) = listener.accept().expect("connection should be accepted");
             let _ = read_http_request(&mut stream);
 

@@ -45,6 +45,65 @@ use chuang_agent::{common::AgentId, common::TaskId};
 use crate::cli_memory::{preview_local_knowledge_context, MemoryKnowledgePreviewContextOutput};
 use crate::cli_types::{CliOptions, ConversationHistoryItem, RememberedRecords, RunCliRequest};
 
+/// Maximum number of automatic retries for a model call when the provider
+/// fails with a transient error before any tool has run. Retrying after tools
+/// ran would repeat side effects, so it is intentionally limited to the
+/// pre-tool phase.
+const MAX_MODEL_AUTO_RETRIES: usize = 2;
+
+/// Transient provider failures that are safe to auto-retry: gateway/limit HTTP
+/// statuses and transport-level failures. Auth (401/403) and quota (402) are
+/// deliberately excluded — retrying them cannot succeed.
+fn provider_failure_is_retryable(body: &str) -> bool {
+    if body.contains("PROVIDER_HTTP_ERROR") {
+        return ["429", "408", "500", "502", "503", "504"]
+            .iter()
+            .any(|code| body.contains(&format!("status_code={code}")))
+            || body.contains("http-error-429")
+            || body.contains("http-error-408")
+            || body.contains("http-error-502")
+            || body.contains("http-error-503")
+            || body.contains("http-error-504");
+    }
+    if body.contains("CONFIG_ERROR") {
+        return [
+            "curl_exit",
+            "curl_spawn",
+            "curl_write",
+            "curl_wait",
+            "http_connect",
+            "http_write",
+            "http_flush",
+            "http_read",
+            "http_timeout",
+            "native_http_timeout",
+            "native_http_send",
+            "native_http_response_body",
+        ]
+        .iter()
+        .any(|field| body.contains(&format!("field={field}")));
+    }
+    false
+}
+
+/// Short human/operator-facing reason recorded in turn metadata when a
+/// transient provider failure was auto-retried.
+fn provider_failure_retry_reason(body: &str) -> String {
+    for token in ["status_code=", "field=", "reason="] {
+        if let Some(index) = body.find(token) {
+            let rest = &body[index + token.len()..];
+            let end = rest
+                .find(|ch: char| ch.is_whitespace() || ch == ':')
+                .unwrap_or(rest.len());
+            let value = &rest[..end];
+            if !value.is_empty() {
+                return format!("{token}{value}");
+            }
+        }
+    }
+    "transient_provider_failure".to_string()
+}
+
 pub(crate) fn run_with_options(
     request: &RunCliRequest,
 ) -> Result<
@@ -522,14 +581,60 @@ where
                 round: round_index + 1,
             },
         )?;
-        let mut turn = kernel
-            .run_governed_turn_with_extra_context(
-                current_input.clone(),
-                governance,
-                turn_context.clone(),
-            )
-            .map_err(|e| format!("{e:?}"))?;
+        // Auto-retry transient provider failures while nothing has run yet.
+        // Once a tool executed, side effects exist, so we never repeat the
+        // model call blindly — the error surfaces through the normal protocol
+        // loop instead.
+        let mut model_retry_count = 0usize;
+        let mut model_retry_reason: Option<String> = None;
+        let mut turn = loop {
+            let candidate = kernel
+                .run_governed_turn_with_extra_context(
+                    current_input.clone(),
+                    governance,
+                    turn_context.clone(),
+                )
+                .map_err(|e| format!("{e:?}"))?;
+            let candidate_body = candidate.result.response.body.trim().to_string();
+            if tool_calls.is_empty()
+                && model_retry_count < MAX_MODEL_AUTO_RETRIES
+                && provider_failure_is_retryable(&candidate_body)
+            {
+                model_retry_count += 1;
+                let reason = provider_failure_retry_reason(&candidate_body);
+                model_retry_reason = Some(reason.clone());
+                write_terminal_event(
+                    progress_path,
+                    &TerminalEvent::ModelRetried {
+                        round: round_index + 1,
+                        attempt: model_retry_count,
+                        reason,
+                    },
+                )?;
+                continue;
+            }
+            break candidate;
+        };
         model_usage.observe_and_write(&mut turn);
+        if model_retry_count > 0 {
+            turn.result.response.meta.extra.insert(
+                "model_auto_retry_count".to_string(),
+                model_retry_count.to_string(),
+            );
+            turn.result.response.meta.extra.insert(
+                "model_auto_retry_reason".to_string(),
+                model_retry_reason.unwrap_or_default(),
+            );
+        }
+        // If the retries were exhausted while the provider is still failing
+        // with a transient error, surface the provider error as the final
+        // answer (same semantics as before auto-retry). Feeding it back into
+        // the protocol loop would burn tool rounds and cause misleading
+        // "turn not completed" messages.
+        if model_retry_count > 0 && provider_failure_is_retryable(&turn.result.response.body) {
+            insert_tool_surface_metadata(&mut turn, workspace_root)?;
+            return Ok(turn);
+        }
         ensure_turn_not_cancelled(live_guidance_path, progress_path, "模型返回后")?;
         let body = turn.result.response.body.trim().to_string();
         write_terminal_event(
@@ -8098,6 +8203,210 @@ allowed_channels = ["app-server"]
         let events = fs::read_to_string(&progress_path).expect("progress should exist");
         assert!(events.contains("\"kind\":\"turn_cancelled\""));
         assert!(events.contains("\"stage\":\"模型调用前\""));
+    }
+
+    #[test]
+    fn provider_transient_error_is_auto_retried_before_any_tool() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-provider-auto-retry-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let responder = SequenceResponder::new(vec![
+            "PROVIDER_HTTP_ERROR: provider=x model=y transport=native status_code=429 error=rate limited",
+            "FINAL: 自动重试后成功",
+        ]);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "问一句好".to_string(),
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("auto-retried turn should succeed");
+
+        assert_eq!(
+            turn.result.response.body,
+            "自动重试后成功",
+            "final answer should come from the retried model call"
+        );
+        assert_eq!(
+            turn.result.response.meta.extra.get("model_auto_retry_count"),
+            Some(&"1".to_string())
+        );
+        assert!(turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("model_auto_retry_reason")
+            .map(|reason| reason.contains("status_code=429"))
+            .unwrap_or(false));
+        assert_eq!(
+            captured.lock().expect("captured lock should succeed").len(),
+            2,
+            "one failed call plus one retry"
+        );
+    }
+
+    #[test]
+    fn provider_transient_error_retries_up_to_limit_then_succeeds() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-provider-auto-retry-limit-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let responder = SequenceResponder::new(vec![
+            "PROVIDER_HTTP_ERROR: provider=x model=y transport=native status_code=502 error=bad gateway",
+            "CONFIG_ERROR: openai-compatible provider invalid field=http_read reason=connection reset",
+            "FINAL: 重试到成功",
+        ]);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "问一句好".to_string(),
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("turn should succeed after two retries");
+
+        assert_eq!(turn.result.response.body, "重试到成功");
+        assert_eq!(
+            turn.result.response.meta.extra.get("model_auto_retry_count"),
+            Some(&"2".to_string())
+        );
+        assert_eq!(
+            captured.lock().expect("captured lock should succeed").len(),
+            3
+        );
+    }
+
+    #[test]
+    fn provider_auth_error_is_not_auto_retried() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-provider-auth-no-retry-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let responder = SequenceResponder::new(vec![
+            "PROVIDER_HTTP_ERROR: provider=x model=y transport=native status_code=401 error=Invalid API key",
+        ]);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "问一句好".to_string(),
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("auth error should surface as a plain-text turn, not retry");
+
+        assert!(
+            turn.result.response.body.contains("PROVIDER_HTTP_ERROR"),
+            "auth error should remain visible"
+        );
+        assert!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("model_auto_retry_count")
+                .is_none(),
+            "auth errors must not be auto-retried"
+        );
+        assert_eq!(
+            captured.lock().expect("captured lock should succeed").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn provider_transient_error_after_tool_call_is_not_auto_retried() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-provider-retry-after-tool-{}",
+            unique_record_suffix_for_test()
+        ));
+        let workspace_root = temp_dir.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let action = r#"ACTION: {"type":"tool_call","call":{"tool":"list_dir","path":"."}}"#;
+        let responder = SequenceResponder::new(vec![
+            action,
+            "PROVIDER_HTTP_ERROR: provider=x model=y transport=native status_code=502 error=bad gateway",
+            "FINAL: 工具已执行后正常完成",
+        ]);
+        let captured = responder.captured.clone();
+        let mut kernel = ChuangKernel::with_responder(
+            test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
+            chuang_agent::memory_store::InMemoryMemoryStore::new(),
+            responder,
+        );
+        let mut governance = chuang_agent::governance::StaticRuleGovernance::new();
+
+        let turn = run_governed_turn_with_tools_live(
+            &mut kernel,
+            &mut governance,
+            &workspace_root,
+            4,
+            ToolExecutionConfig::default(),
+            "列出当前目录".to_string(),
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("turn should complete through the protocol loop");
+
+        assert_eq!(turn.result.response.body, "工具已执行后正常完成");
+        assert!(
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("model_auto_retry_count")
+                .is_none(),
+            "no auto-retry once a tool has run"
+        );
+        assert_eq!(
+            captured.lock().expect("captured lock should succeed").len(),
+            3
+        );
     }
 
     #[derive(Debug, Clone)]

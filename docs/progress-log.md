@@ -1,3 +1,19 @@
+# 2026-08-06 P2「本轮没有完成」专项：瞬态 provider 失败自动重试
+
+- **痛点收敛**：`readable_runtime_error` 兜底文案「本轮处理没有完成」多由瞬态 provider 失败
+  （429/502/504/transport 抖动）触发；此前一轮模型调用失败后直接产出错误/耗尽工具轮次。
+- **修复（最小侵入，不动架构）**：`run_governed_turn_with_tools_live` 模型调用点加自动重试——
+  **仅当本轮尚未执行任何工具**（避免副作用重复）时，对瞬态 provider 失败自动重试最多 2 次；
+  重试耗尽仍失败时按 provider 错误最终答复返回（等价重试前语义，不再烧工具轮次）。
+  新增 metadata：`model_auto_retry_count` / `model_auto_retry_reason`；新增
+  `TerminalEvent::ModelRetried` 进度事件 + REPL 显示「模型服务暂时不可用，自动重试第 N 次…」。
+- **不可重试**：401/403（密钥错重试无用）、工具已执行后的失败（防副作用重复）。
+- **测试**：+4 个单测（首次 429 重试成功 / 重试上限 2 次 / 401 不重试 / 工具后不重试）；
+  修复 2 个 app-server 集成测试 mock（429 按请求内容区分 first/second、接受 9 次连接，
+  与 provider 内部重试 + turn 级自动重试协同）。bin 130 / lib 59 / app_server 26 全绿。
+- **端到端验证**：本地 mock 前 2 次 429 后 200，`chuang run` 一轮自动重试 2 次后 Success，
+  metadata 正确落盘。
+
 # 2026-08-06 P2 daemon 长稳测试：真实 daemon 多轮 / 重启恢复 / 断连重连
 
 - **Phase A 连续多轮（真实 canonical daemon）**：5 轮真实 turn 全 completed/stop，provider=example-provider。

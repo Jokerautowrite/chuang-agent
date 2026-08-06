@@ -24,6 +24,11 @@ pub enum TerminalEvent {
         finish: String,
         chars: usize,
     },
+    ModelRetried {
+        round: usize,
+        attempt: usize,
+        reason: String,
+    },
     ToolStarted {
         round: usize,
         tool: String,
