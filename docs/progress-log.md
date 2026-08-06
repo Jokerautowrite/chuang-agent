@@ -1,3 +1,19 @@
+# 2026-08-07 情感状态跨轮持久化：落盘 + 启动恢复 + 时间流逝 tick
+
+- **emotion_store.rs（可拔插存储）**：最简 JSON 文件实现，`data/emotion-state.json`
+  （与 db_path 同目录，主人维度全局，不按 session 分片）。保存 axes + saved_at；
+  文件缺失 → None、解析失败 → Err（调用方静默回退默认状态）。+6 单测。
+- **真实心跳时间**：Fake/Jiwen 的 `tick` 把 last_tick_at 从占位 `"now"` 改为 RFC3339
+  （`emotion_slot::now_rfc3339`），可排序、可算流逝分钟。
+- **启动恢复**（`restore_emotion_slot`）：读回 axes + 上次心跳 → 用真实流逝分钟
+  `tick`（连接需求随时间增长，jiwen 语义）→ 阈值触发（observation/contact/find_activity）
+  渲染成「[情感提示]」追加进 context segment + metadata trigger_count。
+- **每轮落盘**（`persist_emotion_state`）：turn 结束后 snapshot 落盘，saved_at 恒为
+  当前时刻（本轮结束 = 主人离开起点，连接从此刻重新增长）。
+- **边界**：存储失败永远静默；`data/` 在 .gitignore 内，情绪状态不进入仓库。
+- **回归**：lib 94 / bin 133 / app_server 26 全绿。持久化测试：连续两轮同一 temp 目录，
+  第二轮恢复第一轮 valence（跨轮情绪记忆成立）。
+
 # 2026-08-07 情感模块接线：EmotionSlot 进 turn + 对话 delta 提取器
 
 - **EmotionDeltaExtractor（可拔插）**：新模块 `src/emotion_delta.rs`。

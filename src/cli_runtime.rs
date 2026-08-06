@@ -13,6 +13,8 @@ use chuang_agent::chuang_kernel::{
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
 use chuang_agent::emotion_delta::{EmotionDeltaExtractor, RuleEmotionDeltaExtractor};
+use chuang_agent::emotion_slot::EmotionTrigger;
+use chuang_agent::emotion_store::{resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState};
 use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
@@ -147,6 +149,9 @@ pub(crate) fn run_with_options(
     // 情感槽位从 slots 中移出（provider 会被移入 kernel；情感状态在本轮存活，
     // 跨轮持久化由上层接入 EmotionSlot 快照读写，见 emotion_slot.rs）。
     let mut emotion_slot = slots.emotion;
+    let emotion_state_path = resolve_emotion_state_path(&runtime.db_path);
+    // 恢复跨轮情感记忆：读回 axes + 上次心跳，按真实流逝分钟 tick（连接增长）。
+    let emotion_triggers = restore_emotion_slot(&mut emotion_slot, &emotion_state_path);
     let mut store = SqliteMemoryStore::open(&runtime.db_path)
         .map_err(|e| format!("failed_to_open_db: {e:?}"))?;
     seed_default_memory_if_empty(&mut store)?;
@@ -161,7 +166,12 @@ pub(crate) fn run_with_options(
         runtime_context.extend(knowledge_preview_context_segments(preview));
     }
     // 情感状态注入：快照作为高优先级 context segment（可拔插；失败静默跳过）。
-    if let Some(segment) = emotion_context_segment(&emotion_slot, &runtime, &request.user_input) {
+    if let Some(segment) = emotion_context_segment(
+        &emotion_slot,
+        &runtime,
+        &request.user_input,
+        &emotion_triggers,
+    ) {
         runtime_context.push(segment);
     }
 
@@ -199,6 +209,7 @@ pub(crate) fn run_with_options(
         &turn.result.response.body,
     );
     insert_emotion_metadata(&mut turn, &emotion_slot);
+    persist_emotion_state(&emotion_slot, &emotion_state_path);
     remember_turn_if_requested(&request.options, &mut kernel, turn, request)
 }
 
@@ -217,6 +228,7 @@ fn emotion_context_segment(
     emotion: &EmotionSlotRuntime,
     runtime: &RuntimeConfig,
     user_input: &str,
+    triggers: &[EmotionTrigger],
 ) -> Option<ContextSegment> {
     let snapshot = emotion.snapshot().ok()?;
     let mut content = snapshot.prompt_context.clone();
@@ -229,6 +241,10 @@ fn emotion_context_segment(
         );
         brain_hit_count = hits.len();
         content = chuang_agent::emotion_brain::augment_prompt_context(&snapshot, &hits);
+    }
+    if !triggers.is_empty() {
+        content.push_str("\n\n[情感提示] 主人离开了一阵子：");
+        content.push_str(&render_emotion_triggers(triggers));
     }
     let now = default_cli_context_timestamp();
     Some(ContextSegment {
@@ -243,8 +259,79 @@ fn emotion_context_segment(
             ("kind".to_string(), "emotion_state".to_string()),
             ("emotion_slot".to_string(), emotion.kind().to_string()),
             ("brain_hit_count".to_string(), brain_hit_count.to_string()),
+            ("trigger_count".to_string(), triggers.len().to_string()),
         ]),
     })
+}
+
+/// 把阈值触发的动作渲染成给模型看的一句话（jiwen 语义人话化）。
+fn render_emotion_triggers(triggers: &[EmotionTrigger]) -> String {
+    let mut parts = Vec::new();
+    for trigger in triggers {
+        match trigger {
+            EmotionTrigger::Contact { urgency, forced } => {
+                if *forced {
+                    parts.push(format!(
+                        "很想主动联系主人（想ta了，强烈度 {:.0}%）",
+                        urgency * 100.0
+                    ));
+                } else {
+                    parts.push(format!(
+                        "有点想主动联系主人（想ta了，强烈度 {:.0}%）",
+                        urgency * 100.0
+                    ));
+                }
+            }
+            EmotionTrigger::FindActivity { reason, .. } => {
+                parts.push(format!("想找点事做调节心情（{reason}）"));
+            }
+            EmotionTrigger::Observation { .. } => {
+                parts.push("心里惦记着主人，但还不到主动打扰的程度".to_string());
+            }
+        }
+    }
+    parts.join("；")
+}
+
+/// 启动恢复：读回持久化情感状态 → 按流逝时间 tick → 返回阈值触发。
+/// 文件缺失/解析失败/存储异常一律用默认状态继续（情感永远不阻断）。
+fn restore_emotion_slot(emotion: &mut EmotionSlotRuntime, path: &std::path::Path) -> Vec<EmotionTrigger> {
+    if !matches!(emotion, EmotionSlotRuntime::Jiwen(_)) {
+        return Vec::new();
+    }
+    let store = EmotionStateFile::new(path);
+    let Ok(Some(state)) = store.load() else {
+        return Vec::new();
+    };
+    let config = chuang_agent::emotion_slot::JiwenEmotionConfig::default();
+    let mut restored = EmotionSlotRuntime::Jiwen(
+        chuang_agent::emotion_slot::JiwenEmotionSlot::from_persisted(
+            config,
+            state.axes,
+            state.saved_at.clone(),
+        ),
+    );
+    let minutes = state
+        .saved_at
+        .as_deref()
+        .and_then(|saved| chuang_agent::emotion_store::elapsed_minutes_since(saved, chrono::Utc::now()))
+        .unwrap_or(0.0);
+    let triggers = restored.tick(minutes).unwrap_or_default();
+    *emotion = restored;
+    triggers
+}
+
+/// 每轮结束后把情感快照落盘（失败静默）。
+/// saved_at 恒为当前时刻（本轮结束 = 主人离开的起点，连接需求从此刻重新增长）。
+fn persist_emotion_state(emotion: &EmotionSlotRuntime, path: &std::path::Path) {
+    let Ok(snapshot) = emotion.snapshot() else {
+        return;
+    };
+    let state = PersistedEmotionState {
+        axes: snapshot.axes,
+        saved_at: Some(chuang_agent::emotion_slot::now_rfc3339()),
+    };
+    let _ = EmotionStateFile::new(path).save(&state);
 }
 
 /// 从本轮对话提取五轴 delta 并喂给 EmotionSlot；随后重置连接需求
@@ -8739,11 +8826,15 @@ allowed_channels = ["cli", "app-server"]
             )),
         );
         let emotion = EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
-        let segment = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样")
+        let segment = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样", &[])
             .expect("emotion segment should build");
         assert_eq!(segment.id, "emotion-state");
         assert_eq!(segment.priority, 246);
         assert!(segment.content.contains("当前情绪状态"));
+        assert_eq!(
+            segment.metadata.get("trigger_count").map(String::as_str),
+            Some("0")
+        );
         assert_eq!(
             segment.metadata.get("emotion_slot").map(String::as_str),
             Some("jiwen")
@@ -8758,9 +8849,117 @@ allowed_channels = ["cli", "app-server"]
         runtime
             .metadata
             .insert("emotion_brain".to_string(), "1".to_string());
-        let augmented =
-            emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样").expect("segment");
+        let augmented = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样", &[])
+            .expect("segment");
         assert_eq!(augmented.priority, 246);
         assert!(augmented.content.contains("当前情绪状态"));
+
+        // 触发提示会追加进 segment 内容。
+        let triggered = emotion_context_segment(
+            &emotion,
+            &runtime,
+            "主人今天状态怎么样",
+            &[chuang_agent::emotion_slot::EmotionTrigger::Contact {
+                urgency: 0.4,
+                forced: false,
+            }],
+        )
+        .expect("segment with triggers");
+        assert!(triggered.content.contains("情感提示"));
+        assert!(triggered.content.contains("有点想主动联系主人"));
+        assert_eq!(
+            triggered.metadata.get("trigger_count").map(String::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn run_with_options_persists_and_restores_emotion_state() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-emotion-persist-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["cli", "app-server"]
+"#,
+        );
+
+        let db_path = temp_dir.join("memory.db");
+        let mut runtime = test_runtime(db_path.clone(), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+
+        let make_request = |input: &str| RunCliRequest {
+            options: CliOptions { runtime: runtime.clone() },
+            user_input: input.to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        // 第一轮：正向对话 → 愉悦度上升，落盘。
+        let (first, _) = run_with_options(&make_request("今天好开心，你真棒！"))
+            .expect("first run should succeed");
+        let first_valence = first
+            .response
+            .meta
+            .extra
+            .get("emotion_axes")
+            .and_then(|json| {
+                serde_json::from_str::<serde_json::Value>(json)
+                    .ok()
+                    .and_then(|v| v.get("valence").and_then(|v| v.as_f64()))
+            })
+            .expect("first valence should be recorded");
+        assert!(first_valence > 0.0, "positive turn should lift valence");
+
+        let state_path = chuang_agent::emotion_store::resolve_emotion_state_path(&db_path);
+        assert!(state_path.exists(), "emotion state file should persist");
+        let persisted = EmotionStateFile::new(&state_path)
+            .load()
+            .expect("persisted state should load")
+            .expect("persisted state exists");
+        assert!(persisted.axes.valence > 0.0);
+        assert!(persisted.saved_at.is_some());
+
+        // 第二轮：恢复同一份状态（valence 延续，而不是从默认 0 开始）。
+        let (second, _) = run_with_options(&make_request("帮我看看这个文件"))
+            .expect("second run should succeed");
+        let second_valence = second
+            .response
+            .meta
+            .extra
+            .get("emotion_axes")
+            .and_then(|json| {
+                serde_json::from_str::<serde_json::Value>(json)
+                    .ok()
+                    .and_then(|v| v.get("valence").and_then(|v| v.as_f64()))
+            })
+            .expect("second valence should be recorded");
+        assert!(
+            second_valence > 0.0,
+            "restored emotion should carry valence across runs (got {second_valence})"
+        );
     }
 }

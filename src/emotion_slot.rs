@@ -11,6 +11,11 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 当前时间 RFC3339（情感 tick/持久化统一使用，可排序可解析）。
+pub fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
 /// 五轴情感状态。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EmotionAxes {
@@ -141,6 +146,16 @@ impl FakeEmotionSlot {
         }
     }
 
+    /// 从持久化状态恢复（跨轮恢复情绪记忆）。
+    pub fn from_persisted(axes: EmotionAxes, last_tick_at: Option<String>) -> Self {
+        Self {
+            axes,
+            last_activity: None,
+            last_tick_at,
+            ticks: 0,
+        }
+    }
+
     fn describe_axes(&self) -> String {
         let mut parts = Vec::new();
         if self.axes.valence > 0.3 {
@@ -170,7 +185,7 @@ impl EmotionSlot for FakeEmotionSlot {
             return Err(EmotionSlotError::new("tick minutes_elapsed must be >= 0"));
         }
         self.ticks += 1;
-        self.last_tick_at = Some("now".to_string());
+        self.last_tick_at = Some(now_rfc3339());
         // Fake：connection 随时间缓慢增长（确定性），阈值触发 observation。
         let growth = (minutes_elapsed * 0.0007).min(1.0);
         self.axes.connection = clamp(self.axes.connection + growth, 0.0, 1.0);
@@ -632,6 +647,20 @@ impl JiwenEmotionSlot {
         }
     }
 
+    /// 从持久化状态恢复（跨轮恢复情绪记忆 + 上次心跳时间）。
+    pub fn from_persisted(
+        config: JiwenEmotionConfig,
+        axes: EmotionAxes,
+        last_tick_at: Option<String>,
+    ) -> Self {
+        Self {
+            axes,
+            config,
+            last_activity: None,
+            last_tick_at,
+        }
+    }
+
     fn check_thresholds(&self) -> Vec<EmotionTrigger> {
         let t = &self.config.thresholds;
         let c = self.axes.connection;
@@ -820,7 +849,7 @@ impl EmotionSlot for JiwenEmotionSlot {
             self.axes.arousal = clamp(net_arousal, -1.0, 1.0);
         }
 
-        self.last_tick_at = Some("now".to_string());
+        self.last_tick_at = Some(now_rfc3339());
         Ok(self.check_thresholds())
     }
 
