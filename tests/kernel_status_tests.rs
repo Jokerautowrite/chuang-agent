@@ -54,6 +54,7 @@ fn kernel_test_config_and_snapshot() -> (RuntimeConfig, ChuangKernelConfig) {
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
     (config, kernel)
 }
@@ -96,6 +97,7 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -1180,6 +1182,7 @@ fn kernel_status_marks_knowledge_read_preflight_ready_when_env_and_endpoints_are
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -1258,6 +1261,7 @@ fn kernel_status_surfaces_live_ready_browser_read_adapter_when_cdp_port_is_reach
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -1329,6 +1333,7 @@ lesson=测试 memory maintenance receipt
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -1408,6 +1413,7 @@ fn kernel_status_exposes_identity_bootstrap_presence_flags() {
             agents_registry_exists: false,
             active_identity: None,
         }),
+        governance_rules: None,
     };
 
     let status = build_chuang_mvp_status(&config, &kernel).expect("status should build");
@@ -1439,6 +1445,7 @@ fn kernel_status_rejects_invalid_runtime_config() {
         memory_write_max_chars: Some(DEFAULT_MEMORY_WRITE_MAX_CHARS),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
 
     let err = build_chuang_mvp_status(&config, &kernel).expect_err("invalid config should fail");

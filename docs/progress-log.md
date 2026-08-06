@@ -1,3 +1,22 @@
+# 2026-08-06 多 provider 三级冗余落地：example-provider → ccswitch → cli-proxy-api
+
+- **需求**：主备同源 deepseek，抖动同步；需接独立服务商做真冗余（PI 移植清单模型接入项）。
+- **现状盘点**：本机可用通道——
+  - primary: example-provider.example / deepseek-v4-flash（chat_completions + curl）
+  - fallback1: ccswitch-local (127.0.0.1:15721) / deepseek-v4-flash
+  - fallback2（新增）: cli-proxy-api (127.0.0.1:8317) / gpt-5.4-mini（与上述两个不同源，实测 200 可答）
+  - 弃用：zen-proxy (8318) billing 余额不足 429；ccswitch 的 claude-opus-4-6 无权限 502。
+- **代码（可拔插、向后兼容）**：`parse_provider` 改为按前缀循环构建链 `primary -> fallback -> fallback2 -> ...`，
+  `parse_prefixed_fallback_provider/policy` 各层独立 transport/endpoint/policy；`ProviderSlot::Fallback` 本就
+  通过 Box 递归执行嵌套链（内层先恢复、外层不误触发）。新增 3 测试：单级不变、两级链形态、嵌套执行
+  落内层且外层保留 fallback_used=true。单测 56→59 绿。
+- **meta 修复**：嵌套链内层已降级时，外层不再把 `provider_fallback_used` 覆盖成 false，最终诊断
+  `fallback_used=true + fallback_from=<原始死 primary>`。
+- **真实验证**：故障注入 primary 挂 → 自动走 fallback1 回答正常；primary+fallback1 全挂 → 落到 fallback2
+  （gpt-5.4-mini）回答正常。
+- **配置**：config.toml（gitignore 本地配置）新增 fallback2_*；运行 env 两个入口
+  （chuang-feishu-bridge.env、~/.config/chuang-agent/provider.env）均加 `CHUANG_PROXY_STATIC_KEY`。
+
 # 2026-08-06 弱项闭环：治理规则分层注入 → 四项能力分全满
 
 - **发现**：`rules/core.md` 只用于工具动作拦截，从未注入模型上下文。benchmark 是问答型，

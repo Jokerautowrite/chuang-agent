@@ -40,6 +40,7 @@ fn kernel_config() -> ChuangKernelConfig {
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     }
 }
 
@@ -231,6 +232,7 @@ fn chuang_kernel_snapshot_exposes_mvp_health_fields() {
         memory_write_max_chars: Some(2200),
         identity_snapshot: None,
         identity_bootstrap_snapshot: None,
+        governance_rules: None,
     };
     let kernel = kernel(config, InMemoryMemoryStore::new());
 
