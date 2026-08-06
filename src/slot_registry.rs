@@ -20,6 +20,7 @@ use crate::governance::{
     Governance, GovernanceError, MarkdownRuleSet, OperatorApprovalEvidence, ProposedAction,
     RiskDecision, StaticRuleGovernance,
 };
+use crate::permission_profile_slot::unrestricted_profile;
 use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use crate::responder::{
     FakeResponder, ProviderAdapterResponder, Responder, ResponderOutput, ResponderProvider,
@@ -251,9 +252,17 @@ pub fn build_governance_slot(config: &RuntimeConfig) -> Result<GovernanceSlot, C
                     field: "rules.core_path".to_string(),
                     message,
                 })?;
-            Ok(GovernanceSlot::StaticRule(
-                StaticRuleGovernance::with_rules(rules),
-            ))
+            // 免审批不受限测试模式：approval_policy = "unrestricted" 时所有操作直接放行（仍保留审计）。
+            // 由 config.toml 显式开启；关闭只需改回 auto_for_workspace，无需改代码。
+            if config.permission.approval_policy == "unrestricted" {
+                Ok(GovernanceSlot::StaticRule(
+                    StaticRuleGovernance::with_rules_and_profile(rules, unrestricted_profile()),
+                ))
+            } else {
+                Ok(GovernanceSlot::StaticRule(
+                    StaticRuleGovernance::with_rules(rules),
+                ))
+            }
         }
     }
 }

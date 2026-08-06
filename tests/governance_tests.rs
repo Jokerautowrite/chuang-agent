@@ -3,6 +3,7 @@ use chuang_agent::governance::{
     ActionKind, Governance, MarkdownRuleSet, ProposedAction, RiskDecision, StaticRuleGovernance,
 };
 use chuang_agent::permission_profile_slot::safe_default_profile;
+use chuang_agent::permission_profile_slot::unrestricted_profile;
 
 fn action(kind: ActionKind, target: &str) -> ProposedAction {
     ProposedAction {
@@ -52,6 +53,31 @@ fn static_governance_requires_approval_for_external_or_destructive_actions() {
                 .unwrap(),
             RiskDecision::NeedsApproval { .. }
         ));
+    }
+}
+
+#[test]
+fn unrestricted_governance_allows_even_destructive_actions_without_approval() {
+    let governance = StaticRuleGovernance::with_profile(unrestricted_profile());
+
+    for kind in [
+        ActionKind::ExternalSend,
+        ActionKind::PublicPost,
+        ActionKind::Payment,
+        ActionKind::VerificationCodeInput,
+        ActionKind::DeleteOrCleanup,
+        ActionKind::PrivilegeEscalation,
+        ActionKind::ServiceChange,
+        ActionKind::NetworkChange,
+        ActionKind::SecretAccess,
+    ] {
+        let decision = governance
+            .classify(&action(kind.clone(), "explicit-target"))
+            .unwrap();
+        assert!(
+            matches!(decision, RiskDecision::Allowed { .. }),
+            "unrestricted mode should allow {kind:?}, got {decision:?}"
+        );
     }
 }
 

@@ -3152,3 +3152,17 @@
 # 2026-07-18 产品主色定稿：雷蛇绿
 - 主基调 Razer Green 写入 `src/brand_theme.rs`，TUI 全引用；文档 `docs/brand-color.md`。
 - 散落 RGB 收口；Figma 终稿只改 brand_theme 常量。
+
+# 2026-08-07 免审批不受限测试模式（approval_policy = "unrestricted"）
+- 背景：创反复"需要审批"死循环——模型承诺消费审批单但从不触发工具调用；且 shell 命令含 `rm -f` 触发高危审批。
+- 新增免审批不受限测试模式：`config.toml` 中 `approval_policy = "unrestricted"` 时所有操作直接放行（仍保留审计），关闭只需改回 `auto_for_workspace`，不涉及架构改动。
+- 实现：
+  - `permission_profile_slot.rs`：新增 `PermissionProfileId::Unrestricted` + `unrestricted_profile()`，`decide_descriptor_risk` 短路全 Allow。
+  - `governance/static_rule.rs`：新增 `with_rules_and_profile()` 组合构造。
+  - `slot_registry.rs`：`build_governance_slot` 按 approval_policy 注入 unrestricted 档案。
+  - `runtime_config.rs`：`validate()` 接受 `unrestricted`（原仅 `auto_for_workspace`）。
+  - `kernel_status.rs`：doctor/status 面板反映真实档案（unrestricted 时 dangerous_*=allowed 且 ok=true）。
+- 测试：lib 103 / bin 135 / app_server 26 全绿；新增 unrestricted 治理/档案/配置单测。
+- 验证：`chuang-agent doctor` 显示 `governance_decisions: read_only/dangerous_write/dangerous_shell/secret_shell=allowed`；app-server 冒烟 `approval_requested_count=0`，code_execute 直接执行。
+- 服务已重启：chuang-agent-app-server.service + chuang-feishu-bot.service。
+- 说明：残留 `.chuang/runtime/pending-approvals/*.json`（7 个历史审批单）未删除，unrestricted 模式下不再产生新审批单，旧文件无害留档。

@@ -483,6 +483,7 @@ pub struct GovernanceReadinessStatus {
     pub rule_count: usize,
     pub rules_fingerprint: String,
     pub tool_surface_governed: bool,
+    pub unrestricted: bool,
     pub read_only_decision: String,
     pub dangerous_write_decision: String,
     pub dangerous_shell_decision: String,
@@ -800,7 +801,12 @@ fn build_policy_tool_status_surface(
     config: &RuntimeConfig,
     ga_manifests: &[AtomicToolManifest],
 ) -> PolicyToolStatusSurface {
-    let profile = full_local_workspace_profile();
+    // 反映真实生效的治理档案：免审批不受限测试模式下显示 unrestricted。
+    let profile = if config.permission.approval_policy == "unrestricted" {
+        crate::permission_profile_slot::unrestricted_profile()
+    } else {
+        full_local_workspace_profile()
+    };
     let registry = default_tool_registry_slot();
     let mut ga_tool_descriptors = Vec::new();
     let mut ga_tool_descriptor_missing = Vec::new();
@@ -874,8 +880,13 @@ fn build_policy_tool_status_surface(
             config.permission.workspace_root.display()
         ),
         local_ga_default_decision: decision_label(profile.default_decision).to_string(),
-        local_ga_normal_local_action_default:
-            "file_write/code_execute/open_app/click/input=allow_with_audit".to_string(),
+        local_ga_normal_local_action_default: if profile.id
+            == crate::permission_profile_slot::PermissionProfileId::Unrestricted
+        {
+            "all=allow (unrestricted test mode)".to_string()
+        } else {
+            "file_write/code_execute/open_app/click/input=allow_with_audit".to_string()
+        },
         local_ga_high_risk_boundary_summary: high_risk_defaults.join(","),
         tool_descriptor_count: registry.descriptors.len(),
         ga_tool_descriptor_mapped_count: ga_tool_descriptors.len(),
@@ -3250,7 +3261,16 @@ fn governance_readiness_status(
     })?;
     let read_only_probe = governance_probe("read-only-status-probe", ActionKind::Observe);
     let rule_check = rules.check(&read_only_probe);
-    let governance = StaticRuleGovernance::with_rules(rules);
+    // 与 build_governance_slot 一致：approval_policy = "unrestricted" 时使用免审批不受限档案。
+    // 这里复用一个与真实运行时相同的构造，避免 doctor 与线上治理判定不一致。
+    let governance = if config.permission.approval_policy == "unrestricted" {
+        StaticRuleGovernance::with_rules_and_profile(
+            rules,
+            crate::permission_profile_slot::unrestricted_profile(),
+        )
+    } else {
+        StaticRuleGovernance::with_rules(rules)
+    };
     let read_only_decision = classify_probe(&governance, &read_only_probe)?;
     let dangerous_write_decision = classify_probe(
         &governance,
@@ -3265,17 +3285,28 @@ fn governance_readiness_status(
         &governance_probe("secret-shell-probe", ActionKind::SecretAccess),
     )?;
 
-    Ok(GovernanceReadinessStatus {
-        ok: read_only_decision == "allowed"
+    let unrestricted = config.permission.approval_policy == "unrestricted";
+    let ok = if unrestricted {
+        read_only_decision == "allowed"
+            && dangerous_write_decision == "allowed"
+            && dangerous_shell_decision == "allowed"
+            && secret_shell_decision == "allowed"
+    } else {
+        read_only_decision == "allowed"
             && dangerous_write_decision == "needs_approval"
             && dangerous_shell_decision == "needs_approval"
-            && secret_shell_decision == "needs_approval",
+            && secret_shell_decision == "needs_approval"
+    };
+
+    Ok(GovernanceReadinessStatus {
+        ok,
         kind: config.governance.kind().to_string(),
         rules_loaded: true,
         rules_core_path: config.rules.core_path.display().to_string(),
         rule_count: rule_check.rule_count,
         rules_fingerprint: rule_check.fingerprint,
         tool_surface_governed: true,
+        unrestricted,
         read_only_decision,
         dangerous_write_decision,
         dangerous_shell_decision,

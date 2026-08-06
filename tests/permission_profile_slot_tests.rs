@@ -1,7 +1,7 @@
 use chuang_agent::permission_profile_slot::{
     classify_tag, decide_descriptor_risk, decide_tag, full_local_workspace_profile,
-    local_ga_profile, safe_default_profile, PermissionDecision, PermissionProfileId, PermissionTag,
-    ToolDescriptorRisk,
+    local_ga_profile, safe_default_profile, unrestricted_profile, PermissionDecision,
+    PermissionProfileId, PermissionTag, ToolDescriptorRisk,
 };
 
 fn descriptor<'a>(
@@ -236,4 +236,41 @@ fn classify_tag_accepts_stable_aliases_and_rejects_unknown_tags() {
         Some(PermissionTag::ServiceControl)
     );
     assert_eq!(classify_tag("not_a_real_risk_tag"), None);
+}
+
+#[test]
+fn unrestricted_profile_allows_every_descriptor_including_destructive() {
+    let profile = unrestricted_profile();
+    assert_eq!(profile.id, PermissionProfileId::Unrestricted);
+    assert_eq!(profile.name, "unrestricted");
+
+    for raw in [
+        "delete",
+        "payment",
+        "external_send",
+        "privilege_escalation",
+        "secret_access",
+    ] {
+        let tag = classify_tag(raw).expect("tag should classify");
+        assert!(matches!(
+            decide_tag(&profile, tag).decision,
+            PermissionDecision::Allow
+        ));
+    }
+
+    // 即使描述符同时标记 destructive + external_commit + requires_approval，unrestricted 仍直接 Allow。
+    let decision = decide_descriptor_risk(
+        &profile,
+        &descriptor(
+            "destructive-any",
+            &["delete", "payment"],
+            false,
+            true,
+            true,
+            true,
+            true,
+        ),
+    );
+    assert_eq!(decision.profile, PermissionProfileId::Unrestricted);
+    assert!(matches!(decision.decision, PermissionDecision::Allow));
 }

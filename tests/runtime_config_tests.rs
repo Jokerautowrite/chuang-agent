@@ -59,6 +59,26 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
 }
 
 #[test]
+fn runtime_config_accepts_unrestricted_approval_policy() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.permission.approval_policy = "unrestricted".to_string();
+
+    config.validate().expect("unrestricted policy should validate");
+    assert_eq!(config.summary().approval_policy, "unrestricted");
+}
+
+#[test]
+fn runtime_config_rejects_unknown_approval_policy() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.permission.approval_policy = "bogus".to_string();
+
+    let err = config
+        .validate()
+        .expect_err("bogus approval policy should be rejected");
+    assert_eq!(err.field, "permission.approval_policy");
+}
+
+#[test]
 fn subagent_live_worker_config_is_status_only_and_never_available_by_default() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.subagent_live_worker = SubagentLiveWorkerConfig {

@@ -49,6 +49,18 @@ impl StaticRuleGovernance {
         }
     }
 
+    pub fn with_rules_and_profile(
+        rules: MarkdownRuleSet,
+        permission_profile: PermissionProfile,
+    ) -> Self {
+        Self {
+            audit_records: Vec::new(),
+            rules: Some(rules),
+            operator_approvals: BTreeSet::new(),
+            permission_profile,
+        }
+    }
+
     pub fn audit_records(&self) -> &[AuditRecord] {
         &self.audit_records
     }

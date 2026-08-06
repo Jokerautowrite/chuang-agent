@@ -5,6 +5,9 @@ pub enum PermissionProfileId {
     FullLocalWorkspace,
     LocalGa,
     SafeDefault,
+    /// 免审批不受限测试模式：所有操作直接放行（仍保留审计）。
+    /// 仅当 approval_policy = "unrestricted" 时启用；默认关闭。
+    Unrestricted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,6 +308,15 @@ pub fn safe_default_profile() -> PermissionProfile {
     }
 }
 
+pub fn unrestricted_profile() -> PermissionProfile {
+    PermissionProfile {
+        id: PermissionProfileId::Unrestricted,
+        name: "unrestricted",
+        rules: &[],
+        default_decision: PermissionDecision::Allow,
+    }
+}
+
 pub fn classify_tag(raw: &str) -> Option<PermissionTag> {
     let normalized = raw.trim().to_ascii_lowercase().replace(['-', ' '], "_");
     match normalized.as_str() {
@@ -361,6 +373,17 @@ pub fn decide_descriptor_risk(
     profile: &PermissionProfile,
     descriptor: &ToolDescriptorRisk<'_>,
 ) -> PermissionRiskDecision {
+    if profile.id == PermissionProfileId::Unrestricted {
+        return PermissionRiskDecision {
+            profile: profile.id,
+            decision: PermissionDecision::Allow,
+            matched_tag: None,
+            reason: format!(
+                "profile={} unrestricted mode: all actions allowed with audit",
+                profile.name
+            ),
+        };
+    }
     let mut best: Option<PermissionRiskDecision> = None;
     for raw_tag in descriptor.risk_tags {
         if let Some(tag) = classify_tag(raw_tag) {

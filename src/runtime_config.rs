@@ -345,10 +345,13 @@ impl RuntimeConfig {
                 message: "permission profile must be full_local_workspace".to_string(),
             });
         }
-        if self.permission.approval_policy != "auto_for_workspace" {
+        if !matches!(
+            self.permission.approval_policy.as_str(),
+            "auto_for_workspace" | "unrestricted"
+        ) {
             return Err(ConfigError {
                 field: "permission.approval_policy".to_string(),
-                message: "approval policy must be auto_for_workspace".to_string(),
+                message: "approval policy must be auto_for_workspace or unrestricted".to_string(),
             });
         }
         if self.permission.workspace_root.as_os_str().is_empty() {
