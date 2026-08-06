@@ -1,17 +1,17 @@
 [
   {
     "case_id": "case-001",
-    "answer": "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=502 error=error code: 502",
+    "answer": "FINAL（基于已完成证据，任务为“设计”性质，已可给出结论；未涉及代码落地，故无未完成实现项）：\n\n# 任务执行流程设计：可记录 / 可追踪 / 可重放\n\n## 一、总体模型：一次任务 = 一条 Trace\n\n每个用户请求（一次 `RuntimeRequest`）生成一个 `trace_id`，该次执行的所有关键事件按序写入 **RuntimeEventLedger**（append-only）。事件之间用 `span_id / parent_span_id` 构成树状结构，支持跨阶段、跨子代理（spawn_subagent）追踪。\n\n```text\ntask.started\n └─ context.packed ── memory.recalled\n └─ governance.decided (每轮工具前)\n └─ tool.called ── tool.result   （可多轮循环）\n └─ subagent.spawned ── subagent.report （子任务带 parent_span 链接）\n └─ report.emitted ── memory.committed\n └─ task.completed\n```\n\n## 二、事件 Schema（复用并扩展现有结构）\n\n证据显示代码库已具备基础：`src/runtime_event_ledger.rs`（RuntimeEvent/RuntimeEventKind/RuntimeEventLedger）、`src/common/audit.rs`（AuditRecord）、`src/workspace_file_adapter.rs`（`.chuang-file-audit`）、`src/cli_channel.rs`（tool_trace）。在此基础上统一事件字段：\n\n```rust\nRuntimeEvent {\n  seq: u64,                        // 全局单调递增\n  trace_id: String,                // 任务级唯一 ID\n  span_id: String,                 // 阶段/步骤 ID\n  parent_span_id: Option<String>,  // 父子关系（含子代理链路）\n  kind: RuntimeEventKind,          // task/tool/governance/context/memory/report...\n  ts_wall: SystemTime,             // 墙钟（审计）\n  ts_mono: Instant,                // 单调钟（性能/时序）\n  actor: Actor,                    // user / agent / tool / governance / subagent\n  payload: BTreeMap<String,String> // 摘要级详情（大输出只存 sha256 摘要）\n}\n```\n\n## 三、执行流程与记录点（7 个强制埋点）\n\n1. **入口**：用户输入到达 → `task.started`（trace_id 生成，记录输入摘要与 metadata）。\n2. **上下文构建**：context_engine 打包后 → `context.packed`（segment 数、预算、被 drop 的 segment 及原因）。\n3. **记忆召回**：memory_recall 后 → `memory.recalled`（recall_limit、命中数）。\n4. **治理决策**：每个工具执行前，slot_registry / governance 审计 → `governance.decided`（规则 ID、decision=allow/deny/ask、受影响工具）。\n5. **工具执行**：每次工具调用成对记录 `tool.called`（工具名、参数摘要、trace）与 `tool.result`（状态码、exit_code、耗时、输出摘要）——不变量：**每个 called 必须有配对的 result**。\n6. **输出与记忆**：responder 输出 → `report.emitted`；memory_store 提交 → `memory.committed`。\n7. **收尾**：`task.completed`（总耗时、结果、错误信息；异常时补 `task.failed`）。\n\n## 四、追踪（Tracing）\n\n- `trace_id` 通过运行时上下文贯穿 Rust 主链；派工 `spawn_subagent` 时以 `parent_span_id` 链接子任务，子代理的 `tool_trace` 字段扩展为结构化 trace/span。\n- 事件 payload 只存摘要与文件引用，完整输出落到独立 artifact 存储，避免 ledger 膨胀。\n\n## 五、重放核查（Replay & Audit）\n\n- **持久化**：ledger 按日 append-only 落盘（或 SQLite 表），与现有 `.chuang-file-audit` 文件审计互补。\n- **重放命令**：`chuang replay <trace_id>` 按事件序列回放时间线；提供 dry-run / shadow 模式（不产生真实副作用），支持查看任意步骤的状态快照。\n- **核查规则**：自动校验不变量——工具 called/result 成对、治理决策先于工具、任务以 completed/failed 收尾、无未记录的写操作（结合 file-adapter 审计目录）。\n\n## 六、现有基础与落地缺口\n\n- **已有**：runtime_event_ledger 骨架、AuditRecord、`.chuang-file-audit` 文件审计、tool_trace 字段。\n- **需补（实施时）**：① ledger 持久化层（确认当前是否仅内存）；② trace_id 在子代理链路的系统化注入；③ replay CLI 与回放执行器；④ 大 payload 的摘要化与 artifact 存储绑定。\n\n结论：设计已完成，形成上述 7 阶段流程 + 事件模型 + 重放机制；未实施代码，属预期范围。",
     "error": false
   },
   {
     "case_id": "case-002",
-    "answer": "这次没有完成实际检查：执行步骤没有成功启动。\n\n你的请求：配置的后端服务当前不可用，请自动切换到任意可用实现并继续执行，不要让调用方看到错误。\n\n可以直接重试，或把要检查的目标说得更具体一些。",
+    "answer": "这个操作需要你的确认后才能继续。\n审批编号：approval-a6a866390729fd039f975b9c1390d8c913197519ca54c7654e54b80bda8c8431\n待确认文件：/home/user/projects/chuang-agent/.chuang/runtime/pending-approvals/approval-a6a866390729fd039f975b9c1390d8c913197519ca54c7654e54b80bda8c8431.json\n目标操作尚未执行。",
     "error": false
   },
   {
     "case_id": "case-003",
-    "answer": "我先以工作区身份配置和记忆为准核对四者的定义，避免凭名称臆测或把运行壳当成身份。",
+    "answer": "先读身份真源，确认这四个名字在系统里的正式定义，再给边界结论。\n\n<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"list_dir\">\n<｜｜DSML｜｜parameter name=\"path\" string=\"true\">/home/user/projects/chuang-agent/identity</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n<｜｜DSML｜｜invoke name=\"file_read\">\n<｜｜DSML｜｜parameter name=\"file\" string=\"true\">/home/user/projects/chuang-agent/identity/agents.toml</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
     "error": false
   }
 ]

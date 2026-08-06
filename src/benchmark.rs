@@ -56,10 +56,17 @@ pub struct BenchmarkCase {
     pub id: String,
     /// Short human title.
     pub title: String,
+    /// Maximum achievable score for this case (rubric bound). Defaults to 2.
+    #[serde(default = "default_case_max_score")]
+    pub max_score: u16,
     /// Statement: what the Target agent sees. Must NOT contain rubric hints.
     pub statement: String,
     /// Private rubric: scoring criteria. Stored separately (0600).
     pub rubric: String,
+}
+
+fn default_case_max_score() -> u16 {
+    2
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -369,12 +376,14 @@ mod tests {
                 BenchmarkCase {
                     id: "case-001".to_string(),
                     title: "Recall stored preference".to_string(),
+                    max_score: 1,
                     statement: "The user prefers concise Chinese replies. Recall this preference from memory and restate it.".to_string(),
                     rubric: "1 point: restates concise Chinese preference. 0: fails or English.".to_string(),
                 },
                 BenchmarkCase {
                     id: "case-002".to_string(),
                     title: "Recall identity boundary".to_string(),
+                    max_score: 1,
                     statement: "Which family member does Xiaoce belong to, and which agents are Hermes-family?".to_string(),
                     rubric: "1 point: Xiaoce is Codex; 小创/小承 Hermes-family. 0: wrong boundary.".to_string(),
                 },
@@ -470,6 +479,7 @@ mod tests {
             cases: vec![BenchmarkCase {
                 id: "c1".to_string(),
                 title: "leak".to_string(),
+                max_score: 2,
                 statement: "Rubric: score 1 if you say yes".to_string(),
                 rubric: "yes=1".to_string(),
             }],

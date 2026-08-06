@@ -23,6 +23,7 @@ use tokio::time::timeout;
 use crate::responder::{
     ProviderAdapterResponder, ProviderAdapterResponse, ProviderIdentity, ResponderRequest,
 };
+use crate::runtime_config::ProviderApiEndpoint;
 
 const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
@@ -159,6 +160,7 @@ pub struct OpenAICompatibleProviderAdapter {
     base_url: String,
     api_key: String,
     transport: ProviderTransport,
+    endpoint: ProviderApiEndpoint,
     reasoning_effort: Option<ReasoningEffort>,
     max_output_tokens: Option<u32>,
     request_timeout_ms: u64,
@@ -180,6 +182,7 @@ impl OpenAICompatibleProviderAdapter {
             base_url: base_url.into(),
             api_key: api_key.into(),
             transport: ProviderTransport::Stub,
+            endpoint: ProviderApiEndpoint::default(),
             reasoning_effort: None,
             max_output_tokens: None,
             request_timeout_ms: DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
@@ -189,6 +192,11 @@ impl OpenAICompatibleProviderAdapter {
 
     pub fn with_transport(mut self, transport: ProviderTransport) -> Self {
         self.transport = transport;
+        self
+    }
+
+    pub fn with_endpoint(mut self, endpoint: ProviderApiEndpoint) -> Self {
+        self.endpoint = endpoint;
         self
     }
 
@@ -235,7 +243,6 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<OpenAICompatibleRequestEnvelope, ProviderConfigError> {
         self.validate_config()?;
-
         Ok(OpenAICompatibleRequestEnvelope {
             provider_id: self.identity.provider_id.clone(),
             base_url: self.base_url.clone(),
@@ -252,19 +259,50 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpRequestPreview, ProviderConfigError> {
         let envelope = self.build_request_envelope(request)?;
-        let url = format!("{}/responses", envelope.base_url.trim_end_matches('/'),);
-        let mut body = json!({
-            "model": envelope.model,
-            "instructions": envelope.instructions,
-            "input": envelope.input,
-            "store": envelope.store,
-        });
-        if let Some(reasoning_effort) = self.reasoning_effort {
-            body["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
-        }
-        if let Some(max_output_tokens) = envelope.max_output_tokens {
-            body["max_output_tokens"] = json!(max_output_tokens);
-        }
+        let (url, body) = match self.endpoint {
+            ProviderApiEndpoint::Responses => {
+                let url = format!("{}/responses", envelope.base_url.trim_end_matches('/'),);
+                let mut body = json!({
+                    "model": envelope.model,
+                    "instructions": envelope.instructions,
+                    "input": envelope.input,
+                    "store": envelope.store,
+                });
+                if let Some(reasoning_effort) = self.reasoning_effort {
+                    body["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
+                }
+                if let Some(max_output_tokens) = envelope.max_output_tokens {
+                    body["max_output_tokens"] = json!(max_output_tokens);
+                }
+                (url, body)
+            }
+            ProviderApiEndpoint::ChatCompletions => {
+                let url = format!(
+                    "{}/chat/completions",
+                    envelope.base_url.trim_end_matches('/'),
+                );
+                let mut body = json!({
+                    "model": envelope.model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": envelope.instructions,
+                        },
+                        {
+                            "role": "user",
+                            "content": envelope.input,
+                        }
+                    ],
+                });
+                if let Some(reasoning_effort) = self.reasoning_effort {
+                    body["reasoning"] = json!({ "effort": reasoning_effort.as_str() });
+                }
+                if let Some(max_output_tokens) = envelope.max_output_tokens {
+                    body["max_tokens"] = json!(max_output_tokens);
+                }
+                (url, body)
+            }
+        };
         let body_json = body.to_string();
 
         Ok(HttpRequestPreview {

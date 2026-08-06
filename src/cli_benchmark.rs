@@ -5,9 +5,10 @@ use chuang_agent::benchmark::{
     BenchmarkDef, BenchmarkRunRequest, BenchmarkStore, CaseScore,
 };
 use chuang_agent::benchmark_evaluator::{BenchmarkEvaluator, CaseAnswer, EvaluateRequest};
-use chuang_agent::runtime_config::{OpenAICompatibleConfig, RuntimeConfig};
+use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
 use chuang_agent::runtime_config_file::load_runtime_config_file;
 use chuang_agent::self_experiment::{ExperimentRequest, SelfExperimentPlanner};
+use chuang_agent::slot_registry::build_provider_responder;
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
 
@@ -346,7 +347,7 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
 
     let runtime: RuntimeConfig = load_runtime_config_file(&config_path)
         .map_err(|e| format!("cannot load config {}: {e:?}", config_path.display()))?;
-    let provider = match provider_override {
+    let provider_slot = match provider_override {
         Some((base_url, api_key, model_name, provider_id)) => {
             let base = if base_url.is_empty() {
                 provider_base_url(&runtime)
@@ -368,22 +369,24 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
             } else {
                 provider_id
             };
-            OpenAICompatibleConfig {
+            let config = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {
                 provider_id: pid,
                 base_url: base,
                 api_key: key,
                 model_name: model,
                 transport: provider_transport(&runtime),
+                endpoint: Default::default(),
                 reasoning_effort: None,
                 request_timeout_ms: None,
                 tls_ca_cert_path: None,
-            }
+            });
+            build_provider_responder(&config).map_err(|e| e.message)?
         }
-        None => provider_from_runtime(&runtime)?,
+        None => build_provider_responder(&runtime.provider).map_err(|e| e.message)?,
     };
 
     let store = BenchmarkStore::new(&root);
-    let evaluator = BenchmarkEvaluator::new(store.clone(), provider);
+    let evaluator = BenchmarkEvaluator::new(store.clone(), provider_slot);
     let receipt = evaluator.evaluate(&EvaluateRequest {
         benchmark_id: benchmark_id.clone(),
         answers,

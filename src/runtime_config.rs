@@ -55,9 +55,56 @@ pub struct OpenAICompatibleConfig {
     pub api_key: String,
     pub model_name: String,
     pub transport: ProviderTransport,
+    /// API endpoint shape used for this provider. `Responses` matches the
+    /// OpenAI Responses API (`/responses`); `ChatCompletions` matches the
+    /// classic chat-completions API (`/chat/completions`) used by most
+    /// OpenAI-compatible gateways (e.g. example-provider / ccswitch for
+    /// deepseek-v4-flash). Defaults to Responses for backwards compatibility.
+    pub endpoint: ProviderApiEndpoint,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub request_timeout_ms: Option<u64>,
     pub tls_ca_cert_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderApiEndpoint {
+    Responses,
+    ChatCompletions,
+}
+
+impl ProviderApiEndpoint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+            Self::ChatCompletions => "chat_completions",
+        }
+    }
+}
+
+impl Default for ProviderApiEndpoint {
+    fn default() -> Self {
+        Self::Responses
+    }
+}
+
+impl std::str::FromStr for ProviderApiEndpoint {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "responses" | "openai_responses" => Ok(Self::Responses),
+            "chat_completions" | "chat" | "chatcompletions" => Ok(Self::ChatCompletions),
+            other => Err(format!(
+                "unsupported provider endpoint: {other} (supported: responses, chat_completions)"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for ProviderApiEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

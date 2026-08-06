@@ -18,7 +18,8 @@ use crate::governance::{
 };
 use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use crate::responder::{
-    FakeResponder, Responder, ResponderOutput, ResponderProvider, ResponderRequest,
+    FakeResponder, ProviderAdapterResponder, Responder, ResponderOutput, ResponderProvider,
+    ResponderRequest,
 };
 use crate::runtime_config::{
     ActuatorConfig, ConfigError, ControlPlaneConfig, EvolutionConfig, GovernanceConfig,
@@ -56,6 +57,24 @@ pub enum ProviderSlot {
         fallback: Box<ProviderSlot>,
         policy: ProviderFallbackPolicy,
     },
+}
+
+impl ProviderSlot {
+    pub fn provider_name(&self) -> String {
+        match self {
+            Self::Fake(responder) => responder.provider().provider_id,
+            Self::OpenAICompatible(responder) => responder.identity().provider_id,
+            Self::Fallback { primary, .. } => primary.provider_name(),
+        }
+    }
+
+    pub fn model_name(&self) -> String {
+        match self {
+            Self::Fake(responder) => responder.provider().model_name,
+            Self::OpenAICompatible(responder) => responder.identity().model_name,
+            Self::Fallback { primary, .. } => primary.model_name(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +164,7 @@ pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot,
                 config.model_name.clone(),
             )
             .with_transport(config.transport.clone())
+            .with_endpoint(config.endpoint)
             .with_reasoning_effort(config.reasoning_effort)
             .with_request_timeout_ms(config.request_timeout_ms.unwrap_or(60_000))
             .with_tls_ca_cert_path(config.tls_ca_cert_path.clone()),

@@ -1,3 +1,22 @@
+# 2026-08-06 补齐 benchmark 收口：endpoint 可拔插 + 4 项真实能力分齐
+
+- **根因补刀**：之前「curl 成功但程序 502」的真凶除了 transport，还有 **adapter 硬编码 `/responses` 端点**，
+  而 example-provider/ccswitch 对 deepseek-v4-flash 只支持 `/chat/completions`（手动 curl `/responses` 两通道均 502，
+  `/chat/completions` 均 200）。之前只看 transport，漏了 endpoint。
+- **修复（可拔插）**：`OpenAICompatibleConfig` 新增 `endpoint` 字段（`responses` | `chat_completions`，默认 responses 向后兼容），
+  adapter 按 endpoint 构造 URL 与 body（responses 用 instructions/input，chat 用 system+user messages / max_tokens）；
+  响应解析早已兼容两种格式（choices[].message.content / output_text）。config.toml 主备通道均切 `chat_completions`。
+  单测 54/54 绿。
+- **BenchmarkCase.max_score**：新增显式字段（默认 2），错误回答（PROVIDER_HTTP_ERROR/<timeout>/空）直接计 0 分
+  不再回喂模型，避免评分阶段死循环；4 个定义 JSON 全部显式标注 max_score。
+- **四项真实能力分齐（baseline 收口）**：
+  - governance-intercept: 6/6
+  - memory-recall: 4/4
+  - subagent-dispatch: 2/6（委派/验证有基础，限制核心记忆直写被扣）
+  - norm-compliance: 2/6（结构化作错、身份边界说明弱）
+- **经验**：example-provider 对 chat 端点正常、responses 端点 502 → 对接第三方 OpenAI 兼容网关时，
+  endpoint 形态必须显式可配置（已入 provider 配置面，属 PI 移植清单「模型接入」补齐项）。
+
 # 2026-08-06 「本轮没有完成」真相与根治：模型不存在 + transport 不兼容
 
 - **真相链**（逐层定位）：

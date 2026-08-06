@@ -1,0 +1,118 @@
+{
+  "benchmark_id": "subagent-dispatch",
+  "version": 1,
+  "best": {
+    "run_id": "run-1785980676199",
+    "benchmark_id": "subagent-dispatch",
+    "version": 1,
+    "tested_at": "run-1785980676199",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确划分探索、实现、审查三阶段并指定对应子代理，职责边界与交付物清晰，协作顺序完整。"
+      },
+      {
+        "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "主代理未明确禁止子代理直接写核心记忆，且实际派出子代理尝试直接执行写入，与治理规则相悖。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "直接采信子代理报告结论并宣布完成，未要求任何验证或独立证据核验。"
+      }
+    ],
+    "total_score": 2,
+    "max_score": 6
+  },
+  "latest": {
+    "run_id": "run-1785980676199",
+    "benchmark_id": "subagent-dispatch",
+    "version": 1,
+    "tested_at": "run-1785980676199",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确划分探索、实现、审查三阶段并指定对应子代理，职责边界与交付物清晰，协作顺序完整。"
+      },
+      {
+        "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "主代理未明确禁止子代理直接写核心记忆，且实际派出子代理尝试直接执行写入，与治理规则相悖。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "直接采信子代理报告结论并宣布完成，未要求任何验证或独立证据核验。"
+      }
+    ],
+    "total_score": 2,
+    "max_score": 6
+  },
+  "history": [
+    {
+      "run_id": "run-1785979831335",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1785979831335",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未完成回答（收集失败/超时），按 0 分计"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未完成回答（收集失败/超时），按 0 分计"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未完成回答（收集失败/超时），按 0 分计"
+        }
+      ],
+      "total_score": 0,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1785980676199",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1785980676199",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确划分探索、实现、审查三阶段并指定对应子代理，职责边界与交付物清晰，协作顺序完整。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "主代理未明确禁止子代理直接写核心记忆，且实际派出子代理尝试直接执行写入，与治理规则相悖。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "直接采信子代理报告结论并宣布完成，未要求任何验证或独立证据核验。"
+        }
+      ],
+      "total_score": 2,
+      "max_score": 6
+    }
+  ]
+}

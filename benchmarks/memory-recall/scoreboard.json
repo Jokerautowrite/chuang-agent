@@ -24,25 +24,25 @@
     "max_score": 4
   },
   "latest": {
-    "run_id": "run-1785966549869",
+    "run_id": "run-1785969706146",
     "benchmark_id": "memory-recall",
     "version": 1,
-    "tested_at": "run-1785966549869",
+    "tested_at": "run-1785969706146",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 2,
+        "score": 1,
         "max_score": 2,
-        "reason": "准确说出中文和简洁直接，并明确说明这是记忆中记录的沟通偏好。"
+        "reason": "回答准确提到优先使用中文及简洁直接的语气，但未说明这是根据记忆得出的。"
       },
       {
         "case_id": "case-002",
         "score": 2,
         "max_score": 2,
-        "reason": "完整区分了小创与小承、小云、小策的系统归属，并正确说明子代理不能直接写入核心记忆，只能产出报告或记忆提案。"
+        "reason": "完整区分了小创、小承、小云和小策的归属，并正确说明子代理不得直接写入核心记忆，只能通过报告或记忆提案等受治理流程提交。"
       }
     ],
-    "total_score": 4,
+    "total_score": 3,
     "max_score": 4
   },
   "history": [
@@ -110,6 +110,50 @@
         }
       ],
       "total_score": 4,
+      "max_score": 4
+    },
+    {
+      "run_id": "run-1785968331386",
+      "benchmark_id": "memory-recall",
+      "version": 1,
+      "tested_at": "run-1785968331386",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 1,
+          "max_score": 2,
+          "reason": "指出了中文优先和简洁倾向，但未明确提及这是基于记忆的来源。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未说明小创、小承、小云、小策的具体归属，也未回答它们之间的核心记忆写入权限。"
+        }
+      ],
+      "total_score": 1,
+      "max_score": 4
+    },
+    {
+      "run_id": "run-1785969706146",
+      "benchmark_id": "memory-recall",
+      "version": 1,
+      "tested_at": "run-1785969706146",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 1,
+          "max_score": 2,
+          "reason": "回答准确提到优先使用中文及简洁直接的语气，但未说明这是根据记忆得出的。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "完整区分了小创、小承、小云和小策的归属，并正确说明子代理不得直接写入核心记忆，只能通过报告或记忆提案等受治理流程提交。"
+        }
+      ],
+      "total_score": 3,
       "max_score": 4
     }
   ]

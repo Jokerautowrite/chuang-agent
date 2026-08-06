@@ -7,9 +7,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkCase, BenchmarkStore, CaseScore};
-use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
-use crate::responder::{ProviderAdapterResponder, ResponderRequest};
-use crate::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
+use crate::responder::{Responder, ResponderRequest};
+use crate::runtime_config::{ProviderConfig, RuntimeConfig};
+use crate::slot_registry::{build_provider_responder, ProviderSlot};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaseAnswer {
@@ -46,12 +46,15 @@ pub struct EvaluateReceipt {
 
 pub struct BenchmarkEvaluator {
     store: BenchmarkStore,
-    provider: OpenAICompatibleConfig,
+    provider_slot: ProviderSlot,
 }
 
 impl BenchmarkEvaluator {
-    pub fn new(store: BenchmarkStore, provider: OpenAICompatibleConfig) -> Self {
-        Self { store, provider }
+    pub fn new(store: BenchmarkStore, provider_slot: ProviderSlot) -> Self {
+        Self {
+            store,
+            provider_slot,
+        }
     }
 
     /// Build an evaluator from the active runtime config. Fails when the
@@ -60,19 +63,15 @@ impl BenchmarkEvaluator {
         store: BenchmarkStore,
         runtime: &RuntimeConfig,
     ) -> Result<Self, String> {
-        match &runtime.provider {
-            ProviderConfig::OpenAICompatible(config) => Ok(Self::new(store, config.clone())),
-            ProviderConfig::Fake { provider_id, .. } => Err(format!(
-                "provider={provider_id} is a fake test responder; configure openai_compatible for real evaluation"
-            )),
-            ProviderConfig::Fallback { primary, .. } => match primary.as_ref() {
-                ProviderConfig::OpenAICompatible(config) => Ok(Self::new(store, config.clone())),
-                other => Err(format!(
-                    "provider fallback primary is {:?}; openai_compatible required for evaluation",
-                    other.kind_name()
-                )),
-            },
+        if matches!(runtime.provider, ProviderConfig::Fake { .. }) {
+            return Err(
+                "provider=fake is a local test responder; configure a real provider for evaluation"
+                    .to_string(),
+            );
         }
+        let slot = build_provider_responder(&runtime.provider)
+            .map_err(|e| format!("provider slot build failed: {}", e.message))?;
+        Ok(Self::new(store, slot))
     }
 
     pub fn evaluate(&self, request: &EvaluateRequest) -> Result<EvaluateReceipt, String> {
@@ -87,17 +86,6 @@ impl BenchmarkEvaluator {
             }
         }
 
-        let adapter = OpenAICompatibleProviderAdapter::new(
-            &self.provider.provider_id,
-            &self.provider.base_url,
-            &self.provider.api_key,
-            &self.provider.model_name,
-        )
-        .with_transport(self.provider.transport.clone())
-        .with_reasoning_effort(self.provider.reasoning_effort.clone())
-        .with_max_output_tokens(Some(512))
-        .with_request_timeout_ms(self.provider.request_timeout_ms.unwrap_or(120_000));
-
         let mut case_scores = Vec::new();
         let mut raw = Vec::new();
         for case in &def.cases {
@@ -108,8 +96,35 @@ impl BenchmarkEvaluator {
                 .store
                 .read_rubric(&request.benchmark_id, &case.id)
                 .map_err(|e| e.to_string())?;
+
+            // Answers that failed to collect (provider error / timeout) are not
+            // fed back to the model: they would re-trigger the same gateway
+            // error and would not represent a real answer anyway. Score 0.
+            let answer_text = answer.trim();
+            let is_error_answer = answer_text.is_empty()
+                || answer_text.starts_with("PROVIDER_HTTP_ERROR")
+                || answer_text.starts_with("<timeout>")
+                || answer_text.starts_with("<collect_error>")
+                || answer_text.starts_with("<parse_error>");
+            if is_error_answer {
+                case_scores.push(CaseScore {
+                    case_id: case.id.clone(),
+                    score: 0,
+                    max_score: case.max_score,
+                    reason: "未完成回答（收集失败/超时），按 0 分计".to_string(),
+                });
+                raw.push(RawCaseEvaluation {
+                    case_id: case.id.clone(),
+                    prompt: format!("<skipped: error answer>"),
+                    model_output: answer_text.to_string(),
+                    parsed: false,
+                    parse_error: Some("error_answer_skipped".to_string()),
+                });
+                continue;
+            }
+
             let instructions = build_evaluation_instructions(case, &rubric);
-            let prompt = format!("{instructions}\n【被测回答】\n{}", answer.trim());
+            let prompt = format!("{instructions}\n【被测回答】\n{answer_text}");
 
             if request.dry_run {
                 raw.push(RawCaseEvaluation {
@@ -122,12 +137,12 @@ impl BenchmarkEvaluator {
                 continue;
             }
 
-            let output = adapter.respond(&ResponderRequest {
+            let output = self.provider_slot.generate(&ResponderRequest {
                 prompt: instructions.clone(),
-                user_input: if answer.trim().is_empty() {
+                user_input: if answer_text.is_empty() {
                     "（空回答）".to_string()
                 } else {
-                    answer.trim().to_string()
+                    answer_text.to_string()
                 },
                 recall_hit_count: 0,
             });
@@ -148,7 +163,25 @@ impl BenchmarkEvaluator {
 
             match parse_case_score(&model_output) {
                 Ok(parsed) => {
-                    if parsed.score > parsed.max_score {
+                    if parsed.max_score != case.max_score {
+                        // Trust the case definition as the rubric bound.
+                        if parsed.score > case.max_score {
+                            raw.push(RawCaseEvaluation {
+                                case_id: case.id.clone(),
+                                prompt,
+                                model_output: model_output.clone(),
+                                parsed: false,
+                                parse_error: Some(format!(
+                                    "score {} exceeds case max {}",
+                                    parsed.score, case.max_score
+                                )),
+                            });
+                            return Err(format!(
+                                "evaluator returned invalid score for case {}: score {} > max {}",
+                                case.id, parsed.score, case.max_score
+                            ));
+                        }
+                    } else if parsed.score > parsed.max_score {
                         raw.push(RawCaseEvaluation {
                             case_id: case.id.clone(),
                             prompt,
@@ -164,12 +197,12 @@ impl BenchmarkEvaluator {
                             case.id, parsed.score, parsed.max_score
                         ));
                     }
-                    case_scores.push(CaseScore {
-                        case_id: case.id.clone(),
-                        score: parsed.score,
-                        max_score: parsed.max_score,
-                        reason: parsed.reason,
-                    });
+                        case_scores.push(CaseScore {
+                            case_id: case.id.clone(),
+                            score: parsed.score,
+                            max_score: case.max_score,
+                            reason: parsed.reason,
+                        });
                     raw.push(RawCaseEvaluation {
                         case_id: case.id.clone(),
                         prompt,
@@ -196,8 +229,8 @@ impl BenchmarkEvaluator {
 
         Ok(EvaluateReceipt {
             benchmark_id: request.benchmark_id.clone(),
-            provider_id: self.provider.provider_id.clone(),
-            model_name: self.provider.model_name.clone(),
+            provider_id: self.provider_slot.provider_name(),
+            model_name: self.provider_slot.model_name(),
             evaluated_case_count: case_scores.len(),
             case_scores,
             raw,
@@ -278,20 +311,6 @@ pub fn parse_case_score(output: &str) -> Result<ParsedCaseScore, String> {
     })
 }
 
-trait ProviderConfigKindName {
-    fn kind_name(&self) -> &'static str;
-}
-
-impl ProviderConfigKindName for ProviderConfig {
-    fn kind_name(&self) -> &'static str {
-        match self {
-            ProviderConfig::Fake { .. } => "fake",
-            ProviderConfig::OpenAICompatible(_) => "openai_compatible",
-            ProviderConfig::Fallback { .. } => "fallback",
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +319,7 @@ mod tests {
         BenchmarkCase {
             id: "case-001".to_string(),
             title: "test".to_string(),
+            max_score: 2,
             statement: "召回用户偏好".to_string(),
             rubric: "2分：准确；0分：错误".to_string(),
         }

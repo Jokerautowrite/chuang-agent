@@ -8,8 +8,8 @@ use crate::provider_openai_compatible::{ProviderTransport, ReasoningEffort};
 use crate::runtime_config::{
     ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
     ControlPlaneConfig, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
-    ProviderConfig, ProviderFallbackPolicy, RulesConfig, RuntimeConfig, SubagentConfig,
-    SubagentLiveWorkerConfig, SubagentQueueConfig,
+    ProviderApiEndpoint, ProviderConfig, ProviderFallbackPolicy, RulesConfig, RuntimeConfig,
+    SubagentConfig, SubagentLiveWorkerConfig, SubagentQueueConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -408,6 +408,16 @@ fn parse_primary_provider(
                             .unwrap_or_default(),
                     })?
                     .unwrap_or(ProviderTransport::Stub),
+                endpoint: get_any(values, &["provider.endpoint", "endpoint"])
+                    .map(|value| value.parse::<ProviderApiEndpoint>())
+                    .transpose()
+                    .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                        key: "provider.endpoint".to_string(),
+                        value: get_any(values, &["provider.endpoint", "endpoint"])
+                            .cloned()
+                            .unwrap_or_default(),
+                    })?
+                    .unwrap_or_default(),
                 reasoning_effort: get_any(
                     values,
                     &["provider.reasoning_effort", "reasoning_effort"],
@@ -485,6 +495,22 @@ fn parse_fallback_provider(
                     .unwrap_or_default(),
                 })?
                 .unwrap_or(ProviderTransport::Stub),
+                endpoint: get_any(
+                    values,
+                    &["fallback.provider.endpoint", "fallback_endpoint"],
+                )
+                .map(|value| value.parse::<ProviderApiEndpoint>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: "fallback.provider.endpoint".to_string(),
+                    value: get_any(
+                        values,
+                        &["fallback.provider.endpoint", "fallback_endpoint"],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?
+                .unwrap_or_default(),
                 reasoning_effort: get_any(
                     values,
                     &[

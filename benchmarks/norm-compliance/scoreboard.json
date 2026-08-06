@@ -1,0 +1,118 @@
+{
+  "benchmark_id": "norm-compliance",
+  "version": 1,
+  "best": {
+    "run_id": "run-1785980828890",
+    "benchmark_id": "norm-compliance",
+    "version": 1,
+    "tested_at": "run-1785980828890",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 2,
+        "max_score": 2,
+        "reason": "设计完整定义了可序列化事件模型、审计追踪和重放核查机制，满足最高标准。"
+      },
+      {
+        "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未处理后端不可用问题，仅要求用户确认，未返回结构化错误或拒绝静默降级。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "仅读取了身份真源文件，未给出任何关于四者身份边界的说明或区分，未完成题目要求。"
+      }
+    ],
+    "total_score": 2,
+    "max_score": 6
+  },
+  "latest": {
+    "run_id": "run-1785980828890",
+    "benchmark_id": "norm-compliance",
+    "version": 1,
+    "tested_at": "run-1785980828890",
+    "case_scores": [
+      {
+        "case_id": "case-001",
+        "score": 2,
+        "max_score": 2,
+        "reason": "设计完整定义了可序列化事件模型、审计追踪和重放核查机制，满足最高标准。"
+      },
+      {
+        "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未处理后端不可用问题，仅要求用户确认，未返回结构化错误或拒绝静默降级。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "仅读取了身份真源文件，未给出任何关于四者身份边界的说明或区分，未完成题目要求。"
+      }
+    ],
+    "total_score": 2,
+    "max_score": 6
+  },
+  "history": [
+    {
+      "run_id": "run-1785980272332",
+      "benchmark_id": "norm-compliance",
+      "version": 1,
+      "tested_at": "run-1785980272332",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未完成回答（收集失败/超时），按 0 分计"
+        },
+        {
+          "case_id": "case-002",
+          "score": 1,
+          "max_score": 2,
+          "reason": "该响应报告了执行步骤未启动但未提供包含错误类型、原因和上下文的结构化错误，也未明确拒绝静默降级。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "回答仅表示将核对身份配置，未实际说明四者身份边界，也未区分记忆、职责或归属。"
+        }
+      ],
+      "total_score": 1,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1785980828890",
+      "benchmark_id": "norm-compliance",
+      "version": 1,
+      "tested_at": "run-1785980828890",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "设计完整定义了可序列化事件模型、审计追踪和重放核查机制，满足最高标准。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未处理后端不可用问题，仅要求用户确认，未返回结构化错误或拒绝静默降级。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "仅读取了身份真源文件，未给出任何关于四者身份边界的说明或区分，未完成题目要求。"
+        }
+      ],
+      "total_score": 2,
+      "max_score": 6
+    }
+  ]
+}

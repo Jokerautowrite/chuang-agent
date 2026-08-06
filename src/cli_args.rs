@@ -1127,6 +1127,7 @@ fn parse_cli_options_with_options(
                 api_key,
                 model_name,
                 transport: parse_provider_transport(provider_transport.as_deref())?,
+                endpoint: Default::default(),
                 reasoning_effort: None,
                 request_timeout_ms: provider_request_timeout_ms,
                 tls_ca_cert_path: None,
