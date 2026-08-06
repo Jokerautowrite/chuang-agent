@@ -1,3 +1,13 @@
+# 2026-08-06 P2 发布记录：推送 origin/main（4 commits）
+
+- 远程：`https://github.com/Jokerautowrite/chuang-agent.git`，`main`。
+- 推送范围：`62d82ad..14c21d1`（4 commits，本地与 origin/main 已同步）。
+  1. `21880ee` fix: isolate app_server integration tests from shell workspace env（26/26 绿）
+  2. `230c40e` docs: P2 real-link smoke - 3-tier provider chain verified（真实三级链路 200）
+  3. `ffda7ec` docs: P2 daemon long-run - multi-turn / restart recovery / reconnect all pass
+  4. `14c21d1` feat: auto-retry transient provider failures before any tool runs（「本轮没有完成」专项）
+- 工作区未推送改动：仅 vultr 站点资产、cli_browser、.chuang 等无关文件（未触碰）。
+
 # 2026-08-06 P2「本轮没有完成」专项：瞬态 provider 失败自动重试
 
 - **痛点收敛**：`readable_runtime_error` 兜底文案「本轮处理没有完成」多由瞬态 provider 失败
