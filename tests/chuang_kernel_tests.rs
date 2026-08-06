@@ -193,7 +193,7 @@ fn chuang_kernel_can_write_turn_summary_memory_after_execution() {
         .remember_turn(&turn)
         .expect("turn memory should be written");
 
-    assert_eq!(record_id, "turn-memory-turn-1");
+    assert!(record_id.starts_with("turn-memory-turn-1-"));
 
     let second = run_turn(&mut kernel, "MVP");
 

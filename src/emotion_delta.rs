@@ -43,6 +43,12 @@ const POSITIVE_WORDS: &[&str] = &[
     "期待",
     "安心",
     "幸福",
+    "好一点",
+    "好多了",
+    "好转",
+    "恢复",
+    "好些",
+    "舒服多",
     "幸运",
     "顺利",
     "成功",
@@ -240,6 +246,12 @@ mod tests {
         let delta = extract("今天好开心，项目终于成功了！", "太好了，为你高兴！");
         assert!(delta.valence.unwrap() > 0.2);
         assert!(delta.immersion.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn recovery_phrases_raise_valence() {
+        let delta = extract("好一点了，恢复了不少", "真为你高兴！");
+        assert!(delta.valence.unwrap() > 0.2);
     }
 
     #[test]

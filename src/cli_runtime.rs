@@ -364,6 +364,22 @@ fn insert_emotion_metadata(turn: &mut ChuangKernelTurn, emotion: &EmotionSlotRun
     }
 }
 
+/// 从 turn 元数据提炼情感标签（写入记忆记录用；无情感信息则空）。
+fn emotion_memory_tags(turn: &ChuangKernelTurn) -> BTreeMap<String, String> {
+    let extra = &turn.result.response.meta.extra;
+    let mut tags = BTreeMap::new();
+    if let Some(axes) = extra.get("emotion_axes") {
+        tags.insert("emotion_axes".to_string(), axes.clone());
+    }
+    if let Some(state) = extra.get("emotion_state") {
+        tags.insert("emotion_state".to_string(), state.clone());
+    }
+    if let Some(slot) = extra.get("emotion_slot") {
+        tags.insert("emotion_slot".to_string(), slot.clone());
+    }
+    tags
+}
+
 pub(crate) fn kernel_config_from_runtime(
     runtime: &RuntimeConfig,
 ) -> Result<ChuangKernelConfig, String> {
@@ -3117,11 +3133,18 @@ where
     }
 
     if request.remember {
-        records.sqlite_record_id = Some(
+        // 情感记忆标签：把本轮情感快照写进记忆记录 metadata（可拔插增强，
+        // 没有情感元数据时走原路径，行为与之前完全一致）。
+        let emotion_tags = emotion_memory_tags(&turn);
+        records.sqlite_record_id = Some(if emotion_tags.is_empty() {
             kernel
                 .remember_turn(&turn)
-                .map_err(format_kernel_memory_error)?,
-        );
+                .map_err(format_kernel_memory_error)?
+        } else {
+            kernel
+                .remember_turn_with_metadata_tags(&turn, emotion_tags)
+                .map_err(format_kernel_memory_error)?
+        });
     }
 
     if request.remember_session {
@@ -8961,5 +8984,153 @@ allowed_channels = ["cli", "app-server"]
             second_valence > 0.0,
             "restored emotion should carry valence across runs (got {second_valence})"
         );
+    }
+
+    #[test]
+    fn run_with_options_tags_turn_memory_with_emotion() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-emotion-memory-tag-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["cli", "app-server"]
+"#,
+        );
+
+        let db_path = temp_dir.join("memory.db");
+        let mut runtime = test_runtime(db_path.clone(), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+        let request = RunCliRequest {
+            options: CliOptions { runtime },
+            user_input: "今天好开心，你真棒！".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: true,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (_, records) = run_with_options(&request).expect("run should succeed");
+        let record_id = records
+            .sqlite_record_id
+            .expect("turn memory should be recorded");
+
+        let store = SqliteMemoryStore::open(&db_path).expect("store should open");
+        let record = store
+            .get(&record_id)
+            .expect("get should succeed")
+            .expect("record should exist");
+        let axes = record
+            .metadata
+            .get("emotion_axes")
+            .expect("emotion_axes tag should be stored on turn memory");
+        assert!(axes.contains("valence"));
+        assert!(record.metadata.contains_key("emotion_state"));
+        assert_eq!(
+            record.metadata.get("emotion_slot").map(String::as_str),
+            Some("jiwen")
+        );
+
+        // 情绪标签可作为检索维度：按 emotion_axes 精确过滤可召回本条。
+        let hits = store
+            .search(&chuang_agent::memory_store::MemoryQuery {
+                text: None,
+                metadata: std::collections::BTreeMap::from([(
+                    "emotion_axes".to_string(),
+                    axes.clone(),
+                )]),
+                limit: 10,
+            })
+            .expect("search should succeed");
+        assert!(
+            hits.iter().any(|hit| hit.record.id == record_id),
+            "emotion-tagged memory should be recallable by emotion metadata"
+        );
+    }
+
+    #[test]
+    fn run_with_options_remember_twice_does_not_collide_turn_memory_ids() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-emotion-remember-twice-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        write_identity_registry(
+            &identity_root,
+            r#"memory_body_id = "chuang-body"
+active_agent_id = "chuang"
+
+[[agents]]
+agent_id = "chuang"
+display_name = "Chuang"
+shell_kind = "codex-rust"
+role = "kernel"
+memory_body_id = "chuang-body"
+allowed_channels = ["cli", "app-server"]
+"#,
+        );
+
+        let db_path = temp_dir.join("memory.db");
+        let mut runtime = test_runtime(db_path.clone(), identity_root.clone());
+        runtime.identity_bootstrap =
+            chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
+        let make_request = |input: &str| RunCliRequest {
+            options: CliOptions { runtime: runtime.clone() },
+            user_input: input.to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: true,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+
+        let (_, first_records) = run_with_options(&make_request("第一次记住"))
+            .expect("first remember run should succeed");
+        let first_id = first_records
+            .sqlite_record_id
+            .expect("first turn memory id");
+
+        let (_, second_records) = run_with_options(&make_request("第二次记住"))
+            .expect("second remember run should succeed on the same db");
+        let second_id = second_records
+            .sqlite_record_id
+            .expect("second turn memory id");
+
+        assert_ne!(
+            first_id, second_id,
+            "consecutive --remember runs must not collide (DuplicateId)"
+        );
+
+        let store = SqliteMemoryStore::open(&db_path).expect("store should open");
+        assert!(store.get(&first_id).expect("get").is_some());
+        assert!(store.get(&second_id).expect("get").is_some());
     }
 }

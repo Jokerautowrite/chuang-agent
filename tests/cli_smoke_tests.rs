@@ -1966,7 +1966,7 @@ fn cli_run_can_remember_turn_summary_when_requested() {
         String::from_utf8_lossy(&first.stderr)
     );
     let first_stdout = String::from_utf8_lossy(&first.stdout);
-    assert!(first_stdout.contains("memory_recorded: turn-memory-turn-1"));
+    assert!(first_stdout.contains("memory_recorded: turn-memory-turn-1-"));
 
     let second = Command::new("cargo")
         .args([

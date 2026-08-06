@@ -1,3 +1,19 @@
+# 2026-08-07 情感记忆标签 + 修复连续 --remember 撞主键（live 冒烟发现）
+
+- **情感记忆标签**（调研路线①记忆情绪）：`remember_turn_with_metadata_tags` 把本轮
+  emotion_axes / emotion_state / emotion_slot 写进 turn 记忆记录 metadata；
+  检索支持按情绪维度精确过滤（测试验证可召回）。无情感元数据时走原路径零变化。
+- **规则提取器词表补全**：增加恢复类正向词（好一点/好多了/好转/恢复/好些/舒服多），
+  主人说「好转」时 valence 能正确回升。+1 单测。
+- **修复稳定性 bug**（live 冒烟复现）：CLI 每进程 turn_id 恒为 turn-1，同一 db
+  连续 `--remember` 会写 `turn-memory-turn-1` 撞主键 → `DuplicateId` 本轮失败。
+  非 session 路径补唯一后缀（`turn-memory-{turn_id}-{pid}-{nanos}`），
+  更新 2 处旧断言 + 新增回归测试（连续两次 remember 均成功且 id 不同）。
+- **live 冒烟**：真实 provider 两轮 `--remember` 全通过（status 200）；
+  情感状态跨轮恢复验证：第 1 轮「累/心情不好」valence -0.14，第 2 轮「谢谢你陪我」
+  pride 0.15→0.44，情绪记忆按轮延续。
+- **回归**：lib 95 / bin 135 / app_server 26 / chuang_kernel 13 全绿。
+
 # 2026-08-07 情感状态跨轮持久化：落盘 + 启动恢复 + 时间流逝 tick
 
 - **emotion_store.rs（可拔插存储）**：最简 JSON 文件实现，`data/emotion-state.json`

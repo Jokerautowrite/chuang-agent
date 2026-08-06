@@ -338,6 +338,17 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             .map(|receipt| receipt.record_id)
     }
 
+    /// 记忆本轮并附额外元数据标签（如情感状态 emotion_axes/emotion_state）。
+    /// 标签进入 MemoryRecord.metadata，供未来检索按情绪维度召回。
+    pub fn remember_turn_with_metadata_tags(
+        &mut self,
+        turn: &ChuangKernelTurn,
+        extra_metadata: BTreeMap<String, String>,
+    ) -> Result<String, ChuangKernelMemoryError> {
+        self.remember_turn_with_metadata(turn, extra_metadata, None, false)
+            .map(|receipt| receipt.record_id)
+    }
+
     pub fn remember_session_turn(
         &mut self,
         turn: &ChuangKernelTurn,
@@ -406,7 +417,11 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                     unique_record_suffix()
                 )
             })
-            .unwrap_or_else(|| format!("turn-memory-{}", turn.turn_id));
+            // 非 session 路径也要唯一后缀：CLI 每次进程内 turn_id 都是 turn-1，
+            // 同一 db 连续 --remember 会撞主键（DuplicateId）。
+            .unwrap_or_else(|| {
+                format!("turn-memory-{}-{}", turn.turn_id, unique_record_suffix())
+            });
         let original_content = turn_summary_content(turn);
         let original_chars = original_content.chars().count();
         let mut content = original_content.clone();
