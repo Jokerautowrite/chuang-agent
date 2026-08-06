@@ -408,9 +408,11 @@ pub struct SubagentToolContext {
     pub worker_capability: String,
 }
 
-/// Default worker model for `spawn_subagent` (queued_external + codex runner).
-/// Matches existing smoke/docs; override with `CHUANG_CODEX_RUNNER_MODEL`.
-pub const DEFAULT_SUBAGENT_WORKER_MODEL: &str = "gpt-5.6-luna";
+/// Default worker model for queued subagent Codex runners.
+/// Aligned with the example-provider/zen-sub2 account group's actually supported model
+/// (deepseek-v4-flash); gpt-5.6-luna/terra both return 404 there.
+/// Pluggable: override with `CHUANG_CODEX_RUNNER_MODEL`.
+pub const DEFAULT_SUBAGENT_WORKER_MODEL: &str = "deepseek-v4-flash";
 
 /// Default capability advertised to the subagent dispatch/run-loop chain.
 pub const DEFAULT_SUBAGENT_WORKER_CAPABILITY: &str = "workspace";
