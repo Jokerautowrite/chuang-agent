@@ -57,3 +57,5 @@ __pycache__/
 
 # OS / editor noise
 Thumbs.db
+/server-assets/
+.chuang/
