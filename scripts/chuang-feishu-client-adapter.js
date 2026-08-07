@@ -37,22 +37,8 @@ class ChuangFeishuClientAdapter {
 
 function buildChuangReplyPayload({
   replyText,
-  modelName = "unknown",
-  threadId = "",
-  runtimeReportId = "",
-  channelMessageId = "",
 }) {
-  const text = normalizeCardText(replyText) || "已收到。";
-  const model = normalizeCardText(modelName) || "unknown";
-  const thread = normalizeCardText(threadId);
-  const report = normalizeCardText(runtimeReportId);
-  const message = normalizeCardText(channelMessageId);
-  const fields = [
-    { label: "模型", value: model },
-    thread ? { label: "线程", value: thread } : null,
-    report ? { label: "报告", value: report } : null,
-    message ? { label: "消息", value: message } : null,
-  ].filter(Boolean);
+  const text = normalizeCardText(stripProcessFooter(replyText)) || "已收到。";
 
   return {
     msgType: "interactive",
@@ -72,19 +58,6 @@ function buildChuangReplyPayload({
           tag: "markdown",
           content: escapeFeishuMarkdown(text),
         },
-        {
-          tag: "hr",
-        },
-        {
-          tag: "div",
-          fields: fields.map((field) => ({
-            is_short: true,
-            text: {
-              tag: "lark_md",
-              content: `**${field.label}**\n${escapeFeishuMarkdown(field.value)}`,
-            },
-          })),
-        },
       ],
     }),
   };
@@ -93,8 +66,34 @@ function buildChuangReplyPayload({
 function buildChuangTextPayload(replyText) {
   return {
     msgType: "text",
-    content: JSON.stringify({ text: normalizeCardText(replyText) || "已收到。" }),
+    content: JSON.stringify({
+      text: normalizeCardText(stripProcessFooter(replyText)) || "已收到。",
+    }),
   };
+}
+
+// 只保留回复正文：在"过程摘要 / 已完成 · 耗时"等过程尾注处截断，
+// 避免把模型附带的执行元信息（耗时/摘要/模型/线程/报告/消息）发给主人。
+function stripProcessFooter(text) {
+  const raw = String(text || "");
+  const lines = raw.split("\n");
+  const kept = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith("过程摘要") ||
+      trimmed.startsWith("已完成 ·") ||
+      trimmed === "已完成" ||
+      trimmed === "模型" ||
+      trimmed === "线程" ||
+      trimmed === "报告" ||
+      trimmed === "消息"
+    ) {
+      break;
+    }
+    kept.push(line);
+  }
+  return kept.join("\n").trimEnd();
 }
 
 function resolveCreateMessageMethod(client) {
