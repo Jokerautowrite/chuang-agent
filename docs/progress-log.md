@@ -3174,3 +3174,9 @@
   - 复测：spawn_subagent execution_succeeded=true，worker report status=Success model=deepseek-v4-flash provider=zen-sub2，创正确回收并总结。
 - C 记忆：全新轮次凭长期记忆回答身份（"我是创，叫你老爸，记忆是本体 runtime 只是壳"），身份记忆跨会话持久有效；session recall hit=0（经历记忆待长期聊天积累）。
 - D 自愈：kill -9 app-server → systemd 5s 自动拉起；主 provider ccswitch 200；fallback 通道（example-provider deepseek-v4-flash）经 B 实证可用。
+
+# 2026-08-07 三项实测：记忆召回修复 / 并行调度 / 桌面浏览器
+- 1) 记忆 recall=0 排查：根因 A 匹配太弱（整句 contains，自然语言 query 0 命中）→ 升级分词召回（memory_store.rs text_match_score：整句权重 + ASCII 词 + 中文 2-4 字滑窗）。真实数据验证：改述查询"上午做了什么验证 体检报告"在 thread-18 由 0 命中 → 2 命中。根因 B：kernel 自动召回存在（user_input 自动 recall），session 隔离是设计；跨会话长期记忆需 experiences writeback（app-server remember_experience=false，extract_experience_lesson 无质量门槛，策略待定）。
+- 2) 并行子代理调度：spawn_subagent tasks + 并发 3 → batch_completed、admission accepted、23.3s 完成。发现"回收结果"缺陷：codex 输出格式不稳定 + 模型不解析嵌套 output JSON，worker 产出偶尔无法回流 → 修复：成功回执 summary 内嵌 workers=[#1 产出 | #2 ...] 片段。复测：创正确汇总 140 个 .rs 文件 + progress-log 最近主题。
+- 3) 真实桌面/浏览器只读：browser_read 读到当前页面标题/URL（Example Domain）；locate 观察到当前窗口（飞书）。CDP + xdotool 真实链路通。
+- 待决策：跨会话长期记忆 writeback 策略（什么值得写 experiences、频率、质量门槛）。
