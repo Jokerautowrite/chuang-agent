@@ -60,6 +60,12 @@ const MAX_MODEL_AUTO_RETRIES: usize = 2;
 /// statuses and transport-level failures. Auth (401/403) and quota (402) are
 /// deliberately excluded — retrying them cannot succeed.
 fn provider_failure_is_retryable(body: &str) -> bool {
+    // deepseek 等推理模型偶发“200 但 content 为空”（思维链吃满输出预算，
+    // 正文还没来得及产出）。同一请求重试一次通常就能拿到完整正文，
+    // 因此 missing_content 也按瞬时可重试处理。
+    if body.contains("PROVIDER_MISSING_CONTENT") {
+        return true;
+    }
     if body.contains("PROVIDER_HTTP_ERROR") {
         return ["429", "408", "500", "502", "503", "504"]
             .iter()
@@ -7892,6 +7898,22 @@ allowed_channels = ["app-server"]
         ));
         assert!(!looks_like_tool_intent("今天天气不错，适合出去走走。"));
         assert!(!looks_like_tool_intent("FINAL: 已完成。"));
+    }
+
+    #[test]
+    fn provider_missing_content_is_retryable() {
+        assert!(provider_failure_is_retryable(
+            "PROVIDER_MISSING_CONTENT: provider=ccswitch-local-deepseek model=deepseek-v4-flash transport=curl status_code=200 response_kind=chat.completion"
+        ));
+        assert!(provider_failure_is_retryable(
+            "PROVIDER_HTTP_ERROR: status_code=502"
+        ));
+        assert!(!provider_failure_is_retryable(
+            "PROVIDER_HTTP_ERROR: status_code=401"
+        ));
+        assert!(!provider_failure_is_retryable(
+            "PROVIDER_HTTP_ERROR: status_code=400"
+        ));
     }
 
     #[test]

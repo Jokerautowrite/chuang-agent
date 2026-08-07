@@ -1680,7 +1680,7 @@ fn handle_model_list(params: &Value) -> Result<Value, String> {
             .unwrap_or(""),
     );
     let runtime = build_runtime_for_workspace(&app_server_config_workspace_root(&workspace_root))?;
-    let model_name = provider_summary_model_name(&runtime);
+    let model_name = provider_primary_model_name(&runtime);
     Ok(json!({
         "data": [{
             "id": model_name,
@@ -3213,6 +3213,23 @@ fn provider_summary_model_name(runtime: &RuntimeConfig) -> String {
             provider_config_model_name(primary),
             provider_config_model_name(fallback)
         ),
+    }
+}
+
+/// 对外暴露的主模型名：Fallback 链路只取主模型，避免把
+/// "primary->fallback" 内部链路名暴露给 UI/桥（桥按精确模型名匹配）。
+fn provider_primary_model_name(runtime: &RuntimeConfig) -> String {
+    let mut provider = &runtime.provider;
+    loop {
+        match provider {
+            ProviderConfig::Fake { model_name, .. } => return model_name.clone(),
+            ProviderConfig::OpenAICompatible(OpenAICompatibleConfig { model_name, .. }) => {
+                return model_name.clone();
+            }
+            ProviderConfig::Fallback { primary, .. } => {
+                provider = primary;
+            }
+        }
     }
 }
 

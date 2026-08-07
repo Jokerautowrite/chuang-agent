@@ -801,7 +801,9 @@ impl OpenAICompatibleProviderAdapter {
                 "provider_error_message".to_string(),
                 "missing assistant content in successful provider response".to_string(),
             );
-            extra_meta.insert("provider_retryable".to_string(), "false".to_string());
+            // deepseek 等推理模型偶发 200+空 content，重试一次通常即恢复，
+            // 循环层按 provider_retryable=true 走自动重试。
+            extra_meta.insert("provider_retryable".to_string(), "true".to_string());
             insert_provider_failure_meta(
                 &mut extra_meta,
                 Some(call.status_code()),
