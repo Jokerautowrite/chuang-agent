@@ -26,6 +26,75 @@ pub struct SearchHit {
     pub score: u32,
 }
 
+/// 文本匹配打分（供各 MemoryStore::search 实现复用）。
+///
+/// - 整句精确包含：最高分（权重 ×10），保证确定性召回。
+/// - 否则按检索 token 命中：ASCII 词（≥2 字符）+ 中文 2~4 字滑窗；
+///   任一 token 命中即召回，得分 = 命中 token 字符数。
+/// - 返回 None 表示无命中。
+pub fn text_match_score(query_text: &str, content: &str) -> Option<u32> {
+    let q = query_text.trim();
+    if q.is_empty() {
+        return None;
+    }
+    if content.contains(q) {
+        return Some(q.chars().count() as u32);
+    }
+    let q_lower = q.to_lowercase();
+    let content_lower = content.to_lowercase();
+    if content_lower.contains(&q_lower) {
+        return Some(q_lower.chars().count() as u32);
+    }
+
+    let mut score = 0u32;
+    for token in tokenize_query(q) {
+        if content_lower.contains(&token.to_lowercase()) {
+            score += token.chars().count() as u32;
+        }
+    }
+    if score > 0 {
+        Some(score)
+    } else {
+        None
+    }
+}
+
+/// 把查询拆成检索 token：ASCII 字母数字词（≥2 字符）+ 中文 2~4 字滑窗。
+/// 结果去重，保持稳定顺序。
+fn tokenize_query(text: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+
+    // ASCII 词
+    for word in text.split(|c: char| !c.is_alphanumeric()) {
+        if word.chars().count() >= 2 && word.chars().all(|c| c as u32 <= 127) {
+            push_unique(&mut tokens, word.to_string());
+        }
+    }
+
+    // 中文滑窗 2~4 字（含 CJK 的片段才收）
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    for win in [2usize, 3, 4] {
+        if n < win {
+            continue;
+        }
+        for i in 0..=n - win {
+            let chunk: String = chars[i..i + win].iter().collect();
+            if chunk.chars().any(|c| c as u32 > 127) {
+                push_unique(&mut tokens, chunk);
+            }
+        }
+    }
+
+    tokens
+}
+
+fn push_unique(tokens: &mut Vec<String>, token: String) {
+    if !tokens.iter().any(|existing| existing == &token) {
+        tokens.push(token);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryLayer {
     InternalIdentity,

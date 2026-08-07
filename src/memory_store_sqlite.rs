@@ -127,29 +127,23 @@ impl MemoryStore for SqliteMemoryStore {
         let mut hits = Vec::new();
         for row in rows {
             let record = row.map_err(|_| MemoryStoreError::StorageUnavailable)?;
-            let text_match = query
-                .text
-                .as_ref()
-                .map(|text| record.content.contains(text))
-                .unwrap_or(true);
             let metadata_match = query
                 .metadata
                 .iter()
                 .all(|(key, value)| record.metadata.get(key) == Some(value));
 
+            let text_score = query
+                .text
+                .as_ref()
+                .and_then(|text| crate::memory_store::text_match_score(text, &record.content))
+                .unwrap_or(0);
+            let text_match = query.text.is_none() || text_score > 0;
+
             if text_match && metadata_match {
-                let score = query
-                    .text
-                    .as_ref()
-                    .map(|text| {
-                        if record.content.contains(text) {
-                            text.len() as u32
-                        } else {
-                            0
-                        }
-                    })
-                    .unwrap_or(0);
-                hits.push(SearchHit { record, score });
+                hits.push(SearchHit {
+                    record,
+                    score: text_score,
+                });
             }
         }
 

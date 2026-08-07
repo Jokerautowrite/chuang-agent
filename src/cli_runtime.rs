@@ -5010,7 +5010,9 @@ allowed_channels = ["app-server"]
             progress_path: None,
         };
         let (other_session, _) = run_with_options(&third).expect("third run should succeed");
-        assert_eq!(other_session.recall_hit_count, 0);
+        // 分词召回增强：同 session 内改述查询（锚点B → 锚点A 记录）也能命中。
+        // 语义从"整句精确包含"升级为"token 命中召回"。
+        assert_eq!(other_session.recall_hit_count, 1);
         assert_eq!(
             other_session
                 .response

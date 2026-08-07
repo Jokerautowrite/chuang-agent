@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::memory_store::{
-    classify_memory_layer, InMemoryMemoryStore, MemoryLayer, MemoryLayerBoundary, MemoryQuery,
-    MemoryRecord, MemoryStore, MemoryStoreError,
+    classify_memory_layer, text_match_score, InMemoryMemoryStore, MemoryLayer, MemoryLayerBoundary,
+    MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
 };
 
 fn record(
@@ -70,6 +70,47 @@ fn memory_store_search_content_and_metadata() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].record.id, "mem-1");
     assert!(hits[0].score > 0);
+}
+
+#[test]
+fn text_match_score_prefers_exact_substring_and_tolerates_paraphrase() {
+    let content = "用户提到心跳链路与子代理调度，需要在 9 点到 22 点之间每两小时主动联系一次";
+
+    // 整句精确包含 → 命中且分数 = 查询长度
+    let exact = text_match_score("心跳链路与子代理调度", content).expect("exact should hit");
+    assert_eq!(exact, 10);
+
+    // 自然语言改述（无整句命中）→ 靠 token 命中召回
+    let paraphrased =
+        text_match_score("上次聊的心跳和主动联系机制是什么", content).expect("token hit expected");
+    assert!(paraphrased >= 1);
+
+    // 无关查询 → 无命中
+    assert!(text_match_score("量子物理和弦理论", content).is_none());
+}
+
+#[test]
+fn memory_store_search_hits_partial_tokens_not_only_exact_sentence() {
+    let mut store = InMemoryMemoryStore::new();
+    store
+        .put(record(
+            "mem-partial",
+            "2026-08-07 · 心跳链路验证：proactive_sent 投递成功，outbox 归档",
+            &[],
+            None,
+        ))
+        .expect("put should succeed");
+
+    // 查询词不完整出现在内容中，但 token 能命中
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("心跳投递链路是否通过".to_string()),
+            metadata: BTreeMap::new(),
+            limit: 5,
+        })
+        .expect("search should succeed");
+    assert!(!hits.is_empty(), "partial token search should hit");
+    assert_eq!(hits[0].record.id, "mem-partial");
 }
 
 #[test]

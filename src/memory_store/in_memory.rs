@@ -35,31 +35,22 @@ impl MemoryStore for InMemoryMemoryStore {
 
         let mut hits = Vec::new();
         for record in self.records.values() {
-            let text_match = query
-                .text
-                .as_ref()
-                .map(|text| record.content.contains(text))
-                .unwrap_or(true);
             let metadata_match = query
                 .metadata
                 .iter()
                 .all(|(key, value)| record.metadata.get(key) == Some(value));
 
+            let text_score = query
+                .text
+                .as_ref()
+                .and_then(|text| super::text_match_score(text, &record.content))
+                .unwrap_or(0);
+            let text_match = query.text.is_none() || text_score > 0;
+
             if text_match && metadata_match {
-                let score = query
-                    .text
-                    .as_ref()
-                    .map(|text| {
-                        if record.content.contains(text) {
-                            text.len() as u32
-                        } else {
-                            0
-                        }
-                    })
-                    .unwrap_or(0);
                 hits.push(SearchHit {
                     record: record.clone(),
-                    score,
+                    score: text_score,
                 });
             }
         }
