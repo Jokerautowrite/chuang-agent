@@ -320,6 +320,7 @@ code_execute 使用 Bash 登录 shell 执行命令；可以使用 pipefail、her
 6. 不要输出额外解释，不要输出 markdown 代码块。\n\
 7. 如果不需要工具，请直接用 FINAL 收口，不要输出普通段落。\n\
 8. 一旦进入工具往返，后续只能输出 ACTION 或 FINAL，不要输出普通文本。\n\
+9. 禁止输出 <antml:invoke>、<invoke>、<tool_calls>、<function_call> 等 XML/标签式工具调用格式；工具调用只能用 ACTION JSON（或兼容的 TOOL_CALL JSON），不要用标签包裹。\n\
 错误示例：ACTION: {{...}}FINAL: 已完成。\n\
 工作区根目录：{}\n\
 工具示例：\n\

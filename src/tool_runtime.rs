@@ -926,7 +926,152 @@ pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
         return ToolModelOutput::FinalAnswer(final_text.to_string());
     }
 
+    // 兼容层：部分推理模型（如 deepseek-v4-flash 经 ccswitch）偶发输出
+    // Anthropic/OpenAI 风格的 XML 工具调用（<antml:invoke>/<invoke>），
+    // 而不是创要求的 ACTION JSON。这里识别并转换成正式 ToolCall，
+    // 避免把“开始语 + XML 调用”当成最终答案导致一句话断流。
+    if let Some(call) = parse_xml_tool_call(trimmed) {
+        return ToolModelOutput::ToolCall(call);
+    }
+    if let Some(call) = parse_loose_colon_tool_call(trimmed) {
+        return ToolModelOutput::ToolCall(call);
+    }
+
     ToolModelOutput::PlainText(trimmed.to_string())
+}
+
+/// 解析 XML 风格工具调用，返回正式 ToolCall。支持两类常见输出：
+/// 1. antml:invoke / invoke（参数用 parameter 标签）
+/// 2. <ACTION><tool_call><name>..</name><args>{json}</args>..（参数用 name+args）
+/// 参数名做小范围映射（cmd -> command），数字/布尔参数自动转换，tasks 支持多行数组。
+fn parse_xml_tool_call(body: &str) -> Option<ToolCall> {
+    if let Some(call) = parse_xml_invoke_tool_call(body) {
+        return Some(call);
+    }
+    parse_xml_named_args_tool_call(body)
+}
+
+fn parse_xml_invoke_tool_call(body: &str) -> Option<ToolCall> {
+    let invoke_re = regex::Regex::new(r#"<(?:\w+:)?invoke\s+name=["']([^"']+)["'][^>]*>"#).ok()?;
+    let tool_name = invoke_re.captures(body)?.get(1)?.as_str().to_string();
+
+    let param_re = regex::Regex::new(
+        r#"<(?:\w+:)?parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)</(?:\w+:)?parameter>"#,
+    )
+    .ok()?;
+    let mut params: Vec<(String, serde_json::Value)> = Vec::new();
+    for captures in param_re.captures_iter(body) {
+        let Some(name) = captures.get(1) else {
+            continue;
+        };
+        let Some(value) = captures.get(2) else {
+            continue;
+        };
+        let raw = value.as_str().trim().to_string();
+        params.push((
+            name.as_str().to_string(),
+            coerce_xml_param(name.as_str(), &raw),
+        ));
+    }
+    if params.is_empty() {
+        return None;
+    }
+
+    let mut object = serde_json::Map::new();
+    object.insert("tool".to_string(), serde_json::Value::String(tool_name));
+    for (name, value) in params {
+        // 兼容常见别名：deepseek 系输出 code_execute 参数为 cmd。
+        let key = if name == "cmd" {
+            "command"
+        } else {
+            name.as_str()
+        };
+        object.insert(key.to_string(), value);
+    }
+    serde_json::from_value::<ToolCall>(serde_json::Value::Object(object)).ok()
+}
+
+/// <ACTION><tool_call><name>code_execute</name><args>{"command":"pwd"}</args></tool_call></ACTION>
+fn parse_xml_named_args_tool_call(body: &str) -> Option<ToolCall> {
+    let name_re = regex::Regex::new(r#"<(?:\w+:)?name>([^<]+)</(?:\w+:)?name>"#).ok()?;
+    let args_re = regex::Regex::new(r#"<(?:\w+:)?args>([\s\S]*?)</(?:\w+:)?args>"#).ok()?;
+    let tool_name = name_re.captures(body)?.get(1)?.as_str().trim().to_string();
+    let args_raw = args_re.captures(body)?.get(1)?.as_str().trim().to_string();
+    let mut args_value: serde_json::Map<String, serde_json::Value> = if args_raw.is_empty() {
+        serde_json::Map::new()
+    } else {
+        serde_json::from_str(&args_raw).ok()?
+    };
+    if let Some(cmd) = args_value.remove("cmd") {
+        args_value.insert("command".to_string(), cmd);
+    }
+    let mut object = serde_json::Map::new();
+    object.insert("tool".to_string(), serde_json::Value::String(tool_name));
+    for (key, value) in args_value {
+        object.insert(key, value);
+    }
+    serde_json::from_value::<ToolCall>(serde_json::Value::Object(object)).ok()
+}
+
+/// 松散 key:value 风格工具调用，例如：
+/// ACTION
+/// tool_call: code_execute
+/// arguments: {"command": "pwd"}
+fn parse_loose_colon_tool_call(body: &str) -> Option<ToolCall> {
+    let name_re =
+        regex::Regex::new(r#"(?m)^\s*(?:tool_call|tool)\s*[:：]\s*([A-Za-z_][A-Za-z0-9_]*)"#)
+            .ok()?;
+    let tool_name = name_re.captures(body)?.get(1)?.as_str().trim().to_string();
+    let args_re = regex::Regex::new(r#"(?m)^\s*arguments?\s*[:：]\s*(\{[\s\S]*\})"#).ok()?;
+    let args_raw = args_re.captures(body)?.get(1)?.as_str().trim().to_string();
+    let mut args_value: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&args_raw).ok()?;
+    if let Some(cmd) = args_value.remove("cmd") {
+        args_value.insert("command".to_string(), cmd);
+    }
+    let mut object = serde_json::Map::new();
+    object.insert("tool".to_string(), serde_json::Value::String(tool_name));
+    for (key, value) in args_value {
+        object.insert(key, value);
+    }
+    serde_json::from_value::<ToolCall>(serde_json::Value::Object(object)).ok()
+}
+
+/// 把 XML 字符串参数按目标字段类型转成 JSON 值（数字/布尔），其余保持字符串。
+fn coerce_xml_param(name: &str, raw: &str) -> serde_json::Value {
+    match name {
+        "x" | "y" | "millis" | "limit" | "timeout_ms" | "max_concurrency" | "token_budget" => raw
+            .parse::<i64>()
+            .map(|number| serde_json::Value::Number(number.into()))
+            .unwrap_or_else(|_| serde_json::Value::String(raw.to_string())),
+        "secret" => match raw.to_lowercase().as_str() {
+            "true" => serde_json::Value::Bool(true),
+            "false" => serde_json::Value::Bool(false),
+            _ => serde_json::Value::String(raw.to_string()),
+        },
+        "tasks" => {
+            let trimmed = raw.trim_start();
+            if trimmed.starts_with('[') {
+                serde_json::from_str::<serde_json::Value>(trimmed)
+                    .unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
+            } else {
+                let items: Vec<String> = raw
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if items.is_empty() {
+                    serde_json::Value::String(raw.to_string())
+                } else {
+                    serde_json::Value::Array(
+                        items.into_iter().map(serde_json::Value::String).collect(),
+                    )
+                }
+            }
+        }
+        _ => serde_json::Value::String(raw.to_string()),
+    }
 }
 
 fn protocol_error(code: &str, message: &str, raw: &str) -> ToolProtocolError {
@@ -3979,5 +4124,121 @@ mod subagent_context_builder_tests {
             }
         }
         assert_eq!(ctx.worker_model, DEFAULT_SUBAGENT_WORKER_MODEL);
+    }
+}
+
+#[cfg(test)]
+mod xml_tool_call_parser_tests {
+    use super::{parse_tool_model_output, parse_xml_tool_call, ToolCall, ToolModelOutput};
+
+    #[test]
+    fn parses_antml_invoke_with_cmd_alias() {
+        let body = r#"我先查一下目录。
+
+<antml:invoke name="code_execute">
+<antml:parameter name="cmd" string="true">git status --short</antml:parameter>
+</antml:invoke>"#;
+        let call = parse_xml_tool_call(body).expect("antml invoke should parse");
+        match call {
+            ToolCall::ShellExec { command, cwd } => {
+                assert_eq!(command, "git status --short");
+                assert_eq!(cwd, None);
+            }
+            other => panic!("expected code_execute, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_openai_style_invoke_with_command() {
+        let body = r#"<tool_calls>
+<invoke name="list_dir">
+<parameter name="path">src</parameter>
+</invoke>
+</tool_calls>"#;
+        let call = parse_xml_tool_call(body).expect("openai invoke should parse");
+        match call {
+            ToolCall::ListDir { path } => assert_eq!(path, "src"),
+            other => panic!("expected list_dir, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_model_output_accepts_xml_instead_of_plain_text() {
+        let body = "我先看看文件。\n\n<antml:invoke name=\"file_read\">\n<antml:parameter name=\"path\">Cargo.toml</antml:parameter>\n</antml:invoke>";
+        let parsed = parse_tool_model_output(body);
+        assert!(
+            matches!(parsed, ToolModelOutput::ToolCall(ToolCall::ReadFile { .. })),
+            "xml tool call should become ToolCall, got {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn coerces_numeric_and_boolean_params() {
+        let body = r#"<antml:invoke name="wait">
+<antml:parameter name="millis">250</antml:parameter>
+</antml:invoke>"#;
+        let call = parse_xml_tool_call(body).expect("wait invoke should parse");
+        match call {
+            ToolCall::Wait { millis } => assert_eq!(millis, 250),
+            other => panic!("expected wait, got {other:?}"),
+        }
+
+        let body = r#"<antml:invoke name="keyboard">
+<antml:parameter name="text">hi</antml:parameter>
+<antml:parameter name="secret">true</antml:parameter>
+</antml:invoke>"#;
+        let call = parse_xml_tool_call(body).expect("keyboard invoke should parse");
+        match call {
+            ToolCall::Keyboard { text, secret } => {
+                assert_eq!(text, "hi");
+                assert!(secret);
+            }
+            other => panic!("expected keyboard, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_plain_text_when_no_xml_invoke() {
+        let parsed = parse_tool_model_output("今天天气不错。");
+        assert!(matches!(parsed, ToolModelOutput::PlainText(_)));
+    }
+
+    #[test]
+    fn parses_action_xml_with_name_and_args() {
+        let body = r#"<ACTION>
+<tool_call>
+<name>code_execute</name>
+<args>{"command": "pwd"}</args>
+</tool_call>
+</ACTION>"#;
+        let parsed = parse_tool_model_output(body);
+        match parsed {
+            ToolModelOutput::ToolCall(ToolCall::ShellExec { command, .. }) => {
+                assert_eq!(command, "pwd");
+            }
+            other => panic!("expected code_execute, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_action_xml_with_cmd_alias_in_args() {
+        let body = r#"<ACTION><tool_call><name>code_execute</name><args>{"cmd": "ls -la"}</args></tool_call></ACTION>"#;
+        let call = parse_xml_tool_call(body).expect("action xml should parse");
+        match call {
+            ToolCall::ShellExec { command, .. } => assert_eq!(command, "ls -la"),
+            other => panic!("expected code_execute, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_loose_colon_style_tool_call() {
+        let body = "ACTION\ntool_call: code_execute\narguments: {\"command\": \"pwd\"}";
+        let parsed = parse_tool_model_output(body);
+        match parsed {
+            ToolModelOutput::ToolCall(ToolCall::ShellExec { command, .. }) => {
+                assert_eq!(command, "pwd");
+            }
+            other => panic!("expected code_execute, got {other:?}"),
+        }
     }
 }

@@ -14,8 +14,9 @@ use chuang_agent::chuang_kernel::{
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
 use chuang_agent::emotion_delta::{EmotionDeltaExtractor, RuleEmotionDeltaExtractor};
 use chuang_agent::emotion_slot::EmotionTrigger;
-use chuang_agent::emotion_store::{resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState};
-use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime};
+use chuang_agent::emotion_store::{
+    resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState,
+};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
@@ -32,6 +33,7 @@ use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEvent, RuntimeEventLedger,
 };
 use chuang_agent::session_archive::SqliteSessionArchive;
+use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime};
 use chuang_agent::subagent_queue::FileSubagentQueueConfig;
 use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
@@ -295,7 +297,10 @@ fn render_emotion_triggers(triggers: &[EmotionTrigger]) -> String {
 
 /// 启动恢复：读回持久化情感状态 → 按流逝时间 tick → 返回阈值触发。
 /// 文件缺失/解析失败/存储异常一律用默认状态继续（情感永远不阻断）。
-fn restore_emotion_slot(emotion: &mut EmotionSlotRuntime, path: &std::path::Path) -> Vec<EmotionTrigger> {
+fn restore_emotion_slot(
+    emotion: &mut EmotionSlotRuntime,
+    path: &std::path::Path,
+) -> Vec<EmotionTrigger> {
     if !matches!(emotion, EmotionSlotRuntime::Jiwen(_)) {
         return Vec::new();
     }
@@ -314,7 +319,9 @@ fn restore_emotion_slot(emotion: &mut EmotionSlotRuntime, path: &std::path::Path
     let minutes = state
         .saved_at
         .as_deref()
-        .and_then(|saved| chuang_agent::emotion_store::elapsed_minutes_since(saved, chrono::Utc::now()))
+        .and_then(|saved| {
+            chuang_agent::emotion_store::elapsed_minutes_since(saved, chrono::Utc::now())
+        })
         .unwrap_or(0.0);
     let triggers = restored.tick(minutes).unwrap_or_default();
     *emotion = restored;
@@ -351,11 +358,7 @@ fn persist_emotion_state(emotion: &EmotionSlotRuntime, path: &std::path::Path) {
 
 /// 从本轮对话提取五轴 delta 并喂给 EmotionSlot；随后重置连接需求
 /// （主人主动来找 → 连接需求满足）。情感失败不阻断主流程。
-fn observe_turn_emotion(
-    emotion: &mut EmotionSlotRuntime,
-    user_input: &str,
-    assistant_reply: &str,
-) {
+fn observe_turn_emotion(emotion: &mut EmotionSlotRuntime, user_input: &str, assistant_reply: &str) {
     let delta = RuleEmotionDeltaExtractor::default().extract(user_input, assistant_reply);
     let _ = emotion.observe_delta(&delta);
     let _ = emotion.reset_connection();
@@ -1146,10 +1149,11 @@ where
                 continue;
             }
             ToolModelOutput::PlainText(_) => {
+                let tool_intent = looks_like_tool_intent(&body);
                 let requires_spawn = should_require_spawn_subagent(&original_input)
                     && !tool_calls_include_spawn(&tool_calls);
                 let requires_local_action = !requires_spawn
-                    && should_require_action_for_local_task(&original_input)
+                    && (should_require_action_for_local_task(&original_input) || tool_intent)
                     && tool_calls.is_empty();
                 if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
                     if !requires_local_action && !requires_spawn {
@@ -1165,7 +1169,11 @@ where
                     code: if requires_spawn {
                         "missing_required_spawn_subagent".to_string()
                     } else if requires_local_action {
-                        "missing_required_action".to_string()
+                        if tool_intent {
+                            "unrecognized_tool_call_format".to_string()
+                        } else {
+                            "missing_required_action".to_string()
+                        }
                     } else {
                         "plain_text_response".to_string()
                     },
@@ -1173,7 +1181,13 @@ where
                         "user asked to exercise spawn_subagent; call spawn_subagent before FINAL"
                             .to_string()
                     } else if requires_local_action {
-                        "local task requires at least one ACTION tool call before FINAL".to_string()
+                        if tool_intent {
+                            "model emitted tool-call intent in an unsupported format; reply with a single ACTION JSON only"
+                                .to_string()
+                        } else {
+                            "local task requires at least one ACTION tool call before FINAL"
+                                .to_string()
+                        }
                     } else {
                         "tool loop requires ACTION or FINAL; plain text is not accepted".to_string()
                     },
@@ -1221,7 +1235,7 @@ where
                     tool_protocol_repair_prompt(
                         &original_input,
                         &transcript,
-                        should_require_action_for_local_task(&original_input)
+                        (should_require_action_for_local_task(&original_input) || tool_intent)
                             && tool_calls.is_empty(),
                     )
                 };
@@ -2388,6 +2402,41 @@ fn tool_calls_include_spawn(tool_calls: &[ToolExecutionRecord]) -> bool {
     tool_calls
         .iter()
         .any(|record| matches!(record.call, ToolCall::SpawnSubagent { .. }))
+}
+
+/// 检测模型回复是否明显表达了“工具调用意图”但格式不是创的 ACTION JSON。
+/// 命中时不再把 PlainText 直接当最终答案，而是进入协议修复循环，
+/// 避免 deepseek 等模型花式输出（XML / key:value / 半句调用）导致一句话断流。
+fn looks_like_tool_intent(body: &str) -> bool {
+    let text = body.to_lowercase();
+    let tool_keywords = [
+        "code_execute",
+        "shell_exec",
+        "list_dir",
+        "file_read",
+        "file_write",
+        "apply_patch",
+        "spawn_subagent",
+        "memory_recall",
+        "browser_navigate",
+        "browser_read",
+        "human_suspend",
+        "open_app",
+        "locate",
+        "screenshot",
+        "tool_call",
+        "tool_calls",
+        "<invoke",
+        "<antml:",
+        "arguments:",
+        "argument:",
+    ];
+    if tool_keywords.iter().any(|keyword| text.contains(keyword)) {
+        return true;
+    }
+    // 带工具字样的 ACTION 声明（ACTION XML / ACTION: 但非正式 envelope）。
+    (text.contains("action") || text.contains("<action>"))
+        && (text.contains("tool") || text.contains("call"))
 }
 
 fn tool_protocol_repair_prompt_for_spawn(original_input: &str, transcript: &[String]) -> String {
@@ -7831,6 +7880,21 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
+    fn looks_like_tool_intent_detects_loose_formats() {
+        assert!(looks_like_tool_intent(
+            "ACTION\ntool_call: code_execute\narguments: {\"command\": \"pwd\"}"
+        ));
+        assert!(looks_like_tool_intent(
+            "<ACTION>\n<tool_call>\n<name>code_execute</name>\n<args>{}</args>\n</tool_call>\n</ACTION>"
+        ));
+        assert!(looks_like_tool_intent(
+            "<antml:invoke name=\"list_dir\"><antml:parameter name=\"path\">src</antml:parameter></antml:invoke>"
+        ));
+        assert!(!looks_like_tool_intent("今天天气不错，适合出去走走。"));
+        assert!(!looks_like_tool_intent("FINAL: 已完成。"));
+    }
+
+    #[test]
     fn terminal_tool_failure_answer_subagent_unavailable_is_not_permission_block() {
         let answer = terminal_tool_failure_answer(&ToolExecutionRecord {
             call: ToolCall::SpawnSubagent {
@@ -8455,12 +8519,15 @@ allowed_channels = ["app-server"]
         .expect("auto-retried turn should succeed");
 
         assert_eq!(
-            turn.result.response.body,
-            "自动重试后成功",
+            turn.result.response.body, "自动重试后成功",
             "final answer should come from the retried model call"
         );
         assert_eq!(
-            turn.result.response.meta.extra.get("model_auto_retry_count"),
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("model_auto_retry_count"),
             Some(&"1".to_string())
         );
         assert!(turn
@@ -8514,7 +8581,11 @@ allowed_channels = ["app-server"]
 
         assert_eq!(turn.result.response.body, "重试到成功");
         assert_eq!(
-            turn.result.response.meta.extra.get("model_auto_retry_count"),
+            turn.result
+                .response
+                .meta
+                .extra
+                .get("model_auto_retry_count"),
             Some(&"2".to_string())
         );
         assert_eq!(
@@ -8865,7 +8936,8 @@ allowed_channels = ["cli", "app-server"]
                 unique_record_suffix_for_test()
             )),
         );
-        let emotion = EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
+        let emotion =
+            EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
         let segment = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样", &[])
             .expect("emotion segment should build");
         assert_eq!(segment.id, "emotion-state");
@@ -8942,7 +9014,9 @@ allowed_channels = ["cli", "app-server"]
             chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
 
         let make_request = |input: &str| RunCliRequest {
-            options: CliOptions { runtime: runtime.clone() },
+            options: CliOptions {
+                runtime: runtime.clone(),
+            },
             user_input: input.to_string(),
             workspace_root: Some(temp_dir.clone()),
             remember: false,
@@ -8984,8 +9058,8 @@ allowed_channels = ["cli", "app-server"]
         assert!(persisted.saved_at.is_some());
 
         // 第二轮：恢复同一份状态（valence 延续，而不是从默认 0 开始）。
-        let (second, _) = run_with_options(&make_request("帮我看看这个文件"))
-            .expect("second run should succeed");
+        let (second, _) =
+            run_with_options(&make_request("帮我看看这个文件")).expect("second run should succeed");
         let second_valence = second
             .response
             .meta
@@ -9113,7 +9187,9 @@ allowed_channels = ["cli", "app-server"]
         runtime.identity_bootstrap =
             chuang_agent::runtime_config::IdentityBootstrapConfig::new(&identity_root);
         let make_request = |input: &str| RunCliRequest {
-            options: CliOptions { runtime: runtime.clone() },
+            options: CliOptions {
+                runtime: runtime.clone(),
+            },
             user_input: input.to_string(),
             workspace_root: Some(temp_dir.clone()),
             remember: true,
