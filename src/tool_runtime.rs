@@ -2517,6 +2517,38 @@ fn execute_spawn_subagent(
         return failed_record_with_output(registry, call, short, Some(output));
     }
 
+    // 把每个工人的产出片段嵌进 summary，保证模型在主摘要里就能看到 worker 结果
+    // （不依赖模型解析嵌套 output JSON；codex 输出格式不稳定时也能可靠回流）。
+    let mut worker_summary_lines: Vec<String> = Vec::new();
+    for (index, item) in results.iter().enumerate() {
+        let result_preview = item
+            .get("result_preview")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(180)
+            .collect::<String>();
+        let item_summary = item
+            .get("summary")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let worker_text = if result_preview.is_empty() {
+            item_summary.to_string()
+        } else {
+            result_preview
+        };
+        if !worker_text.is_empty() {
+            worker_summary_lines.push(format!("#{} {}", index + 1, worker_text));
+        }
+    }
+    let worker_summary_suffix = if worker_summary_lines.is_empty() {
+        String::new()
+    } else {
+        format!("; workers=[{}]", worker_summary_lines.join(" | "))
+    };
+
     let first = results.first();
     let first_run = first
         .and_then(|item| item.get("run_id").and_then(|v| v.as_str()))
@@ -2540,8 +2572,8 @@ fn execute_spawn_subagent(
         registry,
         call,
         format!(
-            "subagent_batch_completed workers={} concurrency={concurrency} admission=accepted first_run={first_run} first={first_summary_token}",
-            job_list.len()
+            "subagent_batch_completed workers={} concurrency={concurrency} admission=accepted first_run={first_run} first={first_summary_token}{worker_summary_suffix}",
+            job_list.len(),
         ),
         Some(output),
         false,
