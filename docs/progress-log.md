@@ -3180,3 +3180,9 @@
 - 2) 并行子代理调度：spawn_subagent tasks + 并发 3 → batch_completed、admission accepted、23.3s 完成。发现"回收结果"缺陷：codex 输出格式不稳定 + 模型不解析嵌套 output JSON，worker 产出偶尔无法回流 → 修复：成功回执 summary 内嵌 workers=[#1 产出 | #2 ...] 片段。复测：创正确汇总 140 个 .rs 文件 + progress-log 最近主题。
 - 3) 真实桌面/浏览器只读：browser_read 读到当前页面标题/URL（Example Domain）；locate 观察到当前窗口（飞书）。CDP + xdotool 真实链路通。
 - 待决策：跨会话长期记忆 writeback 策略（什么值得写 experiences、频率、质量门槛）。
+
+# 2026-08-07 情感模块 + GBrain 外脑实测
+- 情感模块 ✅：五轴（connection/pride/valence/arousal/immersion）注入 turn metadata；emotion_state 渲染成人话（"心情平稳，正沉浸在某件事里"）；创回复自然且与五轴数值一致（immersion 0.57 高 ↔ "思维通路是热的"）。
+- GBrain 外脑 ✅：emotion_brain=1 时 emotion_context_segment 调 agent-hub-brain-query semantic（CLI 通道）查主人相关记忆颗粒并注入 prompt；创回答引用了 4 条具体颗粒（agent-harness-loop、service-governance、File-over-App、Ratatui 壳）。CLI 直测返回记忆颗粒正常。
+- 备注：knowledge_context（GBrain 直连 API 通道）仍 disabled（默认），外脑供料走 emotion_brain CLI 通道已够用；是否启用直连 API 通道留给后续决策。
+- 长期记忆 writeback：待专项治理（靠规则定什么值得写 experiences，不默认开启防膨胀）。
