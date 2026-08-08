@@ -1,15 +1,16 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json;
 
 use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError, SearchHit};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct SqliteMemoryStore {
-    path: PathBuf,
+    conn: RefCell<Connection>,
 }
 
 impl SqliteMemoryStore {
@@ -19,13 +20,24 @@ impl SqliteMemoryStore {
             fs::create_dir_all(parent).map_err(|_| MemoryStoreError::StorageUnavailable)?;
         }
 
-        let store = Self { path };
+        let conn = Connection::open(&path).map_err(|_| MemoryStoreError::StorageUnavailable)?;
+        // WAL：显著改善并发读写（多 session 同时写记忆时不互相锁库）。
+        // busy_timeout：并发写撞锁时等待而非立即报 database is locked。
+        conn.busy_timeout(std::time::Duration::from_millis(5000))
+            .map_err(|_| MemoryStoreError::StorageUnavailable)?;
+        let _ = conn
+            .execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|_| MemoryStoreError::StorageUnavailable)?;
+
+        let store = Self {
+            conn: RefCell::new(conn),
+        };
         store.init_schema()?;
         Ok(store)
     }
 
-    fn connection(&self) -> Result<Connection, MemoryStoreError> {
-        Connection::open(&self.path).map_err(|_| MemoryStoreError::StorageUnavailable)
+    fn connection(&self) -> Result<std::cell::RefMut<'_, Connection>, MemoryStoreError> {
+        self.conn.try_borrow_mut().map_err(|_| MemoryStoreError::StorageUnavailable)
     }
 
     fn init_schema(&self) -> Result<(), MemoryStoreError> {
