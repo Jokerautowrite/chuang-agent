@@ -103,6 +103,10 @@ impl Governance for StaticRuleGovernance {
         Ok(())
     }
 
+    fn audit_records(&self) -> &[AuditRecord] {
+        &self.audit_records
+    }
+
     fn verify_operator_approval(
         &self,
         evidence: &OperatorApprovalEvidence,

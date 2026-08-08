@@ -266,6 +266,19 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             })
             .map_err(ChuangKernelGovernanceError::Governance)?;
 
+        // 持久化治理审计记录：把本次 turn 累积的 AuditRecord 序列化进 meta，
+        // 随 turn 存档（session_turn_archive）落库，避免审计明细仅存内存丢失。
+        let audit_snapshot = governance.audit_records().to_vec();
+        let audit_json = serde_json::to_string(&audit_snapshot).map_err(|error| {
+            ChuangKernelGovernanceError::Governance(GovernanceError {
+                message: format!("serialize audit records: {error}"),
+            })
+        })?;
+        turn.result.response.meta.extra.insert(
+            "governance_audit_records_json".to_string(),
+            audit_json,
+        );
+
         Ok(turn)
     }
 
@@ -827,6 +840,7 @@ fn default_identity_timestamp() -> chrono::DateTime<chrono::Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::StaticRuleGovernance;
     use crate::memory_store::InMemoryMemoryStore;
     use crate::responder::FakeResponder;
 
@@ -864,5 +878,37 @@ mod tests {
         assert!(segments
             .iter()
             .all(|segment| segment.id != "identity-governance-rules"));
+    }
+
+    #[test]
+    fn governed_turn_persists_audit_records_in_meta() {
+        let mut config = ChuangKernelConfig::mvp_default("chuang");
+        config.recall_limit = 1;
+        let mut kernel = ChuangKernel::with_responder(
+            config,
+            InMemoryMemoryStore::new(),
+            FakeResponder::new("fake-responder".to_string()),
+        );
+        let mut governance = StaticRuleGovernance::new();
+        let turn = kernel
+            .run_governed_turn("hello", &mut governance)
+            .expect("governed turn should run");
+        let audit_json = turn
+            .result
+            .response
+            .meta
+            .extra
+            .get("governance_audit_records_json")
+            .expect("audit records json should be present in meta");
+        let records: Vec<AuditRecord> =
+            serde_json::from_str(audit_json).expect("audit json should parse");
+        assert!(
+            !records.is_empty(),
+            "at least the run_governed_turn audit record should be persisted"
+        );
+        assert!(
+            records.iter().any(|r| r.operation == "run_governed_turn"),
+            "run_governed_turn audit record should be in snapshot"
+        );
     }
 }

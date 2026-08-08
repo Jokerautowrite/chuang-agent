@@ -57,6 +57,12 @@ pub trait Governance {
     fn classify(&self, action: &ProposedAction) -> Result<RiskDecision, GovernanceError>;
     fn audit(&mut self, record: AuditRecord) -> Result<(), GovernanceError>;
 
+    /// 返回本会话累积的审计记录（供持久化快照使用）。
+    /// 默认返回空；实现方如 StaticRuleGovernance 会返回真实记录。
+    fn audit_records(&self) -> &[AuditRecord] {
+        &[]
+    }
+
     fn verify_operator_approval(
         &self,
         _evidence: &OperatorApprovalEvidence,

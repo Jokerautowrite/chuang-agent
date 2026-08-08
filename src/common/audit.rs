@@ -1,6 +1,7 @@
 use crate::common::{AgentId, TaskId, Timestamp};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditRecord {
     pub operation: String,
     pub agent_id: AgentId,
