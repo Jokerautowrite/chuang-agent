@@ -7,6 +7,7 @@
 //!
 //! 只读调用本机 CLI：`agent-hub-brain-query semantic <query> <limit>`（JSON 输出）。
 
+use std::env;
 use std::process::Command;
 use std::str;
 
@@ -31,8 +32,14 @@ pub struct EmotionBrainConfig {
 
 impl Default for EmotionBrainConfig {
     fn default() -> Self {
+        // 默认走环境变量覆盖，避免硬编码本机绝对路径；
+        // 未设置时回退到 PATH 查找（同名命令）。
+        let query_bin = env::var("CHUANG_BRAIN_QUERY_BIN")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "agent-hub-brain-query".to_string());
         Self {
-            query_bin: "/home/user/agent-hub/bin/agent-hub-brain-query".to_string(),
+            query_bin,
             default_limit: 3,
         }
     }

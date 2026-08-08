@@ -812,6 +812,14 @@ pub fn parse_tool_action_envelope_result(
 ) -> Result<ToolActionEnvelope, ToolProtocolError> {
     let trimmed = body.trim();
     let Some(json_text) = trimmed.strip_prefix("ACTION:").map(str::trim) else {
+        // 容错：模型可能在说明文字后输出 "ACTION: {...}" 混合体，
+        // 找不到前缀时先在全文中搜索 ACTION: 标记，提取其后 JSON 再解析。
+        if let Some(pos) = trimmed.find("ACTION:") {
+            let action_part = trimmed[pos + "ACTION:".len()..].trim_start();
+            if action_part.starts_with('{') {
+                return parse_action_json_prefix(action_part, trimmed);
+            }
+        }
         return Err(protocol_error(
             "missing_action_prefix",
             "ACTION payload must start with ACTION:",
@@ -825,6 +833,12 @@ fn parse_action_json_prefix(
     json_text: &str,
     raw: &str,
 ) -> Result<ToolActionEnvelope, ToolProtocolError> {
+    if let Ok(envelope) = serde_json::from_str::<ToolActionEnvelope>(json_text) {
+        return Ok(envelope);
+    }
+    if let Some(envelope) = try_repair_action_json(json_text) {
+        return Ok(envelope);
+    }
     let mut stream =
         serde_json::Deserializer::from_str(json_text).into_iter::<ToolActionEnvelope>();
     let envelope = stream
@@ -848,6 +862,27 @@ fn parse_action_json_prefix(
             raw,
         ))
     }
+}
+
+/// 容错修复：模型偶发在深层嵌套处截断 ACTION JSON，
+/// 从结尾逆推最近一个完整 `}` 再解析，命中即视为有效 ACTION。
+fn try_repair_action_json(json_text: &str) -> Option<ToolActionEnvelope> {
+    let mut cut = json_text.len();
+    while cut > 1 {
+        match json_text[..cut].rfind('}') {
+            Some(pos) if pos > 0 => {
+                cut = pos + 1;
+                if let Ok(envelope) =
+                    serde_json::from_str::<ToolActionEnvelope>(&json_text[..cut])
+                {
+                    return Some(envelope);
+                }
+                cut = pos;
+            }
+            _ => break,
+        }
+    }
+    None
 }
 
 fn is_recoverable_concatenated_tool_output(trailing: &str) -> bool {
@@ -4241,4 +4276,21 @@ mod xml_tool_call_parser_tests {
             other => panic!("expected code_execute, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn repairs_action_json_with_trailing_noise() {
+    let body = r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls -la"}} 后面是一些解释文字"#;
+    let envelope = parse_tool_action_envelope_result(body).expect("尾部杂讯应被修复");
+    let reparsed = serde_json::to_string(&envelope).unwrap();
+    assert!(reparsed.contains("\"tool\":\"code_execute\""), "reparsed={reparsed}");
+}
+
+#[test]
+fn parses_action_embedded_after_prose() {
+    let body = r#"好的，我先看一下。
+ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"pwd"}}"#;
+    let envelope = parse_tool_action_envelope_result(body).expect("说明文字+ACTION 应解析成功");
+    let reparsed = serde_json::to_string(&envelope).unwrap();
+    assert!(reparsed.contains("\"tool\":\"code_execute\""), "reparsed={reparsed}");
 }

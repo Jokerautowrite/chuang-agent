@@ -24,8 +24,8 @@ use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
-    ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
-    ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
+    ConfigSummary, DEFAULT_WORKSPACE_ROOT, IdentityBootstrapConfig, IdentityMemoryConfig,
+    OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -2955,8 +2955,7 @@ fn build_runtime_for_workspace_with_options(
 
     normalize_runtime_paths(&mut runtime, &base_dir);
     if !config_path.exists()
-        || runtime.permission.workspace_root
-            == PathBuf::from("/home/user/projects/chuang-agent")
+        || runtime.permission.workspace_root == PathBuf::from(DEFAULT_WORKSPACE_ROOT)
     {
         runtime.permission.workspace_root = base_dir.clone();
     }

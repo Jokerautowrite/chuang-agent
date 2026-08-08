@@ -11,6 +11,10 @@ use crate::subagent_queue::FileSubagentQueueConfig;
 use crate::tool_runtime::ShellRiskRules;
 use serde::Serialize;
 
+/// 默认工作区根（仅作为 RuntimeConfig::new 的初始哨兵值；
+/// 实际生效值由 app_server 按 base_dir / 环境变量归一化）。
+pub const DEFAULT_WORKSPACE_ROOT: &str = "/home/user/projects/chuang-agent";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub db_path: PathBuf,
@@ -312,7 +316,7 @@ impl RuntimeConfig {
             permission: PermissionRuntimeConfig {
                 profile: "full_local_workspace".to_string(),
                 approval_policy: "auto_for_workspace".to_string(),
-                workspace_root: PathBuf::from("/home/user/projects/chuang-agent"),
+                workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
             },
             tool_loop: ToolLoopConfig {
                 max_rounds: 4,
