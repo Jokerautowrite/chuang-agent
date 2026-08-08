@@ -105,6 +105,10 @@ fn browser_read_live_receipt_script_blocks_when_status_skipped_and_cdp_port_miss
         .arg("--json")
         .env("CHUANG_BROWSER_READ_RECEIPT_SKIP_STATUS", "1")
         .env_remove("CHUANG_CDP_PORT")
+        .env(
+            "CHUANG_HEADLESS_STATE_DIR",
+            "/tmp/chuang-browser-receipt-no-state-dir",
+        )
         .output()
         .expect("browser read receipt script should execute");
 
