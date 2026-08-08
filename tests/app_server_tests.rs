@@ -1177,6 +1177,7 @@ transport = "stub"
         .iter()
         .find(|value| value["id"] == 2)
         .expect("turn/start response should be present");
+
     assert_eq!(turn_response["result"]["turn"]["toolCallCount"], 0);
     assert_eq!(
         turn_response["result"]["turn"]["runtimeReportId"],
@@ -2699,19 +2700,31 @@ fn app_server_turn_marks_200_missing_content_as_provider_error() {
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
+    listener
+        .set_nonblocking(true)
+        .expect("listener should be nonblocking");
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let _ = read_http_request(&mut stream);
-
-        let body = r#"{"id":"chatcmpl-empty","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+        // 空 content 触发模型自动重试，mock 需持续可用。
+        // 非阻塞 accept + 短 sleep 轮询：可靠接受每次连接，
+        // 同时避免无更多连接时永久阻塞 server.join()。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = read_http_request(&mut stream);
+                    let body = r#"{"id":"chatcmpl-empty","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                }
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+        }
     });
 
     fs::write(
