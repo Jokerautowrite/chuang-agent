@@ -19,10 +19,7 @@ Auto-start on tool use is default; disable with CHUANG_HEADLESS_AUTOSTART=0."
             );
             Ok(())
         }
-        other => Err(format!(
-            "unsupported browser action: {other}\n{}",
-            usage()
-        )),
+        other => Err(format!("unsupported browser action: {other}\n{}", usage())),
     }
 }
 
@@ -38,7 +35,12 @@ fn run_headless_script(action: &str) -> Result<(), String> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .map_err(|err| format!("browser script spawn failed path={} error={err}", script.display()))?;
+        .map_err(|err| {
+            format!(
+                "browser script spawn failed path={} error={err}",
+                script.display()
+            )
+        })?;
     if !status.success() {
         return Err(format!(
             "browser {action} failed exit={}",

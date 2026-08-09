@@ -167,7 +167,10 @@ impl EmotionSlotRuntime {
         }
     }
 
-    pub fn tick(&mut self, minutes_elapsed: f64) -> Result<Vec<crate::emotion_slot::EmotionTrigger>, EmotionSlotError> {
+    pub fn tick(
+        &mut self,
+        minutes_elapsed: f64,
+    ) -> Result<Vec<crate::emotion_slot::EmotionTrigger>, EmotionSlotError> {
         match self {
             Self::Fake(slot) => slot.tick(minutes_elapsed),
             Self::Jiwen(slot) => slot.tick(minutes_elapsed),
@@ -446,10 +449,10 @@ impl Responder for ProviderSlot {
                         .extra
                         .contains_key("provider_fallback_used")
                     {
-                        primary_output.meta.extra.insert(
-                            "provider_fallback_used".to_string(),
-                            "false".to_string(),
-                        );
+                        primary_output
+                            .meta
+                            .extra
+                            .insert("provider_fallback_used".to_string(), "false".to_string());
                     }
                     return primary_output;
                 }
@@ -794,11 +797,11 @@ mod tests {
         // A primary that points at an unroutable local port fails fast
         // (connection refused), exercising the fallback path without a
         // network dependency.
-        let primary_fail = ProviderSlot::OpenAICompatible(OpenAICompatibleProviderAdapter::new(
-            "primary", "http://127.0.0.1:1/v1", "k", "m1",
-        )
-        .with_transport(crate::provider_openai_compatible::ProviderTransport::Http)
-        .with_request_timeout_ms(1500));
+        let primary_fail = ProviderSlot::OpenAICompatible(
+            OpenAICompatibleProviderAdapter::new("primary", "http://127.0.0.1:1/v1", "k", "m1")
+                .with_transport(crate::provider_openai_compatible::ProviderTransport::Http)
+                .with_request_timeout_ms(1500),
+        );
         let level1 = ProviderSlot::Fallback {
             primary: Box::new(primary_fail),
             fallback: Box::new(ProviderSlot::Fake(FakeResponder::new("m2-ok"))),
@@ -821,7 +824,11 @@ mod tests {
         // behavior: recover at the first available level, and the final
         // meta must still report that a fallback was used (at an inner hop).
         assert_eq!(
-            output.meta.extra.get("provider_fallback_used").map(String::as_str),
+            output
+                .meta
+                .extra
+                .get("provider_fallback_used")
+                .map(String::as_str),
             Some("true")
         );
         assert_eq!(

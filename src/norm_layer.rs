@@ -67,7 +67,11 @@ pub fn dispatch_worker_brief() -> &'static str {
 }
 
 pub fn wrap_task_for_worker(task: &str) -> String {
-    format!("{}\n\n---\n任务：\n{}", dispatch_worker_brief(), task.trim())
+    format!(
+        "{}\n\n---\n任务：\n{}",
+        dispatch_worker_brief(),
+        task.trim()
+    )
 }
 
 struct SkillSpec {
@@ -501,9 +505,7 @@ pub fn repin_always_on_norms(packed: &mut crate::context_engine::PackedContext) 
         .any(|segment| segment.id == DOCTRINE_CARD_ID)
     {
         let card = doctrine_card_segment();
-        packed.total_tokens = packed
-            .total_tokens
-            .saturating_add(card.tokens.unwrap_or(0));
+        packed.total_tokens = packed.total_tokens.saturating_add(card.tokens.unwrap_or(0));
         packed.dropped_ids.retain(|id| id != DOCTRINE_CARD_ID);
         packed.segments.insert(insert_at, card);
         insert_at = insert_at.saturating_add(1);
@@ -569,10 +571,14 @@ mod tests {
     fn contradiction_skill_is_short_and_narrow() {
         assert!(SKILL_CONTRADICTION.chars().count() < 500);
         let segs = on_demand_skill_segments("我们资源不够，主要矛盾到底是什么");
-        assert!(segs.iter().any(|s| s.id == "norm-skill-contradiction-analysis"));
+        assert!(segs
+            .iter()
+            .any(|s| s.id == "norm-skill-contradiction-analysis"));
         // daily coding must not load it
         let code = on_demand_skill_segments("修一下编译错误");
-        assert!(!code.iter().any(|s| s.id == "norm-skill-contradiction-analysis"));
+        assert!(!code
+            .iter()
+            .any(|s| s.id == "norm-skill-contradiction-analysis"));
     }
 
     #[test]
@@ -581,9 +587,13 @@ mod tests {
         let card = doctrine_card_segment();
         assert!(card.content.contains("闭环"));
         let segs = on_demand_skill_segments("agent 老是跑偏，需要闭环控制");
-        assert!(segs.iter().any(|s| s.id == "norm-skill-closed-loop-control"));
+        assert!(segs
+            .iter()
+            .any(|s| s.id == "norm-skill-closed-loop-control"));
         let code = on_demand_skill_segments("修一下编译错误");
-        assert!(!code.iter().any(|s| s.id == "norm-skill-closed-loop-control"));
+        assert!(!code
+            .iter()
+            .any(|s| s.id == "norm-skill-closed-loop-control"));
     }
 
     #[test]

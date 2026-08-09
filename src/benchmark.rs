@@ -241,7 +241,10 @@ impl BenchmarkStore {
 
     /// Record one evaluator run. Accepts as best only when total strictly
     /// improves over the previous best (Penguin: no improvement -> no accept).
-    pub fn record_run(&self, request: &BenchmarkRunRequest) -> Result<BenchmarkRunReceipt, BenchmarkError> {
+    pub fn record_run(
+        &self,
+        request: &BenchmarkRunRequest,
+    ) -> Result<BenchmarkRunReceipt, BenchmarkError> {
         let def = self.load_def(&request.benchmark_id)?;
         let mut board = self.load_scoreboard(&request.benchmark_id)?;
         let total = sum_total(&request.case_scores);
@@ -267,12 +270,19 @@ impl BenchmarkStore {
         board.version = def.version;
         board.history.push(entry);
 
-        let path = self.root.join(&request.benchmark_id).join("scoreboard.json");
+        let path = self
+            .root
+            .join(&request.benchmark_id)
+            .join("scoreboard.json");
         let json = serde_json::to_vec_pretty(&board).map_err(|e| BenchmarkError(e.to_string()))?;
         fs::write(&path, json).map_err(|e| BenchmarkError(e.to_string()))?;
 
         Ok(BenchmarkRunReceipt {
-            run_id: board.history.last().map(|e| e.run_id.clone()).unwrap_or_default(),
+            run_id: board
+                .history
+                .last()
+                .map(|e| e.run_id.clone())
+                .unwrap_or_default(),
             benchmark_id: request.benchmark_id.clone(),
             version: def.version,
             total_score: total,
@@ -307,7 +317,8 @@ impl BenchmarkStore {
                 issues.push(format!("duplicate case id: {}", case.id));
             }
             let lower = case.statement.to_lowercase();
-            if lower.contains("rubric") || lower.contains("评分标准") || lower.contains("scoring") {
+            if lower.contains("rubric") || lower.contains("评分标准") || lower.contains("scoring")
+            {
                 issues.push(format!("statement contains rubric hint: {}", case.id));
             }
             if case.rubric.trim().is_empty() {
@@ -335,7 +346,8 @@ impl BenchmarkStore {
                 issues.push(format!("empty statement: {}", case.id));
             }
             let lower = case.statement.to_lowercase();
-            if lower.contains("rubric") || lower.contains("评分标准") || lower.contains("scoring") {
+            if lower.contains("rubric") || lower.contains("评分标准") || lower.contains("scoring")
+            {
                 issues.push(format!("statement contains rubric hint: {}", case.id));
             }
             match self.read_rubric(id, &case.id) {
@@ -363,7 +375,11 @@ mod tests {
 
     fn temp_root() -> PathBuf {
         let n = TMP_COUNTER.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join(format!("chuang-benchmark-test-{}-{}", std::process::id(), n))
+        std::env::temp_dir().join(format!(
+            "chuang-benchmark-test-{}-{}",
+            std::process::id(),
+            n
+        ))
     }
 
     fn sample_def() -> BenchmarkDef {
@@ -401,8 +417,8 @@ mod tests {
         assert_eq!(loaded.cases.len(), 2);
         assert_eq!(loaded.cases[0].id, "case-001");
         // Isolation: the public definition must NOT contain rubric text.
-        let public_raw = fs::read_to_string(root.join("memory-recall/benchmark.json"))
-            .expect("read public def");
+        let public_raw =
+            fs::read_to_string(root.join("memory-recall/benchmark.json")).expect("read public def");
         assert!(
             !public_raw.contains("1 point: restates concise Chinese preference"),
             "public benchmark.json must not leak rubric text"
@@ -411,7 +427,9 @@ mod tests {
             loaded.cases.iter().all(|c| c.rubric.is_empty()),
             "loaded public def must have empty rubric fields"
         );
-        let rubric = store.read_rubric("memory-recall", "case-001").expect("rubric");
+        let rubric = store
+            .read_rubric("memory-recall", "case-001")
+            .expect("rubric");
         assert!(rubric.contains("concise Chinese"));
         #[cfg(unix)]
         {
@@ -434,8 +452,18 @@ mod tests {
         let low = BenchmarkRunRequest {
             benchmark_id: "memory-recall".to_string(),
             case_scores: vec![
-                CaseScore { case_id: "case-001".into(), score: 1, max_score: 2, reason: "partial".into() },
-                CaseScore { case_id: "case-002".into(), score: 1, max_score: 2, reason: "partial".into() },
+                CaseScore {
+                    case_id: "case-001".into(),
+                    score: 1,
+                    max_score: 2,
+                    reason: "partial".into(),
+                },
+                CaseScore {
+                    case_id: "case-002".into(),
+                    score: 1,
+                    max_score: 2,
+                    reason: "partial".into(),
+                },
             ],
         };
         let first = store.record_run(&low).expect("record low");
@@ -445,8 +473,18 @@ mod tests {
         let tie = BenchmarkRunRequest {
             benchmark_id: "memory-recall".to_string(),
             case_scores: vec![
-                CaseScore { case_id: "case-001".into(), score: 1, max_score: 2, reason: "tie".into() },
-                CaseScore { case_id: "case-002".into(), score: 1, max_score: 2, reason: "tie".into() },
+                CaseScore {
+                    case_id: "case-001".into(),
+                    score: 1,
+                    max_score: 2,
+                    reason: "tie".into(),
+                },
+                CaseScore {
+                    case_id: "case-002".into(),
+                    score: 1,
+                    max_score: 2,
+                    reason: "tie".into(),
+                },
             ],
         };
         let tie_run = store.record_run(&tie).expect("record tie");
@@ -455,8 +493,18 @@ mod tests {
         let better = BenchmarkRunRequest {
             benchmark_id: "memory-recall".to_string(),
             case_scores: vec![
-                CaseScore { case_id: "case-001".into(), score: 2, max_score: 2, reason: "full".into() },
-                CaseScore { case_id: "case-002".into(), score: 1, max_score: 2, reason: "partial".into() },
+                CaseScore {
+                    case_id: "case-001".into(),
+                    score: 2,
+                    max_score: 2,
+                    reason: "full".into(),
+                },
+                CaseScore {
+                    case_id: "case-002".into(),
+                    score: 1,
+                    max_score: 2,
+                    reason: "partial".into(),
+                },
             ],
         };
         let improved = store.record_run(&better).expect("record better");

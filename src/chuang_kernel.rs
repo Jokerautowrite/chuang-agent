@@ -274,10 +274,11 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 message: format!("serialize audit records: {error}"),
             })
         })?;
-        turn.result.response.meta.extra.insert(
-            "governance_audit_records_json".to_string(),
-            audit_json,
-        );
+        turn.result
+            .response
+            .meta
+            .extra
+            .insert("governance_audit_records_json".to_string(), audit_json);
 
         Ok(turn)
     }
@@ -432,9 +433,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             })
             // 非 session 路径也要唯一后缀：CLI 每次进程内 turn_id 都是 turn-1，
             // 同一 db 连续 --remember 会撞主键（DuplicateId）。
-            .unwrap_or_else(|| {
-                format!("turn-memory-{}-{}", turn.turn_id, unique_record_suffix())
-            });
+            .unwrap_or_else(|| format!("turn-memory-{}-{}", turn.turn_id, unique_record_suffix()));
         let original_content = turn_summary_content(turn);
         let original_chars = original_content.chars().count();
         let mut content = original_content.clone();

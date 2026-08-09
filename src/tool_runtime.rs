@@ -872,8 +872,7 @@ fn try_repair_action_json(json_text: &str) -> Option<ToolActionEnvelope> {
         match json_text[..cut].rfind('}') {
             Some(pos) if pos > 0 => {
                 cut = pos + 1;
-                if let Ok(envelope) =
-                    serde_json::from_str::<ToolActionEnvelope>(&json_text[..cut])
+                if let Ok(envelope) = serde_json::from_str::<ToolActionEnvelope>(&json_text[..cut])
                 {
                     return Some(envelope);
                 }
@@ -4283,7 +4282,10 @@ fn repairs_action_json_with_trailing_noise() {
     let body = r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls -la"}} 后面是一些解释文字"#;
     let envelope = parse_tool_action_envelope_result(body).expect("尾部杂讯应被修复");
     let reparsed = serde_json::to_string(&envelope).unwrap();
-    assert!(reparsed.contains("\"tool\":\"code_execute\""), "reparsed={reparsed}");
+    assert!(
+        reparsed.contains("\"tool\":\"code_execute\""),
+        "reparsed={reparsed}"
+    );
 }
 
 #[test]
@@ -4292,5 +4294,8 @@ fn parses_action_embedded_after_prose() {
 ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"pwd"}}"#;
     let envelope = parse_tool_action_envelope_result(body).expect("说明文字+ACTION 应解析成功");
     let reparsed = serde_json::to_string(&envelope).unwrap();
-    assert!(reparsed.contains("\"tool\":\"code_execute\""), "reparsed={reparsed}");
+    assert!(
+        reparsed.contains("\"tool\":\"code_execute\""),
+        "reparsed={reparsed}"
+    );
 }

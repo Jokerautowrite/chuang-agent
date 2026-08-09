@@ -2,11 +2,11 @@
 
 use std::path::PathBuf;
 
+use chuang_agent::emotion_brain::{brain_query_semantic, BrainHit, EmotionBrainConfig};
 use chuang_agent::emotion_heartbeat::{
     build_proactive_prompt, evaluate_heartbeat, restore_jiwen_from_state, HeartbeatPolicy,
     ProactiveOutbox,
 };
-use chuang_agent::emotion_brain::{brain_query_semantic, BrainHit, EmotionBrainConfig};
 use chuang_agent::emotion_slot::{now_rfc3339, EmotionSlot, EmotionStateSnapshot};
 use chuang_agent::emotion_store::{
     resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState,
@@ -55,8 +55,7 @@ fn wants_json(args: &[String]) -> bool {
 }
 
 fn resolve_config_path(args: &[String]) -> Result<PathBuf, String> {
-    let config_path = parse_config_path(args)?
-        .unwrap_or_else(|| PathBuf::from("config.toml"));
+    let config_path = parse_config_path(args)?.unwrap_or_else(|| PathBuf::from("config.toml"));
     Ok(if config_path.is_absolute() {
         config_path
     } else {
@@ -69,8 +68,11 @@ fn resolve_config_path(args: &[String]) -> Result<PathBuf, String> {
 fn load_runtime(args: &[String]) -> Result<RuntimeConfig, String> {
     let config_path = resolve_config_path(args)?;
     // 心跳/状态不需要 provider：宽松加载，缺 provider env 也不报错。
-    load_runtime_config_file_with_options(&config_path, RuntimeConfigFileOptions::allow_missing_env())
-        .map_err(|error| format!("config_load_failed: {error:?}"))
+    load_runtime_config_file_with_options(
+        &config_path,
+        RuntimeConfigFileOptions::allow_missing_env(),
+    )
+    .map_err(|error| format!("config_load_failed: {error:?}"))
 }
 
 /// 严格加载（provider env 齐全才 Some）；仅缺 env 时返回 None（回退模板消息）。
@@ -161,8 +163,7 @@ fn heartbeat_command(args: &[String]) -> Result<(), String> {
         .snapshot()
         .map_err(|error| format!("emotion_snapshot_failed: {error:?}"))?;
 
-    let decision =
-        evaluate_heartbeat(&snapshot, &triggers, &state, &policy, &workspace_root, now);
+    let decision = evaluate_heartbeat(&snapshot, &triggers, &state, &policy, &workspace_root, now);
 
     // 无论是否触发都要持久化：已 tick 的轴 + 心跳时间，避免时间重复计。
     let mut next_state = PersistedEmotionState {
@@ -259,7 +260,10 @@ fn status_command(args: &[String]) -> Result<(), String> {
         .load()
         .map_err(|error| format!("emotion_state_load_failed: {error}"))?
         .unwrap_or_else(|| default_persisted_state(&now_rfc3339()));
-    let outbox = ProactiveOutbox::new(ProactiveOutbox::resolve_dir(&runtime.metadata, &workspace_root));
+    let outbox = ProactiveOutbox::new(ProactiveOutbox::resolve_dir(
+        &runtime.metadata,
+        &workspace_root,
+    ));
     let pending = outbox.list_pending();
 
     if json {

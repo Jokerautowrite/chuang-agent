@@ -35,17 +35,16 @@ use crate::brand_theme::{
     ASSIST_FG, BG, BRAND, BRAND_DIM, BRAND_MUTED, BRAND_SOFT, DANGER, INPUT_FG, USER_BG, USER_FG,
 };
 use crate::cli_approval::resume_local_tty_approval;
-use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::cli_repl_transport::ReplTurnTransport;
+use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::{
     compact_preview, complete_progress_jsonl, format_ms_duration, format_progress_event,
     format_short_duration, handle_repl_command, handle_sticky_key, humanize_approval_record,
     insert_str_at, merge_repl_guidance, note_raw_progress_line, pending_approval_from_result,
     readable_runtime_error, recent_repl_conversation_history, record_repl_conversation_turn,
     render_approval_details, render_completion_metadata_line, render_repl_answer_text,
-    reset_repl_session_for_new,
-    LiveControlEnqueueResult, ProgressCursor, ReplPendingApproval, ReplSessionStats, RunningTurn,
-    StickyKeyAction, REPL_HISTORY_MAX_TURNS,
+    reset_repl_session_for_new, LiveControlEnqueueResult, ProgressCursor, ReplPendingApproval,
+    ReplSessionStats, RunningTurn, StickyKeyAction, REPL_HISTORY_MAX_TURNS,
 };
 use chuang_agent::display_projector::DisplayState;
 
@@ -57,7 +56,13 @@ pub fn run_ratatui_repl(
     transport: &mut ReplTurnTransport,
 ) -> Result<(), String> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, options, &mut verbose, &mut show_trace, transport);
+    let result = run_app(
+        &mut terminal,
+        options,
+        &mut verbose,
+        &mut show_trace,
+        transport,
+    );
     let _ = restore_terminal(&mut terminal);
     result
 }
@@ -571,17 +576,15 @@ fn run_app(
                     }
                 }
             }
-            Event::Mouse(me) => {
-                match me.kind {
-                    MouseEventKind::ScrollUp => {
-                        apply_manual_scroll(&mut app, -3);
-                    }
-                    MouseEventKind::ScrollDown => {
-                        apply_manual_scroll(&mut app, 3);
-                    }
-                    _ => {}
+            Event::Mouse(me) => match me.kind {
+                MouseEventKind::ScrollUp => {
+                    apply_manual_scroll(&mut app, -3);
                 }
-            }
+                MouseEventKind::ScrollDown => {
+                    apply_manual_scroll(&mut app, 3);
+                }
+                _ => {}
+            },
             Event::Paste(text) => {
                 // Multi-line / bulk paste into draft at cursor; works with slash menu open.
                 app.draft_cursor = app.draft_cursor.min(app.draft.chars().count());
@@ -1125,10 +1128,7 @@ fn expand_transcript_line(line: &TranscriptLine, width: u16) -> Vec<Line<'static
             let used = display_width(&centered);
             let mut spans = spans;
             if used < w {
-                spans.push(Span::styled(
-                    " ".repeat(w - used),
-                    Style::default().bg(BG),
-                ));
+                spans.push(Span::styled(" ".repeat(w - used), Style::default().bg(BG)));
             }
             vec![Line::from(spans)]
         }
@@ -1702,7 +1702,8 @@ mod tests {
         app.lines.clear();
         app.banner_cleared = true;
         for i in 0..40 {
-            app.lines.push(transcript_line(LineKind::Meta, format!("line-{i}")));
+            app.lines
+                .push(transcript_line(LineKind::Meta, format!("line-{i}")));
         }
         app.follow = true;
         app.turn_top = None;
@@ -1724,11 +1725,7 @@ mod tests {
         assert!(rows.len() >= 2);
         // 每行视觉内容经 pad 后显示宽 = 8
         for row in &rows {
-            let plain: String = row
-                .spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect();
+            let plain: String = row.spans.iter().map(|s| s.content.as_ref()).collect();
             assert_eq!(display_width(&plain), 8, "row={plain:?}");
         }
     }
@@ -1740,10 +1737,7 @@ mod tests {
             true,
             |_guidance_path, _progress_path, _live_control_gate| Err("done".to_string()),
         );
-        let _ = turn
-            .receiver
-            .recv()
-            .expect("turn completion should arrive");
+        let _ = turn.receiver.recv().expect("turn completion should arrive");
         let partial = concat!(
             "{\"kind\":\"live_control_warning\",\"details\":{\"message\":\"first\"}}\n",
             "{\"kind\":\"live_control_warning\",\"details\":{\"message\":\"second\""

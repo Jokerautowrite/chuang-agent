@@ -75,13 +75,17 @@ impl BenchmarkEvaluator {
     }
 
     pub fn evaluate(&self, request: &EvaluateRequest) -> Result<EvaluateReceipt, String> {
-        let def = self.store
+        let def = self
+            .store
             .load_def(&request.benchmark_id)
             .map_err(|e| e.to_string())?;
 
         let mut answers = std::collections::BTreeMap::new();
         for answer in &request.answers {
-            if answers.insert(answer.case_id.clone(), answer.answer.clone()).is_some() {
+            if answers
+                .insert(answer.case_id.clone(), answer.answer.clone())
+                .is_some()
+            {
                 return Err(format!("duplicate answer for case {}", answer.case_id));
             }
         }
@@ -197,12 +201,12 @@ impl BenchmarkEvaluator {
                             case.id, parsed.score, parsed.max_score
                         ));
                     }
-                        case_scores.push(CaseScore {
-                            case_id: case.id.clone(),
-                            score: parsed.score,
-                            max_score: case.max_score,
-                            reason: parsed.reason,
-                        });
+                    case_scores.push(CaseScore {
+                        case_id: case.id.clone(),
+                        score: parsed.score,
+                        max_score: case.max_score,
+                        reason: parsed.reason,
+                    });
                     raw.push(RawCaseEvaluation {
                         case_id: case.id.clone(),
                         prompt,

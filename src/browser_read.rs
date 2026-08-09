@@ -244,7 +244,10 @@ pub fn find_headless_chrome_script() -> Option<std::path::PathBuf> {
     if let Ok(root) = std::env::var("CHUANG_AGENT_ROOT") {
         candidates.push(std::path::PathBuf::from(root).join("scripts/chuang-headless-chrome.sh"));
     }
-    candidates.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/chuang-headless-chrome.sh"));
+    candidates.push(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts/chuang-headless-chrome.sh"),
+    );
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("scripts/chuang-headless-chrome.sh"));
         candidates.push(cwd.join("chuang-agent/scripts/chuang-headless-chrome.sh"));
@@ -383,10 +386,11 @@ impl CdpBrowserReadAdapter {
             // Early exit when Content-Length body is fully buffered.
             if let Some(header_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
                 let header = String::from_utf8_lossy(&raw[..header_end]);
-                if let Some(cl) = header
-                    .lines()
-                    .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().to_string()))
-                {
+                if let Some(cl) = header.lines().find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|v| v.trim().to_string())
+                }) {
                     if let Ok(len) = cl.parse::<usize>() {
                         let body_start = header_end + 4;
                         if raw.len() >= body_start + len {
@@ -561,9 +565,7 @@ impl CdpBrowserReadAdapter {
     }
 
     fn read_page_via_ws(&self, ws_url: &str) -> Result<BrowserPageRead, BrowserReadError> {
-        let url = self
-            .ws_eval(ws_url, "location.href")
-            .unwrap_or_default();
+        let url = self.ws_eval(ws_url, "location.href").unwrap_or_default();
         let title = self.ws_eval(ws_url, "document.title").unwrap_or_default();
         let mut dom_text = self
             .ws_eval(

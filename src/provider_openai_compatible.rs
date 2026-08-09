@@ -852,8 +852,8 @@ impl OpenAICompatibleProviderAdapter {
     ) -> ProviderAdapterResponse {
         let response_body = call.response_body_json();
         let status_code = call.status_code();
-        let error_message =
-            extract_provider_error_message(response_body).unwrap_or_else(|| format!("status_code={status_code}"));
+        let error_message = extract_provider_error_message(response_body)
+            .unwrap_or_else(|| format!("status_code={status_code}"));
         ProviderAdapterResponse {
             body: format!(
                 "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",

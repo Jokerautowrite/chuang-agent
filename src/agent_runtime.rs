@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
 use crate::capability_primer::capability_primer_segment;
-use crate::norm_layer::{norm_context_segments, repin_always_on_norms};
 use crate::context_engine::{
     BudgetExceededReason, ContextBudget, ContextEngineKind, ContextPackError, ContextSegment,
     DropReason, PackedContext, SegmentSource,
 };
 use crate::memory_recall::{MemoryRecallError, MemoryRecallPipeline, RecallRequest};
 use crate::memory_store::MemoryStore;
+use crate::norm_layer::{norm_context_segments, repin_always_on_norms};
 use crate::responder::{Responder, ResponderMeta, ResponderOutput, ResponderRequest};
 use crate::runtime_config::default_context_budget as runtime_default_context_budget;
 use crate::runtime_event_ledger::{
@@ -220,10 +220,7 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         request: &RuntimeRequest,
         recall_segments: &[ContextSegment],
     ) -> Result<PackedContext, ContextPackError> {
-        let mut segments = vec![
-            build_system_segment(),
-            capability_primer_segment(),
-        ];
+        let mut segments = vec![build_system_segment(), capability_primer_segment()];
         // Thin always-on doctrine + skill index + at most 2 on-demand skills.
         segments.extend(norm_context_segments(&request.user_input));
         segments.push(build_working_segment(&request.user_input));
@@ -297,10 +294,7 @@ pub fn debug_pack_for_test(
     recall_segments: &[ContextSegment],
     context_budget: ContextBudget,
 ) -> Result<PackedContext, ContextPackError> {
-    let mut segments = vec![
-        build_system_segment(),
-        capability_primer_segment(),
-    ];
+    let mut segments = vec![build_system_segment(), capability_primer_segment()];
     segments.extend(norm_context_segments(user_input));
     segments.push(build_working_segment(user_input));
     segments.extend(recall_segments.iter().cloned());

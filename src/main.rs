@@ -286,16 +286,16 @@ mod cli_config;
 mod cli_console;
 mod cli_control;
 mod cli_doctor;
+mod cli_emotion;
 mod cli_experiment;
 mod cli_external_ai;
-mod cli_emotion;
 mod cli_genesis;
 mod cli_goal;
 mod cli_memory;
 mod cli_output;
 mod cli_plugin;
-mod cli_repl_tui;
 mod cli_repl_transport;
+mod cli_repl_tui;
 mod cli_runtime;
 mod cli_skill;
 mod cli_subagent;
@@ -966,10 +966,9 @@ fn process_repl_input(
                 LiveControlEnqueueResult::Closed => {
                     chrome.write_body(stdout, "当前回合已结束，停止请求未发送。\n")?
                 }
-                LiveControlEnqueueResult::NotSupported => chrome.write_body(
-                    stdout,
-                    "当前回合不支持中途停止；请等待本轮完成。\n",
-                )?,
+                LiveControlEnqueueResult::NotSupported => {
+                    chrome.write_body(stdout, "当前回合不支持中途停止；请等待本轮完成。\n")?
+                }
             }
         } else {
             chrome.write_body(
@@ -1053,10 +1052,9 @@ fn process_repl_input(
                 LiveControlEnqueueResult::Closed => {
                     chrome.write_body(stdout, "当前回合已结束，补充要求未发送。\n")?
                 }
-                LiveControlEnqueueResult::NotSupported => chrome.write_body(
-                    stdout,
-                    "当前回合不支持实时补充；请等待本轮完成后发送。\n",
-                )?,
+                LiveControlEnqueueResult::NotSupported => {
+                    chrome.write_body(stdout, "当前回合不支持实时补充；请等待本轮完成后发送。\n")?
+                }
             }
         } else {
             pending_guidance.push(note.to_string());
@@ -1716,11 +1714,9 @@ impl ReplSessionStats {
     ) {
         self.model_name = result.response.model_name.clone();
         self.context_tokens = u64::from(result.packed_token_count);
-        self.context_max_tokens = parse_meta_u64(
-            &result.response.meta.extra,
-            "app_server_context_max_tokens",
-        )
-        .unwrap_or(self.context_max_tokens);
+        self.context_max_tokens =
+            parse_meta_u64(&result.response.meta.extra, "app_server_context_max_tokens")
+                .unwrap_or(self.context_max_tokens);
         self.last_input_tokens =
             parse_meta_u64(&result.response.meta.extra, "aggregate_prompt_tokens")
                 .or_else(|| parse_meta_u64(&result.response.meta.extra, "prompt_tokens"))
@@ -1986,7 +1982,8 @@ pub(crate) fn readable_runtime_error(error: &str) -> String {
     }
     if error.contains("PROVIDER_HTTP_ERROR") {
         if error.contains("status_code=401") || error.contains("status_code=403") {
-            return "模型服务拒绝了密钥（401/403）：请检查模型接入配置的 API key 是否有效。".to_string();
+            return "模型服务拒绝了密钥（401/403）：请检查模型接入配置的 API key 是否有效。"
+                .to_string();
         }
         if error.contains("status_code=429") {
             return "模型服务当前限流（429），请稍等几秒后重试。".to_string();
@@ -2961,10 +2958,7 @@ mod tests {
             true,
             |_guidance_path, _progress_path, _live_control_gate| Err("done".to_string()),
         );
-        let _ = turn
-            .receiver
-            .recv()
-            .expect("turn completion should arrive");
+        let _ = turn.receiver.recv().expect("turn completion should arrive");
         assert_eq!(
             turn.enqueue_live_control("too late")
                 .expect("closed gate should be reported"),

@@ -100,12 +100,7 @@ impl HeartbeatPolicy {
     }
 
     /// 每日配额检查（按本地日期 YYYY-MM-DD 计）。
-    pub fn daily_quota_available(
-        &self,
-        count_date: Option<&str>,
-        count: u32,
-        today: &str,
-    ) -> bool {
+    pub fn daily_quota_available(&self, count_date: Option<&str>, count: u32, today: &str) -> bool {
         if count_date != Some(today) {
             return true;
         }
@@ -214,7 +209,9 @@ pub fn restore_jiwen_from_state(state: &PersistedEmotionState) -> (JiwenEmotionS
 
 /// 今天日期字符串（YYYY-MM-DD，本地时区）。
 pub fn today_local(now: DateTime<Utc>) -> String {
-    now.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()
+    now.with_timezone(&chrono::Local)
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 /// 渲染主动联系消息（按五轴状态选语气；纯模板、确定性，模型润色后续增强）。
@@ -247,9 +244,7 @@ pub fn evaluate_heartbeat(
         return None;
     }
     let contact = triggers.iter().find_map(|trigger| match trigger {
-        EmotionTrigger::Contact { urgency, forced } => {
-            Some((*urgency, *forced, trigger))
-        }
+        EmotionTrigger::Contact { urgency, forced } => Some((*urgency, *forced, trigger)),
         _ => None,
     });
     let (urgency, forced, trigger) = contact?;
@@ -273,11 +268,7 @@ pub fn evaluate_heartbeat(
     }
 
     let text = render_proactive_text(snapshot, trigger);
-    let id = format!(
-        "{}-{}",
-        now.timestamp_millis(),
-        std::process::id()
-    );
+    let id = format!("{}-{}", now.timestamp_millis(), std::process::id());
     let message = ProactiveMessage {
         id,
         created_at: now_rfc3339(),
@@ -403,7 +394,9 @@ mod tests {
         let pending = outbox.list_pending();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].1, message);
-        outbox.archive(&pending[0].0).expect("archive should succeed");
+        outbox
+            .archive(&pending[0].0)
+            .expect("archive should succeed");
         assert!(outbox.list_pending().is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -437,11 +430,19 @@ mod tests {
 
         // 未启用 → 不产出。
         let disabled = HeartbeatPolicy::from_metadata(&metadata_pairs(&[]));
-        assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &disabled, Path::new("/tmp/ws"), now)
-            .is_none());
+        assert!(evaluate_heartbeat(
+            &snapshot,
+            &triggers,
+            &state,
+            &disabled,
+            Path::new("/tmp/ws"),
+            now
+        )
+        .is_none());
 
         // 启用且达标 → 产出消息。
-        let enabled = HeartbeatPolicy::from_metadata(&metadata_pairs(&[("heartbeat_enabled", "1")]));
+        let enabled =
+            HeartbeatPolicy::from_metadata(&metadata_pairs(&[("heartbeat_enabled", "1")]));
         let (message, today) = evaluate_heartbeat(
             &snapshot,
             &triggers,
@@ -463,25 +464,25 @@ mod tests {
             },
             ..snapshot.clone()
         };
-        assert!(evaluate_heartbeat(&low, &triggers, &state, &enabled, Path::new("/tmp/ws"), now)
-            .is_none());
+        assert!(
+            evaluate_heartbeat(&low, &triggers, &state, &enabled, Path::new("/tmp/ws"), now)
+                .is_none()
+        );
 
         // 冷却未过 → 不产出。
         let recently_sent = PersistedEmotionState {
             last_proactive_at: Some(now_rfc3339()),
             ..state.clone()
         };
-        assert!(
-            evaluate_heartbeat(
-                &snapshot,
-                &triggers,
-                &recently_sent,
-                &enabled,
-                Path::new("/tmp/ws"),
-                now
-            )
-            .is_none()
-        );
+        assert!(evaluate_heartbeat(
+            &snapshot,
+            &triggers,
+            &recently_sent,
+            &enabled,
+            Path::new("/tmp/ws"),
+            now
+        )
+        .is_none());
     }
 
     #[test]

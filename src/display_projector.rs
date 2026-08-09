@@ -128,17 +128,15 @@ impl DisplayProjector {
 
     pub fn project(&self, event: &TerminalEvent) -> Option<DisplayEvent> {
         match event {
-            TerminalEvent::TurnStarted { .. } => {
-                self.options.show_lifecycle_steps.then(|| {
-                    DisplayEvent::new(
-                        DisplayEventKind::Progress,
-                        DisplayState::Running,
-                        DisplayProminence::Secondary,
-                        true,
-                        "正在理解你的要求".to_string(),
-                    )
-                })
-            }
+            TerminalEvent::TurnStarted { .. } => self.options.show_lifecycle_steps.then(|| {
+                DisplayEvent::new(
+                    DisplayEventKind::Progress,
+                    DisplayState::Running,
+                    DisplayProminence::Secondary,
+                    true,
+                    "正在理解你的要求".to_string(),
+                )
+            }),
             TerminalEvent::StepStarted { title, .. } => {
                 // 机械 step（准备上下文 / 整理答复）默认不进对话流。
                 if !self.options.show_lifecycle_steps && !self.options.show_successful_step_events {
@@ -168,9 +166,7 @@ impl DisplayProjector {
             }),
             TerminalEvent::ModelFinished { .. } => None,
             TerminalEvent::ModelRetried {
-                attempt,
-                reason,
-                ..
+                attempt, reason, ..
             } => Some(DisplayEvent::new(
                 DisplayEventKind::Progress,
                 DisplayState::Running,

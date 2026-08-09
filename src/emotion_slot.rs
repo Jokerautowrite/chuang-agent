@@ -59,10 +59,7 @@ pub enum EmotionTrigger {
         forced: bool,
     },
     /// 找事做/自我调节（逃避或宣泄）
-    FindActivity {
-        urgency: f64,
-        reason: String,
-    },
+    FindActivity { urgency: f64, reason: String },
     /// 注意到沉默但还没想动（内心念头）
     Observation { urgency: f64 },
 }
@@ -103,7 +100,8 @@ pub trait EmotionSlot {
     /// 当前状态快照（含人话描述，供 prompt 注入）。
     fn snapshot(&self) -> Result<EmotionStateSnapshot, EmotionSlotError>;
     /// 记录当前活动（沉浸度缓冲）。
-    fn set_activity(&mut self, activity: &str, label: Option<&str>) -> Result<(), EmotionSlotError>;
+    fn set_activity(&mut self, activity: &str, label: Option<&str>)
+        -> Result<(), EmotionSlotError>;
     /// 重置连接需求（如刚回复完主人）。
     fn reset_connection(&mut self) -> Result<(), EmotionSlotError>;
 }
@@ -243,7 +241,11 @@ impl EmotionSlot for FakeEmotionSlot {
         })
     }
 
-    fn set_activity(&mut self, activity: &str, _label: Option<&str>) -> Result<(), EmotionSlotError> {
+    fn set_activity(
+        &mut self,
+        activity: &str,
+        _label: Option<&str>,
+    ) -> Result<(), EmotionSlotError> {
         if activity.trim().is_empty() {
             return Err(EmotionSlotError::new("activity must not be empty"));
         }
@@ -336,7 +338,8 @@ mod tests {
     #[test]
     fn fake_set_activity_raises_immersion() {
         let mut slot = default_fake();
-        slot.set_activity("写代码", Some("deep-work")).expect("set activity");
+        slot.set_activity("写代码", Some("deep-work"))
+            .expect("set activity");
         assert!(slot.snapshot().unwrap().axes.immersion > 0.0);
     }
 
@@ -363,7 +366,10 @@ mod tests {
                 }
             }
         }
-        assert!(got_observation, "connection should pass observation threshold");
+        assert!(
+            got_observation,
+            "connection should pass observation threshold"
+        );
         assert!(got_contact, "connection should pass contact threshold");
     }
 
@@ -461,7 +467,8 @@ mod tests {
     #[test]
     fn jiwen_set_activity_raises_immersion_and_decays() {
         let mut slot = jiwen();
-        slot.set_activity("reading", Some("看书")).expect("activity");
+        slot.set_activity("reading", Some("看书"))
+            .expect("activity");
         let snap = slot.snapshot().unwrap();
         assert!((snap.axes.immersion - 0.6).abs() < 1e-9);
         slot.tick(60.0).expect("tick");
@@ -724,9 +731,7 @@ impl JiwenEmotionSlot {
 impl EmotionSlot for JiwenEmotionSlot {
     fn tick(&mut self, minutes_elapsed: f64) -> Result<Vec<EmotionTrigger>, EmotionSlotError> {
         if minutes_elapsed < 0.0 {
-            return Err(EmotionSlotError::new(
-                "tick minutes_elapsed must be >= 0",
-            ));
+            return Err(EmotionSlotError::new("tick minutes_elapsed must be >= 0"));
         }
         let mins = minutes_elapsed.min(60.0);
         let r = &self.config.rates;
@@ -739,8 +744,7 @@ impl EmotionSlot for JiwenEmotionSlot {
             1.0
         };
         let mut valence_multiplier = 1.0;
-        if r.valence_connect_dampen > 0.0
-            && self.axes.valence < r.valence_connect_dampen_threshold
+        if r.valence_connect_dampen > 0.0 && self.axes.valence < r.valence_connect_dampen_threshold
         {
             valence_multiplier = r.valence_connect_dampen;
         } else if r.valence_connect_boost > 0.0
@@ -757,13 +761,11 @@ impl EmotionSlot for JiwenEmotionSlot {
             * accel_factor
             * valence_multiplier
             * immersion_factor;
-        self.axes.connection =
-            clamp(self.axes.connection + effective_rate * mins, 0.0, 1.0);
+        self.axes.connection = clamp(self.axes.connection + effective_rate * mins, 0.0, 1.0);
 
         // 2) immersion 衰减（简化：按 tick 时长衰减，近似 jiwen 的 sinceActivity）
         if self.last_activity.is_some() {
-            self.axes.immersion =
-                clamp(self.axes.immersion - r.immersion_decay * mins, 0.0, 1.0);
+            self.axes.immersion = clamp(self.axes.immersion - r.immersion_decay * mins, 0.0, 1.0);
             if self.axes.immersion <= 0.01 {
                 self.last_activity = None;
                 self.axes.immersion = 0.0;
@@ -774,19 +776,15 @@ impl EmotionSlot for JiwenEmotionSlot {
         if self.axes.connection >= r.pride_defend_threshold {
             let target = clamp(r.pride_defend_target, -1.0, 1.0);
             if self.axes.pride < target {
-                self.axes.pride =
-                    target.min(self.axes.pride + r.pride_defend_rate * mins);
+                self.axes.pride = target.min(self.axes.pride + r.pride_defend_rate * mins);
             } else if self.axes.pride > target {
-                self.axes.pride =
-                    target.max(self.axes.pride - r.pride_defend_rate * mins);
+                self.axes.pride = target.max(self.axes.pride - r.pride_defend_rate * mins);
             }
         } else {
             if self.axes.pride > 0.0 {
-                self.axes.pride =
-                    (self.axes.pride - r.pride_regress * mins).max(0.0);
+                self.axes.pride = (self.axes.pride - r.pride_regress * mins).max(0.0);
             } else if self.axes.pride < 0.0 {
-                self.axes.pride =
-                    (self.axes.pride + r.pride_regress * mins).min(0.0);
+                self.axes.pride = (self.axes.pride + r.pride_regress * mins).min(0.0);
             }
         }
         // 4) pride 侵蚀（想念太重撑不住）
@@ -917,7 +915,11 @@ impl EmotionSlot for JiwenEmotionSlot {
         })
     }
 
-    fn set_activity(&mut self, activity: &str, label: Option<&str>) -> Result<(), EmotionSlotError> {
+    fn set_activity(
+        &mut self,
+        activity: &str,
+        label: Option<&str>,
+    ) -> Result<(), EmotionSlotError> {
         if activity.trim().is_empty() {
             return Err(EmotionSlotError::new("activity must not be empty"));
         }
@@ -937,9 +939,8 @@ impl EmotionSlot for JiwenEmotionSlot {
             .copied()
             .unwrap_or(0.2);
         if self.config.rates.activity_connection_relief > 0.0 && !same_type {
-            self.axes.connection = (self.axes.connection
-                - self.config.rates.activity_connection_relief)
-                .max(0.01);
+            self.axes.connection =
+                (self.axes.connection - self.config.rates.activity_connection_relief).max(0.01);
         }
         Ok(())
     }

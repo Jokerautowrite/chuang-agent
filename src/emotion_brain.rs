@@ -58,7 +58,10 @@ pub fn parse_brain_query_json(raw: &str) -> Vec<BrainHit> {
         .filter_map(|item| {
             let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
             let slug = item.get("slug").and_then(|v| v.as_str()).unwrap_or("");
-            let text = item.get("chunk_text").and_then(|v| v.as_str()).unwrap_or("");
+            let text = item
+                .get("chunk_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if title.is_empty() && slug.is_empty() {
                 return None;
             }
@@ -103,10 +106,7 @@ pub fn brain_query_semantic(
 }
 
 /// 把外脑命中摘要追加到情感快照的 prompt_context（摘要点 + slug，不贴原文）。
-pub fn augment_prompt_context(
-    snapshot: &EmotionStateSnapshot,
-    hits: &[BrainHit],
-) -> String {
+pub fn augment_prompt_context(snapshot: &EmotionStateSnapshot, hits: &[BrainHit]) -> String {
     if hits.is_empty() {
         return snapshot.prompt_context.clone();
     }
