@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,10 +9,15 @@ use chuang_agent::goal_dispatch::{
 };
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::goal_run::{
-    GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
-    GoalRunReceipt, GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    ConvergenceStatus, ConvergenceVerdict, GoalCheckpoint, GoalCheckpointWriteback,
+    GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics, GoalRunReceipt, GoalRunStore,
+    GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 use chuang_agent::runtime_config::RuntimeConfig;
+use chuang_agent::skill_evolver::{
+    DryRunProposalEvolver, EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver,
+    SkillProposal, ValidationReport,
+};
 use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use serde::Serialize;
 
@@ -28,6 +33,7 @@ pub(crate) fn goal_command(args: &[String]) -> Result<(), String> {
         Some("dispatch") => goal_dispatch_command(&args[1..]),
         Some("collect") => goal_collect_command(&args[1..]),
         Some("step") => goal_step_command(&args[1..]),
+        Some("evolve") => goal_evolve_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -179,6 +185,170 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
         })?,
     }
     Ok(())
+}
+
+/// 外环触发：goal 收敛判定为 blocked/spinning 时，把重复卡点转成
+/// skill 进化提案（dry-run，需人工审批后才可固化），实现
+/// "重复失败 → 自动提出改规则/换策略"的 harness 外环。
+fn goal_evolve_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_evolve(args)?;
+    let store = GoalRunStore::new(&request.root);
+    let run = store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    let verdict = run.convergence_verdict();
+
+    let output = if verdict.status == ConvergenceStatus::Blocked
+        || verdict.status == ConvergenceStatus::Spinning
+    {
+        let mut metadata = BTreeMap::new();
+        metadata.insert("goal_id".to_string(), request.goal_id.clone());
+        metadata.insert(
+            "convergence_status".to_string(),
+            convergence_status_label(&verdict),
+        );
+        if let Some(fingerprint) = verdict.repeated_fingerprint.as_deref() {
+            metadata.insert("repeated_fingerprint".to_string(), fingerprint.to_string());
+        }
+        metadata.insert(
+            "repeated_count".to_string(),
+            verdict.repeated_count.to_string(),
+        );
+        metadata.insert(
+            "max_repeated_blockers".to_string(),
+            run.goal_spec
+                .convergence_policy
+                .max_repeated_blockers
+                .to_string(),
+        );
+
+        let event = RuntimeEvent {
+            event_id: format!(
+                "goal-evolve-{}-{}",
+                sanitize_event_id_part(&request.goal_id),
+                goal_evolve_token()
+            ),
+            task_id: request.goal_id.clone(),
+            kind: RuntimeEventKind::ToolFailed,
+            summary: verdict.reason.clone(),
+            metadata,
+        };
+        let mut evolver = DryRunProposalEvolver::new();
+        evolver
+            .observe(event)
+            .map_err(|err| format!("goal_evolve_observe_failed: {err:?}"))?;
+        let proposals = evolver
+            .propose(EvolutionScope {
+                agent_id: "chuang-goal".to_string(),
+                task_kind: Some("goal-convergence-blocker".to_string()),
+                max_proposals: 1,
+            })
+            .map_err(|err| format!("goal_evolve_propose_failed: {err:?}"))?;
+        let proposal_validations = proposals
+            .iter()
+            .map(|proposal| {
+                evolver
+                    .validate(proposal)
+                    .map_err(|err| format!("goal_evolve_validate_failed: {err:?}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        GoalEvolveOutput {
+            goal_id: request.goal_id.clone(),
+            convergence_status: convergence_status_label(&verdict),
+            convergence_repeated_fingerprint: verdict.repeated_fingerprint.clone(),
+            convergence_repeated_count: verdict.repeated_count,
+            convergence_reason: verdict.reason.clone(),
+            evolved: true,
+            proposal_count: proposals.len(),
+            proposals,
+            proposal_validations,
+        }
+    } else {
+        GoalEvolveOutput {
+            goal_id: request.goal_id.clone(),
+            convergence_status: convergence_status_label(&verdict),
+            convergence_repeated_fingerprint: None,
+            convergence_repeated_count: 0,
+            convergence_reason: verdict.reason.clone(),
+            evolved: false,
+            proposal_count: 0,
+            proposals: Vec::new(),
+            proposal_validations: Vec::new(),
+        }
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_evolve_goal_id: {}", output.goal_id);
+            println!(
+                "goal_evolve_convergence_status: {}",
+                output.convergence_status
+            );
+            println!("goal_evolve_reason: {}", output.convergence_reason);
+            println!("goal_evolve_evolved: {}", output.evolved);
+            println!("goal_evolve_proposal_count: {}", output.proposal_count);
+            for (proposal, validation) in output
+                .proposals
+                .iter()
+                .zip(output.proposal_validations.iter())
+            {
+                println!(
+                    "goal_evolve_proposal id={} title={} trigger={} accepted={} reasons={}",
+                    proposal.proposal_id,
+                    proposal.title,
+                    proposal.trigger,
+                    validation.accepted,
+                    validation.reasons.join("|")
+                );
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+    Ok(())
+}
+
+fn convergence_status_label(verdict: &ConvergenceVerdict) -> String {
+    match verdict.status {
+        ConvergenceStatus::Unknown => "unknown".to_string(),
+        ConvergenceStatus::Converging => "converging".to_string(),
+        ConvergenceStatus::Spinning => "spinning".to_string(),
+        ConvergenceStatus::Blocked => "blocked".to_string(),
+    }
+}
+
+fn sanitize_event_id_part(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn goal_evolve_token() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+#[derive(Serialize)]
+struct GoalEvolveOutput {
+    goal_id: String,
+    convergence_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    convergence_repeated_fingerprint: Option<String>,
+    convergence_repeated_count: usize,
+    convergence_reason: String,
+    evolved: bool,
+    proposal_count: usize,
+    proposals: Vec<SkillProposal>,
+    proposal_validations: Vec<ValidationReport>,
 }
 
 fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
@@ -576,6 +746,12 @@ struct GoalCheckpointCliRequest {
     checkpoint_id: String,
     root: PathBuf,
     source: GoalCheckpointCliSource,
+    output: ControlOutputFormat,
+}
+
+struct GoalEvolveCliRequest {
+    goal_id: String,
+    root: PathBuf,
     output: ControlOutputFormat,
 }
 
@@ -1272,6 +1448,31 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
         checkpoint_id: checkpoint_id.unwrap_or_else(default_checkpoint_id),
         root,
         source,
+        output,
+    })
+}
+
+fn parse_goal_evolve(args: &[String]) -> Result<GoalEvolveCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(GoalEvolveCliRequest {
+        goal_id,
+        root,
         output,
     })
 }

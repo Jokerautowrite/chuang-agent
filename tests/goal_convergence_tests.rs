@@ -4,6 +4,138 @@ use chuang_agent::goal_run::{
     GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 
+#[test]
+fn goal_evolve_emits_outer_loop_proposal_when_blocked() {
+    // goal evolve 的 CLI 行为：blocked → 外环提案（dry-run）；converging → 不触发。
+    // 这里通过 CLI 二进制做端到端验证（bin 测试）。
+    let tmp = std::env::temp_dir().join(format!(
+        "chuang-goal-evolve-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let bin = env!("CARGO_BIN_EXE_chuang-agent");
+    let run = |args: &[&str]| {
+        std::process::Command::new(bin)
+            .args(args)
+            .output()
+            .expect("chuang-agent binary should run")
+    };
+
+    // plan + 3 次相同 blocker
+    let plan = run(&[
+        "goal",
+        "plan",
+        "--goal-id",
+        "evolve-smoke",
+        "--objective",
+        "evolve smoke",
+        "--root",
+        tmp.to_str().unwrap(),
+        "--worker",
+        "w1|scope-src|do work",
+        "--scope",
+        "scope-src=src",
+        "--validation",
+        "cargo test",
+    ]);
+    assert!(plan.status.success(), "goal plan should succeed");
+    for i in 1..=3 {
+        let cp = run(&[
+            "goal",
+            "checkpoint",
+            "--goal-id",
+            "evolve-smoke",
+            "--root",
+            tmp.to_str().unwrap(),
+            "--checkpoint-id",
+            &format!("c{i}"),
+            "--summary",
+            &format!("attempt {i}"),
+            "--completed-worker-id",
+            "w1",
+            "--validation-note",
+            "failed",
+            "--blocker-key",
+            "auth-401",
+            "--json",
+        ]);
+        assert!(cp.status.success(), "checkpoint {i} should succeed");
+    }
+
+    let evolve = run(&[
+        "goal",
+        "evolve",
+        "--goal-id",
+        "evolve-smoke",
+        "--root",
+        tmp.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(evolve.status.success(), "goal evolve should succeed");
+    let out: serde_json::Value = serde_json::from_slice(&evolve.stdout).expect("valid json");
+    assert_eq!(out["convergence_status"], "blocked");
+    assert_eq!(out["evolved"], true);
+    assert_eq!(out["proposal_count"], 1);
+    assert_eq!(
+        out["proposals"][0]["provenance"][0]["source_kind"],
+        "tool_failed"
+    );
+
+    // converging → 不触发外环
+    let plan2 = run(&[
+        "goal",
+        "plan",
+        "--goal-id",
+        "evolve-ok",
+        "--objective",
+        "converging smoke",
+        "--root",
+        tmp.to_str().unwrap(),
+        "--worker",
+        "w1|scope-src|do work",
+        "--scope",
+        "scope-src=src",
+        "--validation",
+        "cargo test",
+    ]);
+    assert!(plan2.status.success());
+    let cp = run(&[
+        "goal",
+        "checkpoint",
+        "--goal-id",
+        "evolve-ok",
+        "--root",
+        tmp.to_str().unwrap(),
+        "--checkpoint-id",
+        "c1",
+        "--summary",
+        "progress",
+        "--completed-worker-id",
+        "w1",
+        "--validation-note",
+        "ok",
+        "--json",
+    ]);
+    assert!(cp.status.success());
+    let evolve_ok = run(&[
+        "goal",
+        "evolve",
+        "--goal-id",
+        "evolve-ok",
+        "--root",
+        tmp.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(evolve_ok.status.success());
+    let out_ok: serde_json::Value = serde_json::from_slice(&evolve_ok.stdout).expect("valid json");
+    assert_eq!(out_ok["convergence_status"], "converging");
+    assert_eq!(out_ok["evolved"], false);
+    assert_eq!(out_ok["proposal_count"], 0);
+}
+
 fn sample_goal_run() -> GoalRun {
     GoalRun::new(
         GoalSpec::mainline_mvp("convergence gate smoke"),
