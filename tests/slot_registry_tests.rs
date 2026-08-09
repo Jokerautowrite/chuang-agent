@@ -235,7 +235,7 @@ fn slot_registry_builds_provider_responder_from_config() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -259,7 +259,7 @@ fn slot_registry_provider_fallback_uses_secondary_on_primary_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -327,7 +327,7 @@ fn slot_registry_marks_unconfigured_fallback_on_model_capacity_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -399,7 +399,7 @@ fn slot_registry_provider_fallback_preserves_primary_capacity_reason() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -467,7 +467,7 @@ fn slot_registry_provider_fallback_does_not_mask_unlisted_error() {
             api_key: "test-key".to_string(),
             model_name: "primary-model".to_string(),
             transport: ProviderTransport::Http,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -548,7 +548,7 @@ fn slot_registry_rejects_invalid_provider_config_before_adapter_use() {
             api_key: "test-key".to_string(),
             model_name: "gpt-4.1-mini".to_string(),
             transport: ProviderTransport::Stub,
-        endpoint: Default::default(),
+            endpoint: Default::default(),
             reasoning_effort: None,
             request_timeout_ms: None,
             tls_ca_cert_path: None,
@@ -1054,7 +1054,8 @@ fn queued_slot_report(run_id: &str, agent_id: &AgentId) -> SubagentReport {
 
 #[test]
 fn emotion_slot_runtime_observes_delta_and_resets_connection() {
-    let mut emotion = EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
+    let mut emotion =
+        EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
     assert_eq!(emotion.kind(), "jiwen");
 
     let snapshot = emotion.snapshot().expect("snapshot should build");
@@ -1071,14 +1072,18 @@ fn emotion_slot_runtime_observes_delta_and_resets_connection() {
         })
         .expect("observe delta should succeed");
 
-    let after = emotion.snapshot().expect("snapshot after delta should build");
+    let after = emotion
+        .snapshot()
+        .expect("snapshot after delta should build");
     assert!(after.axes.valence > 0.2);
     assert!(after.axes.pride > 0.1);
     assert_eq!(after.axes.connection, 0.0, "主人来对话后连接需求应重置");
 
     // 时间流逝 tick：连接需求增长（jiwen 语义）。
     let triggers = emotion.tick(60.0).expect("tick should succeed");
-    let after_tick = emotion.snapshot().expect("snapshot after tick should build");
+    let after_tick = emotion
+        .snapshot()
+        .expect("snapshot after tick should build");
     assert!(after_tick.axes.connection > 0.0);
     // 60 分钟 < 阈值，不应触发主动联系。
     assert!(triggers.is_empty());

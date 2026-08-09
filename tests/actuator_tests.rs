@@ -277,7 +277,7 @@ fn real_actuator_adapter_allows_only_allowlisted_app_in_dry_run() {
         r#"{
   "apps": [{
     "app_name": "Feishu",
-    "open_command": ["feishu"]
+    "open_command": ["bytedance-feishu"]
   }],
   "input_allowed": false,
   "click_allowed": false,
@@ -322,7 +322,7 @@ fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
         r#"{
   "apps": [{
     "app_name": "Feishu",
-    "open_command": ["feishu"]
+    "open_command": ["bytedance-feishu"]
   }],
   "input_allowed": false,
   "click_allowed": false,
@@ -334,6 +334,7 @@ fn real_actuator_adapter_dry_run_message_carries_audit_boundary() {
         .join("scripts")
         .join("chuang-real-actuator-adapter.py");
     let mut child = Command::new(adapter_path)
+        .env_remove("CHUANG_REAL_ACTUATOR_ENABLE")
         .args(["--json", "--allowlist"])
         .arg(&allowlist)
         .stdin(Stdio::piped())

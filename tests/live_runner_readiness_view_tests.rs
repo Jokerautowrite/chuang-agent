@@ -560,7 +560,11 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         "live_runner_rehearsal"
     );
     // doctor layer can be null when doctor CLI fails on this machine; app_server should still be present.
-    if rehearsal["layers"]["doctor"].get("name").and_then(|v| v.as_str()).is_some() {
+    if rehearsal["layers"]["doctor"]
+        .get("name")
+        .and_then(|v| v.as_str())
+        .is_some()
+    {
         assert_eq!(
             rehearsal["layers"]["doctor"]["name"],
             "live_runner_rehearsal"

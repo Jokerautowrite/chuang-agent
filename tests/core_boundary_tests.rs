@@ -28,6 +28,40 @@ const FORBIDDEN_CORE_TOKENS: &[&str] = &[
     "FEISHU_",
 ];
 
+/// Strip `#[cfg(test)]` module bodies so test-only fakes (FakeResponder, etc.)
+/// inside core files are not counted as production core-boundary violations.
+fn strip_cfg_test_blocks(content: &str) -> String {
+    let mut result = String::new();
+    let mut in_test = false;
+    let mut brace_depth = 0usize;
+    for line in content.lines() {
+        if !in_test {
+            if line.contains("#[cfg(test)]") {
+                in_test = true;
+                brace_depth = 0;
+                // A `mod tests {` may share the same line or follow on the next.
+                let opens = line.matches('{').count();
+                let closes = line.matches('}').count();
+                brace_depth = brace_depth + opens - closes;
+                if brace_depth == 0 {
+                    continue;
+                }
+            } else {
+                result.push_str(line);
+                result.push('\n');
+            }
+        } else {
+            let opens = line.matches('{').count();
+            let closes = line.matches('}').count();
+            brace_depth = brace_depth + opens - closes;
+            if brace_depth == 0 {
+                in_test = false;
+            }
+        }
+    }
+    result
+}
+
 #[test]
 fn core_files_do_not_import_or_construct_specific_adapters() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -35,7 +69,8 @@ fn core_files_do_not_import_or_construct_specific_adapters() {
 
     for relative_path in CORE_FILES {
         let path = repo_root.join(relative_path);
-        let content = fs::read_to_string(&path).expect("core file should be readable");
+        let raw = fs::read_to_string(&path).expect("core file should be readable");
+        let content = strip_cfg_test_blocks(&raw);
         for token in FORBIDDEN_CORE_TOKENS {
             if content.contains(token) {
                 violations.push(format!("{relative_path} contains {token}"));

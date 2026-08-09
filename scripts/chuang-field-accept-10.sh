@@ -15,8 +15,15 @@ ok()   { PASS=$((PASS+1)); echo "PASS  $1" | tee -a "$LOG"; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL  $1 — $2" | tee -a "$LOG"; }
 skip() { SKIP=$((SKIP+1)); echo "SKIP  $1 — $2" | tee -a "$LOG"; }
 
-BIN="${CHUANG_BIN:-$ROOT/target/debug/chuang-agent}"
-if [[ ! -x "$BIN" ]]; then
+BIN="${CHUANG_BIN:-}"
+if [[ -z "$BIN" || ! -x "$BIN" ]]; then
+  if [[ -x "$ROOT/target/debug/chuang-agent" ]]; then
+    BIN="$ROOT/target/debug/chuang-agent"
+  elif command -v chuang >/dev/null 2>&1; then
+    BIN="$(command -v chuang)"
+  fi
+fi
+if [[ -z "$BIN" || ! -x "$BIN" ]]; then
   cargo build -q --manifest-path "$ROOT/Cargo.toml" || exit 1
   BIN="$ROOT/target/debug/chuang-agent"
 fi
@@ -257,7 +264,7 @@ if [[ -f "$ROOT/scripts/chuang-materialize-runtime-config.py" ]]; then
     && grep -q "$ROOT/config/control-allowlist.json" "$MAT" \
     && grep -q "$ROOT/rules/core.md" "$MAT" \
     && (cd /tmp && timeout 30 "$BIN" status --config "$MAT" >"$TMPDIR_RUN/mat-status.out" 2>"$TMPDIR_RUN/mat-status.err") \
-    && grep -q 'provider: openai_compatible' "$TMPDIR_RUN/mat-status.out"; then
+    && grep -q '^provider = "openai_compatible"' "$MAT"; then
     ok "17 config materialize（cwd 无关 + real control 路径）"
   else
     bad "17 config materialize" "$(tail -c 180 "$TMPDIR_RUN/mat.err" "$TMPDIR_RUN/mat-status.err" 2>/dev/null | tr '\n' ' ')"

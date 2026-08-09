@@ -63,7 +63,9 @@ fn runtime_config_accepts_unrestricted_approval_policy() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.permission.approval_policy = "unrestricted".to_string();
 
-    config.validate().expect("unrestricted policy should validate");
+    config
+        .validate()
+        .expect("unrestricted policy should validate");
     assert_eq!(config.summary().approval_policy, "unrestricted");
 }
 

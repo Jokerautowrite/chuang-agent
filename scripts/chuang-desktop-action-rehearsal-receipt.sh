@@ -17,7 +17,7 @@ while [ "$#" -gt 0 ]; do
 usage: scripts/chuang-desktop-action-rehearsal-receipt.sh [--json] [--live]
 
 Rehearsal (default): always dry-run, live gate stays closed.
---live: perform one real allowlisted desktop action (open_app Chrome) and
+--live: execute one real allowlisted desktop action (open_app Chrome) and
         emit a desktop_action_live_receipt with real_execution=true. The
         live gate env CHUANG_REAL_ACTUATOR_ENABLE is required.
 EOF

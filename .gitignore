@@ -17,6 +17,7 @@
 /.hermes/
 /.agent-hub/
 /.chuang-audit/
+/.chuang-file-audit/
 /context/
 /data/
 /tmp/

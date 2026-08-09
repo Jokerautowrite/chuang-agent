@@ -291,7 +291,11 @@ fn tool_instruction_block_prefers_ga_atomic_tool_names() {
     assert!(instructions.contains(r#""schema_version":1"#));
     assert!(instructions.contains(r#""tool":"file_read""#));
     assert!(instructions.contains("open_app/mouse/keyboard/screenshot/locate"));
-    assert!(instructions.contains("browser_navigate + browser_read") || instructions.contains("browser_navigate+browser_read") || instructions.contains("browser_navigate"));
+    assert!(
+        instructions.contains("browser_navigate + browser_read")
+            || instructions.contains("browser_navigate+browser_read")
+            || instructions.contains("browser_navigate")
+    );
     assert!(instructions.contains("open_app / mouse / keyboard 是交互工具"));
     assert!(instructions.contains("桌面只读观察：screenshot, locate"));
     assert!(instructions.contains("每次回复只能输出一个结构"));
@@ -1618,7 +1622,9 @@ else:
             || output.contains("\"ok\":true"),
         "output={output}"
     );
-    assert!(output.contains("\"worker_model\":\"gpt-5.6-luna\"") || output.contains("gpt-5.6-luna"));
+    assert!(
+        output.contains("\"worker_model\":\"gpt-5.6-luna\"") || output.contains("gpt-5.6-luna")
+    );
     assert!(
         output.contains("\"admission\":\"accepted\""),
         "output should include admission status: {output}"
@@ -2225,7 +2231,11 @@ fn browser_navigate_and_read_tools_work_when_cdp_live() {
         return;
     }
     assert_eq!(nav.tool_name, "browser_navigate");
-    assert!(nav.output.as_deref().unwrap_or("").contains("example"), "{}", nav.summary);
+    assert!(
+        nav.output.as_deref().unwrap_or("").contains("example"),
+        "{}",
+        nav.summary
+    );
     let read = execute_tool_call(&root, &ToolCall::BrowserRead {});
     assert!(read.ok, "{}", read.summary);
     assert_eq!(read.tool_name, "browser_read");
