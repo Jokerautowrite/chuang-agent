@@ -314,7 +314,7 @@ fn feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup() {
         )
         .env(
             "NODE_PATH",
-            "/home/user/.codex/codex-feishu-bridge/node_modules",
+            "/home/user/agent-hub/plugins/agent-bridge/node_modules",
         )
         .env("CHUANG_FEISHU_ENV_FILE", &bridge_env)
         .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)

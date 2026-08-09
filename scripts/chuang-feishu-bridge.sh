@@ -4,7 +4,7 @@ set -eu
 ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
 ENV_FILE="${CHUANG_FEISHU_ENV_FILE:-$HOME/.codex-im/chuang-feishu-bridge.env}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
-FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-/home/user/.codex/codex-feishu-bridge-current/node_modules}"
+FEISHU_SDK_MODULES="${CHUANG_FEISHU_SDK_NODE_MODULES:-/home/user/agent-hub/plugins/agent-bridge/node_modules}"
 
 detect_desktop_env() {
   uid="$(id -u)"
