@@ -10,6 +10,42 @@ pub struct GoalSpec {
     pub allowed_slots: Vec<String>,
     pub checkpoint_policy: GoalCheckpointPolicy,
     pub final_report_policy: GoalFinalReportPolicy,
+    /// 收敛策略：判定 checkpoint 是"收敛"还是"原地打转"。
+    /// 旧 on-disk goal JSON 无此字段时使用默认值（向后兼容）。
+    #[serde(default)]
+    pub convergence_policy: GoalConvergencePolicy,
+}
+
+/// 收敛控制策略（Penguin goal-file 语义，最小接入）。
+///
+/// 核心规则：
+/// - 每个 checkpoint 可携带规范化 `blocker_key`（同一失败原因的去重键）。
+/// - 尾部连续相同 blocker_key（或完全相同的 validation_notes）达到
+///   `max_repeated_blockers` 次 → 判定 blocked，禁止再以同策略重试。
+/// - `max_repeated_blockers = 0` 表示禁用重复卡点判定。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalConvergencePolicy {
+    #[serde(default = "default_max_repeated_blockers")]
+    pub max_repeated_blockers: usize,
+    #[serde(default = "default_require_progress_between_checkpoints")]
+    pub require_progress_between_checkpoints: bool,
+}
+
+fn default_max_repeated_blockers() -> usize {
+    3
+}
+
+fn default_require_progress_between_checkpoints() -> bool {
+    true
+}
+
+impl Default for GoalConvergencePolicy {
+    fn default() -> Self {
+        Self {
+            max_repeated_blockers: default_max_repeated_blockers(),
+            require_progress_between_checkpoints: default_require_progress_between_checkpoints(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +99,7 @@ impl GoalSpec {
                 include_validation: true,
                 include_next_steps: true,
             },
+            convergence_policy: GoalConvergencePolicy::default(),
         }
     }
 
@@ -93,6 +130,14 @@ impl GoalSpec {
                 "max_tool_rounds must be greater than zero when set",
             ));
         }
+        if self.convergence_policy.max_repeated_blockers != 0
+            && self.convergence_policy.max_repeated_blockers < 2
+        {
+            return Err(GoalSpecError::new(
+                "convergence_policy.max_repeated_blockers",
+                "max_repeated_blockers must be 0 (disabled) or at least 2",
+            ));
+        }
         Ok(())
     }
 
@@ -106,7 +151,8 @@ acceptance_checks:\n{}\n\
 allowed_slots: {}\n\
 budget: max_minutes={} max_tool_rounds={} max_subtasks={}\n\
 checkpoint_policy: progress_log={} handoff={} commit={}\n\
-final_report_policy: validation={} next_steps={}",
+final_report_policy: validation={} next_steps={}\n\
+convergence_policy: max_repeated_blockers={} require_progress={}",
             self.goal_id,
             self.objective,
             render_list(&self.acceptance_checks),
@@ -118,7 +164,9 @@ final_report_policy: validation={} next_steps={}",
             self.checkpoint_policy.update_handoff,
             self.checkpoint_policy.commit_checkpoint,
             self.final_report_policy.include_validation,
-            self.final_report_policy.include_next_steps
+            self.final_report_policy.include_next_steps,
+            self.convergence_policy.max_repeated_blockers,
+            self.convergence_policy.require_progress_between_checkpoints,
         ))
     }
 

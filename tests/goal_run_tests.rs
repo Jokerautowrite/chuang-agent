@@ -152,6 +152,7 @@ fn goal_run_rejects_checkpoint_with_invalid_created_at() {
             created_at: Some("not-a-timestamp".to_string()),
             completed_worker_ids: vec!["worker-1".to_string()],
             validation_notes: vec!["cargo test -q --test goal_run_tests".to_string()],
+            blocker_key: None,
         })
         .expect_err("invalid timestamp should fail");
 
@@ -787,9 +788,7 @@ fn goal_run_time_budget_blocks_when_elapsed() {
     let mut run = sample_goal_run();
     run.goal_spec.budget.max_minutes = Some(1);
     // two hours ago
-    run.started_at = Some(
-        (chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339(),
-    );
+    run.started_at = Some((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
     let err = run
         .assert_time_budget_allows_continue()
         .expect_err("should exhaust time budget");

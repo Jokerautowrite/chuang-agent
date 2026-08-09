@@ -1,4 +1,4 @@
-use crate::goal_mode::{GoalCheckpointPolicy, GoalSpec, GoalSpecError};
+use crate::goal_mode::{GoalCheckpointPolicy, GoalConvergencePolicy, GoalSpec, GoalSpecError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -61,6 +61,34 @@ pub struct GoalCheckpoint {
     pub created_at: Option<String>,
     pub completed_worker_ids: Vec<String>,
     pub validation_notes: Vec<String>,
+    /// 规范化失败原因键（去重键）。同一 blocker_key 尾部连续出现达到
+    /// `max_repeated_blockers` 次时判定 blocked。旧 checkpoint JSON 无此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocker_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvergenceStatus {
+    /// 尚无 checkpoint，无法判定。
+    Unknown,
+    /// 尾部 checkpoint 无重复卡点，正在收敛。
+    Converging,
+    /// 尾部出现相同卡点/相同验证结果（重复但未达上限），原地打转风险。
+    Spinning,
+    /// 同一卡点重复达到上限，判定 blocked，禁止以同策略重试。
+    Blocked,
+}
+
+/// 收敛判定结果（确定性纯函数输出）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConvergenceVerdict {
+    pub status: ConvergenceStatus,
+    /// 触发重复判定的 blocker_key（无时用 validation_notes 指纹）。
+    pub repeated_fingerprint: Option<String>,
+    /// 尾部连续相同指纹的 checkpoint 数。
+    pub repeated_count: usize,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +107,15 @@ pub struct GoalRunDiagnostics {
     pub last_checkpoint_completed_worker_ids: Option<Vec<String>>,
     pub last_checkpoint_validation_notes: Option<Vec<String>>,
     pub incomplete_reasons: Vec<String>,
+    /// 收敛状态：converging / spinning / blocked / unknown。
+    #[serde(default)]
+    pub convergence_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convergence_repeated_fingerprint: Option<String>,
+    #[serde(default)]
+    pub convergence_repeated_count: usize,
+    #[serde(default)]
+    pub convergence_reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +256,11 @@ impl GoalRun {
             );
         }
 
+        let convergence = self.convergence_verdict();
+        if convergence.status == ConvergenceStatus::Blocked {
+            incomplete_reasons.push(convergence.reason.clone());
+        }
+
         GoalRunDiagnostics {
             schema_version: 1,
             executes_automatically: false,
@@ -237,7 +279,16 @@ impl GoalRun {
             last_checkpoint_validation_notes: last_checkpoint
                 .map(|checkpoint| checkpoint.validation_notes.clone()),
             incomplete_reasons,
+            convergence_status: convergence_status_string(convergence.status),
+            convergence_repeated_fingerprint: convergence.repeated_fingerprint.clone(),
+            convergence_repeated_count: convergence.repeated_count,
+            convergence_reason: convergence.reason,
         }
+    }
+
+    /// 基于当前 checkpoint 日志计算收敛判定（converged vs spinning vs blocked）。
+    pub fn convergence_verdict(&self) -> ConvergenceVerdict {
+        enforce_convergence_gate(&self.checkpoint_log, &self.goal_spec.convergence_policy)
     }
 
     pub fn validate(&self) -> Result<(), GoalRunError> {
@@ -487,7 +538,26 @@ impl GoalCheckpoint {
             created_at: Some(current_rfc3339_timestamp()),
             completed_worker_ids,
             validation_notes,
+            blocker_key: None,
         }
+    }
+
+    /// 带规范化失败原因键的构造（用于收敛判定：同一 blocker_key 重复 → blocked）。
+    pub fn with_blocker_key(
+        checkpoint_id: impl Into<String>,
+        summary: impl Into<String>,
+        completed_worker_ids: Vec<String>,
+        validation_notes: Vec<String>,
+        blocker_key: impl Into<String>,
+    ) -> Self {
+        let mut checkpoint = Self::new(
+            checkpoint_id,
+            summary,
+            completed_worker_ids,
+            validation_notes,
+        );
+        checkpoint.blocker_key = Some(blocker_key.into());
+        checkpoint
     }
 
     fn validate(&self) -> Result<(), GoalRunError> {
@@ -504,6 +574,9 @@ impl GoalCheckpoint {
         )?;
         for note in &self.validation_notes {
             require_non_empty("checkpoint_log.validation_notes", note)?;
+        }
+        if let Some(blocker_key) = self.blocker_key.as_deref() {
+            require_non_empty("checkpoint_log.blocker_key", blocker_key)?;
         }
         Ok(())
     }
@@ -742,4 +815,86 @@ fn require_non_empty_vec(field: &str, len: usize) -> Result<(), GoalRunError> {
 
 fn format_goal_spec_error(error: GoalSpecError) -> String {
     format!("{}: {}", error.field, error.message)
+}
+
+/// 收敛门禁：判定 checkpoint 序列是"收敛"还是"原地打转"。
+///
+/// 语义（Penguin goal-file 收敛控制，最小实现）：
+/// - 无 checkpoint → `Unknown`。
+/// - 尾部连续相同"进度指纹"（blocker_key 优先，否则 validation_notes 全量指纹）的
+///   checkpoint 数 `n`：
+///   - `n >= max_repeated_blockers`（且 > 0）→ `Blocked`：同一卡点重复到上限，
+///     禁止继续以同策略重试；必须换策略或由外部裁决。
+///   - `n >= 2` → `Spinning`：已出现重复，但尚未到上限。
+///   - 否则 → `Converging`。
+///
+/// 纯函数：无 I/O、无随机，输出完全由入参决定，便于测试与审计。
+pub fn enforce_convergence_gate(
+    checkpoint_log: &[GoalCheckpoint],
+    policy: &GoalConvergencePolicy,
+) -> ConvergenceVerdict {
+    let Some(last) = checkpoint_log.last() else {
+        return ConvergenceVerdict {
+            status: ConvergenceStatus::Unknown,
+            repeated_fingerprint: None,
+            repeated_count: 0,
+            reason: "no checkpoint recorded; convergence cannot be judged".to_string(),
+        };
+    };
+
+    let tail_fingerprint = checkpoint_progress_fingerprint(last);
+    let max_repeated = policy.max_repeated_blockers;
+    let mut repeated_count = 0usize;
+    for checkpoint in checkpoint_log.iter().rev() {
+        if checkpoint_progress_fingerprint(checkpoint) == tail_fingerprint {
+            repeated_count += 1;
+        } else {
+            break;
+        }
+    }
+
+    if max_repeated > 0 && repeated_count >= max_repeated {
+        return ConvergenceVerdict {
+            status: ConvergenceStatus::Blocked,
+            repeated_fingerprint: Some(tail_fingerprint.clone()),
+            repeated_count,
+            reason: format!(
+                "repeated blocker threshold reached: fingerprint={tail_fingerprint} count={repeated_count} max={max_repeated}; stop retrying the same strategy"
+            ),
+        };
+    }
+    if repeated_count >= 2 {
+        return ConvergenceVerdict {
+            status: ConvergenceStatus::Spinning,
+            repeated_fingerprint: Some(tail_fingerprint.clone()),
+            repeated_count,
+            reason: format!(
+                "no progress between checkpoints: fingerprint={tail_fingerprint} repeated={repeated_count} max={max_repeated}"
+            ),
+        };
+    }
+    ConvergenceVerdict {
+        status: ConvergenceStatus::Converging,
+        repeated_fingerprint: None,
+        repeated_count,
+        reason: "checkpoint shows progress; convergence gate passed".to_string(),
+    }
+}
+
+/// checkpoint 的进度指纹：有 blocker_key 用它（同一失败原因去重），
+/// 否则用 validation_notes 全量拼接（完全相同的验证结果视为无进展）。
+fn checkpoint_progress_fingerprint(checkpoint: &GoalCheckpoint) -> String {
+    match checkpoint.blocker_key.as_deref() {
+        Some(key) => format!("blocker:{key}"),
+        None => format!("notes:{}", checkpoint.validation_notes.join("|")),
+    }
+}
+
+fn convergence_status_string(status: ConvergenceStatus) -> String {
+    match status {
+        ConvergenceStatus::Unknown => "unknown".to_string(),
+        ConvergenceStatus::Converging => "converging".to_string(),
+        ConvergenceStatus::Spinning => "spinning".to_string(),
+        ConvergenceStatus::Blocked => "blocked".to_string(),
+    }
 }

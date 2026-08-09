@@ -10,7 +10,7 @@ use chuang_agent::goal_dispatch::{
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::goal_run::{
     GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
-    GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    GoalRunReceipt, GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
@@ -151,6 +151,25 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                 "goal_bypasses_governance: {}",
                 diagnostics.bypasses_governance
             );
+            println!(
+                "goal_convergence_status: {}",
+                diagnostics.convergence_status
+            );
+            println!(
+                "goal_convergence_repeated_fingerprint: {}",
+                diagnostics
+                    .convergence_repeated_fingerprint
+                    .as_deref()
+                    .unwrap_or("none")
+            );
+            println!(
+                "goal_convergence_repeated_count: {}",
+                diagnostics.convergence_repeated_count
+            );
+            println!(
+                "goal_convergence_reason: {}",
+                diagnostics.convergence_reason
+            );
             print_goal_operability_text(&operability);
         }
         ControlOutputFormat::Json => print_json(&GoalShowOutput {
@@ -170,7 +189,29 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
             summary,
             completed_worker_ids,
             validation_notes,
-        } => (summary, completed_worker_ids, validation_notes, None),
+            blocker_key,
+        } => {
+            let checkpoint = if let Some(blocker_key) = blocker_key {
+                GoalCheckpoint::with_blocker_key(
+                    request.checkpoint_id,
+                    summary,
+                    completed_worker_ids,
+                    validation_notes,
+                    blocker_key,
+                )
+            } else {
+                GoalCheckpoint::new(
+                    request.checkpoint_id,
+                    summary,
+                    completed_worker_ids,
+                    validation_notes,
+                )
+            };
+            let receipt = store
+                .record_checkpoint(&request.goal_id, checkpoint)
+                .map_err(format_goal_run_error)?;
+            return render_goal_checkpoint_receipt(receipt, None, request.output);
+        }
         GoalCheckpointCliSource::FromCollect { queue_root } => {
             let suggestion =
                 load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
@@ -192,7 +233,15 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
         .record_checkpoint(&request.goal_id, checkpoint)
         .map_err(format_goal_run_error)?;
 
-    match request.output {
+    render_goal_checkpoint_receipt(receipt, source_hint, request.output)
+}
+
+fn render_goal_checkpoint_receipt(
+    receipt: GoalRunReceipt,
+    source_hint: Option<&str>,
+    output: ControlOutputFormat,
+) -> Result<(), String> {
+    match output {
         ControlOutputFormat::Text => {
             if let Some(source_hint) = source_hint {
                 println!("goal_checkpoint_source: {}", source_hint);
@@ -535,6 +584,7 @@ enum GoalCheckpointCliSource {
         summary: String,
         completed_worker_ids: Vec<String>,
         validation_notes: Vec<String>,
+        blocker_key: Option<String>,
     },
     FromCollect {
         queue_root: PathBuf,
@@ -1149,6 +1199,7 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
     let mut summary: Option<String> = None;
     let mut completed_worker_ids: Vec<String> = Vec::new();
     let mut validation_notes: Vec<String> = Vec::new();
+    let mut blocker_key: Option<String> = None;
     let mut root = default_goal_root();
     let mut queue_root: Option<PathBuf> = None;
     let mut from_collect = false;
@@ -1168,6 +1219,7 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
             "--validation-note" => {
                 validation_notes.push(take_value(args, &mut index, "--validation-note")?)
             }
+            "--blocker-key" => blocker_key = Some(take_value(args, &mut index, "--blocker-key")?),
             "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
             "--subagent-queue-root" => {
                 queue_root = Some(PathBuf::from(take_value(
@@ -1189,6 +1241,12 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
     }
 
     let source = if from_collect {
+        if blocker_key.is_some() {
+            return Err(format_goal_checkpoint_cli_error(
+                "checkpoint.blocker_key",
+                "--blocker-key is manual-only; --from-collect derives suggestions from reports",
+            ));
+        }
         if let Some(queue_root) = queue_root {
             GoalCheckpointCliSource::FromCollect { queue_root }
         } else {
@@ -1205,6 +1263,7 @@ fn parse_goal_checkpoint(args: &[String]) -> Result<GoalCheckpointCliRequest, St
             summary: summary.ok_or_else(|| "goal checkpoint requires --summary".to_string())?,
             completed_worker_ids,
             validation_notes,
+            blocker_key,
         }
     };
 
