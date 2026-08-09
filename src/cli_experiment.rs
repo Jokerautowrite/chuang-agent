@@ -5,6 +5,7 @@ use chuang_agent::self_experiment::{
 };
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
+use crate::cli_skill::{run_skill_solidify, skill_propose_request_for_experiment};
 
 pub(crate) fn experiment_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -43,20 +44,82 @@ fn experiment_plan_command(args: &[String]) -> Result<(), String> {
 fn experiment_complete_command(args: &[String]) -> Result<(), String> {
     let request = parse_experiment_complete(args)?;
     let planner = SelfExperimentPlanner::new(&request.root);
+    let outcome = request.outcome.clone();
+    let experiment_id = request.experiment_id.clone();
+    let summary = request.summary.clone();
     let receipt = planner.complete(&ExperimentCompleteRequest {
-        experiment_id: request.experiment_id,
-        outcome: request.outcome,
-        summary: request.summary,
+        experiment_id: experiment_id.clone(),
+        outcome: outcome.clone(),
+        summary: summary.clone(),
         next_step: request.next_step,
     })?;
+
+    // Self-experiment closure: when a benchmark-gated experiment succeeds,
+    // solidify the learned skill through the same gate `skill solidify`
+    // enforces (strict score improvement required; nothing is written on
+    // refusal). Kept separate from the experiment report itself.
+    let solidify_output = if request.benchmark_gate.is_some() {
+        if outcome != ExperimentOutcome::Success {
+            return Err(
+                "experiment_complete_solidify_refused: benchmark gate only allowed on success"
+                    .to_string(),
+            );
+        }
+        let after_score = request.benchmark_after_score.ok_or_else(|| {
+            "experiment_complete_solidify_refused: --benchmark-after-score required with --benchmark-gate"
+                .to_string()
+        })?;
+        let skills_root = request
+            .skills_root
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("data/skills"));
+        let proposal = skill_propose_request_for_experiment(
+            &experiment_id,
+            &summary,
+            request.agent_id.as_deref().unwrap_or("chuang"),
+        );
+        Some(run_skill_solidify(
+            &proposal,
+            &skills_root,
+            "benchmark-gated-experiment",
+            None,
+            Some("solidified after benchmark-gated experiment success"),
+            request.approval_threshold,
+            request.benchmark_gate.as_deref(),
+            Some(after_score),
+            request.benchmark_root.as_deref(),
+        )?)
+    } else {
+        None
+    };
 
     match request.output {
         ControlOutputFormat::Text => {
             println!("experiment_completed: {}", receipt.experiment_id);
             println!("experiment_report_path: {}", receipt.report_path);
             println!("experiment_outcome: {}", receipt.outcome);
+            if let Some(output) = &solidify_output {
+                let (gate, passed, best, required, writes, skills_root) =
+                    output.benchmark_gate_summary();
+                println!(
+                    "experiment_solidified: gate={} passed={} best={} required={} writes={} skills_root={}",
+                    gate.unwrap_or("none"),
+                    passed,
+                    best.map(|score| score.to_string()).unwrap_or_else(|| "none".to_string()),
+                    required.map(|score| score.to_string()).unwrap_or_else(|| "none".to_string()),
+                    writes,
+                    skills_root,
+                );
+            }
         }
-        ControlOutputFormat::Json => print_json(&receipt)?,
+        ControlOutputFormat::Json => {
+            let mut value = serde_json::to_value(&receipt).map_err(|e| e.to_string())?;
+            if let Some(output) = &solidify_output {
+                value["solidified_skill"] =
+                    serde_json::to_value(output).map_err(|e| e.to_string())?;
+            }
+            print_json(&value)?;
+        }
     }
 
     Ok(())
@@ -139,6 +202,12 @@ struct ExperimentCompleteCliRequest {
     next_step: String,
     root: PathBuf,
     output: ControlOutputFormat,
+    benchmark_gate: Option<String>,
+    benchmark_after_score: Option<u16>,
+    benchmark_root: Option<PathBuf>,
+    skills_root: Option<PathBuf>,
+    agent_id: Option<String>,
+    approval_threshold: u16,
 }
 
 fn parse_experiment_plan(args: &[String]) -> Result<ExperimentPlanCliRequest, String> {
@@ -191,6 +260,12 @@ fn parse_experiment_complete(args: &[String]) -> Result<ExperimentCompleteCliReq
     let mut next_step: Option<String> = None;
     let mut root = PathBuf::from("./experiments");
     let mut output = ControlOutputFormat::Text;
+    let mut benchmark_gate: Option<String> = None;
+    let mut benchmark_after_score: Option<u16> = None;
+    let mut benchmark_root: Option<PathBuf> = None;
+    let mut skills_root: Option<PathBuf> = None;
+    let mut agent_id: Option<String> = None;
+    let mut approval_threshold = 80u16;
 
     let mut index = 0;
     while index < args.len() {
@@ -215,6 +290,54 @@ fn parse_experiment_complete(args: &[String]) -> Result<ExperimentCompleteCliReq
                 output = ControlOutputFormat::Json;
                 index += 1;
             }
+            "--benchmark-gate" => {
+                let value = take_value(args, &mut index, "--benchmark-gate")?;
+                if value.trim().is_empty() {
+                    return Err(
+                        "experiment complete --benchmark-gate must not be empty".to_string()
+                    );
+                }
+                benchmark_gate = Some(value);
+            }
+            "--benchmark-after-score" => {
+                let value = take_value(args, &mut index, "--benchmark-after-score")?;
+                benchmark_after_score =
+                    Some(value.parse::<u16>().map_err(|_| {
+                        "--benchmark-after-score requires numeric value".to_string()
+                    })?);
+            }
+            "--benchmark-root" => {
+                let value = take_value(args, &mut index, "--benchmark-root")?;
+                if value.trim().is_empty() {
+                    return Err(
+                        "experiment complete --benchmark-root must not be empty".to_string()
+                    );
+                }
+                benchmark_root = Some(PathBuf::from(value));
+            }
+            "--skills-root" => {
+                let value = take_value(args, &mut index, "--skills-root")?;
+                if value.trim().is_empty() {
+                    return Err("experiment complete --skills-root must not be empty".to_string());
+                }
+                skills_root = Some(PathBuf::from(value));
+            }
+            "--agent-id" => {
+                let value = take_value(args, &mut index, "--agent-id")?;
+                if value.trim().is_empty() {
+                    return Err("experiment complete --agent-id must not be empty".to_string());
+                }
+                agent_id = Some(value);
+            }
+            "--approval-threshold" => {
+                let value = take_value(args, &mut index, "--approval-threshold")?;
+                approval_threshold = value
+                    .parse::<u16>()
+                    .map_err(|_| "--approval-threshold requires numeric value".to_string())?;
+                if approval_threshold > 100 {
+                    return Err("--approval-threshold must be <= 100".to_string());
+                }
+            }
             _ => return Err(usage()),
         }
     }
@@ -227,6 +350,12 @@ fn parse_experiment_complete(args: &[String]) -> Result<ExperimentCompleteCliReq
         next_step: next_step.ok_or_else(|| "experiment complete requires --next".to_string())?,
         root,
         output,
+        benchmark_gate,
+        benchmark_after_score,
+        benchmark_root,
+        skills_root,
+        agent_id,
+        approval_threshold,
     })
 }
 

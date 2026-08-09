@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chuang_agent::benchmark::{BenchmarkStore, Scoreboard};
 use chuang_agent::skill_evolver::{
     DryRunProposalEvolver, EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver,
     SkillProposal, SkillSolidifyTicket, ValidationReport,
@@ -11,6 +12,9 @@ use chuang_agent::skill_evolver::{
 use serde::Serialize;
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
+
+/// Default benchmark root, aligned with `src/cli_benchmark.rs`.
+pub(crate) const DEFAULT_BENCHMARK_ROOT: &str = "benchmarks";
 
 pub(crate) fn skill_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -290,12 +294,46 @@ fn skill_judge_command(args: &[String]) -> Result<(), String> {
 
 fn skill_solidify_command(args: &[String]) -> Result<(), String> {
     let request = parse_skill_solidify(args)?;
-    let review = build_skill_review(&request.review)?;
     let skills_root = request
         .skills_root
         .clone()
         .unwrap_or_else(default_skills_root);
-    let judgments = build_skill_judgments(&review, request.approval_threshold, Some(&skills_root));
+    let output = run_skill_solidify(
+        &request.review,
+        &skills_root,
+        &request.approval_source,
+        request.approved_at.as_deref(),
+        request.approval_note.as_deref(),
+        request.approval_threshold,
+        request.benchmark_gate.as_deref(),
+        request.benchmark_after_score,
+        request.benchmark_root.as_deref(),
+    )?;
+
+    match request.output {
+        ControlOutputFormat::Json => print_json(&output)?,
+        ControlOutputFormat::Text => print_skill_solidify_text(&output),
+    }
+
+    Ok(())
+}
+
+/// Shared solidify pipeline, reused by `skill solidify` and by the
+/// self-experiment closure (`experiment complete --outcome success` with a
+/// benchmark gate). Owns: review -> self-score -> benchmark gate -> write.
+pub(crate) fn run_skill_solidify(
+    review_request: &SkillProposeRequest,
+    skills_root: &Path,
+    approval_source: &str,
+    approved_at: Option<&str>,
+    approval_note: Option<&str>,
+    approval_threshold: u16,
+    benchmark_gate: Option<&str>,
+    benchmark_after_score: Option<u16>,
+    benchmark_root: Option<&Path>,
+) -> Result<SkillSolidifyOutput, String> {
+    let review = build_skill_review(review_request)?;
+    let judgments = build_skill_judgments(&review, approval_threshold, Some(skills_root));
     if let Some(rejected) = judgments.iter().find(|judgment| !judgment.approved) {
         return Err(format!(
             "skill_solidify_rejected: proposal {} self score {} below threshold {}",
@@ -313,6 +351,29 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
         ));
     }
 
+    // Benchmark score gate (Penguin: no baseline -> no optimize; only a
+    // strictly improving score may solidify a skill). Rejects before any
+    // file write. approve/judge never reach this code path.
+    let (benchmark_gate, benchmark_gate_passed, benchmark_best_score, benchmark_required_score) =
+        match benchmark_gate {
+            Some(gate_id) => {
+                let root = benchmark_root
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(DEFAULT_BENCHMARK_ROOT));
+                let board = BenchmarkStore::new(&root)
+                    .load_scoreboard(gate_id)
+                    .map_err(|err| format!("benchmark_gate_load_failed: {err}"))?;
+                let outcome = enforce_benchmark_gate(&board, benchmark_after_score)?;
+                (
+                    Some(gate_id.to_string()),
+                    outcome.passed,
+                    outcome.best_score,
+                    outcome.required_score,
+                )
+            }
+            None => (None, false, None, None),
+        };
+
     let solidify_tickets = review
         .proposals
         .iter()
@@ -321,9 +382,9 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
             SkillSolidifyTicket::solidify_refusal_receipt(
                 proposal,
                 validation,
-                request.approval_source.clone(),
-                request.approved_at.clone(),
-                request.approval_note.clone(),
+                approval_source.to_string(),
+                approved_at.map(str::to_string),
+                approval_note.map(str::to_string),
             )
         })
         .collect::<Vec<_>>();
@@ -333,12 +394,12 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
         .zip(judgments.iter())
         .map(|(proposal, judgment)| {
             solidify_skill_file(
-                &skills_root,
+                skills_root,
                 proposal,
                 judgment,
-                &request.approval_source,
-                request.approved_at.as_deref(),
-                request.approval_note.as_deref(),
+                approval_source,
+                approved_at,
+                approval_note,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -347,7 +408,7 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
         solidify_allowed: true,
         self_scored: true,
         approval_policy: "darwin_style_cli_rubric".to_string(),
-        approval_threshold: request.approval_threshold,
+        approval_threshold,
         writes_skills: true,
         solidifies_skill: true,
         skills_root: skills_root.display().to_string(),
@@ -357,6 +418,10 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
         write_receipts,
         solidify_receipt_count: solidify_tickets.len(),
         solidify_receipts: solidify_tickets,
+        benchmark_gate: benchmark_gate.clone(),
+        benchmark_gate_passed,
+        benchmark_best_score,
+        benchmark_required_score,
         boundary: SkillSolidifyBoundary {
             validates_proposal: true,
             self_scores_proposal: true,
@@ -365,69 +430,119 @@ fn skill_solidify_command(args: &[String]) -> Result<(), String> {
             writes_skill_files: true,
             upserts_canonical_skill: true,
             solidifies_skill: true,
+            enforces_benchmark_gate: benchmark_gate.is_some(),
             connects_llm: false,
             connects_external_service: false,
         },
     };
 
-    match request.output {
-        ControlOutputFormat::Json => print_json(&output)?,
-        ControlOutputFormat::Text => {
-            println!(
-                "skill_solidify solidify_requested=true solidify_allowed=true self_scored=true approval_policy={} approval_threshold={} writes_skills=true solidifies_skill=true skills_root={} judgments={} writes={} solidify_receipts={}",
-                output.approval_policy,
-                output.approval_threshold,
-                output.skills_root,
-                output.judgment_count,
-                output.write_count,
-                output.solidify_receipt_count
-            );
-            println!(
-                "boundary validates_proposal=true self_scores_proposal=true emits_solidify_receipt=true reads_existing_skills=true writes_skill_files=true upserts_canonical_skill=true solidifies_skill=true connects_llm=false connects_external_service=false"
-            );
-            for judgment in &output.judgments {
-                print_skill_judgment_text("judgment", judgment);
-            }
-            for receipt in &output.write_receipts {
-                println!(
-                    "skill_write skill_id={} action={} duplicate_state={} path={} bytes_written={} status={} version={} provenance={}",
-                    receipt.skill_id,
-                    receipt.action,
-                    receipt.duplicate_state,
-                    receipt.path,
-                    receipt.bytes_written,
-                    receipt.status,
-                    receipt.version,
-                    receipt.provenance_event_ids.join(",")
-                );
-            }
-            for receipt in &output.solidify_receipts {
-                println!(
-                    "solidify_receipt id={} proposal_id={} approved={} source={} approved_at={} note={} dry_run={} writes_skills={} solidifies_skill={} local_only={}",
-                    receipt.ticket_id,
-                    receipt.proposal_id,
-                    receipt.approval_receipt.approved,
-                    receipt.approval_receipt.approval_source,
-                    receipt
-                        .approval_receipt
-                        .approved_at
-                        .as_deref()
-                        .unwrap_or("none"),
-                    receipt
-                        .approval_receipt
-                        .approval_note
-                        .as_deref()
-                        .unwrap_or("none"),
-                    receipt.dry_run,
-                    receipt.writes_skills,
-                    receipt.solidifies_skill,
-                    receipt.local_only
-                );
-            }
-        }
-    }
+    Ok(output)
+}
 
-    Ok(())
+/// Build a minimal skill proposal request for the self-experiment closure.
+/// The event/task ids derive from the experiment id so the solidified skill
+/// can be traced back to the experiment report.
+pub(crate) fn skill_propose_request_for_experiment(
+    experiment_id: &str,
+    summary: &str,
+    agent_id: &str,
+) -> SkillProposeRequest {
+    SkillProposeRequest {
+        output: ControlOutputFormat::Json,
+        event_id: format!("experiment-{experiment_id}"),
+        task_id: format!("experiment-{experiment_id}"),
+        kind: RuntimeEventKind::ManualObservation,
+        summary: summary.to_string(),
+        metadata: BTreeMap::new(),
+        agent_id: agent_id.to_string(),
+        task_kind: Some("self-experiment".to_string()),
+        max_proposals: 1,
+    }
+}
+
+fn print_skill_solidify_text(output: &SkillSolidifyOutput) {
+    println!(
+        "skill_solidify solidify_requested=true solidify_allowed=true self_scored=true approval_policy={} approval_threshold={} writes_skills=true solidifies_skill=true skills_root={} judgments={} writes={} solidify_receipts={}",
+        output.approval_policy,
+        output.approval_threshold,
+        output.skills_root,
+        output.judgment_count,
+        output.write_count,
+        output.solidify_receipt_count
+    );
+    println!(
+        "skill_solidify_gate benchmark_gate={} passed={} best_score={} required_score={}",
+        output.benchmark_gate.as_deref().unwrap_or("none"),
+        output.benchmark_gate_passed,
+        output
+            .benchmark_best_score
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        output
+            .benchmark_required_score
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+    );
+    println!(
+        "boundary validates_proposal=true self_scores_proposal=true emits_solidify_receipt=true reads_existing_skills=true writes_skill_files=true upserts_canonical_skill=true solidifies_skill=true enforces_benchmark_gate={} connects_llm=false connects_external_service=false",
+        output.boundary.enforces_benchmark_gate
+    );
+    for judgment in &output.judgments {
+        print_skill_judgment_text("judgment", judgment);
+    }
+    for receipt in &output.write_receipts {
+        println!(
+            "skill_write skill_id={} action={} duplicate_state={} path={} bytes_written={} status={} version={} provenance={}",
+            receipt.skill_id,
+            receipt.action,
+            receipt.duplicate_state,
+            receipt.path,
+            receipt.bytes_written,
+            receipt.status,
+            receipt.version,
+            receipt.provenance_event_ids.join(",")
+        );
+    }
+    for receipt in &output.solidify_receipts {
+        println!(
+            "solidify_receipt id={} proposal_id={} approved={} source={} approved_at={} note={} dry_run={} writes_skills={} solidifies_skill={} local_only={}",
+            receipt.ticket_id,
+            receipt.proposal_id,
+            receipt.approval_receipt.approved,
+            receipt.approval_receipt.approval_source,
+            receipt
+                .approval_receipt
+                .approved_at
+                .as_deref()
+                .unwrap_or("none"),
+            receipt
+                .approval_receipt
+                .approval_note
+                .as_deref()
+                .unwrap_or("none"),
+            receipt.dry_run,
+            receipt.writes_skills,
+            receipt.solidifies_skill,
+            receipt.local_only
+        );
+    }
+}
+
+impl SkillSolidifyOutput {
+    /// Compact gate summary for cross-command reporting without exposing
+    /// private fields outside this module.
+    pub(crate) fn benchmark_gate_summary(
+        &self,
+    ) -> (Option<&str>, bool, Option<u16>, Option<u16>, usize, &str) {
+        (
+            self.benchmark_gate.as_deref(),
+            self.benchmark_gate_passed,
+            self.benchmark_best_score,
+            self.benchmark_required_score,
+            self.write_count,
+            self.skills_root.as_str(),
+        )
+    }
 }
 
 fn skill_retire_command(args: &[String]) -> Result<(), String> {
@@ -687,21 +802,22 @@ fn parse_skill_propose(args: &[String]) -> Result<SkillProposeRequest, String> {
 }
 
 fn parse_skill_approve(args: &[String]) -> Result<SkillApproveRequest, String> {
-    parse_skill_review_request(args, "skill approve", "cli skill approve")
+    parse_skill_review_request(args, "skill approve", "cli skill approve", false)
 }
 
 fn parse_skill_judge(args: &[String]) -> Result<SkillApproveRequest, String> {
-    parse_skill_review_request(args, "skill judge", "cli skill judge")
+    parse_skill_review_request(args, "skill judge", "cli skill judge", false)
 }
 
 fn parse_skill_solidify(args: &[String]) -> Result<SkillApproveRequest, String> {
-    parse_skill_review_request(args, "skill solidify", "cli skill solidify")
+    parse_skill_review_request(args, "skill solidify", "cli skill solidify", true)
 }
 
 fn parse_skill_review_request(
     args: &[String],
     command_name: &str,
     default_approval_source: &str,
+    allow_benchmark_flags: bool,
 ) -> Result<SkillApproveRequest, String> {
     let mut output = ControlOutputFormat::Text;
     let mut event_id: Option<String> = None;
@@ -717,6 +833,9 @@ fn parse_skill_review_request(
     let mut approval_note: Option<String> = None;
     let mut skills_root: Option<PathBuf> = None;
     let mut approval_threshold = 80u16;
+    let mut benchmark_gate: Option<String> = None;
+    let mut benchmark_after_score: Option<u16> = None;
+    let mut benchmark_root: Option<PathBuf> = None;
 
     let mut index = 0;
     while index < args.len() {
@@ -792,6 +911,42 @@ fn parse_skill_review_request(
                     return Err("--approval-threshold must be <= 100".to_string());
                 }
             }
+            "--benchmark-gate" => {
+                if !allow_benchmark_flags {
+                    return Err(format!(
+                        "{command_name} does not accept --benchmark-gate; only skill solidify supports benchmark gating"
+                    ));
+                }
+                let value = take_value(args, &mut index, "--benchmark-gate")?;
+                if value.trim().is_empty() {
+                    return Err(format!("{command_name} --benchmark-gate must not be empty"));
+                }
+                benchmark_gate = Some(value);
+            }
+            "--benchmark-after-score" => {
+                if !allow_benchmark_flags {
+                    return Err(format!(
+                        "{command_name} does not accept --benchmark-after-score; only skill solidify supports benchmark gating"
+                    ));
+                }
+                let value = take_value(args, &mut index, "--benchmark-after-score")?;
+                benchmark_after_score =
+                    Some(value.parse::<u16>().map_err(|_| {
+                        "--benchmark-after-score requires numeric value".to_string()
+                    })?);
+            }
+            "--benchmark-root" => {
+                if !allow_benchmark_flags {
+                    return Err(format!(
+                        "{command_name} does not accept --benchmark-root; only skill solidify supports benchmark gating"
+                    ));
+                }
+                let value = take_value(args, &mut index, "--benchmark-root")?;
+                if value.trim().is_empty() {
+                    return Err(format!("{command_name} --benchmark-root must not be empty"));
+                }
+                benchmark_root = Some(PathBuf::from(value));
+            }
             _ => return Err(usage()),
         }
     }
@@ -829,6 +984,46 @@ fn parse_skill_review_request(
         approval_note,
         skills_root,
         approval_threshold,
+        benchmark_gate,
+        benchmark_after_score,
+        benchmark_root,
+    })
+}
+
+/// Outcome of a benchmark score gate check, used by skill solidify.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BenchmarkGateOutcome {
+    passed: bool,
+    best_score: Option<u16>,
+    required_score: Option<u16>,
+}
+
+/// Penguin gate: no baseline -> no optimize; a skill may only solidify when
+/// the submitted score strictly exceeds the recorded best. Pure function so
+/// the rule is unit-testable without touching the filesystem.
+fn enforce_benchmark_gate(
+    board: &Scoreboard,
+    after_score: Option<u16>,
+) -> Result<BenchmarkGateOutcome, String> {
+    let best = board
+        .best
+        .as_ref()
+        .ok_or_else(|| "benchmark_gate_rejected: no best score recorded yet".to_string())?;
+    let best_score = best.total_score;
+    let required_score = after_score.ok_or_else(|| {
+        "benchmark_gate_rejected: --benchmark-after-score required (no improvement proof -> no accept)"
+            .to_string()
+    })?;
+    if required_score <= best_score {
+        return Err(format!(
+            "benchmark_gate_rejected: after_score {} does not strictly exceed best {} (no improvement -> no accept)",
+            required_score, best_score
+        ));
+    }
+    Ok(BenchmarkGateOutcome {
+        passed: true,
+        best_score: Some(best_score),
+        required_score: Some(required_score),
     })
 }
 
@@ -1661,7 +1856,7 @@ fn sanitize_yaml_scalar(raw: &str) -> String {
     raw.replace('\n', " ").replace('\r', " ")
 }
 
-struct SkillProposeRequest {
+pub(crate) struct SkillProposeRequest {
     output: ControlOutputFormat,
     event_id: String,
     task_id: String,
@@ -1681,6 +1876,9 @@ struct SkillApproveRequest {
     approval_note: Option<String>,
     skills_root: Option<PathBuf>,
     approval_threshold: u16,
+    benchmark_gate: Option<String>,
+    benchmark_after_score: Option<u16>,
+    benchmark_root: Option<PathBuf>,
 }
 
 struct SkillRetireRequest {
@@ -1780,7 +1978,7 @@ struct SkillJudgeBoundary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SkillSolidifyOutput {
+pub(crate) struct SkillSolidifyOutput {
     solidify_requested: bool,
     solidify_allowed: bool,
     self_scored: bool,
@@ -1795,6 +1993,10 @@ struct SkillSolidifyOutput {
     write_receipts: Vec<SkillWriteReceiptOutput>,
     solidify_receipt_count: usize,
     solidify_receipts: Vec<SkillSolidifyTicket>,
+    benchmark_gate: Option<String>,
+    benchmark_gate_passed: bool,
+    benchmark_best_score: Option<u16>,
+    benchmark_required_score: Option<u16>,
     boundary: SkillSolidifyBoundary,
 }
 
@@ -1807,6 +2009,7 @@ struct SkillSolidifyBoundary {
     writes_skill_files: bool,
     upserts_canonical_skill: bool,
     solidifies_skill: bool,
+    enforces_benchmark_gate: bool,
     connects_llm: bool,
     connects_external_service: bool,
 }
@@ -1980,4 +2183,65 @@ struct SkillProposeBoundary {
     emits_approval_ticket: bool,
     connects_llm: bool,
     connects_external_service: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chuang_agent::benchmark::{CaseScore, ScoreEntry};
+
+    fn scoreboard_with_best(total: u16) -> Scoreboard {
+        Scoreboard {
+            benchmark_id: "memory-recall".to_string(),
+            version: 1,
+            best: Some(ScoreEntry {
+                run_id: "run-1".to_string(),
+                benchmark_id: "memory-recall".to_string(),
+                version: 1,
+                tested_at: "2026-08-10".to_string(),
+                case_scores: vec![CaseScore {
+                    case_id: "case-1".to_string(),
+                    score: total,
+                    max_score: total,
+                    reason: "baseline".to_string(),
+                }],
+                total_score: total,
+                max_score: total,
+            }),
+            latest: None,
+            history: vec![],
+        }
+    }
+
+    #[test]
+    fn benchmark_gate_rejects_when_no_best_score() {
+        let board = Scoreboard::default();
+        let err = enforce_benchmark_gate(&board, Some(5)).unwrap_err();
+        assert!(err.contains("no best score"));
+    }
+
+    #[test]
+    fn benchmark_gate_rejects_without_after_score() {
+        let board = scoreboard_with_best(4);
+        let err = enforce_benchmark_gate(&board, None).unwrap_err();
+        assert!(err.contains("--benchmark-after-score required"));
+    }
+
+    #[test]
+    fn benchmark_gate_rejects_without_strict_improvement() {
+        let board = scoreboard_with_best(4);
+        let err = enforce_benchmark_gate(&board, Some(4)).unwrap_err();
+        assert!(err.contains("does not strictly exceed"));
+        let err = enforce_benchmark_gate(&board, Some(3)).unwrap_err();
+        assert!(err.contains("does not strictly exceed"));
+    }
+
+    #[test]
+    fn benchmark_gate_passes_on_strict_improvement() {
+        let board = scoreboard_with_best(4);
+        let outcome = enforce_benchmark_gate(&board, Some(5)).unwrap();
+        assert!(outcome.passed);
+        assert_eq!(outcome.best_score, Some(4));
+        assert_eq!(outcome.required_score, Some(5));
+    }
 }

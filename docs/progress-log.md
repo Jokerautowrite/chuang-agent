@@ -1,3 +1,57 @@
+# 2026-08-10 benchmark 评分门禁 + 自实验闭环（Penguin 收敛语义落地）
+
+- **目标**：把「无基线不优化 + 分数严格提升才接受」落地到技能固化流程——
+  之前 `skill solidify` 只做 darwin 启发式自评，分数与 benchmark 无关；
+  harness-integration-plan 明确缺「分数严格提升才接受」这道门。
+- **改动**（`src/cli_skill.rs`）：
+  - `skill solidify` 新增可选参数 `--benchmark-gate ID`、
+    `--benchmark-after-score N`、`--benchmark-root PATH`（默认 `benchmarks`）。
+  - 提供 gate 时：加载 scoreboard，无 best → 拒绝；未提供 after-score → 拒绝
+    （不允许无证据落盘）；`after_score` 必须**严格大于** best 才允许写技能文件，
+    否则 `benchmark_gate_rejected`，不落盘。
+  - 纯函数 `enforce_benchmark_gate()`（可单测）；输出/边界增加
+    `benchmark_gate`、`benchmark_gate_passed`、`benchmark_best_score`、
+    `benchmark_required_score`、`enforces_benchmark_gate`。
+  - approve/judge 不接受这些 flag（解析层直接报错，避免误用）。
+  - `src/cli_output.rs` usage 同步更新。
+- **闭环**（`src/cli_experiment.rs`）：`experiment complete --outcome success`
+  加 `--benchmark-gate ID --benchmark-after-score N [--benchmark-root] [--skills-root]
+  [--agent-id]`；成功后自动走同一条 gate 固化技能（共用 `run_skill_solidify`），
+  拒绝时不落盘；`benchmark evaluate --json` 输出补 `total_score/max_score`，
+  创可直接解析分数去固化。
+- **验证**：4 个单元测试 + 4 个 skill 集成测试 + 2 个 experiment 闭环集成测试
+  通过；真实冒烟 `experiment complete --benchmark-gate memory-recall
+  --benchmark-after-score 5` 自动落盘技能。全量测试仅剩既有失败
+  `cli_memory_session_search_filters_by_session_id`（8-07 分词升级引入，与本次无关）。
+
+# 2026-08-09 识图兜底：无视觉主模型也能看图（视觉模型描述成文字，图片不进会话）
+
+- **问题**：主模型 deepseek-v4-flash（纯文本）收到带图请求时上游 400
+  （`Provider error 400: Upstream request failed`）；此前 opencodex 侧已配置
+  `noVisionModels: ["deepseek-v4-flash"]`（图替换占位符），codex 桥已解决，
+  但 chuang 侧需要真正的「看图」能力。
+- **方案（不改桥）**：chuang app-server 加识图兜底——主模型不支持视觉时，
+  带图请求先把图片交给视觉模型描述成文字，描述结果并入本轮输入；
+  历史只保留文本，图片不代入后续会话（符合「读完告诉你，不要带入会话」）。
+- **改动**：
+  - `src/runtime_config.rs`：`RuntimeConfig` 新增 `vision_model: Option<String>`。
+  - `src/runtime_config_file.rs`：解析 `vision_model` 配置。
+  - `config.toml`：`vision_model = "sub2/mimo-v2.5"`（走 opencodex 路由）。
+  - `src/app_server.rs`：
+    - `extract_turn_input()` 提取 input 里的 `{type:"localImage", path}` → `image_paths`；
+      `PreparedLiveTurn` 新增 `image_paths`（纯文本/纯图/图文混合均支持）。
+    - `run_live_turn()` 带图时调用 `describe_images_with_vision()`，把描述文本拼进
+      `input_text`；失败时降级为「图片路径 + 错误说明」占位，不阻塞主流程。
+    - `describe_images_with_vision()`：递归找第一个 OpenAICompatible provider，
+      POST `{base_url}/chat/completions`，模型用 `vision_model`，图片 base64 转
+      data URL；**只传固定描述指令 + 图片，不传用户原始提问**（避免视觉模型
+      直接回答用户问题而不描述图片，曾出现只回 "OK" 的 bug，已修复）。
+  - 调试 eprintln 已清理，仅保留失败日志。
+- **验证**：真实 mimo-v2.5 调用成功（opencodex usage.jsonl 有记录），返回
+  「这是一张数据展示界面…」等真实描述；主模型 deepseek 200 正常回复。
+  纯文本轮询（无图）不受影响。既有失败用例
+  `cli_memory_session_search_filters_by_session_id` 为既有问题，与本次无关。
+
 # 2026-08-07 心跳调优：白天窗口 + 2 小时间隔 + 模型自由发挥话术
 
 - **时段窗口**：新增 `heartbeat_start_hour` / `heartbeat_end_hour`（本地时间含两端），
@@ -3186,3 +3240,17 @@
 - GBrain 外脑 ✅：emotion_brain=1 时 emotion_context_segment 调 agent-hub-brain-query semantic（CLI 通道）查主人相关记忆颗粒并注入 prompt；创回答引用了 4 条具体颗粒（agent-harness-loop、service-governance、File-over-App、Ratatui 壳）。CLI 直测返回记忆颗粒正常。
 - 备注：knowledge_context（GBrain 直连 API 通道）仍 disabled（默认），外脑供料走 emotion_brain CLI 通道已够用；是否启用直连 API 通道留给后续决策。
 - 长期记忆 writeback：待专项治理（靠规则定什么值得写 experiences，不默认开启防膨胀）。
+
+# 2026-08-10 参考资料深挖（老爸发起「深挖所有参考资料」）
+- 目的：把本机跟 harness/自进化/Agent OS 相关的参考资产挖透，找对创可落地的方向。
+- 产出：`docs/reference-dig-20260810.md`（18 项资产清单 + 10 块深挖提炼 + P0/P1/P2 落地建议）。
+- 关键提炼：
+  1. **图片不进会话**：penguin session.ts 的正式语义 = 图片落 scratchpad + `[attached image: <路径>]` 文本引用，按模型能力注入 read_image/describe_image 按需读 → 昨天 vision 兜底的升级方向。
+  2. **进化闭环**：penguin 4 skills（benchmark-design/evaluation/optimization + agent-creation）：statement/rubric 隔离、无基线不优化、分数严格提升才接受、快照回滚 → 创 skill_evolver 缺评分门禁。
+  3. **goal 模式**：GOAL.yaml 收敛控制通道（objective 系统写/status 模型只写 complete|blocked）、blocked 连续 3 轮审计、预算耗尽 wrap-up、幻影轮防护 → 创 goal_mode 升级蓝本。
+  4. **错误恢复**：Claude Code 7 级级联（每种恢复只试一次）+ withRetry（500ms→32s jitter0.25）+ 空闲看门狗 45s/90s。
+  5. **权限**：三层 allow/deny/ask 按 source + 输入级 readonly/concurrency/destructive + ResolveOnce 防竞态。
+  6. **记忆**：Claude Code Sonnet 侧查询召回（manifest+小模型）vs memory-qa-layer 多路召回，两种路径都有本地实现可参考。
+  7. **上下文压缩**：5 策略级联（Snip→Micro→Collapse→Auto→Session Memory）+ 3 次失败熔断 + 压缩前 strip images。
+- 交叉核对：PI×Penguin×创 roadmap（8-06）、harness-integration-plan（8-08）方向一致，本次补了实现细节与优先级。
+- 待老爸确认：P0 图片方案开工、第一个 Benchmark 能力、Evaluator 默认模型。

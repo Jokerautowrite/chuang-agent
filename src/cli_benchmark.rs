@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use chuang_agent::benchmark::{
-    BenchmarkDef, BenchmarkRunRequest, BenchmarkStore, CaseScore,
-};
+use chuang_agent::benchmark::{BenchmarkDef, BenchmarkRunRequest, BenchmarkStore, CaseScore};
 use chuang_agent::benchmark_evaluator::{BenchmarkEvaluator, CaseAnswer, EvaluateRequest};
 use chuang_agent::runtime_config::{OpenAICompatibleConfig, ProviderConfig, RuntimeConfig};
 use chuang_agent::runtime_config_file::load_runtime_config_file;
@@ -93,11 +91,12 @@ fn benchmark_init_command(args: &[String]) -> Result<(), String> {
             _ => return Err(usage()),
         }
     }
-    let def_path = def_path.ok_or_else(|| "benchmark init requires --def <definition.json>".to_string())?;
+    let def_path =
+        def_path.ok_or_else(|| "benchmark init requires --def <definition.json>".to_string())?;
     let raw = fs::read_to_string(&def_path)
         .map_err(|e| format!("cannot read def file {}: {e}", def_path.display()))?;
-    let def: BenchmarkDef = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid benchmark definition: {e}"))?;
+    let def: BenchmarkDef =
+        serde_json::from_str(&raw).map_err(|e| format!("invalid benchmark definition: {e}"))?;
 
     // Isolation is a hard gate: refuse to install a definition whose statement
     // leaks the rubric to the Target agent.
@@ -150,7 +149,14 @@ fn benchmark_verify_command(args: &[String]) -> Result<(), String> {
     match output {
         ControlOutputFormat::Text => {
             println!("benchmark_id: {benchmark_id}");
-            println!("benchmark_verify: {}", if issues.is_empty() { "ok" } else { "violations" });
+            println!(
+                "benchmark_verify: {}",
+                if issues.is_empty() {
+                    "ok"
+                } else {
+                    "violations"
+                }
+            );
             for issue in &issues {
                 println!("  - {issue}");
             }
@@ -192,8 +198,8 @@ fn benchmark_run_command(args: &[String]) -> Result<(), String> {
 
     let raw = fs::read_to_string(&scores_path)
         .map_err(|e| format!("cannot read scores file {}: {e}", scores_path.display()))?;
-    let case_scores: Vec<CaseScore> = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid case scores: {e}"))?;
+    let case_scores: Vec<CaseScore> =
+        serde_json::from_str(&raw).map_err(|e| format!("invalid case scores: {e}"))?;
 
     let store = BenchmarkStore::new(&root);
     let receipt = store.record_run(&BenchmarkRunRequest {
@@ -206,9 +212,15 @@ fn benchmark_run_command(args: &[String]) -> Result<(), String> {
             println!("benchmark_run: {}", receipt.run_id);
             println!("benchmark_id: {}", receipt.benchmark_id);
             println!("benchmark_version: {}", receipt.version);
-            println!("benchmark_total: {}/{}", receipt.total_score, receipt.max_score);
+            println!(
+                "benchmark_total: {}/{}",
+                receipt.total_score, receipt.max_score
+            );
             println!("benchmark_accepted_as_best: {}", receipt.accepted_as_best);
-            println!("benchmark_scoreboard_path: {}", receipt.scoreboard_path.display());
+            println!(
+                "benchmark_scoreboard_path: {}",
+                receipt.scoreboard_path.display()
+            );
         }
         ControlOutputFormat::Json => print_json(&receipt)?,
     }
@@ -313,20 +325,32 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
                 index += 1;
             }
             "--provider-base-url" => {
-                provider_override.get_or_insert_with(|| (String::new(), String::new(), String::new(), String::new())).0 =
-                    take_value(args, &mut index, "--provider-base-url")?;
+                provider_override
+                    .get_or_insert_with(|| {
+                        (String::new(), String::new(), String::new(), String::new())
+                    })
+                    .0 = take_value(args, &mut index, "--provider-base-url")?;
             }
             "--provider-api-key" => {
-                provider_override.get_or_insert_with(|| (String::new(), String::new(), String::new(), String::new())).1 =
-                    take_value(args, &mut index, "--provider-api-key")?;
+                provider_override
+                    .get_or_insert_with(|| {
+                        (String::new(), String::new(), String::new(), String::new())
+                    })
+                    .1 = take_value(args, &mut index, "--provider-api-key")?;
             }
             "--provider-model" => {
-                provider_override.get_or_insert_with(|| (String::new(), String::new(), String::new(), String::new())).2 =
-                    take_value(args, &mut index, "--provider-model")?;
+                provider_override
+                    .get_or_insert_with(|| {
+                        (String::new(), String::new(), String::new(), String::new())
+                    })
+                    .2 = take_value(args, &mut index, "--provider-model")?;
             }
             "--provider-id" => {
-                provider_override.get_or_insert_with(|| (String::new(), String::new(), String::new(), String::new())).3 =
-                    take_value(args, &mut index, "--provider-id")?;
+                provider_override
+                    .get_or_insert_with(|| {
+                        (String::new(), String::new(), String::new(), String::new())
+                    })
+                    .3 = take_value(args, &mut index, "--provider-id")?;
             }
             "--json" => {
                 output = ControlOutputFormat::Json;
@@ -336,14 +360,14 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
         }
     }
 
-    let benchmark_id =
-        benchmark_id.ok_or_else(|| "benchmark evaluate requires --id <benchmark-id>".to_string())?;
+    let benchmark_id = benchmark_id
+        .ok_or_else(|| "benchmark evaluate requires --id <benchmark-id>".to_string())?;
     let answers_path = answers_path
         .ok_or_else(|| "benchmark evaluate requires --answers <answers.json>".to_string())?;
     let raw = fs::read_to_string(&answers_path)
         .map_err(|e| format!("cannot read answers file {}: {e}", answers_path.display()))?;
-    let answers: Vec<CaseAnswer> = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid answers file: {e}"))?;
+    let answers: Vec<CaseAnswer> =
+        serde_json::from_str(&raw).map_err(|e| format!("invalid answers file: {e}"))?;
 
     let runtime: RuntimeConfig = load_runtime_config_file(&config_path)
         .map_err(|e| format!("cannot load config {}: {e:?}", config_path.display()))?;
@@ -406,7 +430,10 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
     match output {
         ControlOutputFormat::Text => {
             println!("benchmark_evaluate: {}", receipt.benchmark_id);
-            println!("provider: {} model: {}", receipt.provider_id, receipt.model_name);
+            println!(
+                "provider: {} model: {}",
+                receipt.provider_id, receipt.model_name
+            );
             println!("dry_run: {}", receipt.dry_run);
             println!("evaluated_case_count: {}", receipt.evaluated_case_count);
             for score in &receipt.case_scores {
@@ -416,7 +443,10 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
                 );
             }
             if let Some(run_receipt) = &recorded {
-                println!("recorded: run_id={} accepted_as_best={}", run_receipt.run_id, run_receipt.accepted_as_best);
+                println!(
+                    "recorded: run_id={} accepted_as_best={}",
+                    run_receipt.run_id, run_receipt.accepted_as_best
+                );
                 println!("scoreboard: {}", run_receipt.scoreboard_path.display());
             } else if record && dry_run {
                 println!("recorded: skipped (dry-run)");
@@ -424,6 +454,10 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
         }
         ControlOutputFormat::Json => {
             let mut value = serde_json::to_value(&receipt).map_err(|e| e.to_string())?;
+            value["total_score"] =
+                serde_json::json!(receipt.case_scores.iter().map(|s| s.score).sum::<u16>());
+            value["max_score"] =
+                serde_json::json!(receipt.case_scores.iter().map(|s| s.max_score).sum::<u16>());
             if let Some(run_receipt) = &recorded {
                 value["recorded"] = serde_json::to_value(run_receipt).map_err(|e| e.to_string())?;
             }
@@ -448,18 +482,28 @@ fn provider_from_runtime(runtime: &RuntimeConfig) -> Result<OpenAICompatibleConf
 }
 
 fn provider_base_url(runtime: &RuntimeConfig) -> String {
-    provider_from_runtime(runtime).map(|c| c.base_url).unwrap_or_default()
+    provider_from_runtime(runtime)
+        .map(|c| c.base_url)
+        .unwrap_or_default()
 }
 fn provider_api_key(runtime: &RuntimeConfig) -> String {
-    provider_from_runtime(runtime).map(|c| c.api_key).unwrap_or_default()
+    provider_from_runtime(runtime)
+        .map(|c| c.api_key)
+        .unwrap_or_default()
 }
 fn provider_model(runtime: &RuntimeConfig) -> String {
-    provider_from_runtime(runtime).map(|c| c.model_name).unwrap_or_default()
+    provider_from_runtime(runtime)
+        .map(|c| c.model_name)
+        .unwrap_or_default()
 }
 fn provider_id_name(runtime: &RuntimeConfig) -> String {
-    provider_from_runtime(runtime).map(|c| c.provider_id).unwrap_or_default()
+    provider_from_runtime(runtime)
+        .map(|c| c.provider_id)
+        .unwrap_or_default()
 }
-fn provider_transport(runtime: &RuntimeConfig) -> chuang_agent::provider_openai_compatible::ProviderTransport {
+fn provider_transport(
+    runtime: &RuntimeConfig,
+) -> chuang_agent::provider_openai_compatible::ProviderTransport {
     provider_from_runtime(runtime)
         .map(|c| c.transport)
         .unwrap_or(chuang_agent::provider_openai_compatible::ProviderTransport::Native)
@@ -498,8 +542,8 @@ fn benchmark_experiment_command(args: &[String]) -> Result<(), String> {
         }
     }
 
-    let benchmark_id =
-        benchmark_id.ok_or_else(|| "benchmark experiment requires --id <benchmark-id>".to_string())?;
+    let benchmark_id = benchmark_id
+        .ok_or_else(|| "benchmark experiment requires --id <benchmark-id>".to_string())?;
     let store = BenchmarkStore::new(&root);
     let def = store.load_def(&benchmark_id)?;
     let board = store.load_scoreboard(&benchmark_id)?;
@@ -532,7 +576,10 @@ fn benchmark_experiment_command(args: &[String]) -> Result<(), String> {
             println!("benchmark_capability: {}", def.capability);
             println!("benchmark_best: {}/{}", best.total_score, best.max_score);
             println!("experiment_plan_path: {}", receipt.plan_path);
-            println!("experiment_time_budget_minutes: {}", receipt.time_budget_minutes);
+            println!(
+                "experiment_time_budget_minutes: {}",
+                receipt.time_budget_minutes
+            );
             println!("next: 完成改进后用 benchmark evaluate --record 复测；达标后 experiment complete --outcome success");
         }
         ControlOutputFormat::Json => print_json(&serde_json::json!({

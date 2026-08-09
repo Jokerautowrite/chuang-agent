@@ -937,3 +937,185 @@ fn cli_skill_deprecate_updates_seeded_canonical_file_without_deleting() {
     assert!(content.contains("deletes_skill_file: false"));
     assert!(content.contains("Existing canonical body kept for lifecycle tests."));
 }
+
+fn seed_benchmark_scoreboard(benchmark_root: &PathBuf, id: &str, best_total: u16) -> PathBuf {
+    let dir = benchmark_root.join(id);
+    fs::create_dir_all(&dir).expect("benchmark dir should be creatable");
+    let board = serde_json::json!({
+        "benchmark_id": id,
+        "version": 1,
+        "best": {
+            "run_id": "run-baseline",
+            "benchmark_id": id,
+            "version": 1,
+            "tested_at": "2026-08-10T00:00:00Z",
+            "case_scores": [],
+            "total_score": best_total,
+            "max_score": best_total
+        },
+        "latest": null,
+        "history": []
+    });
+    let path = dir.join("scoreboard.json");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&board).expect("scoreboard json"),
+    )
+    .expect("scoreboard should be writable");
+    path
+}
+
+#[test]
+fn cli_skill_solidify_benchmark_gate_rejects_when_no_best_score() {
+    let skills_root = test_skills_root("solidify-gate-nobest");
+    let benchmark_root = test_skills_root("solidify-gate-nobest-bench");
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-gate-1",
+            "--task-id",
+            "task-gate-1",
+            "--summary",
+            "gate without baseline should refuse",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--benchmark-gate",
+            "memory-recall",
+            "--benchmark-after-score",
+            "5",
+            "--benchmark-root",
+            benchmark_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no best score recorded yet"),
+        "stderr={stderr}"
+    );
+    assert!(!skills_root
+        .join("dry_run_skill_candidate_for_xiaoce.md")
+        .exists());
+}
+
+#[test]
+fn cli_skill_solidify_benchmark_gate_rejects_without_strict_improvement() {
+    let skills_root = test_skills_root("solidify-gate-noimprove");
+    let benchmark_root = test_skills_root("solidify-gate-noimprove-bench");
+    seed_benchmark_scoreboard(&benchmark_root, "memory-recall", 4);
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-gate-2",
+            "--task-id",
+            "task-gate-2",
+            "--summary",
+            "gate with equal score should refuse",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--benchmark-gate",
+            "memory-recall",
+            "--benchmark-after-score",
+            "4",
+            "--benchmark-root",
+            benchmark_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not strictly exceed"),
+        "stderr={stderr}"
+    );
+    assert!(!skills_root
+        .join("dry_run_skill_candidate_for_xiaoce.md")
+        .exists());
+}
+
+#[test]
+fn cli_skill_solidify_benchmark_gate_passes_on_strict_improvement() {
+    let skills_root = test_skills_root("solidify-gate-pass");
+    let benchmark_root = test_skills_root("solidify-gate-pass-bench");
+    seed_benchmark_scoreboard(&benchmark_root, "memory-recall", 4);
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "solidify",
+            "--event-id",
+            "event-gate-3",
+            "--task-id",
+            "task-gate-3",
+            "--summary",
+            "gate with strict improvement should solidify",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--benchmark-gate",
+            "memory-recall",
+            "--benchmark-after-score",
+            "5",
+            "--benchmark-root",
+            benchmark_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill solidify should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).expect("skill solidify should output json");
+    assert_eq!(parsed["solidify_allowed"], true);
+    assert_eq!(parsed["write_count"], 1);
+    assert_eq!(parsed["benchmark_gate"], "memory-recall");
+    assert_eq!(parsed["benchmark_gate_passed"], true);
+    assert_eq!(parsed["benchmark_best_score"], 4);
+    assert_eq!(parsed["benchmark_required_score"], 5);
+    assert_eq!(parsed["boundary"]["enforces_benchmark_gate"], true);
+
+    let written_path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
+    let written = fs::read_to_string(written_path).expect("solidify should write skill file");
+    assert!(written.contains("skill_id: dry_run_skill_candidate_for_xiaoce"));
+}
+
+#[test]
+fn cli_skill_approve_rejects_benchmark_gate_flags() {
+    let skills_root = test_skills_root("approve-gate-reject");
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "approve",
+            "--event-id",
+            "event-gate-4",
+            "--task-id",
+            "task-gate-4",
+            "--summary",
+            "approve must not accept benchmark gate",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--benchmark-gate",
+            "memory-recall",
+            "--json",
+        ])
+        .output()
+        .expect("skill approve should execute");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("only skill solidify supports benchmark gating"),
+        "stderr={stderr}"
+    );
+}
