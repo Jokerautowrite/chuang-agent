@@ -4305,6 +4305,7 @@ fn seed_default_memory_if_empty(store: &mut SqliteMemoryStore) -> Result<(), Str
             text: None,
             metadata: BTreeMap::new(),
             limit: 1,
+            match_mode: chuang_agent::memory_store::MemoryMatchMode::Token,
         })
         .map_err(|e| format!("seed_search_failed: {e:?}"))?;
 
@@ -9173,6 +9174,7 @@ allowed_channels = ["cli", "app-server"]
                     axes.clone(),
                 )]),
                 limit: 10,
+                match_mode: chuang_agent::memory_store::MemoryMatchMode::Token,
             })
             .expect("search should succeed");
         assert!(

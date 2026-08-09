@@ -43,7 +43,9 @@ impl MemoryStore for InMemoryMemoryStore {
             let text_score = query
                 .text
                 .as_ref()
-                .and_then(|text| super::text_match_score(text, &record.content))
+                .and_then(|text| {
+                    super::text_match_score_in_mode(text, &record.content, query.match_mode)
+                })
                 .unwrap_or(0);
             let text_match = query.text.is_none() || text_score > 0;
 

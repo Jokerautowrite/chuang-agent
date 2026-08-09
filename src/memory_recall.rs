@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::context_engine::{ContextSegment, SegmentSource};
 use crate::memory_store::{
-    MemoryLayerBoundary, MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
+    MemoryLayerBoundary, MemoryMatchMode, MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +61,7 @@ impl<S: MemoryStore> MemoryRecallPipeline<S> {
                 text: Some(request.query_text.clone()),
                 metadata: request.metadata.clone(),
                 limit: request.limit,
+                match_mode: MemoryMatchMode::Token,
             })
             .map_err(MemoryRecallError::Store)?;
 

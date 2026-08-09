@@ -798,6 +798,9 @@ fn search_turn_summaries(
             text: Some(query.to_string()),
             metadata,
             limit,
+            // CLI 诊断搜索要求精确短语命中，避免近似内容（如"锚点A" vs "锚点B"）
+            // 被 token 模糊召回误判为命中；agent 自动召回仍走 Token 模糊模式。
+            match_mode: chuang_agent::memory_store::MemoryMatchMode::ExactPhrase,
         })
         .map_err(|e| format!("session_memory_search_failed: {e:?}"))
 }

@@ -18,12 +18,57 @@ pub struct MemoryQuery {
     pub text: Option<String>,
     pub metadata: BTreeMap<String, String>,
     pub limit: usize,
+    pub match_mode: MemoryMatchMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
     pub record: MemoryRecord,
     pub score: u32,
+}
+
+/// 文本匹配模式。
+///
+/// - `Token`（默认）：整句精确包含优先，否则按 token 滑窗召回（自然语言改述也能命中）。
+///   用于 agent 自动记忆召回（recall 注入 context），容忍改述。
+/// - `ExactPhrase`：仅整句精确包含才命中，行为确定可预期。
+///   用于 CLI 诊断搜索（memory session search / maintenance / lim extract），
+///   避免近似的相似内容（如"锚点A" vs "锚点B"）被误判为命中。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MemoryMatchMode {
+    #[default]
+    Token,
+    ExactPhrase,
+}
+
+/// 按模式计算文本匹配打分（供各 MemoryStore::search 实现复用）。
+pub fn text_match_score_in_mode(
+    query_text: &str,
+    content: &str,
+    mode: MemoryMatchMode,
+) -> Option<u32> {
+    match mode {
+        MemoryMatchMode::Token => text_match_score(query_text, content),
+        MemoryMatchMode::ExactPhrase => exact_phrase_match_score(query_text, content),
+    }
+}
+
+/// 精确短语匹配打分：仅当查询整句包含于内容时命中。
+/// 返回 None 表示无命中；命中时分数 = 查询字符数。
+pub fn exact_phrase_match_score(query_text: &str, content: &str) -> Option<u32> {
+    let q = query_text.trim();
+    if q.is_empty() {
+        return None;
+    }
+    if content.contains(q) {
+        return Some(q.chars().count() as u32);
+    }
+    let q_lower = q.to_lowercase();
+    let content_lower = content.to_lowercase();
+    if content_lower.contains(&q_lower) {
+        return Some(q_lower.chars().count() as u32);
+    }
+    None
 }
 
 /// 文本匹配打分（供各 MemoryStore::search 实现复用）。

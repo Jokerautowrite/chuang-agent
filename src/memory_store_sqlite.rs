@@ -6,7 +6,9 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json;
 
-use crate::memory_store::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError, SearchHit};
+use crate::memory_store::{
+    text_match_score_in_mode, MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError, SearchHit,
+};
 
 #[derive(Debug)]
 pub struct SqliteMemoryStore {
@@ -37,7 +39,9 @@ impl SqliteMemoryStore {
     }
 
     fn connection(&self) -> Result<std::cell::RefMut<'_, Connection>, MemoryStoreError> {
-        self.conn.try_borrow_mut().map_err(|_| MemoryStoreError::StorageUnavailable)
+        self.conn
+            .try_borrow_mut()
+            .map_err(|_| MemoryStoreError::StorageUnavailable)
     }
 
     fn init_schema(&self) -> Result<(), MemoryStoreError> {
@@ -147,7 +151,7 @@ impl MemoryStore for SqliteMemoryStore {
             let text_score = query
                 .text
                 .as_ref()
-                .and_then(|text| crate::memory_store::text_match_score(text, &record.content))
+                .and_then(|text| text_match_score_in_mode(text, &record.content, query.match_mode))
                 .unwrap_or(0);
             let text_match = query.text.is_none() || text_score > 0;
 

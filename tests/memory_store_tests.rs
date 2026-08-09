@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use chuang_agent::memory_store::{
-    classify_memory_layer, text_match_score, InMemoryMemoryStore, MemoryLayer, MemoryLayerBoundary,
-    MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError,
+    classify_memory_layer, exact_phrase_match_score, text_match_score, InMemoryMemoryStore,
+    MemoryLayer, MemoryLayerBoundary, MemoryMatchMode, MemoryQuery, MemoryRecord, MemoryStore,
+    MemoryStoreError,
 };
 
 fn record(
@@ -63,6 +64,7 @@ fn memory_store_search_content_and_metadata() {
         text: Some("主线".to_string()),
         metadata: BTreeMap::from([(String::from("kind"), String::from("plan"))]),
         limit: 10,
+        match_mode: MemoryMatchMode::Token,
     };
 
     let hits = store.search(&query).expect("search should succeed");
@@ -107,6 +109,7 @@ fn memory_store_search_hits_partial_tokens_not_only_exact_sentence() {
             text: Some("心跳投递链路是否通过".to_string()),
             metadata: BTreeMap::new(),
             limit: 5,
+            match_mode: MemoryMatchMode::Token,
         })
         .expect("search should succeed");
     assert!(!hits.is_empty(), "partial token search should hit");
@@ -167,6 +170,7 @@ fn memory_store_rejects_zero_limit_query() {
         text: None,
         metadata: BTreeMap::new(),
         limit: 0,
+        match_mode: MemoryMatchMode::Token,
     };
 
     let err = store.search(&query).expect_err("zero limit should fail");
@@ -201,4 +205,74 @@ fn memory_store_classifies_archive_and_decay_boundaries() {
     assert!(hot_boundary.decay_review_only);
     assert!(!hot_boundary.maintenance_writeback_allowed);
     assert_eq!(hot_boundary.writeback_target, "manual_review_only");
+}
+
+#[test]
+fn exact_phrase_mode_hits_verbatim_content_only_and_ignores_near_miss() {
+    // 精确短语模式：仅整句包含命中；近似内容（只差一个字符）不命中。
+    let near_miss = exact_phrase_match_score("历史会话锚点B", "历史会话锚点A");
+    assert!(near_miss.is_none(), "near-miss content must not match");
+
+    let verbatim = exact_phrase_match_score("历史会话锚点B", "历史会话锚点B 已写入");
+    assert_eq!(verbatim, Some(7));
+}
+
+#[test]
+fn token_mode_still_tolerates_near_miss_paraphrase() {
+    // Token 模糊模式（召回路径）回归：近似内容仍可命中（2d5508a 语义）。
+    let fuzzy = text_match_score("历史会话锚点B", "历史会话锚点A");
+    assert!(fuzzy.is_some(), "token mode should tolerate paraphrase");
+}
+
+#[test]
+fn exact_phrase_mode_filters_by_metadata_in_store_search() {
+    let mut store = InMemoryMemoryStore::new();
+    store
+        .put(record(
+            "alpha-1",
+            "历史会话锚点A 记录",
+            &[("memory_scope", "session"), ("session_id", "alpha")],
+            None,
+        ))
+        .expect("alpha put should succeed");
+    store
+        .put(record(
+            "beta-1",
+            "历史会话锚点B 记录",
+            &[("memory_scope", "session"), ("session_id", "beta")],
+            None,
+        ))
+        .expect("beta put should succeed");
+
+    // 精确短语 + session-id 过滤：查询 B 限定 alpha 会话 → 0 命中。
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("历史会话锚点B".to_string()),
+            metadata: BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), "alpha".to_string()),
+            ]),
+            limit: 10,
+            match_mode: MemoryMatchMode::ExactPhrase,
+        })
+        .expect("search should succeed");
+    assert!(
+        hits.is_empty(),
+        "cross-session near-miss must be filtered out"
+    );
+
+    // 精确短语 + 同会话：查询 B 限定 beta 会话 → 1 命中。
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("历史会话锚点B".to_string()),
+            metadata: BTreeMap::from([
+                ("memory_scope".to_string(), "session".to_string()),
+                ("session_id".to_string(), "beta".to_string()),
+            ]),
+            limit: 10,
+            match_mode: MemoryMatchMode::ExactPhrase,
+        })
+        .expect("search should succeed");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].record.id, "beta-1");
 }

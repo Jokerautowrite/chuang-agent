@@ -541,6 +541,7 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
                 text: None,
                 metadata: BTreeMap::from([("kind".to_string(), "turn_summary".to_string())]),
                 limit: 1000,
+                match_mode: crate::memory_store::MemoryMatchMode::Token,
             })
             .map_err(ChuangKernelMemoryError::Store)?;
 

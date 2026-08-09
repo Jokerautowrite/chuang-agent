@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use chuang_agent::memory_store::{MemoryQuery, MemoryRecord, MemoryStore};
+use chuang_agent::memory_store::{MemoryMatchMode, MemoryQuery, MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
 
 fn temp_db_path(name: &str) -> PathBuf {
@@ -98,6 +98,7 @@ fn sqlite_memory_store_search_and_delete() {
         text: Some("长期记忆".to_string()),
         metadata: BTreeMap::new(),
         limit: 10,
+        match_mode: MemoryMatchMode::Token,
     };
     let hits = store.search(&query).expect("search should succeed");
     assert_eq!(hits.len(), 2);
@@ -189,10 +190,81 @@ fn sqlite_memory_store_search_excludes_expired_records_after_expire() {
             text: Some("长期记忆候选".to_string()),
             metadata: BTreeMap::new(),
             limit: 10,
+            match_mode: MemoryMatchMode::Token,
         })
         .expect("search should succeed");
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].record.id, "mem-fresh");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn sqlite_exact_phrase_mode_filters_by_session_id() {
+    let path = temp_db_path("exact-phrase-session-filter");
+    let mut store = SqliteMemoryStore::open(&path).expect("store should open");
+    store
+        .put(record(
+            "sqlite-alpha-1",
+            "历史会话锚点A 记录",
+            &[("kind", "turn_summary"), ("session_id", "alpha")],
+            None,
+        ))
+        .expect("alpha put should succeed");
+    store
+        .put(record(
+            "sqlite-beta-1",
+            "历史会话锚点B 记录",
+            &[("kind", "turn_summary"), ("session_id", "beta")],
+            None,
+        ))
+        .expect("beta put should succeed");
+
+    // 精确短语 + session-id 过滤：查询 B 限定 alpha 会话 → 0 命中（近误不召回）。
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("历史会话锚点B".to_string()),
+            metadata: BTreeMap::from([
+                ("kind".to_string(), "turn_summary".to_string()),
+                ("session_id".to_string(), "alpha".to_string()),
+            ]),
+            limit: 10,
+            match_mode: MemoryMatchMode::ExactPhrase,
+        })
+        .expect("search should succeed");
+    assert!(
+        hits.is_empty(),
+        "cross-session near-miss must be filtered out"
+    );
+
+    // 精确短语 + 同会话：查询 B 限定 beta 会话 → 1 命中。
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("历史会话锚点B".to_string()),
+            metadata: BTreeMap::from([
+                ("kind".to_string(), "turn_summary".to_string()),
+                ("session_id".to_string(), "beta".to_string()),
+            ]),
+            limit: 10,
+            match_mode: MemoryMatchMode::ExactPhrase,
+        })
+        .expect("search should succeed");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].record.id, "sqlite-beta-1");
+
+    // Token 模式回归：跨会话近误在模糊模式下会命中（召回语义不受影响）。
+    let hits = store
+        .search(&MemoryQuery {
+            text: Some("历史会话锚点B".to_string()),
+            metadata: BTreeMap::from([
+                ("kind".to_string(), "turn_summary".to_string()),
+                ("session_id".to_string(), "alpha".to_string()),
+            ]),
+            limit: 10,
+            match_mode: MemoryMatchMode::Token,
+        })
+        .expect("search should succeed");
+    assert!(!hits.is_empty(), "token mode should still recall near-miss");
+
     let _ = fs::remove_file(path);
 }
