@@ -153,6 +153,7 @@ fn goal_run_rejects_checkpoint_with_invalid_created_at() {
             completed_worker_ids: vec!["worker-1".to_string()],
             validation_notes: vec!["cargo test -q --test goal_run_tests".to_string()],
             blocker_key: None,
+            evidence_verdicts: Vec::new(),
         })
         .expect_err("invalid timestamp should fail");
 

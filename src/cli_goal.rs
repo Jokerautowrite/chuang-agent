@@ -7,11 +7,11 @@ use chuang_agent::goal_dispatch::{
     load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
     GoalDispatchDiagnostics, GoalDispatchManifest,
 };
-use chuang_agent::goal_mode::GoalSpec;
+use chuang_agent::goal_mode::{GoalEvidence, GoalSpec};
 use chuang_agent::goal_run::{
-    ConvergenceStatus, ConvergenceVerdict, GoalCheckpoint, GoalCheckpointWriteback,
-    GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics, GoalRunReceipt, GoalRunStore,
-    GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    check_evidence_plan, ConvergenceStatus, ConvergenceVerdict, GoalCheckpoint,
+    GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics, GoalRunReceipt,
+    GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::skill_evolver::{
@@ -44,6 +44,7 @@ fn goal_plan_command(args: &[String]) -> Result<(), String> {
     let mut goal_spec = GoalSpec::mainline_mvp(request.objective);
     goal_spec.goal_id = request.goal_id;
     goal_spec.budget.max_subtasks = request.max_subtasks;
+    goal_spec.acceptance_evidence = request.evidence;
     let run = GoalRun::new(
         goal_spec,
         request.worker_plan,
@@ -175,6 +176,19 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
             println!(
                 "goal_convergence_reason: {}",
                 diagnostics.convergence_reason
+            );
+            println!("goal_evidence_expected: {}", diagnostics.evidence_expected);
+            println!("goal_evidence_complete: {}", diagnostics.evidence_complete);
+            println!(
+                "goal_evidence_checked_at_checkpoint: {}",
+                diagnostics
+                    .evidence_checked_at_checkpoint
+                    .as_deref()
+                    .unwrap_or("none")
+            );
+            println!(
+                "goal_evidence_missing: {}",
+                format_text_list(&diagnostics.evidence_missing)
             );
             print_goal_operability_text(&operability);
         }
@@ -354,6 +368,10 @@ struct GoalEvolveOutput {
 fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
     let request = parse_goal_checkpoint(args)?;
     let store = GoalRunStore::new(&request.root);
+    let run = store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    let evidence_verdicts = check_evidence_plan(&request.root, &run.goal_spec);
     let (summary, completed_worker_ids, validation_notes, source_hint) = match request.source {
         GoalCheckpointCliSource::Manual {
             summary,
@@ -361,22 +379,16 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
             validation_notes,
             blocker_key,
         } => {
-            let checkpoint = if let Some(blocker_key) = blocker_key {
-                GoalCheckpoint::with_blocker_key(
-                    request.checkpoint_id,
-                    summary,
-                    completed_worker_ids,
-                    validation_notes,
-                    blocker_key,
-                )
-            } else {
-                GoalCheckpoint::new(
-                    request.checkpoint_id,
-                    summary,
-                    completed_worker_ids,
-                    validation_notes,
-                )
-            };
+            let mut checkpoint = GoalCheckpoint::with_evidence(
+                request.checkpoint_id,
+                summary,
+                completed_worker_ids,
+                validation_notes,
+                evidence_verdicts,
+            );
+            if let Some(blocker_key) = blocker_key {
+                checkpoint.blocker_key = Some(blocker_key);
+            }
             let receipt = store
                 .record_checkpoint(&request.goal_id, checkpoint)
                 .map_err(format_goal_run_error)?;
@@ -393,11 +405,12 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
             )
         }
     };
-    let checkpoint = GoalCheckpoint::new(
+    let checkpoint = GoalCheckpoint::with_evidence(
         request.checkpoint_id,
         summary,
         completed_worker_ids,
         validation_notes,
+        evidence_verdicts,
     );
     let receipt = store
         .record_checkpoint(&request.goal_id, checkpoint)
@@ -730,6 +743,7 @@ struct GoalPlanCliRequest {
     write_scopes: Vec<GoalWriteScope>,
     worker_plan: Vec<GoalWorkerPlan>,
     validation_commands: Vec<String>,
+    evidence: Vec<GoalEvidence>,
     max_subtasks: Option<usize>,
     output: ControlOutputFormat,
 }
@@ -1216,6 +1230,7 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
     let mut write_scopes: Vec<GoalWriteScope> = Vec::new();
     let mut worker_plan: Vec<GoalWorkerPlan> = Vec::new();
     let mut validation_commands: Vec<String> = Vec::new();
+    let mut evidence: Vec<GoalEvidence> = Vec::new();
     let mut max_subtasks: Option<usize> = None;
     let mut output = ControlOutputFormat::Text;
 
@@ -1235,6 +1250,11 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
             "--validation" => {
                 validation_commands.push(take_value(args, &mut index, "--validation")?)
             }
+            "--evidence" => evidence.push(parse_goal_evidence(&take_value(
+                args,
+                &mut index,
+                "--evidence",
+            )?)?),
             "--max-subtasks" => {
                 max_subtasks = Some(
                     take_value(args, &mut index, "--max-subtasks")?
@@ -1296,9 +1316,36 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
         write_scopes,
         worker_plan,
         validation_commands,
+        evidence,
         max_subtasks,
         output,
     })
+}
+
+/// 解析验收证据：`path|min_lines|min_content|description`
+/// - min_lines 空或 0 表示不检查行数
+/// - min_content 空表示不检查内容
+/// - description 空时用 path
+fn parse_goal_evidence(raw: &str) -> Result<GoalEvidence, String> {
+    let parts = raw.split('|').map(str::trim).collect::<Vec<_>>();
+    if parts.is_empty() || parts[0].is_empty() {
+        return Err("--evidence expects path[|min_lines|min_content|description]".to_string());
+    }
+    let path = parts[0].to_string();
+    let mut evidence = GoalEvidence::new(path);
+    if parts.len() > 1 && !parts[1].is_empty() && parts[1] != "0" {
+        let min_lines = parts[1]
+            .parse::<usize>()
+            .map_err(|_| "--evidence min_lines must be a positive integer".to_string())?;
+        evidence = evidence.with_min_lines(min_lines);
+    }
+    if parts.len() > 2 && !parts[2].is_empty() {
+        evidence = evidence.with_min_content(parts[2]);
+    }
+    if parts.len() > 3 && !parts[3].is_empty() {
+        evidence = evidence.with_description(parts[3]);
+    }
+    Ok(evidence)
 }
 
 fn parse_write_scope(raw: &str) -> Result<GoalWriteScope, String> {

@@ -6,6 +6,10 @@ pub struct GoalSpec {
     pub goal_id: String,
     pub objective: String,
     pub acceptance_checks: Vec<String>,
+    /// 验收证据（verifier-first）：目标完成必须有文件系统证据，
+    /// 不能只靠模型自述。checkpoint 时由 CLI 自动检查。
+    #[serde(default)]
+    pub acceptance_evidence: Vec<GoalEvidence>,
     pub budget: GoalBudget,
     pub allowed_slots: Vec<String>,
     pub checkpoint_policy: GoalCheckpointPolicy,
@@ -14,6 +18,49 @@ pub struct GoalSpec {
     /// 旧 on-disk goal JSON 无此字段时使用默认值（向后兼容）。
     #[serde(default)]
     pub convergence_policy: GoalConvergencePolicy,
+}
+
+/// 验收证据定义：目标完成时磁盘上必须出现的内容。
+///
+/// - `path`：证据文件路径（相对 goal root 解析）。
+/// - `min_lines`：文件内容至少多少行（非空壳检查；None 表示不检查行数）。
+/// - `min_content`：文件内容必须包含的子串（如 `RESULT=PASS`；None 表示不检查内容）。
+/// - `description`：人类可读说明（show / diagnostics 展示用）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalEvidence {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl GoalEvidence {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            min_lines: None,
+            min_content: None,
+            description: None,
+        }
+    }
+
+    pub fn with_min_lines(mut self, min_lines: usize) -> Self {
+        self.min_lines = Some(min_lines);
+        self
+    }
+
+    pub fn with_min_content(mut self, min_content: impl Into<String>) -> Self {
+        self.min_content = Some(min_content.into());
+        self
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
 }
 
 /// 收敛控制策略（Penguin goal-file 语义，最小接入）。
@@ -78,6 +125,7 @@ impl GoalSpec {
                 "git diff --check".to_string(),
                 "timeout 240s cargo test -q".to_string(),
             ],
+            acceptance_evidence: Vec::new(),
             budget: GoalBudget {
                 max_minutes: Some(60),
                 max_tool_rounds: Some(8),
@@ -103,6 +151,12 @@ impl GoalSpec {
         }
     }
 
+    /// 设置验收证据（builder 风格）。
+    pub fn with_evidence(mut self, evidence: Vec<GoalEvidence>) -> Self {
+        self.acceptance_evidence = evidence;
+        self
+    }
+
     pub fn validate(&self) -> Result<(), GoalSpecError> {
         require_non_empty("goal_id", &self.goal_id)?;
         require_non_empty("objective", &self.objective)?;
@@ -111,6 +165,26 @@ impl GoalSpec {
                 "acceptance_checks",
                 "goal must define at least one acceptance check",
             ));
+        }
+        for (index, evidence) in self.acceptance_evidence.iter().enumerate() {
+            require_non_empty(
+                &format!("acceptance_evidence[{index}].path"),
+                &evidence.path,
+            )?;
+            if let Some(min_lines) = evidence.min_lines {
+                if min_lines == 0 {
+                    return Err(GoalSpecError::new(
+                        &format!("acceptance_evidence[{index}].min_lines"),
+                        "min_lines must be greater than zero when set",
+                    ));
+                }
+            }
+            if let Some(description) = evidence.description.as_deref() {
+                require_non_empty(
+                    &format!("acceptance_evidence[{index}].description"),
+                    description,
+                )?;
+            }
         }
         if self.allowed_slots.is_empty() {
             return Err(GoalSpecError::new(

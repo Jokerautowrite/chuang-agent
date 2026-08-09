@@ -1,4 +1,6 @@
-use crate::goal_mode::{GoalCheckpointPolicy, GoalConvergencePolicy, GoalSpec, GoalSpecError};
+use crate::goal_mode::{
+    GoalCheckpointPolicy, GoalConvergencePolicy, GoalEvidence, GoalSpec, GoalSpecError,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -65,6 +67,21 @@ pub struct GoalCheckpoint {
     /// `max_repeated_blockers` 次时判定 blocked。旧 checkpoint JSON 无此字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocker_key: Option<String>,
+    /// 验收证据检查结果（verifier-first）：checkpoint 时由 CLI 对 goal spec
+    /// 的 acceptance_evidence 检查文件系统得到。旧 checkpoint JSON 无此字段。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_verdicts: Vec<EvidenceVerdict>,
+}
+
+/// 单条验收证据的检查结果（证据在模型自述之外，由文件系统判定）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceVerdict {
+    /// acceptance_evidence 中的下标。
+    pub evidence_index: usize,
+    pub path: String,
+    pub passed: bool,
+    /// passed=false 时说明失败原因；passed=true 时为 "ok"。
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +133,27 @@ pub struct GoalRunDiagnostics {
     pub convergence_repeated_count: usize,
     #[serde(default)]
     pub convergence_reason: String,
+    /// 是否定义了验收证据（spec.acceptance_evidence 非空）。
+    #[serde(default)]
+    pub evidence_expected: bool,
+    /// 最新 checkpoint 的证据是否全部通过（未定义证据时为 true）。
+    #[serde(default)]
+    pub evidence_complete: bool,
+    /// 未通过/未检查的证据列表（`path: reason`）。
+    #[serde(default)]
+    pub evidence_missing: Vec<String>,
+    /// 执行过证据检查的 checkpoint id（未检查时为 None）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_checked_at_checkpoint: Option<String>,
+}
+
+/// 验收证据汇总结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceDiagnostics {
+    pub evidence_expected: bool,
+    pub evidence_complete: bool,
+    pub evidence_missing: Vec<String>,
+    pub evidence_checked_at_checkpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +285,11 @@ impl GoalRun {
         if !validation_plan_complete {
             incomplete_reasons.push("validation plan has no runnable command".to_string());
         }
+        let evidence = self.evidence_diagnostics();
+        if evidence.evidence_expected && !evidence.evidence_complete {
+            incomplete_reasons
+                .push("acceptance evidence is missing or not yet checked".to_string());
+        }
         if self.checkpoint_log.is_empty() {
             incomplete_reasons.push("no checkpoint has been recorded".to_string());
         } else if !checkpoint_log_complete {
@@ -283,6 +326,53 @@ impl GoalRun {
             convergence_repeated_fingerprint: convergence.repeated_fingerprint.clone(),
             convergence_repeated_count: convergence.repeated_count,
             convergence_reason: convergence.reason,
+            evidence_expected: evidence.evidence_expected,
+            evidence_complete: evidence.evidence_complete,
+            evidence_missing: evidence.evidence_missing,
+            evidence_checked_at_checkpoint: evidence.evidence_checked_at_checkpoint,
+        }
+    }
+
+    /// 验收证据汇总（verifier-first）：取最新 checkpoint 的证据检查结果。
+    /// 未定义证据 → expected=false, complete=true；定义了但最新 checkpoint
+    /// 未检查 → complete=false（missing 注明 "not checked"）。
+    pub fn evidence_diagnostics(&self) -> EvidenceDiagnostics {
+        let evidence_expected = !self.goal_spec.acceptance_evidence.is_empty();
+        let last_checkpoint = self.checkpoint_log.last();
+        if !evidence_expected {
+            return EvidenceDiagnostics {
+                evidence_expected: false,
+                evidence_complete: true,
+                evidence_missing: Vec::new(),
+                evidence_checked_at_checkpoint: None,
+            };
+        }
+        let Some(checkpoint) = last_checkpoint else {
+            return EvidenceDiagnostics {
+                evidence_expected: true,
+                evidence_complete: false,
+                evidence_missing: vec!["no checkpoint recorded; evidence never checked".to_string()],
+                evidence_checked_at_checkpoint: None,
+            };
+        };
+        let checkpoint_id = checkpoint.checkpoint_id.clone();
+        let mut missing = Vec::new();
+        for verdict in &checkpoint.evidence_verdicts {
+            if !verdict.passed {
+                missing.push(format!("{}: {}", verdict.path, verdict.reason));
+            }
+        }
+        if checkpoint.evidence_verdicts.is_empty() {
+            missing.push(format!(
+                "not checked at checkpoint {checkpoint_id}: expected {} evidence item(s)",
+                self.goal_spec.acceptance_evidence.len()
+            ));
+        }
+        EvidenceDiagnostics {
+            evidence_expected: true,
+            evidence_complete: missing.is_empty(),
+            evidence_missing: missing,
+            evidence_checked_at_checkpoint: Some(checkpoint_id),
         }
     }
 
@@ -539,6 +629,7 @@ impl GoalCheckpoint {
             completed_worker_ids,
             validation_notes,
             blocker_key: None,
+            evidence_verdicts: Vec::new(),
         }
     }
 
@@ -560,6 +651,24 @@ impl GoalCheckpoint {
         checkpoint
     }
 
+    /// 带验收证据检查结果（verifier-first）的构造。
+    pub fn with_evidence(
+        checkpoint_id: impl Into<String>,
+        summary: impl Into<String>,
+        completed_worker_ids: Vec<String>,
+        validation_notes: Vec<String>,
+        evidence_verdicts: Vec<EvidenceVerdict>,
+    ) -> Self {
+        let mut checkpoint = Self::new(
+            checkpoint_id,
+            summary,
+            completed_worker_ids,
+            validation_notes,
+        );
+        checkpoint.evidence_verdicts = evidence_verdicts;
+        checkpoint
+    }
+
     fn validate(&self) -> Result<(), GoalRunError> {
         require_non_empty("checkpoint_log.checkpoint_id", &self.checkpoint_id)?;
         require_non_empty("checkpoint_log.summary", &self.summary)?;
@@ -577,6 +686,10 @@ impl GoalCheckpoint {
         }
         if let Some(blocker_key) = self.blocker_key.as_deref() {
             require_non_empty("checkpoint_log.blocker_key", blocker_key)?;
+        }
+        for verdict in &self.evidence_verdicts {
+            require_non_empty("checkpoint_log.evidence_verdicts.path", &verdict.path)?;
+            require_non_empty("checkpoint_log.evidence_verdicts.reason", &verdict.reason)?;
         }
         Ok(())
     }
@@ -879,6 +992,69 @@ pub fn enforce_convergence_gate(
         repeated_count,
         reason: "checkpoint shows progress; convergence gate passed".to_string(),
     }
+}
+
+/// 检查单条验收证据（verifier-first 纯函数）：
+/// 1. 文件必须存在；2. 行数 >= min_lines（若设置）；3. 内容包含 min_content（若设置）。
+pub fn check_evidence_at(
+    root: &Path,
+    evidence: &GoalEvidence,
+    evidence_index: usize,
+) -> EvidenceVerdict {
+    let path = if Path::new(&evidence.path).is_absolute() {
+        evidence.path.clone()
+    } else {
+        root.join(&evidence.path).to_string_lossy().to_string()
+    };
+    let description = evidence
+        .description
+        .as_deref()
+        .unwrap_or(&evidence.path)
+        .to_string();
+    let Ok(content) = fs::read_to_string(&path) else {
+        return EvidenceVerdict {
+            evidence_index,
+            path: path.clone(),
+            passed: false,
+            reason: format!("{description}: file not found"),
+        };
+    };
+    if let Some(min_lines) = evidence.min_lines {
+        let line_count = content.lines().count();
+        if line_count < min_lines {
+            return EvidenceVerdict {
+                evidence_index,
+                path: path.clone(),
+                passed: false,
+                reason: format!("{description}: too few lines ({line_count} < {min_lines})"),
+            };
+        }
+    }
+    if let Some(min_content) = evidence.min_content.as_deref() {
+        if !min_content.is_empty() && !content.contains(min_content) {
+            return EvidenceVerdict {
+                evidence_index,
+                path: path.clone(),
+                passed: false,
+                reason: format!("{description}: missing required content {min_content:?}"),
+            };
+        }
+    }
+    EvidenceVerdict {
+        evidence_index,
+        path: path.clone(),
+        passed: true,
+        reason: "ok".to_string(),
+    }
+}
+
+/// 检查 goal spec 全部验收证据（按声明顺序，含 evidence_index）。
+pub fn check_evidence_plan(root: &Path, spec: &GoalSpec) -> Vec<EvidenceVerdict> {
+    spec.acceptance_evidence
+        .iter()
+        .enumerate()
+        .map(|(index, evidence)| check_evidence_at(root, evidence, index))
+        .collect()
 }
 
 /// checkpoint 的进度指纹：有 blocker_key 用它（同一失败原因去重），
