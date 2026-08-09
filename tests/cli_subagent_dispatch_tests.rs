@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,9 +13,27 @@ fn temp_queue_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-agent-cli-subagent-{name}-{nanos}"))
 }
 
+// 读取本机 config.toml 引用的所有 *_api_key_env 变量名，注入假值。
+// 这样测试不依赖运行 shell 是否已 source provider.env，也不依赖旧变量名。
 fn cargo_command() -> Command {
     let mut command = Command::new("cargo");
     command.env("CODEX_PPTOKEN_API_KEY", "test-key");
+    let config_text =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config.toml"))
+            .unwrap_or_default();
+    for line in config_text.lines() {
+        let line = line.trim();
+        if !line.contains("api_key_env") {
+            continue;
+        }
+        let Some(eq) = line.find('=') else {
+            continue;
+        };
+        let name = line[eq + 1..].trim().trim_matches('"');
+        if !name.is_empty() {
+            command.env(name, "test-key");
+        }
+    }
     command
 }
 

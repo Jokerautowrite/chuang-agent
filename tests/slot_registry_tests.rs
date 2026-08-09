@@ -42,19 +42,23 @@ fn spawn_provider_error_server(
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
-        let response = format!(
-            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+        // The adapter retries transient HTTP statuses (429/5xx) up to
+        // MAX_PROVIDER_ATTEMPTS times. Keep serving the same error on every
+        // attempt so the test observes the final classified failure instead
+        // of a connection-refused transport error on the second attempt.
+        for _ in 0..3 {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
+            };
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
     });
     (address, server)
 }

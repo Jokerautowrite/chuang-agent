@@ -637,22 +637,25 @@ fn openai_compatible_http_transport_preserves_non_200_status_with_structured_met
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
 
+    // 429 属于可重试状态码：adapter 会最多重试 3 次，server 需循环接受多次连接。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let mut buffer = [0u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .expect("request should be readable");
 
-        let body = r#"{"error":{"message":"rate limit hit"}}"#;
-        let response = format!(
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+            let body = r#"{"error":{"message":"rate limit hit"}}"#;
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
     });
 
     let adapter = OpenAICompatibleProviderAdapter::new(
@@ -740,22 +743,25 @@ fn openai_compatible_http_transport_surfaces_capacity_metadata_on_plain_text_429
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
 
+    // 429 属于可重试状态码：adapter 会最多重试 3 次，server 需循环接受多次连接。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let mut buffer = [0u8; 4096];
+            let _ = stream
+                .read(&mut buffer)
+                .expect("request should be readable");
 
-        let body = "at capacity";
-        let response = format!(
-            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("response should be writable");
+            let body = "at capacity";
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should be writable");
+        }
     });
 
     let adapter = OpenAICompatibleProviderAdapter::new(
@@ -873,7 +879,8 @@ fn openai_compatible_http_transport_marks_200_missing_content_as_structured_prov
             .extra_meta
             .get("provider_retryable")
             .map(String::as_str),
-        Some("false")
+        // 28723fb 起：200+空 content 被标记为可重试（推理模型偶发断流，重试一次通常恢复）
+        Some("true")
     );
     assert_eq!(
         response

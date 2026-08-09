@@ -836,9 +836,6 @@ fn parse_action_json_prefix(
     if let Ok(envelope) = serde_json::from_str::<ToolActionEnvelope>(json_text) {
         return Ok(envelope);
     }
-    if let Some(envelope) = try_repair_action_json(json_text) {
-        return Ok(envelope);
-    }
     let mut stream =
         serde_json::Deserializer::from_str(json_text).into_iter::<ToolActionEnvelope>();
     let envelope = stream
@@ -862,26 +859,6 @@ fn parse_action_json_prefix(
             raw,
         ))
     }
-}
-
-/// 容错修复：模型偶发在深层嵌套处截断 ACTION JSON，
-/// 从结尾逆推最近一个完整 `}` 再解析，命中即视为有效 ACTION。
-fn try_repair_action_json(json_text: &str) -> Option<ToolActionEnvelope> {
-    let mut cut = json_text.len();
-    while cut > 1 {
-        match json_text[..cut].rfind('}') {
-            Some(pos) if pos > 0 => {
-                cut = pos + 1;
-                if let Ok(envelope) = serde_json::from_str::<ToolActionEnvelope>(&json_text[..cut])
-                {
-                    return Some(envelope);
-                }
-                cut = pos;
-            }
-            _ => break,
-        }
-    }
-    None
 }
 
 fn is_recoverable_concatenated_tool_output(trailing: &str) -> bool {
@@ -4278,14 +4255,14 @@ mod xml_tool_call_parser_tests {
 }
 
 #[test]
-fn repairs_action_json_with_trailing_noise() {
+fn rejects_action_json_with_arbitrary_trailing_text() {
+    // 完整 JSON 后跟任意解释文字必须保持协议错误，
+    // 不能被逆推修复误判为合法 ACTION。
     let body = r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls -la"}} 后面是一些解释文字"#;
-    let envelope = parse_tool_action_envelope_result(body).expect("尾部杂讯应被修复");
-    let reparsed = serde_json::to_string(&envelope).unwrap();
-    assert!(
-        reparsed.contains("\"tool\":\"code_execute\""),
-        "reparsed={reparsed}"
-    );
+    let error = parse_tool_action_envelope_result(body)
+        .expect_err("尾部解释文字应保持协议错误");
+    assert_eq!(error.code, "invalid_action_json");
+    assert!(error.message.contains("trailing text"));
 }
 
 #[test]

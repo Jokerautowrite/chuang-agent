@@ -85,12 +85,45 @@ fn wiki_live_receipt_script_static_safety_guards() {
 }
 
 #[test]
-fn wiki_live_receipt_script_blocks_without_real_endpoint_or_token() {
+fn wiki_live_receipt_script_falls_back_to_local_when_http_missing() {
+    // http 未配置时脚本 fallback 本机只读 local wiki（filesystem index），
+    // /opt/agent-hub/data/brain/wiki 存在时正确 verified。
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
         .env_remove("CHUANG_WIKI_LIVE_ENDPOINT")
         .env_remove("CHUANG_WIKI_LIVE_TOKEN")
+        .output()
+        .expect("wiki receipt script should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: Value = serde_json::from_str(&stdout).expect("receipt output should be json");
+
+    assert_eq!(data["receipt_kind"], "wiki_live_readonly_receipt");
+    assert_eq!(data["source"], "wiki");
+    assert_eq!(data["read_only"], true);
+    assert_eq!(data["writes_automatically"], false);
+    assert_eq!(data["token_state"], "<missing>");
+    // http 缺失 → local fallback；本机 wiki index 存在 → verified
+    assert_eq!(data["source_kind"], "local_filesystem");
+    assert_eq!(data["acceptance_status"], "verified");
+    assert_eq!(data["request_sent"], true);
+}
+
+#[test]
+fn wiki_live_receipt_script_blocks_when_both_http_and_local_unavailable() {
+    let output = Command::new("bash")
+        .arg(script_path())
+        .arg("--json")
+        .env_remove("CHUANG_WIKI_LIVE_ENDPOINT")
+        .env_remove("CHUANG_WIKI_LIVE_TOKEN")
+        .env("CHUANG_WIKI_LOCAL_ROOT", "/nonexistent/wiki-root")
         .output()
         .expect("wiki receipt script should execute");
 
@@ -118,8 +151,11 @@ fn wiki_live_receipt_script_blocks_without_real_endpoint_or_token() {
         .iter()
         .filter_map(|item| item.as_str())
         .collect::<Vec<_>>();
-    assert!(blockers.contains(&"missing_wiki_endpoint"));
-    assert!(blockers.contains(&"missing_wiki_token"));
+    assert!(
+        blockers
+            .iter()
+            .any(|b| b.starts_with("local_wiki_root_missing"))
+    );
 }
 
 #[test]

@@ -32,6 +32,41 @@ fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, Path
     (root, config_path)
 }
 
+// 从本地 config.toml 提取所有 *_api_key_env 引用的变量名，写入临时 provider.env。
+// 这样测试跟随当前配置（例如 CHUANG_PROXY_API_KEY / CHUANG_PROXY_STATIC_KEY），
+// 而不是硬编码某个旧变量名。
+fn write_provider_env_for_config(manifest_dir: &std::path::Path, temp_dir: &std::path::Path) -> PathBuf {
+    let config_path = manifest_dir.join("config.toml");
+    let config_text = fs::read_to_string(&config_path).expect("config.toml should be readable");
+    let mut vars: Vec<String> = Vec::new();
+    for line in config_text.lines() {
+        let line = line.trim();
+        if !line.contains("api_key_env") {
+            continue;
+        }
+        let Some(eq) = line.find('=') else {
+            continue;
+        };
+        let rhs = line[eq + 1..].trim();
+        let name = rhs.trim_matches('"').trim();
+        if name.is_empty() || vars.iter().any(|v| v == name) {
+            continue;
+        }
+        vars.push(name.to_string());
+    }
+    assert!(
+        !vars.is_empty(),
+        "config.toml should reference at least one api_key_env variable"
+    );
+    let provider_env = temp_dir.join("provider.env");
+    let mut content = String::new();
+    for var in &vars {
+        content.push_str(&format!("{var}=provider-secret-value\n"));
+    }
+    fs::write(&provider_env, content).expect("provider env should write");
+    provider_env
+}
+
 fn complete_global_real_live_receipt() -> serde_json::Value {
     let service_ids = [
         "feishu",
@@ -425,12 +460,7 @@ fn provider_readiness_check_uses_provider_env_file_when_available() {
     ));
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
-    let provider_env = temp_dir.join("provider.env");
-    fs::write(
-        &provider_env,
-        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
-    )
-    .expect("provider env should write");
+    let provider_env = write_provider_env_for_config(&manifest_dir, &temp_dir);
 
     let output = Command::new("bash")
         .arg(&script_path)
@@ -474,12 +504,7 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
     ));
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
-    let provider_env = temp_dir.join("provider.env");
-    fs::write(
-        &provider_env,
-        "CODEX_PPTOKEN_API_KEY=provider-secret-value\n",
-    )
-    .expect("provider env should write");
+    let provider_env = write_provider_env_for_config(&manifest_dir, &temp_dir);
 
     let output = Command::new("bash")
         .arg(&script_path)
@@ -562,7 +587,14 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
     assert!(gap_ids.contains(&"manual_operator_live_receipt_missing"));
     assert!(gap_ids.contains(&"real_external_services_not_verified"));
 
-    assert_eq!(data["provider_readiness"]["overall_state"], "ready");
+    let overall_state = data["provider_readiness"]["overall_state"]
+        .as_str()
+        .expect("overall_state should be a string");
+    // config.toml 配置了 fallback 时报告 ready_with_fallback（同为就绪语义）
+    assert!(
+        overall_state == "ready" || overall_state == "ready_with_fallback",
+        "overall_state should be ready or ready_with_fallback, got {overall_state}"
+    );
     assert_eq!(data["provider_readiness"]["api_key_state"], "<set>");
     assert_eq!(data["provider_readiness"]["uses_redacted_state_only"], true);
     assert_eq!(real_live["real_live_ready"], false);

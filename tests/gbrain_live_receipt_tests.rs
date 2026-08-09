@@ -85,12 +85,47 @@ fn gbrain_live_receipt_script_static_safety_guards() {
 }
 
 #[test]
-fn gbrain_live_receipt_script_blocks_without_real_endpoint_or_token() {
+fn gbrain_live_receipt_script_falls_back_to_local_when_http_missing() {
+    // http 未配置时脚本 fallback 本机只读 local gbrain（Unix socket），
+    // 本机 /run/agent-hub/gbrain/read.sock 存在时正确 verified。
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
         .env_remove("CHUANG_GBRAIN_LIVE_ENDPOINT")
         .env_remove("CHUANG_GBRAIN_LIVE_TOKEN")
+        .output()
+        .expect("gbrain receipt script should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let data: Value = serde_json::from_str(&stdout).expect("receipt output should be json");
+
+    assert_eq!(data["receipt_kind"], "gbrain_live_readonly_receipt");
+    assert_eq!(data["source"], "gbrain");
+    assert_eq!(data["read_only"], true);
+    assert_eq!(data["writes_automatically"], false);
+    assert_eq!(data["token_state"], "<missing>");
+    assert_eq!(data["endpoint_state"], "<missing>");
+    // http 缺失 → local fallback；本机 local gbrain 存在 → verified
+    assert_eq!(data["source_kind"], "local_unix_socket");
+    assert_eq!(data["acceptance_status"], "verified");
+    assert_eq!(data["request_sent"], true);
+}
+
+#[test]
+fn gbrain_live_receipt_script_blocks_when_both_http_and_local_unavailable() {
+    let output = Command::new("bash")
+        .arg(script_path())
+        .arg("--json")
+        .env_remove("CHUANG_GBRAIN_LIVE_ENDPOINT")
+        .env_remove("CHUANG_GBRAIN_LIVE_TOKEN")
+        .env("CHUANG_GBRAIN_LOCAL_QUERY_CLI", "/nonexistent/agent-hub-brain-query")
+        .env("CHUANG_GBRAIN_READ_SOCKET", "/nonexistent/gbrain/read.sock")
         .output()
         .expect("gbrain receipt script should execute");
 
@@ -119,8 +154,11 @@ fn gbrain_live_receipt_script_blocks_without_real_endpoint_or_token() {
         .iter()
         .filter_map(|item| item.as_str())
         .collect::<Vec<_>>();
-    assert!(blockers.contains(&"missing_gbrain_endpoint"));
-    assert!(blockers.contains(&"missing_gbrain_token"));
+    assert!(
+        blockers
+            .iter()
+            .any(|b| b.starts_with("local_gbrain_cli_missing"))
+    );
 }
 
 #[test]

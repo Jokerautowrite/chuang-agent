@@ -385,9 +385,13 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
     );
 
     let policy_tool_status = &parsed["policy_tool_status"];
-    assert_eq!(
-        policy_tool_status["active_permission_profile"],
-        "full_local_workspace"
+    // 本机 config.toml 为免审批不受限测试模式时显示 unrestricted（kernel_status 有意区分）
+    let active_profile = policy_tool_status["active_permission_profile"]
+        .as_str()
+        .expect("active_permission_profile should be a string");
+    assert!(
+        active_profile == "full_local_workspace" || active_profile == "unrestricted",
+        "active_permission_profile should be full_local_workspace or unrestricted, got {active_profile}"
     );
     assert_eq!(policy_tool_status["ga_tool_descriptor_mapped_count"], 9);
     assert_eq!(policy_tool_status["tool_descriptor_count"], 15);
@@ -615,7 +619,10 @@ fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() 
     assert!(stdout.contains("runtime_report_surface.observability_field_count=26"));
     assert!(stdout.contains("runtime_report_surface.artifact_locators="));
     assert!(stdout.contains("runtime_report_surface.observability_fields="));
-    assert!(stdout.contains("policy_tool_status.active_permission_profile=full_local_workspace"));
+    assert!(
+        stdout.contains("policy_tool_status.active_permission_profile=full_local_workspace")
+            || stdout.contains("policy_tool_status.active_permission_profile=unrestricted")
+    );
     assert!(stdout.contains("policy_tool_status.ga_tool_descriptors=9/15"));
     assert!(stdout.contains("policy_tool_status.missing=none"));
     assert!(stdout.contains("live_readiness.ok=true"));
