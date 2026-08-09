@@ -23,6 +23,9 @@ pub struct RuntimeConfig {
     pub context_budget: ContextBudget,
     pub context_engine: ContextEngineConfig,
     pub provider: ProviderConfig,
+    /// 视觉模型（用于识图兜底：主模型不支持视觉时，用它把图片描述成文字）。
+    /// 形如 "sub2/mimo-v2.5"，走 opencodex 路由。
+    pub vision_model: Option<String>,
     pub identity_memory: IdentityMemoryConfig,
     pub identity_bootstrap: IdentityBootstrapConfig,
     pub rules: RulesConfig,
@@ -304,6 +307,7 @@ impl RuntimeConfig {
                 provider_id: "fake-runtime".to_string(),
                 model_name: "stub-responder".to_string(),
             },
+            vision_model: None,
             identity_memory: IdentityMemoryConfig::HermesDualFile {
                 // 与 identity_bootstrap 同根：创自己的工作区，不用 hermes 遗留路径
                 root: PathBuf::from("./identity"),

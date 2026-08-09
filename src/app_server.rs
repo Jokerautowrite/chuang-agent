@@ -12,10 +12,19 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use bytes::Bytes;
 use fs2::FileExt;
+use http_body_util::{BodyExt, Full};
+use hyper::{Method, Request};
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::time::timeout;
 
 use crate::cli_runtime::kernel_config_from_runtime;
 use crate::cli_runtime::run_with_options;
@@ -24,8 +33,8 @@ use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
-    ConfigSummary, DEFAULT_WORKSPACE_ROOT, IdentityBootstrapConfig, IdentityMemoryConfig,
-    OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
+    ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
+    ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig, DEFAULT_WORKSPACE_ROOT,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -1681,15 +1690,41 @@ fn handle_model_list(params: &Value) -> Result<Value, String> {
     );
     let runtime = build_runtime_for_workspace(&app_server_config_workspace_root(&workspace_root))?;
     let model_name = provider_primary_model_name(&runtime);
-    Ok(json!({
-        "data": [{
+    // [metadata] model_list=model1,model2,... 可暴露多个可用模型；
+    // 未配置时保持向后兼容（只返回主模型）。
+    let extra_models = runtime
+        .metadata
+        .get("model_list")
+        .map(|value| {
+            value
+                .split(',')
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty() && item.as_str() != model_name)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut models = vec![{
+        json!({
             "id": model_name,
             "model": model_name,
             "displayName": model_name,
             "isDefault": true,
             "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
             "defaultReasoningEffort": "medium",
-        }]
+        })
+    }];
+    for extra in extra_models {
+        models.push(json!({
+            "id": extra,
+            "model": extra,
+            "displayName": extra,
+            "isDefault": false,
+            "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+            "defaultReasoningEffort": "medium",
+        }));
+    }
+    Ok(json!({
+        "data": models,
     }))
 }
 
@@ -1746,6 +1781,7 @@ struct PreparedLiveTurn {
     turn_id: String,
     workspace_root: String,
     input_text: String,
+    image_paths: Vec<String>,
     conversation_history: Vec<ConversationHistoryItem>,
     goal_spec: Option<GoalSpec>,
     guidance_path: PathBuf,
@@ -1872,9 +1908,11 @@ fn prepare_live_turn(
         .get("workspaceRoot")
         .and_then(|value| value.as_str())
         .map(normalize_workspace_root);
-    let input_text = extract_turn_input_text(params);
+    let (input_text, image_paths) = extract_turn_input(params);
     if input_text.is_empty() {
-        return Err("turn/start requires non-empty input".to_string());
+        if image_paths.is_empty() {
+            return Err("turn/start requires non-empty input".to_string());
+        }
     }
     let goal_spec = extract_turn_goal(params)?;
 
@@ -1958,6 +1996,7 @@ fn prepare_live_turn(
             turn_id,
             workspace_root,
             input_text,
+            image_paths,
             conversation_history,
             goal_spec,
             guidance_path: storage.guidance_path,
@@ -2095,13 +2134,37 @@ fn create_private_turn_file(path: &Path, append: bool) -> Result<File, String> {
     Ok(file)
 }
 
-fn run_live_turn(prepared: PreparedLiveTurn, params: &Value) -> Result<LiveTurnResult, String> {
+fn run_live_turn(mut prepared: PreparedLiveTurn, params: &Value) -> Result<LiveTurnResult, String> {
     let mut runtime =
         build_runtime_for_workspace(&app_server_config_workspace_root(&prepared.workspace_root))?;
     runtime
         .metadata
         .insert("channel".to_string(), "app-server".to_string());
     let runtime = override_runtime_model(runtime, params);
+    // 识图兜底：主模型不支持视觉时，先把图片交给视觉模型描述成文字，
+    // 描述结果并入本轮输入；历史只保留文本，图片不代入后续会话。
+    if !prepared.image_paths.is_empty() {
+        let described = describe_images_with_vision(&runtime, &prepared.image_paths);
+        match described {
+            Ok(text) => {
+                if !prepared.input_text.is_empty() {
+                    prepared.input_text.push('\n');
+                }
+                prepared.input_text.push_str("[用户附带的图片内容]\n");
+                prepared.input_text.push_str(&text);
+            }
+            Err(error) => {
+                eprintln!("[vision-fallback] describe failed: {error}");
+                let paths = prepared.image_paths.join(", ");
+                if !prepared.input_text.is_empty() {
+                    prepared.input_text.push('\n');
+                }
+                prepared.input_text.push_str(&format!(
+                    "[图片无法通过视觉模型识别（{error}），图片路径：{paths}]"
+                ));
+            }
+        }
+    }
     let live_readiness = build_chuang_mvp_status(&runtime, &kernel_config_from_runtime(&runtime)?)
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?
         .live_readiness;
@@ -2899,25 +2962,200 @@ fn turn_to_json(turn: &TurnState) -> Value {
     })
 }
 
-fn extract_turn_input_text(params: &Value) -> String {
-    if let Some(text) = params.get("text").and_then(|value| value.as_str()) {
-        return normalize_text(Some(text));
+/// 提取 turn 输入：返回 (文本, 图片路径列表)。
+/// 图片以 `localImage` item 传入（桥层 attachment 渲染），路径为本地文件。
+fn extract_turn_input(params: &Value) -> (String, Vec<String>) {
+    let mut image_paths = Vec::new();
+    let mut text = String::new();
+
+    if let Some(t) = params.get("text").and_then(|value| value.as_str()) {
+        text = normalize_text(Some(t));
     }
 
     if let Some(input) = params.get("input").and_then(|value| value.as_array()) {
         let mut parts = Vec::new();
         for item in input {
-            if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
-                let normalized = normalize_text(Some(text));
+            if let Some(t) = item.get("text").and_then(|value| value.as_str()) {
+                let normalized = normalize_text(Some(t));
                 if !normalized.is_empty() {
                     parts.push(normalized);
                 }
+            } else if let Some(path) = item.get("path").and_then(|value| value.as_str()) {
+                if item.get("type").and_then(|value| value.as_str()) == Some("localImage") {
+                    let normalized = normalize_text(Some(path));
+                    if !normalized.is_empty() {
+                        image_paths.push(normalized);
+                    }
+                }
             }
         }
-        return parts.join("\n");
+        if !parts.is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&parts.join("\n"));
+        }
     }
 
-    String::new()
+    (text, image_paths)
+}
+
+fn extract_turn_input_text(params: &Value) -> String {
+    extract_turn_input(params).0
+}
+
+/// 用视觉模型把本地图片描述成文字（识图兜底）。
+/// 走与主 provider 相同的 opencodex 路由（base_url/api_key），模型用 runtime.vision_model。
+fn describe_images_with_vision(
+    runtime: &RuntimeConfig,
+    image_paths: &[String],
+) -> Result<String, String> {
+    let vision_model = runtime
+        .vision_model
+        .as_deref()
+        .ok_or_else(|| "vision_model not configured in config.toml".to_string())?;
+
+    let (base_url, api_key, request_timeout_ms) =
+        match first_openai_compatible_provider(&runtime.provider) {
+            Some(cfg) => (
+                cfg.base_url.clone(),
+                cfg.api_key.clone(),
+                cfg.request_timeout_ms,
+            ),
+            None => {
+                return Err("vision describe: no openai_compatible provider in chain".to_string())
+            }
+        };
+
+    let mut content_parts: Vec<Value> = Vec::new();
+    // 只给视觉模型固定的描述指令，不传用户原始提问，避免视觉模型
+    // 直接回答用户问题而不描述图片内容。
+    content_parts.push(json!({
+        "type": "text",
+        "text": "请详细描述这张图片的内容，包括画面中的主体、文字、布局与关键细节。"
+    }));
+    for path in image_paths {
+        let data =
+            fs::read(path).map_err(|e| format!("vision describe: read {} failed: {e}", path))?;
+        let mime = guess_image_mime(path);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+        content_parts.push(json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:{mime};base64,{encoded}") }
+        }));
+    }
+    let request_timeout_ms = request_timeout_ms.unwrap_or(60_000);
+
+    let body = json!({
+        "model": vision_model,
+        "messages": [{
+            "role": "user",
+            "content": content_parts
+        }],
+        "max_tokens": 2000,
+    });
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    let tokio_runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("vision describe: tokio runtime: {e}"))?;
+
+    tokio_runtime.block_on(async move {
+        let connector = HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .map_err(|e| format!("vision describe: tls roots: {e}"))?
+            .https_or_http()
+            .enable_http1()
+            .build();
+        let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build(connector);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(body.to_string())))
+            .map_err(|e| format!("vision describe: request build: {e}"))?;
+        let response = timeout(
+            Duration::from_millis(request_timeout_ms),
+            client.request(req),
+        )
+        .await
+        .map_err(|_| format!("vision describe: timeout after {request_timeout_ms}ms"))?
+        .map_err(|e| format!("vision describe: send: {e}"))?;
+        let status_code = response.status().as_u16();
+        let response_body_json = timeout(
+            Duration::from_millis(request_timeout_ms),
+            response.into_body().collect(),
+        )
+        .await
+        .map_err(|_| "vision describe: body timeout".to_string())?
+        .map_err(|e| format!("vision describe: body: {e}"))?
+        .to_bytes();
+        let response_body = String::from_utf8_lossy(&response_body_json).to_string();
+        if status_code != 200 {
+            return Err(format!(
+                "vision describe: upstream status={status_code} body={}",
+                truncate_for_error(&response_body, 300)
+            ));
+        }
+        let parsed: Value = serde_json::from_str(&response_body)
+            .map_err(|e| format!("vision describe: parse response: {e}"))?;
+        let content = &parsed["choices"][0]["message"]["content"];
+        let text = content
+            .as_str()
+            .map(|s| s.to_string())
+            .or_else(|| {
+                content.as_array().map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(|part| part["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            })
+            .ok_or_else(|| {
+                format!(
+                    "vision describe: no content in response: {}",
+                    truncate_for_error(&response_body, 300)
+                )
+            })?;
+        Ok(text)
+    })
+}
+
+/// 沿 provider 链（嵌套 Fallback）找第一个 OpenAICompatible 配置。
+fn first_openai_compatible_provider(provider: &ProviderConfig) -> Option<&OpenAICompatibleConfig> {
+    match provider {
+        ProviderConfig::OpenAICompatible(cfg) => Some(cfg),
+        ProviderConfig::Fallback { primary, .. } => first_openai_compatible_provider(primary),
+        ProviderConfig::Fake { .. } => None,
+    }
+}
+
+fn guess_image_mime(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".bmp") {
+        "image/bmp"
+    } else {
+        "image/png"
+    }
+}
+
+fn truncate_for_error(input: &str, max: usize) -> String {
+    if input.chars().count() <= max {
+        input.to_string()
+    } else {
+        input.chars().take(max).collect::<String>() + "…"
+    }
 }
 
 fn extract_turn_goal(params: &Value) -> Result<Option<GoalSpec>, String> {

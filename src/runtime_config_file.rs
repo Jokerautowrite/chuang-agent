@@ -83,6 +83,12 @@ pub fn parse_runtime_config_file_with_options(
     if let Some(value) = values.get("recall_limit") {
         config.recall_limit = parse_usize("recall_limit", value)?;
     }
+    if let Some(value) = get_any(&values, &["vision_model"]) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            config.vision_model = Some(trimmed.to_string());
+        }
+    }
     if let Some(value) = get_any(&values, &["tool_loop.max_rounds", "tool_max_rounds"]) {
         config.tool_loop.max_rounds = parse_usize("tool_loop.max_rounds", value)?;
     }
@@ -383,7 +389,10 @@ fn parse_provider(
             format!("{prefix}.provider.kind"),
             format!("{prefix}_provider"),
         ];
-        if !has_any(values, &kind_keys.iter().map(String::as_str).collect::<Vec<_>>()) {
+        if !has_any(
+            values,
+            &kind_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        ) {
             break;
         }
         let fallback = parse_prefixed_fallback_provider(&prefix, values, options)?;
@@ -486,8 +495,8 @@ fn parse_prefixed_fallback_provider(
             &format!("{prefix}_provider"),
         ],
     )
-        .map(String::as_str)
-        .unwrap_or("fake");
+    .map(String::as_str)
+    .unwrap_or("fake");
     match kind {
         "fake" => Ok(ProviderConfig::Fake {
             provider_id: get_any(
@@ -501,7 +510,10 @@ fn parse_prefixed_fallback_provider(
             .unwrap_or_else(|| format!("{prefix}-fake-runtime")),
             model_name: get_any(
                 values,
-                &[&format!("{prefix}.provider.model"), &format!("{prefix}_model")],
+                &[
+                    &format!("{prefix}.provider.model"),
+                    &format!("{prefix}_model"),
+                ],
             )
             .cloned()
             .unwrap_or_else(|| format!("{prefix}-stub-responder")),
@@ -525,15 +537,21 @@ fn parse_prefixed_fallback_provider(
                 )
                 .cloned()
                 .unwrap_or_else(|| format!("{prefix}-openai-compatible")),
-                base_url: required_any(values, &[
-                    &format!("{prefix}.provider.base_url"),
-                    &format!("{prefix}_base_url"),
-                ])?,
+                base_url: required_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.base_url"),
+                        &format!("{prefix}_base_url"),
+                    ],
+                )?,
                 api_key,
-                model_name: required_any(values, &[
-                    &format!("{prefix}.provider.model"),
-                    &format!("{prefix}_model"),
-                ])?,
+                model_name: required_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.model"),
+                        &format!("{prefix}_model"),
+                    ],
+                )?,
                 transport: get_any(
                     values,
                     &[
@@ -642,14 +660,20 @@ fn parse_prefixed_fallback_policy(
         .unwrap_or(true),
         status_codes: get_any(
             values,
-            &[&format!("{prefix}.status_codes"), &format!("{prefix}_status_codes")],
+            &[
+                &format!("{prefix}.status_codes"),
+                &format!("{prefix}_status_codes"),
+            ],
         )
         .map(|value| parse_status_codes(&format!("{prefix}.status_codes"), value))
         .transpose()?
         .unwrap_or_else(|| vec![401, 402]),
         error_classes: get_any(
             values,
-            &[&format!("{prefix}.error_classes"), &format!("{prefix}_error_classes")],
+            &[
+                &format!("{prefix}.error_classes"),
+                &format!("{prefix}_error_classes"),
+            ],
         )
         .map(|value| parse_csv_strings(value))
         .unwrap_or_default(),
@@ -1008,8 +1032,14 @@ mod tests {
                         fallback: inner_fallback,
                         ..
                     } => {
-                        assert!(matches!(*inner_primary, ProviderConfig::OpenAICompatible(_)));
-                        assert!(matches!(*inner_fallback, ProviderConfig::OpenAICompatible(_)));
+                        assert!(matches!(
+                            *inner_primary,
+                            ProviderConfig::OpenAICompatible(_)
+                        ));
+                        assert!(matches!(
+                            *inner_fallback,
+                            ProviderConfig::OpenAICompatible(_)
+                        ));
                     }
                     other => panic!("expected nested primary, got {other:?}"),
                 }
