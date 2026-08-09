@@ -1,3 +1,26 @@
+# 2026-08-10 evolve 外环落盘收尾：审批固化 + benchmark 验证 auto-revert（缺口 B）
+
+- **背景**：commit 3eec614 的 `goal evolve` 只产出 dry-run 提案；9ddad47 接了
+  verifier-first 证据门。缺口是提案不能「审批固化」，也没有固化后的自动回滚。
+- **改动**（`src/cli_goal.rs` + `src/cli_skill.rs`）：
+  - `goal evolve` 新增 `--approve` 显式审批参数（默认仍 dry-run，绝不落盘），
+    配套 `--approval-source/--approved-at/--approval-note/--approval-threshold/
+    --skills-root`；converging 时 `--approve` 直接拒绝。
+  - 审批固化复用 skill 管线原语（`build_skill_judgments` / `solidify_skill_file`，
+    从 cli_skill 提升为 pub(crate)）：先自评，任一 judgment 不通过即拒绝落盘。
+  - `goal evolve --approve --benchmark-gate ID --benchmark-after-score N`：
+    固化后接 post-write 验证（沿用 Penguin 语义：无基线不优化 + 严格提升才接受，
+    复用 `enforce_benchmark_gate`）；验证失败自动回滚本次固化的规则文件——
+    原文件精确还原，本次新建文件移除，输出 `reverted=true` + `revert_receipts`
+    （`removed_created` / `restored_previous`）。
+  - `--benchmark-gate/--benchmark-after-score` 未带 `--approve` 时解析层报错。
+  - `src/cli_output.rs` usage 补 `goal evolve` 用法。
+- **测试**（`tests/goal_convergence_tests.rs`）：+7 集成测试——dry-run 不落盘、
+  approve 落盘、converging 拒绝、gate 需 approve、验证更差回滚新建文件、
+  验证更好保留、验证失败还原既有文件、无基线拒绝优化并回滚。
+- **验证**：goal 收敛套件 20/20；goal+skill 相关 12 个套件全绿（cli_skill 19、
+  skill_evolver 20、goal_run 23、cli_goal 23 等）；lib 114 / bin 141 单测通过。
+
 # 2026-08-10 benchmark 评分门禁 + 自实验闭环（Penguin 收敛语义落地）
 
 - **目标**：把「无基线不优化 + 分数严格提升才接受」落地到技能固化流程——

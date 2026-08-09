@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chuang_agent::benchmark::BenchmarkStore;
 use chuang_agent::goal_dispatch::{
     collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, dispatch_goal_run,
     load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
@@ -22,6 +24,10 @@ use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use serde::Serialize;
 
 use crate::cli_output::{print_json, usage, ControlOutputFormat};
+use crate::cli_skill::{
+    build_skill_judgments, default_skills_root, enforce_benchmark_gate, solidify_skill_file,
+    SkillJudgmentOutput, SkillReviewBuild, SkillWriteReceiptOutput,
+};
 use crate::cli_subagent::run_subagent_run_loop;
 use crate::cli_types::{CliOptions, SubagentRunLoopCliOutput, SubagentRunOnceCliRequest};
 
@@ -202,8 +208,12 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
 }
 
 /// 外环触发：goal 收敛判定为 blocked/spinning 时，把重复卡点转成
-/// skill 进化提案（dry-run，需人工审批后才可固化），实现
+/// skill 进化提案（默认 dry-run，需显式 --approve 后才可固化），实现
 /// "重复失败 → 自动提出改规则/换策略"的 harness 外环。
+///
+/// 治理边界：没有 --approve 时只产出 dry-run 提案，绝不落盘；
+/// 落盘后若接了 --benchmark-gate 验证且结果不严格优于基线，
+/// 自动回滚本次固化的规则文件并在输出中标记 reverted=true。
 fn goal_evolve_command(args: &[String]) -> Result<(), String> {
     let request = parse_goal_evolve(args)?;
     let store = GoalRunStore::new(&request.root);
@@ -212,7 +222,7 @@ fn goal_evolve_command(args: &[String]) -> Result<(), String> {
         .map_err(format_goal_run_error)?;
     let verdict = run.convergence_verdict();
 
-    let output = if verdict.status == ConvergenceStatus::Blocked
+    let mut output = if verdict.status == ConvergenceStatus::Blocked
         || verdict.status == ConvergenceStatus::Spinning
     {
         let mut metadata = BTreeMap::new();
@@ -277,6 +287,8 @@ fn goal_evolve_command(args: &[String]) -> Result<(), String> {
             proposal_count: proposals.len(),
             proposals,
             proposal_validations,
+            approval: None,
+            benchmark_verification: None,
         }
     } else {
         GoalEvolveOutput {
@@ -289,8 +301,22 @@ fn goal_evolve_command(args: &[String]) -> Result<(), String> {
             proposal_count: 0,
             proposals: Vec::new(),
             proposal_validations: Vec::new(),
+            approval: None,
+            benchmark_verification: None,
         }
     };
+
+    if request.approve {
+        if !output.evolved || output.proposals.is_empty() {
+            return Err(
+                "goal_evolve_approve_rejected: no convergence blocker proposal to solidify (goal is not blocked/spinning)"
+                    .to_string(),
+            );
+        }
+        let (approval, benchmark_verification) = goal_evolve_approve_and_verify(&request, &output)?;
+        output.approval = Some(approval);
+        output.benchmark_verification = benchmark_verification;
+    }
 
     match request.output {
         ControlOutputFormat::Text => {
@@ -316,10 +342,216 @@ fn goal_evolve_command(args: &[String]) -> Result<(), String> {
                     validation.reasons.join("|")
                 );
             }
+            if let Some(approval) = &output.approval {
+                println!(
+                    "goal_evolve_approve requested=true approved={} approval_source={} approval_threshold={} writes_skills=true solidifies_skill=true skills_root={} judgments={} writes={}",
+                    approval.approved,
+                    approval.approval_source,
+                    approval.approval_threshold,
+                    approval.skills_root,
+                    approval.judgment_count,
+                    approval.write_count
+                );
+                for receipt in &approval.write_receipts {
+                    println!(
+                        "goal_evolve_write skill_id={} action={} duplicate_state={} path={} bytes_written={} status={} version={}",
+                        receipt.skill_id,
+                        receipt.action,
+                        receipt.duplicate_state,
+                        receipt.path,
+                        receipt.bytes_written,
+                        receipt.status,
+                        receipt.version
+                    );
+                }
+            }
+            if let Some(benchmark) = &output.benchmark_verification {
+                println!(
+                    "goal_evolve_benchmark requested=true gate={} best_score={} after_score={} passed={} reverted={} revert_reason={}",
+                    benchmark.benchmark_gate.as_deref().unwrap_or("none"),
+                    benchmark
+                        .best_score
+                        .map(|score| score.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    benchmark
+                        .after_score
+                        .map(|score| score.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    benchmark.passed,
+                    benchmark.reverted,
+                    benchmark
+                        .revert_reason
+                        .as_deref()
+                        .unwrap_or("none")
+                );
+                for receipt in &benchmark.revert_receipts {
+                    println!(
+                        "goal_evolve_revert skill_id={} path={} action={} reason={}",
+                        receipt.skill_id, receipt.path, receipt.action, receipt.reason
+                    );
+                }
+            }
         }
         ControlOutputFormat::Json => print_json(&output)?,
     }
     Ok(())
+}
+
+/// 审批固化 + 可选 benchmark 验证（post-write，失败自动回滚）。
+/// 治理边界：只有显式 --approve（携带审批来源/阈值参数）才会走这里；
+/// 固化前先自评打分，任一 judgment 不通过或 validation 不接受都拒绝落盘。
+fn goal_evolve_approve_and_verify(
+    request: &GoalEvolveCliRequest,
+    output: &GoalEvolveOutput,
+) -> Result<(GoalEvolveApprovalOutput, Option<GoalEvolveBenchmarkOutput>), String> {
+    let review = SkillReviewBuild {
+        proposals: output.proposals.clone(),
+        proposal_validation_reports: output.proposal_validations.clone(),
+    };
+    let judgments = build_skill_judgments(
+        &review,
+        request.approval_threshold,
+        Some(&request.skills_root),
+    );
+    if let Some(rejected) = judgments.iter().find(|judgment| !judgment.approved) {
+        return Err(format!(
+            "goal_evolve_approve_rejected: proposal {} self score {} below threshold {}",
+            rejected.proposal_id, rejected.score_total, rejected.threshold
+        ));
+    }
+    if let Some(rejected) = review
+        .proposal_validation_reports
+        .iter()
+        .find(|report| !report.accepted)
+    {
+        return Err(format!(
+            "goal_evolve_approve_rejected: proposal {} validation not accepted",
+            rejected.proposal_id
+        ));
+    }
+
+    // 固化前先记录原状（存在则保存原文，不存在则记为新建），供 auto-revert 精确还原。
+    let mut write_states = Vec::new();
+    let mut write_receipts = Vec::new();
+    for (proposal, judgment) in output.proposals.iter().zip(judgments.iter()) {
+        let path = request
+            .skills_root
+            .join(format!("{}.md", judgment.canonical_skill_id));
+        let existed = path.exists();
+        let original_content = if existed {
+            Some(
+                fs::read_to_string(&path)
+                    .map_err(|err| format!("goal_evolve_approve_read_existing_failed: {err}"))?,
+            )
+        } else {
+            None
+        };
+        let receipt = solidify_skill_file(
+            &request.skills_root,
+            proposal,
+            judgment,
+            &request.approval_source,
+            request.approved_at.as_deref(),
+            request.approval_note.as_deref(),
+        )
+        .map_err(|err| format!("goal_evolve_approve_solidify_failed: {err}"))?;
+        write_states.push(GoalEvolveWriteState {
+            skill_id: receipt.skill_id.clone(),
+            path,
+            existed,
+            original_content,
+        });
+        write_receipts.push(receipt);
+    }
+
+    let approval = GoalEvolveApprovalOutput {
+        requested: true,
+        approved: true,
+        approval_source: request.approval_source.clone(),
+        approval_threshold: request.approval_threshold,
+        writes_skills: true,
+        solidifies_skill: true,
+        skills_root: request.skills_root.display().to_string(),
+        judgment_count: judgments.len(),
+        write_count: write_receipts.len(),
+        judgments,
+        write_receipts,
+    };
+
+    let benchmark_verification = match &request.benchmark_gate {
+        Some(gate_id) => {
+            let benchmark_root = request
+                .benchmark_root
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(crate::cli_skill::DEFAULT_BENCHMARK_ROOT));
+            let board = BenchmarkStore::new(&benchmark_root)
+                .load_scoreboard(gate_id)
+                .map_err(|err| format!("goal_evolve_benchmark_load_failed: {err}"))?;
+            match enforce_benchmark_gate(&board, request.benchmark_after_score) {
+                Ok(outcome) => Some(GoalEvolveBenchmarkOutput {
+                    requested: true,
+                    benchmark_gate: Some(gate_id.clone()),
+                    best_score: outcome.best_score,
+                    after_score: request.benchmark_after_score,
+                    passed: true,
+                    reverted: false,
+                    revert_reason: None,
+                    revert_receipts: Vec::new(),
+                }),
+                Err(reason) => {
+                    // 验证不通过（无基线 / 未严格提升）：自动回滚本次固化的全部规则文件。
+                    let mut revert_receipts = Vec::new();
+                    for state in &write_states {
+                        revert_receipts.push(revert_evolved_skill_write(state, &reason)?);
+                    }
+                    Some(GoalEvolveBenchmarkOutput {
+                        requested: true,
+                        benchmark_gate: Some(gate_id.clone()),
+                        best_score: board.best.as_ref().map(|entry| entry.total_score),
+                        after_score: request.benchmark_after_score,
+                        passed: false,
+                        reverted: true,
+                        revert_reason: Some(reason),
+                        revert_receipts,
+                    })
+                }
+            }
+        }
+        None => None,
+    };
+
+    Ok((approval, benchmark_verification))
+}
+
+/// 把本次固化写入的规则文件还原到写前状态：
+/// - 原本存在的文件：写回原始内容（精确还原，不残留回滚标记）。
+/// - 本次新建的文件：移除刚创建的文件（属于同一命令自身的回滚，非用户数据删除）。
+fn revert_evolved_skill_write(
+    state: &GoalEvolveWriteState,
+    reason: &str,
+) -> Result<GoalEvolveRevertReceipt, String> {
+    if state.existed {
+        fs::write(
+            &state.path,
+            state.original_content.as_deref().unwrap_or_default(),
+        )
+        .map_err(|err| format!("goal_evolve_revert_restore_failed: {err}"))?;
+        Ok(GoalEvolveRevertReceipt {
+            skill_id: state.skill_id.clone(),
+            path: state.path.display().to_string(),
+            action: "restored_previous".to_string(),
+            reason: reason.to_string(),
+        })
+    } else {
+        fs::remove_file(&state.path)
+            .map_err(|err| format!("goal_evolve_revert_remove_failed: {err}"))?;
+        Ok(GoalEvolveRevertReceipt {
+            skill_id: state.skill_id.clone(),
+            path: state.path.display().to_string(),
+            action: "removed_created".to_string(),
+            reason: reason.to_string(),
+        })
+    }
 }
 
 fn convergence_status_label(verdict: &ConvergenceVerdict) -> String {
@@ -363,6 +595,52 @@ struct GoalEvolveOutput {
     proposal_count: usize,
     proposals: Vec<SkillProposal>,
     proposal_validations: Vec<ValidationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approval: Option<GoalEvolveApprovalOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    benchmark_verification: Option<GoalEvolveBenchmarkOutput>,
+}
+
+#[derive(Serialize)]
+struct GoalEvolveApprovalOutput {
+    requested: bool,
+    approved: bool,
+    approval_source: String,
+    approval_threshold: u16,
+    writes_skills: bool,
+    solidifies_skill: bool,
+    skills_root: String,
+    judgment_count: usize,
+    write_count: usize,
+    judgments: Vec<SkillJudgmentOutput>,
+    write_receipts: Vec<SkillWriteReceiptOutput>,
+}
+
+#[derive(Serialize)]
+struct GoalEvolveBenchmarkOutput {
+    requested: bool,
+    benchmark_gate: Option<String>,
+    best_score: Option<u16>,
+    after_score: Option<u16>,
+    passed: bool,
+    reverted: bool,
+    revert_reason: Option<String>,
+    revert_receipts: Vec<GoalEvolveRevertReceipt>,
+}
+
+#[derive(Serialize)]
+struct GoalEvolveRevertReceipt {
+    skill_id: String,
+    path: String,
+    action: String,
+    reason: String,
+}
+
+struct GoalEvolveWriteState {
+    skill_id: String,
+    path: PathBuf,
+    existed: bool,
+    original_content: Option<String>,
 }
 
 fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
@@ -767,6 +1045,15 @@ struct GoalEvolveCliRequest {
     goal_id: String,
     root: PathBuf,
     output: ControlOutputFormat,
+    approve: bool,
+    approval_source: String,
+    approved_at: Option<String>,
+    approval_note: Option<String>,
+    approval_threshold: u16,
+    skills_root: PathBuf,
+    benchmark_gate: Option<String>,
+    benchmark_after_score: Option<u16>,
+    benchmark_root: Option<PathBuf>,
 }
 
 enum GoalCheckpointCliSource {
@@ -1503,12 +1790,64 @@ fn parse_goal_evolve(args: &[String]) -> Result<GoalEvolveCliRequest, String> {
     let mut goal_id = "mainline-mvp".to_string();
     let mut root = default_goal_root();
     let mut output = ControlOutputFormat::Text;
+    let mut approve = false;
+    let mut approval_source = "cli goal evolve".to_string();
+    let mut approved_at: Option<String> = None;
+    let mut approval_note: Option<String> = None;
+    let mut approval_threshold = 80u16;
+    let mut skills_root: Option<PathBuf> = None;
+    let mut benchmark_gate: Option<String> = None;
+    let mut benchmark_after_score: Option<u16> = None;
+    let mut benchmark_root: Option<PathBuf> = None;
 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
             "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--approve" => {
+                approve = true;
+                index += 1;
+            }
+            "--approval-source" => {
+                approval_source = take_value(args, &mut index, "--approval-source")?;
+            }
+            "--approved-at" => {
+                approved_at = Some(take_value(args, &mut index, "--approved-at")?);
+            }
+            "--approval-note" => {
+                approval_note = Some(take_value(args, &mut index, "--approval-note")?);
+            }
+            "--approval-threshold" => {
+                let value = take_value(args, &mut index, "--approval-threshold")?;
+                approval_threshold = value
+                    .parse::<u16>()
+                    .map_err(|_| "--approval-threshold requires numeric value".to_string())?;
+            }
+            "--skills-root" => {
+                skills_root = Some(PathBuf::from(take_value(
+                    args,
+                    &mut index,
+                    "--skills-root",
+                )?));
+            }
+            "--benchmark-gate" => {
+                benchmark_gate = Some(take_value(args, &mut index, "--benchmark-gate")?);
+            }
+            "--benchmark-after-score" => {
+                let value = take_value(args, &mut index, "--benchmark-after-score")?;
+                benchmark_after_score =
+                    Some(value.parse::<u16>().map_err(|_| {
+                        "--benchmark-after-score requires numeric value".to_string()
+                    })?);
+            }
+            "--benchmark-root" => {
+                benchmark_root = Some(PathBuf::from(take_value(
+                    args,
+                    &mut index,
+                    "--benchmark-root",
+                )?));
+            }
             "--json" => {
                 output = ControlOutputFormat::Json;
                 index += 1;
@@ -1517,10 +1856,36 @@ fn parse_goal_evolve(args: &[String]) -> Result<GoalEvolveCliRequest, String> {
         }
     }
 
+    if benchmark_gate.is_some() || benchmark_after_score.is_some() {
+        if !approve {
+            return Err(
+                "goal evolve --benchmark-gate/--benchmark-after-score require --approve (verification runs after solidification)"
+                    .to_string(),
+            );
+        }
+        if benchmark_after_score.is_some() && benchmark_gate.is_none() {
+            return Err(
+                "goal evolve --benchmark-after-score requires --benchmark-gate".to_string(),
+            );
+        }
+    }
+    if approve && approval_source.trim().is_empty() {
+        return Err("goal evolve --approve requires non-empty --approval-source".to_string());
+    }
+
     Ok(GoalEvolveCliRequest {
         goal_id,
         root,
         output,
+        approve,
+        approval_source,
+        approved_at,
+        approval_note,
+        approval_threshold,
+        skills_root: skills_root.unwrap_or_else(default_skills_root),
+        benchmark_gate,
+        benchmark_after_score,
+        benchmark_root,
     })
 }
 

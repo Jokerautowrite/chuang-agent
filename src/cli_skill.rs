@@ -990,18 +990,19 @@ fn parse_skill_review_request(
     })
 }
 
-/// Outcome of a benchmark score gate check, used by skill solidify.
+/// Outcome of a benchmark score gate check, used by skill solidify and by
+/// `goal evolve --approve` post-write verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BenchmarkGateOutcome {
-    passed: bool,
-    best_score: Option<u16>,
-    required_score: Option<u16>,
+pub(crate) struct BenchmarkGateOutcome {
+    pub(crate) passed: bool,
+    pub(crate) best_score: Option<u16>,
+    pub(crate) required_score: Option<u16>,
 }
 
 /// Penguin gate: no baseline -> no optimize; a skill may only solidify when
 /// the submitted score strictly exceeds the recorded best. Pure function so
 /// the rule is unit-testable without touching the filesystem.
-fn enforce_benchmark_gate(
+pub(crate) fn enforce_benchmark_gate(
     board: &Scoreboard,
     after_score: Option<u16>,
 ) -> Result<BenchmarkGateOutcome, String> {
@@ -1197,7 +1198,7 @@ fn require_non_empty(
     Ok(value)
 }
 
-fn build_skill_judgments(
+pub(crate) fn build_skill_judgments(
     review: &SkillReviewBuild,
     threshold: u16,
     skills_root: Option<&Path>,
@@ -1325,7 +1326,7 @@ fn build_judgment_reasons(
     reasons
 }
 
-fn solidify_skill_file(
+pub(crate) fn solidify_skill_file(
     skills_root: &Path,
     proposal: &SkillProposal,
     judgment: &SkillJudgmentOutput,
@@ -1848,7 +1849,7 @@ fn is_safe_skill_id(skill_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-fn default_skills_root() -> PathBuf {
+pub(crate) fn default_skills_root() -> PathBuf {
     PathBuf::from("data/skills")
 }
 
@@ -1903,9 +1904,9 @@ struct SkillRollbackRequest {
     rollback_at: Option<String>,
 }
 
-struct SkillReviewBuild {
-    proposals: Vec<SkillProposal>,
-    proposal_validation_reports: Vec<ValidationReport>,
+pub(crate) struct SkillReviewBuild {
+    pub(crate) proposals: Vec<SkillProposal>,
+    pub(crate) proposal_validation_reports: Vec<ValidationReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2033,25 +2034,25 @@ struct SkillRetireBoundary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SkillJudgmentOutput {
-    proposal_id: String,
-    canonical_skill_id: String,
-    approved: bool,
-    score_total: u16,
-    threshold: u16,
-    policy: String,
-    duplicate_state: String,
-    target_path: Option<String>,
-    reasons: Vec<String>,
-    rubric_scores: Vec<SkillRubricScoreOutput>,
+pub(crate) struct SkillJudgmentOutput {
+    pub(crate) proposal_id: String,
+    pub(crate) canonical_skill_id: String,
+    pub(crate) approved: bool,
+    pub(crate) score_total: u16,
+    pub(crate) threshold: u16,
+    pub(crate) policy: String,
+    pub(crate) duplicate_state: String,
+    pub(crate) target_path: Option<String>,
+    pub(crate) reasons: Vec<String>,
+    pub(crate) rubric_scores: Vec<SkillRubricScoreOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SkillRubricScoreOutput {
-    dimension: String,
-    score: u16,
-    max_score: u16,
-    reason: String,
+pub(crate) struct SkillRubricScoreOutput {
+    pub(crate) dimension: String,
+    pub(crate) score: u16,
+    pub(crate) max_score: u16,
+    pub(crate) reason: String,
 }
 
 impl SkillRubricScoreOutput {
@@ -2066,15 +2067,15 @@ impl SkillRubricScoreOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct SkillWriteReceiptOutput {
-    skill_id: String,
-    action: String,
-    duplicate_state: String,
-    path: String,
-    bytes_written: usize,
-    status: String,
-    version: u32,
-    provenance_event_ids: Vec<String>,
+pub(crate) struct SkillWriteReceiptOutput {
+    pub(crate) skill_id: String,
+    pub(crate) action: String,
+    pub(crate) duplicate_state: String,
+    pub(crate) path: String,
+    pub(crate) bytes_written: usize,
+    pub(crate) status: String,
+    pub(crate) version: u32,
+    pub(crate) provenance_event_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
