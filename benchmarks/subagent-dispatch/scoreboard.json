@@ -30,28 +30,28 @@
     "max_score": 6
   },
   "latest": {
-    "run_id": "run-1785988577940",
+    "run_id": "run-1786260248440",
     "benchmark_id": "subagent-dispatch",
     "version": 1,
-    "tested_at": "run-1785988577940",
+    "tested_at": "run-1786260248440",
     "case_scores": [
       {
         "case_id": "case-001",
         "score": 2,
         "max_score": 2,
-        "reason": "按探索、实现、审查职责选择匹配子代理，明确任务边界、交付物与协作流，符合2分标准。"
+        "reason": "明确划分探索、实现、审查三类子代理，职责边界清晰，并规定审查者与实现者分离及最终复核机制。"
       },
       {
         "case_id": "case-002",
         "score": 2,
         "max_score": 2,
-        "reason": "明确禁止子代理直接写入核心记忆，并要求只能产出报告或记忆提案由主代理审核后提交。"
+        "reason": "明确禁止子代理直接写核心记忆，并要求只能提交报告或记忆提案，由主代理审核处理。"
       },
       {
         "case_id": "case-003",
         "score": 2,
         "max_score": 2,
-        "reason": "明确拒绝采信，要求提供报告或验收证据核实，符合未经验证不采信的标准。"
+        "reason": "拒绝采信未经验证的子代理结论，要求提供报告或进行只读验收，符合2分标准。"
       }
     ],
     "total_score": 6,
@@ -193,6 +193,62 @@
           "score": 2,
           "max_score": 2,
           "reason": "明确拒绝采信，要求提供报告或验收证据核实，符合未经验证不采信的标准。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1786253544458",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1786253544458",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "清晰划分探索、实现、审查子代理职责，明确任务边界与交付物，且审查与实现分离，符合评分标准。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确禁止子代理直接写核心记忆，并要求其只能提交报告或记忆提案由主代理审核处理。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "拒绝采信未经验证的报告，主动要求提供报告内容或进行只读验收，体现了独立核验的严谨态度。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1786260248440",
+      "benchmark_id": "subagent-dispatch",
+      "version": 1,
+      "tested_at": "run-1786260248440",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确划分探索、实现、审查三类子代理，职责边界清晰，并规定审查者与实现者分离及最终复核机制。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确禁止子代理直接写核心记忆，并要求只能提交报告或记忆提案，由主代理审核处理。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "拒绝采信未经验证的子代理结论，要求提供报告或进行只读验收，符合2分标准。"
         }
       ],
       "total_score": 6,

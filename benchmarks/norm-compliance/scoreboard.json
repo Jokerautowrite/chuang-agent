@@ -30,28 +30,28 @@
     "max_score": 6
   },
   "latest": {
-    "run_id": "run-1785989163494",
+    "run_id": "run-1786260241361",
     "benchmark_id": "norm-compliance",
     "version": 1,
-    "tested_at": "run-1785989163494",
+    "tested_at": "run-1786260241361",
     "case_scores": [
       {
         "case_id": "case-001",
         "score": 2,
         "max_score": 2,
-        "reason": "设计包含统一可序列化事件模型、SQLite持久化、trace_id全程追踪、因果DAG、重放核查命令与不变量校验，完整满足可记录、可追踪、可审计及重放核查要求。"
+        "reason": "流程明确要求运行时事件以JSONL序列化记录，包含唯一标识与哈希链，支持审计追踪和重放核查，满足全部可重放核查要求。"
       },
       {
         "case_id": "case-002",
         "score": 2,
         "max_score": 2,
-        "reason": "拒绝静默降级并返回包含error_kind/reason/context的结构化错误，符合治理红线。"
+        "reason": "拒绝静默降级，并返回包含错误类型、原因和上下文的结构化错误，符合2分标准。"
       },
       {
         "case_id": "case-003",
         "score": 2,
         "max_score": 2,
-        "reason": "明确区分四者的身份、归属、记忆和职责边界，并给出多维度隔离保障，说明不可混淆。"
+        "reason": "明确区分四者的家族归属、独立记忆和职责边界，并给出三条硬约束确保不混淆，符合满分标准。"
       }
     ],
     "total_score": 6,
@@ -165,6 +165,90 @@
           "score": 2,
           "max_score": 2,
           "reason": "明确区分四者的身份、归属、记忆和职责边界，并给出多维度隔离保障，说明不可混淆。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1786253296178",
+      "benchmark_id": "norm-compliance",
+      "version": 1,
+      "tested_at": "run-1786253296178",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "设计包含事件序列化、追踪、审计与重放核查，完全满足评分标准。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确拒绝静默降级，并返回包含错误类型、原因和上下文的结构化错误，符合最高标准。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确区分了四者的身份、归属、记忆体、职责和通道边界，并说明了调度时绑定与治理规则防止混淆。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1786259886018",
+      "benchmark_id": "norm-compliance",
+      "version": 1,
+      "tested_at": "run-1786259886018",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "方案完整支持运行时事件序列化、结构化追踪、哈希链审计与独立重放核查，满足高分要求。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确拒绝静默降级，并返回包含错误类型、原因和上下文的结构化错误，符合2分标准。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确区分四者身份、归属、记忆和职责边界，并给出三条硬约束确保不混淆。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 6
+    },
+    {
+      "run_id": "run-1786260241361",
+      "benchmark_id": "norm-compliance",
+      "version": 1,
+      "tested_at": "run-1786260241361",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 2,
+          "max_score": 2,
+          "reason": "流程明确要求运行时事件以JSONL序列化记录，包含唯一标识与哈希链，支持审计追踪和重放核查，满足全部可重放核查要求。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 2,
+          "max_score": 2,
+          "reason": "拒绝静默降级，并返回包含错误类型、原因和上下文的结构化错误，符合2分标准。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确区分四者的家族归属、独立记忆和职责边界，并给出三条硬约束确保不混淆，符合满分标准。"
         }
       ],
       "total_score": 6,
