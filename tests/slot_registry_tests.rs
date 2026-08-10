@@ -1391,7 +1391,24 @@ fn slot_registry_canonical_governance_noop_rejects_and_writes_nothing() {
         .rule_change_history()
         .expect("history")
         .is_empty());
-    assert!(!root.join(".evolver").exists());
+    // 观察流持久化（ac4a074）会创建 `.evolver/observed-events.jsonl`，
+    // 因此 `.evolver` 目录存在是预期；Noop 拒绝的语义是「不落任何规则/审计」：
+    // rule_changes.jsonl 不得存在，且 skill_root 下不得有规则 .md。
+    assert!(!root.join(".evolver").join("rule_changes.jsonl").exists());
+    let rule_files: Vec<_> = std::fs::read_dir(&root)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .ends_with(".md")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(rule_files.is_empty(), "noop governance must not write rule files");
 }
 
 #[test]
