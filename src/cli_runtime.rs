@@ -28,12 +28,15 @@ use chuang_agent::memory_admission::{
 };
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::runtime_config::{RuntimeConfig, SubagentConfig};
+use chuang_agent::evolution_loop::{
+    EvolutionEventBridge, OuterLoopDriver, OuterLoopDriveInput, OuterLoopReport,
+};
+use chuang_agent::runtime_config::{EvolutionConfig, RuntimeConfig, SubagentConfig};
 use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEvent, RuntimeEventLedger,
 };
 use chuang_agent::session_archive::SqliteSessionArchive;
-use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime};
+use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime, EvolutionSlot};
 use chuang_agent::subagent_queue::FileSubagentQueueConfig;
 use chuang_agent::subagent_report::governance_metadata;
 use chuang_agent::subagent_spawner::{
@@ -209,6 +212,10 @@ pub(crate) fn run_with_options(
     .map_err(|e| format!("runtime_failed: {e:?}"))?;
     insert_knowledge_context_metadata(&mut turn, knowledge_preview.as_ref())?;
     insert_conversation_history_metadata(&mut turn, &request.conversation_history);
+    // evolver 外环薄接线：canonical + auto_outer_loop 开启时，把本 turn 的
+    // ledger 事件桥接进观察流并自动驱动 detect → propose → governance → apply。
+    // 非阻塞：任何失败只记日志/元数据，绝不让外环失败拖垮主流程。
+    drive_evolution_outer_loop_after_turn(&mut slots.evolution, &runtime.evolution, &mut turn);
     // 情感观察：从本轮对话提取 delta 喂给 EmotionSlot，再重置连接需求。
     // 情感模块永远不阻断主流程（可拔插的陪伴增强，不是硬依赖）。
     observe_turn_emotion(
@@ -2961,6 +2968,137 @@ fn insert_runtime_event_ledger_metadata(
             .map_err(|e| format!("runtime_event_ledger_json_failed: {e}"))?,
     );
     Ok(())
+}
+
+/// turn 结束后自动驱动 evolver 外环（薄接线，非阻塞）。
+/// 仅在 evolution=canonical 且 auto_outer_loop=true 时生效：
+/// 1) 用 bridge 把 ledger 工具事件桥接进 evolver 观察流；
+/// 2) 合成 TurnCompleted 事件（ledger 自身不写该事件）；
+/// 3) OuterLoopDriver 跑 detect → propose → governance → apply；
+/// 4) 结构化报告进 turn 元数据；任何失败仅记日志，绝不阻塞主流程。
+fn drive_evolution_outer_loop_after_turn(
+    evolution: &mut EvolutionSlot,
+    evolution_config: &EvolutionConfig,
+    turn: &mut ChuangKernelTurn,
+) {
+    let EvolutionConfig::Canonical(canonical) = evolution_config else {
+        return;
+    };
+    if !canonical.auto_outer_loop {
+        return;
+    }
+
+    let bridge = EvolutionEventBridge::new();
+
+    // 1) 从 turn 元数据读本 turn 的 ledger 事件（无工具事件的 turn 无该键 → 空流）。
+    let ledger_events = turn
+        .result
+        .response
+        .meta
+        .extra
+        .get("runtime_event_ledger_json")
+        .and_then(|raw| serde_json::from_str::<Vec<RuntimeEvent>>(raw).ok())
+        .unwrap_or_default();
+
+    // 2) 桥接喂入工具事件（ToolFinished → ToolSucceeded/ToolFailed 等）。
+    if let Err(error) = bridge.observe_turn_events(evolution, &ledger_events) {
+        record_outer_loop_error_metadata(turn, "observe", &error.to_string());
+        return;
+    }
+
+    // 3) 合成 TurnCompleted。
+    if let Err(error) = bridge.observe_turn_completed(
+        evolution,
+        "cli",
+        &turn.turn_id,
+        "agent turn completed",
+        BTreeMap::new(),
+    ) {
+        record_outer_loop_error_metadata(turn, "observe_turn_completed", &error.to_string());
+        return;
+    }
+
+    // 4) 从槽位取治理门禁（owned 拷贝，避免与 &mut evolution 借用冲突）并驱动外环。
+    let Some(governance) = evolution.cloned_rule_change_governance() else {
+        record_outer_loop_error_metadata(turn, "slot", "canonical slot missing governance");
+        return;
+    };
+    let Some(detector_config) = evolution.rule_change_detector_config().cloned() else {
+        record_outer_loop_error_metadata(turn, "slot", "canonical slot missing detector config");
+        return;
+    };
+    let Some(governance_context) = evolution.rule_change_governance_context() else {
+        record_outer_loop_error_metadata(
+            turn,
+            "slot",
+            "canonical slot missing governance context",
+        );
+        return;
+    };
+    let input = OuterLoopDriveInput::new(
+        &detector_config,
+        governance.as_ref(),
+        &governance_context,
+    );
+    let report = OuterLoopDriver::new().drive(evolution, input);
+
+    // 5) 报告进 turn 元数据 + 日志。
+    insert_outer_loop_report_metadata(turn, &report);
+    if report.error_count() == 0 {
+        eprintln!("evolution_outer_loop_done: {}", report.summary_line());
+    } else {
+        eprintln!(
+            "evolution_outer_loop_errors: {} ({} errors)",
+            report.summary_line(),
+            report.error_count()
+        );
+    }
+}
+
+/// 把外环报告序列化进 turn 元数据（供上层/审计读取）。
+fn insert_outer_loop_report_metadata(turn: &mut ChuangKernelTurn, report: &OuterLoopReport) {
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert("evolution_outer_loop".to_string(), "driven".to_string());
+    extra.insert(
+        "evolution_outer_loop_summary".to_string(),
+        report.summary_line(),
+    );
+    extra.insert(
+        "evolution_outer_loop_applied".to_string(),
+        report.applied_count().to_string(),
+    );
+    extra.insert(
+        "evolution_outer_loop_rejected".to_string(),
+        report.rejected_count().to_string(),
+    );
+    extra.insert(
+        "evolution_outer_loop_errors".to_string(),
+        report.error_count().to_string(),
+    );
+    if let Some(journal_path) = &report.journal_path {
+        extra.insert(
+            "evolution_outer_loop_journal_path".to_string(),
+            journal_path.display().to_string(),
+        );
+    }
+    if let Ok(json) = serde_json::to_string(report) {
+        extra.insert("evolution_outer_loop_report_json".to_string(), json);
+    }
+}
+
+/// 外环薄接线的非致命错误记录（进 turn 元数据 + 日志，不阻塞主流程）。
+fn record_outer_loop_error_metadata(turn: &mut ChuangKernelTurn, stage: &str, message: &str) {
+    let extra = &mut turn.result.response.meta.extra;
+    extra.insert("evolution_outer_loop".to_string(), "failed".to_string());
+    extra.insert(
+        "evolution_outer_loop_error_stage".to_string(),
+        stage.to_string(),
+    );
+    extra.insert(
+        "evolution_outer_loop_error_message".to_string(),
+        truncate_history_text(message, 480),
+    );
+    eprintln!("evolution_outer_loop_failed stage={stage} error={message}");
 }
 
 fn insert_tool_surface_metadata(
