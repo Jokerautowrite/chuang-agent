@@ -6,8 +6,9 @@ use chuang_agent::goal_mode::{
 };
 use chuang_agent::goal_run::{
     check_evidence_at, check_evidence_items, check_evidence_plan, evaluate_acceptance_check,
-    evaluate_acceptance_plan, GoalCheckpoint, GoalIntegrationPolicy, GoalRun, GoalRunStore,
-    GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    evaluate_acceptance_plan, evaluate_acceptance_plan_read_only, GoalCheckpoint,
+    GoalIntegrationPolicy, GoalRun, GoalRunStore, GoalValidationPlan, GoalWorkerPlan,
+    GoalWriteScope,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -434,6 +435,37 @@ fn evaluate_acceptance_plan_reports_each_check_by_index() {
     assert_eq!(verdicts[2].check_index, 2);
     assert!(!verdicts[2].passed);
     assert_eq!(verdicts[2].exit_code, Some(1));
+}
+
+#[test]
+fn evaluate_acceptance_plan_read_only_checks_evidence_but_marks_command_unevaluated() {
+    let root = temp_root("accept-plan-readonly");
+    fs::write(root.join("report.md"), "RESULT=PASS\n").expect("write report");
+    let plan = GoalAcceptancePlan::new(vec![
+        AcceptanceCheck::Evidence(GoalEvidence::new("report.md")),
+        AcceptanceCheck::Command("touch should-not-run".to_string()),
+    ]);
+    let verdicts = evaluate_acceptance_plan_read_only(&root, &plan);
+    assert_eq!(verdicts.len(), 2);
+    // Evidence 检查仍按文件系统只读判定。
+    assert_eq!(verdicts[0].check_index, 0);
+    assert_eq!(verdicts[0].evaluator, "evidence");
+    assert!(verdicts[0].passed);
+    assert_eq!(verdicts[0].reason, "ok");
+    // Command 检查不执行，结构化判定为未评估（不谎报通过）。
+    assert_eq!(verdicts[1].check_index, 1);
+    assert_eq!(verdicts[1].evaluator, "command");
+    assert!(!verdicts[1].passed);
+    assert_eq!(verdicts[1].exit_code, None);
+    assert!(verdicts[1].reason.contains("read-only"));
+    assert!(verdicts[1].reason.contains("goal verify"));
+}
+
+#[test]
+fn evaluate_acceptance_plan_read_only_empty_plan_returns_empty() {
+    let root = temp_root("accept-plan-readonly-empty");
+    let verdicts = evaluate_acceptance_plan_read_only(&root, &GoalAcceptancePlan::default());
+    assert!(verdicts.is_empty());
 }
 
 #[test]

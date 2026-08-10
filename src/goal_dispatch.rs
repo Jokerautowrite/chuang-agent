@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common::{AgentId, TaskId, Timestamp};
-use crate::goal_mode::{AcceptanceCheck, GoalEvidence};
+use crate::goal_mode::{AcceptanceCheck, AcceptanceVerdict, GoalAcceptancePlan, GoalEvidence};
 use crate::goal_run::{
-    check_evidence_items, EvidenceVerdict, GoalRun, GoalRunDiagnostics, GoalRunError,
-    GoalWorkerPlan,
+    check_evidence_items, evaluate_acceptance_plan, evaluate_acceptance_plan_read_only,
+    EvidenceVerdict, GoalRun, GoalRunDiagnostics, GoalRunError, GoalWorkerPlan,
 };
 use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use crate::subagent_report::{
@@ -69,6 +69,12 @@ pub struct GoalDispatchCollectionReceipt {
     /// 文件证据逐条检查文件系统得到，不依赖模型自述。旧 receipt JSON 无此字段。
     #[serde(default)]
     pub acceptance_evidence: Vec<EvidenceVerdict>,
+    /// 类型化验收计划判定（verifier-first）：collect 时按 manifest 快照的
+    /// acceptance_plan 逐条判定（Evidence 文件检查 + Command 执行）。
+    /// 只读 collect 不执行 Command，对应 verdict 为未评估（passed=false）。
+    /// 旧 receipt JSON 无此字段。
+    #[serde(default)]
+    pub acceptance_verdicts: Vec<AcceptanceVerdict>,
     /// 声明了文件证据时，是否全部通过（未声明/旧 receipt 缺字段时为 true）。
     #[serde(default = "default_acceptance_complete")]
     pub acceptance_complete: bool,
@@ -91,6 +97,10 @@ pub struct GoalCheckpointSuggestion {
     /// 运行时验收证据判定快照（collect 时产出；checkpoint --from-collect 直接落盘）。
     #[serde(default)]
     pub evidence_verdicts: Vec<EvidenceVerdict>,
+    /// 类型化验收计划判定快照（collect 时产出；checkpoint --from-collect 后续接线落盘）。
+    /// 旧 suggestion JSON 无此字段。
+    #[serde(default)]
+    pub acceptance_verdicts: Vec<AcceptanceVerdict>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,7 +272,7 @@ pub fn collect_goal_dispatch_reports(
     let manifest = load_goal_dispatch_manifest(&goal_root, goal_id)?;
     let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
         .map_err(dispatch_error_from_queue)?;
-    collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, |run_id| {
+    collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, true, |run_id| {
         read_report_for_collect(&queue, run_id)
     })
 }
@@ -275,7 +285,7 @@ pub fn collect_goal_dispatch_reports_read_only(
     let goal_root = goal_root.into();
     let queue_root = queue_root.into();
     let manifest = load_goal_dispatch_manifest(&goal_root, goal_id)?;
-    collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, |run_id| {
+    collect_goal_dispatch_reports_with_reader(&goal_root, &manifest, false, |run_id| {
         read_report_for_collect_read_only(&queue_root, run_id)
     })
 }
@@ -289,6 +299,7 @@ enum GoalReportReadOutcome {
 fn collect_goal_dispatch_reports_with_reader<F>(
     goal_root: &Path,
     manifest: &GoalDispatchManifest,
+    evaluate_commands: bool,
     mut read_report: F,
 ) -> Result<GoalDispatchCollectionReceipt, GoalDispatchError>
 where
@@ -362,17 +373,37 @@ where
         }
     }
 
-    // 运行时验收证据判定（verifier-first）：collect 时按 manifest 快照的
-    // 文件证据逐条检查文件系统；模型自述完成但证据缺失 = 未完成，
-    // 不能进入 checkpoint 建议。未声明文件证据时不设门禁（向后兼容）。
+    // 运行时验收判定（verifier-first）：collect 时按 manifest 快照判定。
+    // 1. legacy 文件证据（acceptance_evidence）逐条检查文件系统；
+    // 2. 类型化验收计划（acceptance_plan）逐条判定：Evidence 走文件检查，
+    //    Command 走 `sh -c` 执行（复用 goal_run 评估器，不重复实现；120s 超时）。
+    //    只读 collect 不执行 Command（避免副作用），对应 verdict 为未评估。
+    // 任一判定失败 = 未完成，不能进入 checkpoint 建议。
+    // 未声明验收（legacy manifest 空计划/空证据）默认放行（向后兼容）。
     let acceptance_evidence = check_evidence_items(goal_root, &manifest.acceptance_evidence);
-    let acceptance_missing = acceptance_evidence
+    let acceptance_plan = GoalAcceptancePlan::new(manifest.acceptance_plan.clone());
+    let acceptance_verdicts = if evaluate_commands {
+        evaluate_acceptance_plan(goal_root, &acceptance_plan)
+    } else {
+        evaluate_acceptance_plan_read_only(goal_root, &acceptance_plan)
+    };
+    let mut acceptance_missing = acceptance_evidence
         .iter()
         .filter(|verdict| !verdict.passed)
         .map(|verdict| format!("{}: {}", verdict.path, verdict.reason))
         .collect::<Vec<_>>();
-    let acceptance_complete =
-        manifest.acceptance_evidence.is_empty() || acceptance_missing.is_empty();
+    acceptance_missing.extend(
+        acceptance_verdicts
+            .iter()
+            .filter(|verdict| !verdict.passed)
+            .map(|verdict| {
+                format!(
+                    "[{}] {}: {}",
+                    verdict.evaluator, verdict.description, verdict.reason
+                )
+            }),
+    );
+    let acceptance_complete = acceptance_missing.is_empty();
     let ready_to_checkpoint = manifest.dispatch_diagnostics.ready_to_dispatch
         && available_report_count == manifest.dispatch_count
         && missing_run_ids.is_empty()
@@ -391,6 +422,7 @@ where
             &completed_worker_ids,
             &report_summaries,
             &acceptance_evidence,
+            &acceptance_verdicts,
         ))
     } else {
         None
@@ -411,6 +443,7 @@ where
         report_summaries,
         parent_context_handoffs,
         acceptance_evidence,
+        acceptance_verdicts,
         acceptance_complete,
         acceptance_missing,
         handoff_query_summary,
@@ -693,6 +726,7 @@ fn build_checkpoint_suggestion(
     completed_worker_ids: &[String],
     report_summaries: &[String],
     acceptance_evidence: &[EvidenceVerdict],
+    acceptance_verdicts: &[AcceptanceVerdict],
 ) -> GoalCheckpointSuggestion {
     let validation_notes = manifest
         .dispatches
@@ -719,6 +753,7 @@ fn build_checkpoint_suggestion(
         completed_worker_ids: completed_worker_ids.to_vec(),
         validation_notes,
         evidence_verdicts: acceptance_evidence.to_vec(),
+        acceptance_verdicts: acceptance_verdicts.to_vec(),
     }
 }
 

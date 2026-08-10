@@ -730,8 +730,198 @@ fn goal_collect_receipt_deserializes_legacy_json_without_acceptance_fields() {
     // 向后兼容：旧 receipt 无 acceptance_* 字段时，默认视为证据门禁通过。
     assert!(receipt.acceptance_complete);
     assert!(receipt.acceptance_evidence.is_empty());
+    assert!(receipt.acceptance_verdicts.is_empty());
     assert!(receipt.acceptance_missing.is_empty());
     assert!(receipt.ready_to_checkpoint);
+}
+
+#[test]
+fn goal_collect_blocks_checkpoint_when_acceptance_command_fails() {
+    let store_root = temp_goal_root("command-gate-store");
+    let queue_root = temp_goal_root("command-gate-queue");
+    let done_path = store_root.join("done.md");
+    let mut goal = sample_goal_run();
+    goal.goal_spec.acceptance_plan = GoalAcceptancePlan::new(vec![AcceptanceCheck::Command(
+        format!("test -f {}", done_path.display()),
+    )]);
+    let store = GoalRunStore::new(&store_root);
+    store.create(&goal).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    let receipt = dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    for dispatch in &receipt.dispatches {
+        queue
+            .write_report_for_test(
+                &chuang_agent::subagent_spawner::RunId(dispatch.run_id.clone()),
+                &sample_report(dispatch, &format!("{} finished", dispatch.worker_id)),
+            )
+            .expect("report should write");
+    }
+
+    // 报告全齐、身份对齐、Success，但 Command 验收失败（test -f done.md 退出码 1）
+    // → 不能 checkpoint，Command 判定进入 acceptance_verdicts / acceptance_missing。
+    let collection = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("collection should succeed");
+    assert_eq!(collection.available_report_count, 2);
+    assert!(collection.missing_run_ids.is_empty());
+    assert!(!collection.ready_to_checkpoint);
+    assert!(!collection.acceptance_complete);
+    assert_eq!(collection.acceptance_verdicts.len(), 1);
+    assert_eq!(collection.acceptance_verdicts[0].evaluator, "command");
+    assert!(!collection.acceptance_verdicts[0].passed);
+    assert_eq!(collection.acceptance_verdicts[0].exit_code, Some(1));
+    assert_eq!(collection.acceptance_missing.len(), 1);
+    assert!(collection.acceptance_missing[0].contains("[command]"));
+    assert!(collection.acceptance_missing[0].contains("exited with code 1"));
+    assert!(collection.checkpoint_suggestion.is_none());
+    let err = checkpoint_suggestion_from_collection(&collection)
+        .expect_err("failed command acceptance must block checkpoint handoff");
+    assert_eq!(err, "goal collect is not ready to checkpoint");
+
+    // 满足 Command 验收（done.md 出现，test -f 退出码 0）→ 门禁通过，
+    // 产出带 Command 判定的 checkpoint 建议。
+    fs::write(&done_path, "acceptance ready\n").expect("write acceptance file");
+    let collection2 = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("second collection should succeed");
+    assert!(collection2.ready_to_checkpoint);
+    assert!(collection2.acceptance_complete);
+    assert!(collection2.acceptance_missing.is_empty());
+    assert_eq!(collection2.acceptance_verdicts.len(), 1);
+    assert!(collection2.acceptance_verdicts[0].passed);
+    assert_eq!(collection2.acceptance_verdicts[0].exit_code, Some(0));
+    let suggestion = checkpoint_suggestion_from_collection(&collection2)
+        .expect("command acceptance complete should expose checkpoint handoff");
+    assert_eq!(suggestion.acceptance_verdicts.len(), 1);
+    assert!(suggestion.acceptance_verdicts[0].passed);
+}
+
+#[test]
+fn goal_collect_passes_when_acceptance_command_succeeds() {
+    let store_root = temp_goal_root("command-pass-store");
+    let queue_root = temp_goal_root("command-pass-queue");
+    let mut goal = sample_goal_run();
+    goal.goal_spec.acceptance_plan =
+        GoalAcceptancePlan::new(vec![AcceptanceCheck::Command("true".to_string())]);
+    let store = GoalRunStore::new(&store_root);
+    store.create(&goal).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    let receipt = dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    for dispatch in &receipt.dispatches {
+        queue
+            .write_report_for_test(
+                &chuang_agent::subagent_spawner::RunId(dispatch.run_id.clone()),
+                &sample_report(dispatch, &format!("{} finished", dispatch.worker_id)),
+            )
+            .expect("report should write");
+    }
+
+    let collection = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("collection should succeed");
+    assert!(collection.ready_to_checkpoint);
+    assert!(collection.acceptance_complete);
+    assert!(collection.acceptance_missing.is_empty());
+    assert_eq!(collection.acceptance_verdicts.len(), 1);
+    assert_eq!(collection.acceptance_verdicts[0].evaluator, "command");
+    assert!(collection.acceptance_verdicts[0].passed);
+    assert_eq!(collection.acceptance_verdicts[0].exit_code, Some(0));
+    let suggestion = checkpoint_suggestion_from_collection(&collection)
+        .expect("command acceptance pass should expose checkpoint handoff");
+    assert_eq!(suggestion.acceptance_verdicts.len(), 1);
+    assert!(suggestion.acceptance_verdicts[0].passed);
+}
+
+#[test]
+fn goal_collect_legacy_manifest_without_acceptance_plan_defaults_to_pass() {
+    let store_root = temp_goal_root("legacy-plan-store");
+    let queue_root = temp_goal_root("legacy-plan-queue");
+    let store = GoalRunStore::new(&store_root);
+    store.create(&sample_goal_run()).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    let receipt = dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    for dispatch in &receipt.dispatches {
+        queue
+            .write_report_for_test(
+                &chuang_agent::subagent_spawner::RunId(dispatch.run_id.clone()),
+                &sample_report(dispatch, &format!("{} finished", dispatch.worker_id)),
+            )
+            .expect("report should write");
+    }
+
+    // 未声明 Command/Evidence 验收的 legacy manifest：默认放行，门禁不拦。
+    let collection = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("collection should succeed");
+    assert!(collection.acceptance_verdicts.is_empty());
+    assert!(collection.acceptance_evidence.is_empty());
+    assert!(collection.acceptance_complete);
+    assert!(collection.acceptance_missing.is_empty());
+    assert!(collection.ready_to_checkpoint);
+}
+
+#[test]
+fn goal_collect_read_only_does_not_execute_acceptance_commands() {
+    let store_root = temp_goal_root("readonly-command-store");
+    let queue_root = temp_goal_root("readonly-command-queue");
+    let marker_dir = temp_goal_root("readonly-command-marker");
+    let marker = marker_dir.join("acceptance-marker");
+    let mut goal = sample_goal_run();
+    goal.goal_spec.acceptance_plan = GoalAcceptancePlan::new(vec![AcceptanceCheck::Command(
+        format!("touch {}", marker.display()),
+    )]);
+    let store = GoalRunStore::new(&store_root);
+    store.create(&goal).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    // 只读 collect 不执行 Command 验收（sh -c 副作用被禁止）：
+    // Command 判定为未评估，不会产出 marker 文件，门禁不虚报通过。
+    let collection =
+        collect_goal_dispatch_reports_read_only(&store_root, &queue_root, "goal-dispatch")
+            .expect("readonly collection should succeed");
+    assert!(
+        !marker.exists(),
+        "read-only collect must not execute acceptance commands"
+    );
+    assert_eq!(collection.acceptance_verdicts.len(), 1);
+    assert_eq!(collection.acceptance_verdicts[0].evaluator, "command");
+    assert!(!collection.acceptance_verdicts[0].passed);
+    assert_eq!(collection.acceptance_verdicts[0].exit_code, None);
+    assert!(collection.acceptance_verdicts[0]
+        .reason
+        .contains("read-only"));
+    assert!(!collection.acceptance_complete);
+    assert_eq!(collection.acceptance_missing.len(), 1);
+    assert!(collection.acceptance_missing[0].contains("not evaluated"));
+    assert!(!collection.ready_to_checkpoint);
+    assert!(collection.checkpoint_suggestion.is_none());
+}
+
+#[test]
+fn goal_checkpoint_suggestion_deserializes_legacy_json_without_acceptance_verdicts() {
+    let suggestion: GoalCheckpointSuggestion = serde_json::from_str(
+        r#"{
+            "summary":"legacy suggestion",
+            "completed_worker_ids":["worker-1"],
+            "validation_notes":["validated"],
+            "evidence_verdicts":[]
+        }"#,
+    )
+    .expect("legacy suggestion should deserialize");
+
+    assert_eq!(suggestion.summary, "legacy suggestion");
+    assert_eq!(suggestion.completed_worker_ids, vec!["worker-1"]);
+    assert!(suggestion.acceptance_verdicts.is_empty());
 }
 
 fn checkpoint_suggestion_from_collection(

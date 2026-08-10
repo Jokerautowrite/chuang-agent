@@ -1105,6 +1105,43 @@ pub fn evaluate_acceptance_plan(root: &Path, plan: &GoalAcceptancePlan) -> Vec<A
         .collect()
 }
 
+/// 只读评估类型化验收计划（read-only collect / status 诊断用）：
+/// - `Evidence` 检查仍按文件系统只读判定；
+/// - `Command` 检查**不执行**（避免只读路径产生 `sh -c` 副作用），
+///   统一判定为未评估（passed=false，reason 指明需走可执行 collect）。
+/// 权威判定入口是 `evaluate_acceptance_plan`（mutable collect / `goal verify`）。
+pub fn evaluate_acceptance_plan_read_only(
+    root: &Path,
+    plan: &GoalAcceptancePlan,
+) -> Vec<AcceptanceVerdict> {
+    plan.checks
+        .iter()
+        .enumerate()
+        .map(|(index, check)| match check {
+            AcceptanceCheck::Evidence(evidence) => {
+                let verdict = check_evidence_at(root, evidence, index);
+                AcceptanceVerdict {
+                    check_index: index,
+                    evaluator: "evidence".to_string(),
+                    description: check.description(),
+                    passed: verdict.passed,
+                    reason: verdict.reason,
+                    exit_code: None,
+                }
+            }
+            AcceptanceCheck::Command(command) => AcceptanceVerdict {
+                check_index: index,
+                evaluator: "command".to_string(),
+                description: command.clone(),
+                passed: false,
+                reason: "command acceptance not evaluated in read-only collect; run goal collect / goal verify to gate"
+                    .to_string(),
+                exit_code: None,
+            },
+        })
+        .collect()
+}
+
 /// 命令类验收检查：`sh -c` 执行并等待退出码（带超时兜底）。
 /// 输出不进入 verdict（避免命令输出中的敏感内容泄漏到日志/回执）。
 fn evaluate_command_check(command: &str, check_index: usize) -> AcceptanceVerdict {
