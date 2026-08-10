@@ -3382,3 +3382,25 @@
   7. **上下文压缩**：5 策略级联（Snip→Micro→Collapse→Auto→Session Memory）+ 3 次失败熔断 + 压缩前 strip images。
 - 交叉核对：PI×Penguin×创 roadmap（8-06）、harness-integration-plan（8-08）方向一致，本次补了实现细节与优先级。
 - 待老爸确认：P0 图片方案开工、第一个 Benchmark 能力、Evaluator 默认模型。
+
+# 2026-08-10 evolver 外环真实 CLI e2e + 两个修复（小创）
+- 目标：1/2 线全部落地后的真实链路验证——「重复失败 → 自动改规则落盘」挂后台跑通。
+- 隔离环境：`/tmp/chuang-e2e/`（config 改绝对路径 + 头部插 evolution canonical 配置，注意裸键必须位于 `[metadata]` 之前）。
+
+## 修复 1：审批挂起失败进不了外环（commit bedb705）
+- 根因：`needs_approval` 挂起工具调用时 ledger 只写 `ApprovalRequested`（不写 `ToolFinished`），`EvolutionEventBridge` 不认识该事件 → 外环观察不到被治理挂起的失败，`patterns=0`。
+- 修：`map_event` 把 `ApprovalRequested` 与 `ToolFinished` 合并处理，risk_decision 为 blocked/draft_only/needs_approval 时映射 `ToolFailed`（带 tool/error_code/error 供失败签名）。新增 2 单测。
+
+## 修复 2：观察流跨 turn 持久化（commit ac4a074）
+- 根因：`observed_events` 只存内存，CLI 进程重建即丢；needs_approval 单 turn 最多 1 次同签名失败，`min_repeats=2` 生产无法触发。
+- 修：持久化到 `<skill_root>/.evolver/observed-events.jsonl`（与规则 journal 同目录），`new()` 恢复；append 单行、上限 4096 丢最旧；损坏行跳过；持久化失败仅告警不阻断。新增 2 单测，修正 2 处旧断言（拒绝路径语义=无规则 .md 落盘）。
+
+## e2e 实测结果
+- `min_repeats=1`：单 turn 删除命令被治理挂起 → `patterns=1 applied=1`，规则落盘 + journal 写入。
+- `min_repeats=2`：turn1 失败（不触发，事件持久化）→ turn2 新进程恢复+新增=2 次 → `patterns=1 applied=1`，已有规则 UpdateRule version 2，journal 带 before/after 可回滚。
+- 全量测试：lib 116 + integration 全绿。
+
+## 经验沉淀
+- 外环失败判定靠 ledger `risk_decision` 前缀（blocked/draft_only/needs_approval），`allowed` 或无决策算成功。
+- 治理拦截的挂起路径没有 `ToolFinished` 事件——桥接层必须覆盖 `ApprovalRequested`，这是本轮发现的第一个真实缺口。
+- 跨 turn 失败累积是 `min_repeats>=2` 的前提，持久化位置选规则 audit journal 同目录（`.evolver/`），语义自洽。
