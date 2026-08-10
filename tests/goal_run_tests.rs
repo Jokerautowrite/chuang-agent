@@ -778,7 +778,7 @@ fn assert_rfc3339_timestamp(value: Option<&str>) {
 fn goal_run_sets_started_at_and_caps_step_runs() {
     let run = sample_goal_run();
     assert!(run.started_at.is_some());
-    assert_eq!(run.step_run_cap(100), 8); // mainline_mvp max_tool_rounds=8
+    assert_eq!(run.step_run_cap(100), 100); // mainline_mvp max_tool_rounds 不设默认上限
     assert_eq!(run.step_run_cap(3), 3);
     run.assert_time_budget_allows_continue()
         .expect("fresh run should be within 60 minutes");

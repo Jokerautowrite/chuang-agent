@@ -128,7 +128,9 @@ impl GoalSpec {
             acceptance_evidence: Vec::new(),
             budget: GoalBudget {
                 max_minutes: Some(60),
-                max_tool_rounds: Some(8),
+                // 工具轮次不设默认上限：goal step 由 tool_loop.max_rounds
+                // 兜底（上限 256），不给工具轮次长任务无法干活。
+                max_tool_rounds: None,
                 max_subtasks: Some(4),
             },
             allowed_slots: vec![
