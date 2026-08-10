@@ -70,12 +70,20 @@ impl CommandActuator {
             .stdin
             .take()
             .ok_or_else(|| actuator_error("actuator command stdin unavailable"))?;
-        stdin.write_all(stdin_json.as_bytes()).map_err(|error| {
-            actuator_error(format!("actuator command stdin write failed: {error}"))
-        })?;
-        stdin.flush().map_err(|error| {
-            actuator_error(format!("actuator command stdin flush failed: {error}"))
-        })?;
+        if let Err(error) = stdin.write_all(stdin_json.as_bytes()) {
+            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(actuator_error(format!(
+                    "actuator command stdin write failed: {error}"
+                )));
+            }
+        }
+        if let Err(error) = stdin.flush() {
+            if error.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(actuator_error(format!(
+                    "actuator command stdin flush failed: {error}"
+                )));
+            }
+        }
         drop(stdin);
 
         let output = wait_with_timeout(child, self.config.timeout_ms)
