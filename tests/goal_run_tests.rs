@@ -212,10 +212,7 @@ fn goal_run_rejects_checkpoint_with_invalid_acceptance_verdicts() {
         ))
         .expect_err("empty description should fail validation");
 
-    assert_eq!(
-        err.field,
-        "checkpoint_log.acceptance_verdicts.description"
-    );
+    assert_eq!(err.field, "checkpoint_log.acceptance_verdicts.description");
 }
 
 #[test]
@@ -250,8 +247,11 @@ fn goal_run_loads_legacy_checkpoint_without_acceptance_verdicts() {
         .as_object_mut()
         .expect("checkpoint object")
         .remove("acceptance_verdicts");
-    std::fs::write(&path, serde_json::to_string_pretty(&json).expect("render json"))
-        .expect("write legacy json");
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).expect("render json"),
+    )
+    .expect("write legacy json");
 
     let loaded = store.load("mainline-mvp").expect("legacy json should load");
     let last = loaded.checkpoint_log.last().expect("one checkpoint");

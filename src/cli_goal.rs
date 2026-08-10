@@ -665,50 +665,56 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
         .load(&request.goal_id)
         .map_err(format_goal_run_error)?;
     let fresh_evidence_verdicts = check_evidence_plan(&request.root, &run.goal_spec);
-    let (summary, completed_worker_ids, validation_notes, evidence_verdicts, acceptance_verdicts, source_hint) =
-        match request.source {
-            GoalCheckpointCliSource::Manual {
+    let (
+        summary,
+        completed_worker_ids,
+        validation_notes,
+        evidence_verdicts,
+        acceptance_verdicts,
+        source_hint,
+    ) = match request.source {
+        GoalCheckpointCliSource::Manual {
+            summary,
+            completed_worker_ids,
+            validation_notes,
+            blocker_key,
+        } => {
+            // manual 分支保持行为不变：不携带 acceptance_verdicts（空）。
+            let mut checkpoint = GoalCheckpoint::with_evidence(
+                request.checkpoint_id,
                 summary,
                 completed_worker_ids,
                 validation_notes,
-                blocker_key,
-            } => {
-                // manual 分支保持行为不变：不携带 acceptance_verdicts（空）。
-                let mut checkpoint = GoalCheckpoint::with_evidence(
-                    request.checkpoint_id,
-                    summary,
-                    completed_worker_ids,
-                    validation_notes,
-                    fresh_evidence_verdicts,
-                );
-                if let Some(blocker_key) = blocker_key {
-                    checkpoint.blocker_key = Some(blocker_key);
-                }
-                let receipt = store
-                    .record_checkpoint(&request.goal_id, checkpoint)
-                    .map_err(format_goal_run_error)?;
-                return render_goal_checkpoint_receipt(receipt, None, request.output);
+                fresh_evidence_verdicts,
+            );
+            if let Some(blocker_key) = blocker_key {
+                checkpoint.blocker_key = Some(blocker_key);
             }
-            GoalCheckpointCliSource::FromCollect { queue_root } => {
-                let suggestion =
-                    load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
-                // verifier-first：优先落盘 collect 时产出的运行时证据判定快照；
-                // 旧 suggestion 无该字段时回退为 checkpoint 时重新检查。
-                let evidence_verdicts = if suggestion.evidence_verdicts.is_empty() {
-                    fresh_evidence_verdicts
-                } else {
-                    suggestion.evidence_verdicts
-                };
-                (
-                    suggestion.summary,
-                    suggestion.completed_worker_ids,
-                    suggestion.validation_notes,
-                    evidence_verdicts,
-                    suggestion.acceptance_verdicts,
-                    Some("collect"),
-                )
-            }
-        };
+            let receipt = store
+                .record_checkpoint(&request.goal_id, checkpoint)
+                .map_err(format_goal_run_error)?;
+            return render_goal_checkpoint_receipt(receipt, None, request.output);
+        }
+        GoalCheckpointCliSource::FromCollect { queue_root } => {
+            let suggestion =
+                load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
+            // verifier-first：优先落盘 collect 时产出的运行时证据判定快照；
+            // 旧 suggestion 无该字段时回退为 checkpoint 时重新检查。
+            let evidence_verdicts = if suggestion.evidence_verdicts.is_empty() {
+                fresh_evidence_verdicts
+            } else {
+                suggestion.evidence_verdicts
+            };
+            (
+                suggestion.summary,
+                suggestion.completed_worker_ids,
+                suggestion.validation_notes,
+                evidence_verdicts,
+                suggestion.acceptance_verdicts,
+                Some("collect"),
+            )
+        }
+    };
     let checkpoint = GoalCheckpoint::with_acceptance_verdicts(
         request.checkpoint_id,
         summary,

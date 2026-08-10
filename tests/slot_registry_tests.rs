@@ -1399,16 +1399,14 @@ fn slot_registry_canonical_governance_noop_rejects_and_writes_nothing() {
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
-                .filter(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .ends_with(".md")
-                })
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".md"))
                 .collect()
         })
         .unwrap_or_default();
-    assert!(rule_files.is_empty(), "noop governance must not write rule files");
+    assert!(
+        rule_files.is_empty(),
+        "noop governance must not write rule files"
+    );
 }
 
 #[test]

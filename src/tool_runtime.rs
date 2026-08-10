@@ -4262,8 +4262,7 @@ fn rejects_action_json_with_arbitrary_trailing_text() {
     // 完整 JSON 后跟任意解释文字必须保持协议错误，
     // 不能被逆推修复误判为合法 ACTION。
     let body = r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls -la"}} 后面是一些解释文字"#;
-    let error = parse_tool_action_envelope_result(body)
-        .expect_err("尾部解释文字应保持协议错误");
+    let error = parse_tool_action_envelope_result(body).expect_err("尾部解释文字应保持协议错误");
     assert_eq!(error.code, "invalid_action_json");
     assert!(error.message.contains("trailing text"));
 }

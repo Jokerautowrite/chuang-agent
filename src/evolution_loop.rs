@@ -274,7 +274,10 @@ impl OuterLoopDriver {
             };
             report.proposals.push(proposal.clone());
 
-            let decision = match input.governance.evaluate(&proposal, input.governance_context) {
+            let decision = match input
+                .governance
+                .evaluate(&proposal, input.governance_context)
+            {
                 Ok(decision) => decision,
                 Err(error) => {
                     report.errors.push(OuterLoopStageError::new(
@@ -461,14 +464,18 @@ mod tests {
     use crate::runtime_event_ledger::{RuntimeEvent as LedgerEvent, RuntimeRiskDecision};
 
     fn approval_requested_event(decision: &str) -> LedgerEvent {
-        LedgerEvent::at(RuntimeEventKind::ApprovalRequested, "agent:chuang", "2026-08-10T00:00:00Z")
-            .with_turn_id("turn-1")
-            .with_call_id("tool:code_execute:cli:turn-1:tool:1")
-            .with_risk_decision(RuntimeRiskDecision::new(
-                decision.to_string(),
-                "profile=full_local_workspace action=delete or cleanup".to_string(),
-            ))
-            .with_evidence_ref("approval://pending/requested")
+        LedgerEvent::at(
+            RuntimeEventKind::ApprovalRequested,
+            "agent:chuang",
+            "2026-08-10T00:00:00Z",
+        )
+        .with_turn_id("turn-1")
+        .with_call_id("tool:code_execute:cli:turn-1:tool:1")
+        .with_risk_decision(RuntimeRiskDecision::new(
+            decision.to_string(),
+            "profile=full_local_workspace action=delete or cleanup".to_string(),
+        ))
+        .with_evidence_ref("approval://pending/requested")
     }
 
     #[test]
@@ -477,12 +484,19 @@ mod tests {
         let event = bridge.map_event(&approval_requested_event("needs_approval"), 0);
         let mapped = event.expect("approval_requested should map to an evolver event");
         assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolFailed);
-        assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("code_execute"));
+        assert_eq!(
+            mapped.metadata.get("tool").map(String::as_str),
+            Some("code_execute")
+        );
         assert_eq!(
             mapped.metadata.get("error_code").map(String::as_str),
             Some("needs_approval")
         );
-        assert!(mapped.metadata.get("error").map(String::as_str).is_some_and(|reason| !reason.is_empty()));
+        assert!(mapped
+            .metadata
+            .get("error")
+            .map(String::as_str)
+            .is_some_and(|reason| !reason.is_empty()));
     }
 
     #[test]

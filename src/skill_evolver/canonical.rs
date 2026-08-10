@@ -163,7 +163,9 @@ impl CanonicalSkillEvolver {
     /// 结束时观察流不会丢失，下次启动恢复，`min_repeats>=2` 才可能在多 turn
     /// 上真实触发。
     pub fn observed_events_path(&self) -> PathBuf {
-        self.skill_root.join(".evolver").join("observed-events.jsonl")
+        self.skill_root
+            .join(".evolver")
+            .join("observed-events.jsonl")
     }
 
     /// 从磁盘恢复观察流：文件不存在返回空；损坏行跳过（容忍，不 panic）；
@@ -174,7 +176,10 @@ impl CanonicalSkillEvolver {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
             Err(error) => {
-                eprintln!("observed_events_load_failed path={}: {error}", path.display());
+                eprintln!(
+                    "observed_events_load_failed path={}: {error}",
+                    path.display()
+                );
                 return Vec::new();
             }
         };
@@ -775,7 +780,10 @@ impl SkillEvolver for CanonicalSkillEvolver {
     fn observe(&mut self, event: RuntimeEvent) -> Result<EvolutionReceipt, EvolutionError> {
         validate_event(&event)?;
         self.observed_events.push(event);
-        let overflow = self.observed_events.len().saturating_sub(OBSERVED_EVENTS_MAX);
+        let overflow = self
+            .observed_events
+            .len()
+            .saturating_sub(OBSERVED_EVENTS_MAX);
         if overflow > 0 {
             // 超存储级上限：丢弃最旧事件并全量重写（保持 bounded）。
             self.observed_events.drain(..overflow);

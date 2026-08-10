@@ -13,22 +13,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chuang_agent::evolution_loop::{
     EvolutionBridgeError, EvolutionEventBridge, OuterLoopDriveInput, OuterLoopDriver,
 };
-use chuang_agent::runtime_config::{
-    CanonicalEvolutionConfig, EvolutionConfig, RuntimeConfig,
-};
+use chuang_agent::runtime_config::{CanonicalEvolutionConfig, EvolutionConfig, RuntimeConfig};
 use chuang_agent::runtime_event_ledger::{
     RuntimeEvent as LedgerRuntimeEvent, RuntimeEventKind as LedgerRuntimeEventKind,
     RuntimeRiskDecision,
 };
+use chuang_agent::skill_evolver::FailureEvidence;
+use chuang_agent::skill_evolver::RuleChangeKind;
 use chuang_agent::skill_evolver::{
     CanonicalSkillEvolver, EvolutionError, EvolutionReceipt, EvolutionScope, FailureDetectorConfig,
     FailurePattern, GovernanceContext, NoopRuleChangeGovernance, PolicyRuleChangeGovernance,
-    RuleChangeGovernance, RuleChangeProposal, RuleChangeReceipt, RuntimeEvent as EvolverRuntimeEvent,
-    RuntimeEventKind as EvolverRuntimeEventKind, SkillEvolver, SkillId, SkillProposal,
-    SkillProposalProvenance, ValidationReport,
+    RuleChangeGovernance, RuleChangeProposal, RuleChangeReceipt,
+    RuntimeEvent as EvolverRuntimeEvent, RuntimeEventKind as EvolverRuntimeEventKind, SkillEvolver,
+    SkillId, SkillProposal, SkillProposalProvenance, ValidationReport,
 };
-use chuang_agent::skill_evolver::FailureEvidence;
-use chuang_agent::skill_evolver::RuleChangeKind;
 use chuang_agent::slot_registry::{
     build_runtime_slots, CanonicalEvolutionSlot, CanonicalGovernanceSlot, EvolutionSlot,
 };
@@ -137,8 +135,14 @@ fn bridge_maps_turn_completed_to_turn_completed() {
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::TurnCompleted);
     assert_eq!(mapped.task_id, "turn-9");
     assert_eq!(mapped.summary, "agent turn completed");
-    assert_eq!(mapped.metadata.get("ledger_source").map(String::as_str), Some("turn_completed"));
-    assert_eq!(mapped.metadata.get("turn_id").map(String::as_str), Some("turn-9"));
+    assert_eq!(
+        mapped.metadata.get("ledger_source").map(String::as_str),
+        Some("turn_completed")
+    );
+    assert_eq!(
+        mapped.metadata.get("turn_id").map(String::as_str),
+        Some("turn-9")
+    );
     assert!(!mapped.event_id.is_empty());
 }
 
@@ -157,9 +161,18 @@ fn bridge_maps_turn_failed_to_tool_failed_with_source_metadata() {
 
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolFailed);
     assert_eq!(mapped.summary, "agent turn failed");
-    assert_eq!(mapped.metadata.get("ledger_source").map(String::as_str), Some("turn_failed"));
-    assert_eq!(mapped.metadata.get("error").map(String::as_str), Some("turn_failed"));
-    assert_eq!(mapped.metadata.get("turn_id").map(String::as_str), Some("turn-9"));
+    assert_eq!(
+        mapped.metadata.get("ledger_source").map(String::as_str),
+        Some("turn_failed")
+    );
+    assert_eq!(
+        mapped.metadata.get("error").map(String::as_str),
+        Some("turn_failed")
+    );
+    assert_eq!(
+        mapped.metadata.get("turn_id").map(String::as_str),
+        Some("turn-9")
+    );
 }
 
 #[test]
@@ -177,8 +190,14 @@ fn bridge_maps_tool_finished_allowed_to_tool_succeeded() {
 
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolSucceeded);
     assert_eq!(mapped.summary, "tool open_app succeeded");
-    assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("open_app"));
-    assert_eq!(mapped.metadata.get("ledger_source").map(String::as_str), Some("tool_finished"));
+    assert_eq!(
+        mapped.metadata.get("tool").map(String::as_str),
+        Some("open_app")
+    );
+    assert_eq!(
+        mapped.metadata.get("ledger_source").map(String::as_str),
+        Some("tool_finished")
+    );
 }
 
 #[test]
@@ -196,13 +215,22 @@ fn bridge_maps_tool_finished_blocked_to_tool_failed_with_error_metadata() {
 
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolFailed);
     assert_eq!(mapped.summary, "tool open_app failed");
-    assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("open_app"));
-    assert_eq!(mapped.metadata.get("error_code").map(String::as_str), Some("blocked"));
+    assert_eq!(
+        mapped.metadata.get("tool").map(String::as_str),
+        Some("open_app")
+    );
+    assert_eq!(
+        mapped.metadata.get("error_code").map(String::as_str),
+        Some("blocked")
+    );
     assert_eq!(
         mapped.metadata.get("error").map(String::as_str),
         Some("denied by static rule")
     );
-    assert_eq!(mapped.metadata.get("ledger_source").map(String::as_str), Some("tool_finished"));
+    assert_eq!(
+        mapped.metadata.get("ledger_source").map(String::as_str),
+        Some("tool_finished")
+    );
 }
 
 #[test]
@@ -219,8 +247,14 @@ fn bridge_maps_tool_finished_needs_approval_to_tool_failed() {
         .expect("needs_approval tool finished should map");
 
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolFailed);
-    assert_eq!(mapped.metadata.get("error_code").map(String::as_str), Some("needs_approval"));
-    assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("write_file"));
+    assert_eq!(
+        mapped.metadata.get("error_code").map(String::as_str),
+        Some("needs_approval")
+    );
+    assert_eq!(
+        mapped.metadata.get("tool").map(String::as_str),
+        Some("write_file")
+    );
 }
 
 #[test]
@@ -237,7 +271,10 @@ fn bridge_maps_tool_finished_without_decision_to_tool_succeeded() {
         .expect("decision-less tool finished should map to success");
 
     assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolSucceeded);
-    assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("list_dir"));
+    assert_eq!(
+        mapped.metadata.get("tool").map(String::as_str),
+        Some("list_dir")
+    );
 }
 
 #[test]
@@ -245,12 +282,18 @@ fn bridge_ignores_unmapped_event_kinds() {
     let bridge = EvolutionEventBridge::new();
     for (kind, label) in [
         (LedgerRuntimeEventKind::ToolStarted, "tool started"),
-        (LedgerRuntimeEventKind::ProviderRequested, "provider requested"),
+        (
+            LedgerRuntimeEventKind::ProviderRequested,
+            "provider requested",
+        ),
         (LedgerRuntimeEventKind::MemoryCommitted, "memory committed"),
         (LedgerRuntimeEventKind::RiskClassified, "risk classified"),
     ] {
         let event = ledger_event(kind, "2026-08-10T00:00:06Z", "turn-1", None, None);
-        assert!(bridge.map_event(&event, 0).is_none(), "{label} should be ignored");
+        assert!(
+            bridge.map_event(&event, 0).is_none(),
+            "{label} should be ignored"
+        );
     }
 }
 
@@ -277,7 +320,10 @@ fn bridge_observe_turn_events_feeds_in_order_and_counts() {
     let stream = evolver.observed_events();
     assert_eq!(stream.len(), 2);
     assert_eq!(stream[0].kind, EvolverRuntimeEventKind::ToolFailed);
-    assert_eq!(stream[0].metadata.get("tool").map(String::as_str), Some("open_app"));
+    assert_eq!(
+        stream[0].metadata.get("tool").map(String::as_str),
+        Some("open_app")
+    );
     assert_eq!(stream[1].kind, EvolverRuntimeEventKind::ToolFailed);
 }
 
@@ -350,8 +396,7 @@ fn driver_full_chain_detects_proposes_approves_applies_and_reports() {
     let mut slot = canonical_slot_with_events(root.clone(), &events);
 
     let (detector_config, context) = slot_outer_loop_pieces(&slot);
-    let governance: Box<dyn RuleChangeGovernance> =
-        Box::new(PolicyRuleChangeGovernance::default());
+    let governance: Box<dyn RuleChangeGovernance> = Box::new(PolicyRuleChangeGovernance::default());
     let input = OuterLoopDriveInput::new(&detector_config, governance.as_ref(), &context);
 
     let report = OuterLoopDriver::new().drive(&mut slot, input);
@@ -362,7 +407,10 @@ fn driver_full_chain_detects_proposes_approves_applies_and_reports() {
     assert_eq!(report.applied_count(), 1);
     assert_eq!(report.rejected_count(), 0);
     assert_eq!(report.error_count(), 0);
-    assert_eq!(report.receipts[0].proposal_id, report.proposals[0].proposal_id);
+    assert_eq!(
+        report.receipts[0].proposal_id,
+        report.proposals[0].proposal_id
+    );
     assert!(report.receipts[0].path.exists());
     assert_eq!(
         report.receipts[0].change_kind,
@@ -374,10 +422,7 @@ fn driver_full_chain_detects_proposes_approves_applies_and_reports() {
         .expect("canonical slot exposes journal path");
     assert!(journal_path.exists());
     assert_eq!(
-        slot
-            .rule_change_history()
-            .expect("history readable")
-            .len(),
+        slot.rule_change_history().expect("history readable").len(),
         1
     );
     // 报告可序列化（进 turn 元数据用）。
@@ -409,12 +454,10 @@ fn driver_governance_rejection_records_reason_and_does_not_write() {
     assert_eq!(report.error_count(), 0);
     let rejection = &report.rejections[0];
     assert_eq!(rejection.proposal_id, report.proposals[0].proposal_id);
-    assert!(
-        rejection
-            .reasons
-            .iter()
-            .any(|reason| reason.contains("noop governance never approves"))
-    );
+    assert!(rejection
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("noop governance never approves")));
     assert_eq!(rejection.decided_by, "governance.noop");
     // 未落盘：journal 与规则文件都不存在。
     assert!(!root.join(".evolver").join("rule_changes.jsonl").exists());
@@ -429,8 +472,7 @@ fn driver_no_pattern_returns_empty_report() {
     );
 
     let (detector_config, context) = slot_outer_loop_pieces(&slot);
-    let governance: Box<dyn RuleChangeGovernance> =
-        Box::new(PolicyRuleChangeGovernance::default());
+    let governance: Box<dyn RuleChangeGovernance> = Box::new(PolicyRuleChangeGovernance::default());
     let input = OuterLoopDriveInput::new(&detector_config, governance.as_ref(), &context);
 
     let report = OuterLoopDriver::new().drive(&mut slot, input);
@@ -457,8 +499,7 @@ fn driver_detect_error_is_structured_not_panic() {
         failure_kinds: vec![EvolverRuntimeEventKind::ToolFailed],
     };
     let (_, context) = slot_outer_loop_pieces(&slot);
-    let governance: Box<dyn RuleChangeGovernance> =
-        Box::new(PolicyRuleChangeGovernance::default());
+    let governance: Box<dyn RuleChangeGovernance> = Box::new(PolicyRuleChangeGovernance::default());
     let input = OuterLoopDriveInput::new(&detector_config, governance.as_ref(), &context);
 
     let report = OuterLoopDriver::new().drive(&mut slot, input);
@@ -521,17 +562,14 @@ fn driver_apply_error_is_structured_and_governance_gate_not_bypassed() {
         "disk unavailable".to_string(),
     ));
     let f1 = evolver_failure_event("e1", "t1", "build");
-    evolver
-        .observe(f1)
-        .expect("observe");
+    evolver.observe(f1).expect("observe");
 
     let detector_config = FailureDetectorConfig::default();
     let context = GovernanceContext {
         observed_events: evolver.observed_events.to_vec(),
         detector_config: detector_config.clone(),
     };
-    let governance: Box<dyn RuleChangeGovernance> =
-        Box::new(PolicyRuleChangeGovernance::default());
+    let governance: Box<dyn RuleChangeGovernance> = Box::new(PolicyRuleChangeGovernance::default());
     let input = OuterLoopDriveInput::new(&detector_config, governance.as_ref(), &context);
 
     let report = OuterLoopDriver::new().drive(&mut evolver, input);
@@ -643,9 +681,9 @@ impl SkillEvolver for StubOuterLoopEvolver {
         &self,
         _pattern: &FailurePattern,
     ) -> Result<RuleChangeProposal, EvolutionError> {
-        self.proposal.clone().ok_or_else(|| {
-            EvolutionError::InvalidRuleChange("stub has no proposal".to_string())
-        })
+        self.proposal
+            .clone()
+            .ok_or_else(|| EvolutionError::InvalidRuleChange("stub has no proposal".to_string()))
     }
 
     fn apply_rule_change(

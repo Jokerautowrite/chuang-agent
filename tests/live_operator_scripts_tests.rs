@@ -35,7 +35,10 @@ fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, Path
 // 从本地 config.toml 提取所有 *_api_key_env 引用的变量名，写入临时 provider.env。
 // 这样测试跟随当前配置（例如 CHUANG_PROXY_API_KEY / CHUANG_PROXY_STATIC_KEY），
 // 而不是硬编码某个旧变量名。
-fn write_provider_env_for_config(manifest_dir: &std::path::Path, temp_dir: &std::path::Path) -> PathBuf {
+fn write_provider_env_for_config(
+    manifest_dir: &std::path::Path,
+    temp_dir: &std::path::Path,
+) -> PathBuf {
     let config_path = manifest_dir.join("config.toml");
     let config_text = fs::read_to_string(&config_path).expect("config.toml should be readable");
     let mut vars: Vec<String> = Vec::new();

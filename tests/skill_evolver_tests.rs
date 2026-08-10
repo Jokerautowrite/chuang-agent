@@ -1394,7 +1394,10 @@ fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
         metadata: BTreeMap::from([
             ("tool".to_string(), "code_execute".to_string()),
             ("error_code".to_string(), "needs_approval".to_string()),
-            ("error".to_string(), "profile=full_local_workspace action=delete or cleanup".to_string()),
+            (
+                "error".to_string(),
+                "profile=full_local_workspace action=delete or cleanup".to_string(),
+            ),
         ]),
     };
     turn1
@@ -1402,13 +1405,19 @@ fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
         .expect("turn1 failure event should be observed and persisted");
 
     let events_path = turn1.observed_events_path();
-    assert!(events_path.exists(), "observed events jsonl should be persisted");
+    assert!(
+        events_path.exists(),
+        "observed events jsonl should be persisted"
+    );
 
     // 模拟新 CLI 进程：全新 evolver 实例从磁盘恢复观察流。
     let turn2 = CanonicalSkillEvolver::new(&root);
     assert_eq!(turn2.observed_events().len(), 1);
     assert_eq!(
-        turn2.observed_events()[0].metadata.get("tool").map(String::as_str),
+        turn2.observed_events()[0]
+            .metadata
+            .get("tool")
+            .map(String::as_str),
         Some("code_execute")
     );
 
@@ -1417,7 +1426,10 @@ fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
     let patterns = turn2
         .detect_repeated_failures(&config)
         .expect("detect should run over restored stream");
-    assert!(patterns.is_empty(), "single restored failure must not trigger min_repeats=2");
+    assert!(
+        patterns.is_empty(),
+        "single restored failure must not trigger min_repeats=2"
+    );
 
     let mut turn2 = turn2;
     let second = RuntimeEvent {
@@ -1428,7 +1440,10 @@ fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
         metadata: BTreeMap::from([
             ("tool".to_string(), "code_execute".to_string()),
             ("error_code".to_string(), "needs_approval".to_string()),
-            ("error".to_string(), "profile=full_local_workspace action=delete or cleanup".to_string()),
+            (
+                "error".to_string(),
+                "profile=full_local_workspace action=delete or cleanup".to_string(),
+            ),
         ]),
     };
     turn2
@@ -1438,7 +1453,11 @@ fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
     let patterns = turn2
         .detect_repeated_failures(&config)
         .expect("detect should run over accumulated stream");
-    assert_eq!(patterns.len(), 1, "two same-signature failures should form a pattern");
+    assert_eq!(
+        patterns.len(),
+        1,
+        "two same-signature failures should form a pattern"
+    );
     assert_eq!(patterns[0].count, 2);
 }
 

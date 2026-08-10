@@ -124,7 +124,10 @@ fn gbrain_live_receipt_script_blocks_when_both_http_and_local_unavailable() {
         .arg("--json")
         .env_remove("CHUANG_GBRAIN_LIVE_ENDPOINT")
         .env_remove("CHUANG_GBRAIN_LIVE_TOKEN")
-        .env("CHUANG_GBRAIN_LOCAL_QUERY_CLI", "/nonexistent/agent-hub-brain-query")
+        .env(
+            "CHUANG_GBRAIN_LOCAL_QUERY_CLI",
+            "/nonexistent/agent-hub-brain-query",
+        )
         .env("CHUANG_GBRAIN_READ_SOCKET", "/nonexistent/gbrain/read.sock")
         .output()
         .expect("gbrain receipt script should execute");
@@ -154,11 +157,9 @@ fn gbrain_live_receipt_script_blocks_when_both_http_and_local_unavailable() {
         .iter()
         .filter_map(|item| item.as_str())
         .collect::<Vec<_>>();
-    assert!(
-        blockers
-            .iter()
-            .any(|b| b.starts_with("local_gbrain_cli_missing"))
-    );
+    assert!(blockers
+        .iter()
+        .any(|b| b.starts_with("local_gbrain_cli_missing")));
 }
 
 #[test]

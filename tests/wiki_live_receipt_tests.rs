@@ -151,11 +151,9 @@ fn wiki_live_receipt_script_blocks_when_both_http_and_local_unavailable() {
         .iter()
         .filter_map(|item| item.as_str())
         .collect::<Vec<_>>();
-    assert!(
-        blockers
-            .iter()
-            .any(|b| b.starts_with("local_wiki_root_missing"))
-    );
+    assert!(blockers
+        .iter()
+        .any(|b| b.starts_with("local_wiki_root_missing")));
 }
 
 #[test]
