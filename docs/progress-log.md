@@ -1,3 +1,17 @@
+# 2026-08-11 memory-recall v4 运行时落地：会话滚动总结 + 最近 10 轮压缩保真
+
+- **目标**：把 v4 基准验证过的断线恢复与压缩保真能力接入真实运行时；不改变
+  `SqliteSessionArchive::append` / `append_with_summary` 对外签名，不提交 Git。
+- **会话滚动总结**：`session_archive` SQLite 新增 `session_rolling_summary` 表、
+  `SessionRollingSummary` 读写 API；归档 turn 收尾后自动 UPSERT，累计记录所有已归档轮次，
+  并提供已完成/进行中/待办/约束四要素渲染，断线后可从同一数据库恢复。
+- **压缩保真**：新增 `context_recent_turns` 配置，默认 10，可用
+  `context.recent_turns` 或 `context_recent_turns` 配置；压缩引擎压缩旧历史，保护最近 N 轮
+  原文，并将会话滚动总结作为保留 segment 注入上下文。
+- **全链路**：CLI/app-server 将配置传入 context engine；app-server 历史注入从固定 6 轮改为
+  使用该配置；turn 结束归档后更新滚动总结。
+- **测试**：补充滚动总结重开、多轮累计、最近轮次保护、配置默认值与零值拒绝覆盖。
+
 # 2026-08-11 派发规则补丁：多子代理优先走 OpenCode 叉（opencodex）派发
 
 - **背景**：田楠指出派发规则漏了一条——多子代理要通过 OpenCode 叉的工具来派，
@@ -3501,3 +3515,9 @@
 - evaluate 全链路验证：`benchmark verify` ok；Target 答案由 opencodex-sub2/deepseek-v4-flash 生成（未注入创记忆），evaluator 严格区分答对/不确定/编造（case-001/006 部分对 1 分，case-007/008 拒答/诚实原则 2 分，编造次数/偏离结论 0 分）。
 - 说明：低分符合预期——Target 未带创记忆跑，正好展示评分区分度；真正测创需在创的会话上下文里跑 Target（带 identity/ 注入）。
 - 测试：cargo test benchmark 相关 11 passed。
+
+# 2026-08-11 external-ai opencodex 真实通道（任务 C）
+
+- `external-ai dispatch` 已支持 `opencodex`、`openai-compatible` 及 `:<model>` 覆盖模型，通过 runtime `config.toml` 的 OpenAI-compatible provider 配置和 provider.env 解析密钥，不在代码或输出中硬编码密钥。
+- live dispatch 强制使用 `chat_completions`，复用现有 provider transport/超时/错误元数据，模型回答映射为结构化 `ExternalAiStructuredResult`；dry-run 仍保持不联网的请求描述行为。
+- 增加 live 平台校验、fake provider 执行、请求 prompt 构造和 CLI 不支持平台测试；相关测试与 `cargo check --bins` 已通过。

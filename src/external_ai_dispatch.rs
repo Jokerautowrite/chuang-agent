@@ -1,6 +1,9 @@
 //! `external_ai_dispatch` 模块。公开接口：struct ExternalAiDispatchRequest, ExternalAiDispatchOutput, UnifiedIdentityEngineRequest, UnifiedIdentityEngineResult, ExternalAiStructuredResult, ExternalAiDispatchError；fn new, build_external_ai_dispatch。
 
 use serde::Serialize;
+use std::time::Instant;
+
+use crate::responder::{ProviderAdapterResponder, ResponderRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalAiDispatchRequest {
@@ -80,26 +83,8 @@ pub fn build_external_ai_dispatch(
     request: ExternalAiDispatchRequest,
 ) -> Result<ExternalAiDispatchOutput, ExternalAiDispatchError> {
     validate_request(&request)?;
-    let engine_request = UnifiedIdentityEngineRequest {
-        platform: request.platform.trim().to_string(),
-        task: request.task.trim().to_string(),
-        context: request.context.trim().to_string(),
-        session_hint: request
-            .session_hint
-            .as_ref()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
-        timeout_ms: request.timeout_ms,
-        audit: request.audit,
-    };
-    let audit_id = format!(
-        "external-ai-{}-{:016x}",
-        sanitize_id(&engine_request.platform),
-        stable_hash(&format!(
-            "{}\n{}\n{}",
-            engine_request.platform, engine_request.task, engine_request.context
-        ))
-    );
+    let engine_request = build_engine_request(&request);
+    let audit_id = build_audit_id(&engine_request);
     Ok(ExternalAiDispatchOutput {
         adapter: "unified_identity_engine".to_string(),
         dry_run: request.dry_run,
@@ -130,7 +115,154 @@ pub fn build_external_ai_dispatch(
     })
 }
 
-fn validate_request(request: &ExternalAiDispatchRequest) -> Result<(), ExternalAiDispatchError> {
+/// Execute a live request through the configured OpenAI-compatible adapter.
+/// Credentials and transport details remain inside the provider adapter.
+pub fn execute_external_ai_dispatch(
+    request: ExternalAiDispatchRequest,
+    provider: &dyn ProviderAdapterResponder,
+) -> Result<ExternalAiDispatchOutput, ExternalAiDispatchError> {
+    validate_request(&request)?;
+    if request.dry_run {
+        return build_external_ai_dispatch(request);
+    }
+    let platform = parse_live_platform(&request.platform)?;
+    let identity = provider.identity();
+    if platform
+        .model
+        .as_deref()
+        .is_some_and(|model| model != identity.model_name)
+    {
+        return Err(ExternalAiDispatchError::new(
+            "platform",
+            "requested model does not match configured live provider",
+        ));
+    }
+    let engine_request = build_engine_request(&request);
+    let audit_id = build_audit_id(&engine_request);
+    let provider_request = build_live_responder_request(&engine_request);
+    let started = Instant::now();
+    let response = provider.respond(&provider_request);
+    let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let success = response
+        .extra_meta
+        .get("provider_response_ok")
+        .is_some_and(|value| value == "true");
+    let failure_class = (!success).then(|| {
+        response
+            .extra_meta
+            .get("provider_error_class")
+            .cloned()
+            .unwrap_or_else(|| "provider_error".to_string())
+    });
+    Ok(ExternalAiDispatchOutput {
+        adapter: "opencodex_openai_compatible".to_string(),
+        dry_run: false,
+        connects_real_service: true,
+        writes_memory: false,
+        request: engine_request.clone(),
+        result: UnifiedIdentityEngineResult {
+            success,
+            platform: engine_request.platform,
+            audit_id,
+            quality: if success { "acceptable" } else { "failed" }.to_string(),
+            result: ExternalAiStructuredResult {
+                summary: response.body,
+                evidence: vec![
+                    format!(
+                        "provider={} model={}",
+                        identity.provider_id, identity.model_name
+                    ),
+                    "request completed through the configured OpenAI-compatible adapter"
+                        .to_string(),
+                ],
+                risks: if success {
+                    Vec::new()
+                } else {
+                    vec!["external provider did not return a successful model response".to_string()]
+                },
+                follow_up_needed: !success,
+            },
+            duration_ms,
+            failure_class,
+        },
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveExternalAiPlatform {
+    pub kind: String,
+    pub model: Option<String>,
+}
+
+pub fn parse_live_platform(raw: &str) -> Result<LiveExternalAiPlatform, ExternalAiDispatchError> {
+    let trimmed = raw.trim();
+    let (kind, model) = match trimmed.split_once(':') {
+        Some((kind, model)) => (kind, Some(model.trim())),
+        None => (trimmed, None),
+    };
+    if !matches!(kind, "opencodex" | "openai-compatible") {
+        return Err(ExternalAiDispatchError::new(
+            "platform",
+            "live platform must be opencodex or openai-compatible",
+        ));
+    }
+    if model.is_some_and(str::is_empty) {
+        return Err(ExternalAiDispatchError::new(
+            "platform",
+            "platform model override must not be empty",
+        ));
+    }
+    Ok(LiveExternalAiPlatform {
+        kind: kind.to_string(),
+        model: model.map(str::to_string),
+    })
+}
+
+pub fn build_live_responder_request(request: &UnifiedIdentityEngineRequest) -> ResponderRequest {
+    let session_hint = request
+        .session_hint
+        .as_deref()
+        .map(|value| format!("\nSession hint: {value}"))
+        .unwrap_or_default();
+    ResponderRequest {
+        prompt: "You are an external worker dispatched by Chuang. Complete only the bounded task. Return a concise result with factual evidence, risks, and required follow-up. Do not claim actions you did not perform.".to_string(),
+        user_input: format!(
+            "Task:\n{}\n\nContext:\n{}{}",
+            request.task, request.context, session_hint
+        ),
+        recall_hit_count: 0,
+    }
+}
+
+fn build_engine_request(request: &ExternalAiDispatchRequest) -> UnifiedIdentityEngineRequest {
+    UnifiedIdentityEngineRequest {
+        platform: request.platform.trim().to_string(),
+        task: request.task.trim().to_string(),
+        context: request.context.trim().to_string(),
+        session_hint: request
+            .session_hint
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        timeout_ms: request.timeout_ms,
+        audit: request.audit,
+    }
+}
+
+fn build_audit_id(request: &UnifiedIdentityEngineRequest) -> String {
+    format!(
+        "external-ai-{}-{:016x}",
+        sanitize_id(&request.platform),
+        stable_hash(&format!(
+            "{}\n{}\n{}",
+            request.platform, request.task, request.context
+        ))
+    )
+}
+
+pub fn validate_request(
+    request: &ExternalAiDispatchRequest,
+) -> Result<(), ExternalAiDispatchError> {
     require_non_empty("platform", &request.platform)?;
     require_non_empty("task", &request.task)?;
     require_non_empty("context", &request.context)?;
@@ -141,10 +273,7 @@ fn validate_request(request: &ExternalAiDispatchRequest) -> Result<(), ExternalA
         ));
     }
     if !request.dry_run {
-        return Err(ExternalAiDispatchError::new(
-            "dry_run",
-            "live external AI dispatch is not enabled by this adapter",
-        ));
+        parse_live_platform(&request.platform)?;
     }
     for (field, value) in [
         ("platform", request.platform.as_str()),

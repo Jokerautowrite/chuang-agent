@@ -42,7 +42,7 @@ fn cli_external_ai_dispatch_outputs_dry_run_contract() {
 }
 
 #[test]
-fn cli_external_ai_dispatch_requires_dry_run() {
+fn cli_external_ai_dispatch_rejects_unsupported_live_platform() {
     let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "external-ai",
@@ -59,5 +59,5 @@ fn cli_external_ai_dispatch_requires_dry_run() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("live external AI dispatch is not enabled"));
+    assert!(stderr.contains("live platform must be opencodex or openai-compatible"));
 }
