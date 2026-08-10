@@ -27,12 +27,15 @@ use crate::responder::{
     ResponderRequest,
 };
 use crate::runtime_config::{
-    ActuatorConfig, ConfigError, ControlPlaneConfig, EvolutionConfig, GovernanceConfig,
-    ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
+    ActuatorConfig, CanonicalEvolutionGovernance, ConfigError, ControlPlaneConfig, EvolutionConfig,
+    GovernanceConfig, ProviderConfig, ProviderFallbackPolicy, RuntimeConfig, SubagentConfig,
 };
 use crate::skill_evolver::{
-    DryRunProposalEvolver, EvolutionError, EvolutionReceipt, EvolutionScope, NoopEvolver,
-    RuntimeEvent, SkillEvolver, SkillId, SkillProposal, ValidationReport,
+    CanonicalSkillEvolver, DryRunProposalEvolver, EvolutionError, EvolutionReceipt, EvolutionScope,
+    FailureDetectorConfig, FailurePattern, GovernanceContext, GovernanceDecision, NoopEvolver,
+    NoopRuleChangeGovernance, PolicyRuleChangeGovernance, RuleChangeGovernance,
+    RuleChangeJournalEntry, RuleChangeProposal, RuleChangeReceipt, RuntimeEvent, SkillEvolver,
+    SkillId, SkillProposal, ValidationReport,
 };
 use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueError};
 use crate::subagent_spawner::{
@@ -41,6 +44,7 @@ use crate::subagent_spawner::{
 };
 use crate::tool_runtime::{build_subagent_tool_context, ExecutionSlot, ToolExecutionConfig};
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSlots {
@@ -109,6 +113,109 @@ pub enum ActuatorSlot {
 pub enum EvolutionSlot {
     Noop(NoopEvolver),
     DryRun(DryRunProposalEvolver),
+    Canonical(CanonicalEvolutionSlot),
+}
+
+/// canonical 外环的治理门禁槽。治理是强制门禁：规则修改只有经
+/// `RuleChangeGovernance` 批准后才允许走写路径，本槽位本身从不写盘。
+#[derive(Debug, Clone)]
+pub enum CanonicalGovernanceSlot {
+    Policy(PolicyRuleChangeGovernance),
+    Noop(NoopRuleChangeGovernance),
+}
+
+impl Default for CanonicalGovernanceSlot {
+    fn default() -> Self {
+        Self::Policy(PolicyRuleChangeGovernance::default())
+    }
+}
+
+impl RuleChangeGovernance for CanonicalGovernanceSlot {
+    fn evaluate(
+        &self,
+        proposal: &RuleChangeProposal,
+        context: &GovernanceContext,
+    ) -> Result<GovernanceDecision, EvolutionError> {
+        match self {
+            Self::Policy(governance) => governance.evaluate(proposal, context),
+            Self::Noop(governance) => governance.evaluate(proposal, context),
+        }
+    }
+}
+
+/// canonical 外环运行时槽：承载 `CanonicalSkillEvolver` + 治理门禁 + 检测配置。
+/// 运行时事件流经 `SkillEvolver::observe` 进入外环，随后可走
+/// detect → propose → governance apply 闭环。
+#[derive(Debug, Clone)]
+pub struct CanonicalEvolutionSlot {
+    evolver: CanonicalSkillEvolver,
+    governance: CanonicalGovernanceSlot,
+    detector_config: FailureDetectorConfig,
+}
+
+impl CanonicalEvolutionSlot {
+    pub fn new(
+        evolver: CanonicalSkillEvolver,
+        governance: CanonicalGovernanceSlot,
+        detector_config: FailureDetectorConfig,
+    ) -> Self {
+        Self {
+            evolver,
+            governance,
+            detector_config,
+        }
+    }
+
+    pub fn evolver(&self) -> &CanonicalSkillEvolver {
+        &self.evolver
+    }
+
+    pub fn evolver_mut(&mut self) -> &mut CanonicalSkillEvolver {
+        &mut self.evolver
+    }
+
+    /// 治理门禁实例（外部调用方用它对提案做批准/拒绝）。
+    pub fn governance(&self) -> &dyn RuleChangeGovernance {
+        &self.governance
+    }
+
+    /// 治理上下文：当前已观察事件流 + 检测配置（证据验证用）。
+    pub fn governance_context(&self) -> GovernanceContext {
+        GovernanceContext {
+            observed_events: self.evolver.observed_events().to_vec(),
+            detector_config: self.detector_config.clone(),
+        }
+    }
+
+    pub fn detector_config(&self) -> &FailureDetectorConfig {
+        &self.detector_config
+    }
+}
+
+impl EvolutionSlot {
+    /// 外环治理门禁实例；仅 canonical 槽位提供。
+    pub fn rule_change_governance(&self) -> Option<&dyn RuleChangeGovernance> {
+        match self {
+            Self::Canonical(slot) => Some(slot.governance()),
+            Self::Noop(_) | Self::DryRun(_) => None,
+        }
+    }
+
+    /// 外环治理上下文；仅 canonical 槽位提供。
+    pub fn rule_change_governance_context(&self) -> Option<GovernanceContext> {
+        match self {
+            Self::Canonical(slot) => Some(slot.governance_context()),
+            Self::Noop(_) | Self::DryRun(_) => None,
+        }
+    }
+
+    /// canonical 外环的重复失败检测配置；仅 canonical 槽位提供。
+    pub fn rule_change_detector_config(&self) -> Option<&FailureDetectorConfig> {
+        match self {
+            Self::Canonical(slot) => Some(slot.detector_config()),
+            Self::Noop(_) | Self::DryRun(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -324,6 +431,23 @@ fn build_evolution(config: &EvolutionConfig) -> Result<EvolutionSlot, ConfigErro
     match config {
         EvolutionConfig::Noop => Ok(EvolutionSlot::Noop(NoopEvolver::new())),
         EvolutionConfig::DryRun => Ok(EvolutionSlot::DryRun(DryRunProposalEvolver::new())),
+        EvolutionConfig::Canonical(config) => {
+            let governance = match config.governance {
+                CanonicalEvolutionGovernance::Policy => {
+                    CanonicalGovernanceSlot::Policy(PolicyRuleChangeGovernance::default())
+                }
+                CanonicalEvolutionGovernance::Noop => {
+                    CanonicalGovernanceSlot::Noop(NoopRuleChangeGovernance)
+                }
+            };
+            let evolver = CanonicalSkillEvolver::new(&config.skill_root)
+                .with_approval_threshold(config.approval_threshold);
+            Ok(EvolutionSlot::Canonical(CanonicalEvolutionSlot::new(
+                evolver,
+                governance,
+                config.detector.clone(),
+            )))
+        }
     }
 }
 
@@ -729,6 +853,7 @@ impl SkillEvolver for EvolutionSlot {
         match self {
             Self::Noop(evolver) => evolver.observe(event),
             Self::DryRun(evolver) => evolver.observe(event),
+            Self::Canonical(slot) => slot.evolver_mut().observe(event),
         }
     }
 
@@ -736,6 +861,7 @@ impl SkillEvolver for EvolutionSlot {
         match self {
             Self::Noop(evolver) => evolver.propose(scope),
             Self::DryRun(evolver) => evolver.propose(scope),
+            Self::Canonical(slot) => slot.evolver().propose(scope),
         }
     }
 
@@ -743,6 +869,7 @@ impl SkillEvolver for EvolutionSlot {
         match self {
             Self::Noop(evolver) => evolver.validate(proposal),
             Self::DryRun(evolver) => evolver.validate(proposal),
+            Self::Canonical(slot) => slot.evolver().validate(proposal),
         }
     }
 
@@ -750,6 +877,79 @@ impl SkillEvolver for EvolutionSlot {
         match self {
             Self::Noop(evolver) => evolver.solidify(proposal),
             Self::DryRun(evolver) => evolver.solidify(proposal),
+            Self::Canonical(slot) => slot.evolver_mut().solidify(proposal),
+        }
+    }
+
+    fn detect_repeated_failures(
+        &self,
+        config: &FailureDetectorConfig,
+    ) -> Result<Vec<FailurePattern>, EvolutionError> {
+        match self {
+            Self::Canonical(slot) => slot.evolver().detect_repeated_failures(config),
+            Self::Noop(_) | Self::DryRun(_) => Err(EvolutionError::InvalidScope(
+                "detect_repeated_failures requires the canonical evolution slot".to_string(),
+            )),
+        }
+    }
+
+    fn propose_rule_change(
+        &self,
+        pattern: &FailurePattern,
+    ) -> Result<RuleChangeProposal, EvolutionError> {
+        match self {
+            Self::Canonical(slot) => slot.evolver().propose_rule_change(pattern),
+            Self::Noop(_) | Self::DryRun(_) => Err(EvolutionError::InvalidRuleChange(
+                "propose_rule_change requires the canonical evolution slot".to_string(),
+            )),
+        }
+    }
+
+    fn apply_rule_change(
+        &mut self,
+        proposal: RuleChangeProposal,
+        governance: &dyn RuleChangeGovernance,
+        context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        match self {
+            Self::Canonical(slot) => slot
+                .evolver_mut()
+                .apply_rule_change(proposal, governance, context),
+            Self::Noop(_) | Self::DryRun(_) => Err(EvolutionError::InvalidRuleChange(
+                "apply_rule_change requires the canonical evolution slot".to_string(),
+            )),
+        }
+    }
+
+    fn rollback_rule_change(
+        &mut self,
+        entry_id: &str,
+        governance: &dyn RuleChangeGovernance,
+        context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        match self {
+            Self::Canonical(slot) => slot
+                .evolver_mut()
+                .rollback_rule_change(entry_id, governance, context),
+            Self::Noop(_) | Self::DryRun(_) => Err(EvolutionError::InvalidRuleChange(
+                "rollback_rule_change requires the canonical evolution slot".to_string(),
+            )),
+        }
+    }
+
+    fn rule_change_history(&self) -> Result<Vec<RuleChangeJournalEntry>, EvolutionError> {
+        match self {
+            Self::Canonical(slot) => slot.evolver().rule_change_history(),
+            Self::Noop(_) | Self::DryRun(_) => Err(EvolutionError::InvalidRuleChange(
+                "rule_change_history requires the canonical evolution slot".to_string(),
+            )),
+        }
+    }
+
+    fn rule_change_journal_path(&self) -> Option<PathBuf> {
+        match self {
+            Self::Canonical(slot) => Some(slot.evolver().rule_change_journal_path()),
+            Self::Noop(_) | Self::DryRun(_) => None,
         }
     }
 }
