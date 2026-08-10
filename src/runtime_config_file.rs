@@ -235,7 +235,7 @@ pub fn parse_runtime_config_file_with_options(
         config.context_engine = parse_context_engine(value)?;
     }
     if let Some(value) = get_any(&values, &["evolution.kind", "evolution"]) {
-        config.evolution = parse_evolution(value)?;
+        config.evolution = parse_evolution(value, &values)?;
     }
     if let Some(value) = get_any(&values, &["context.max_tokens", "context_max_tokens"]) {
         config.context_budget.max_tokens = parse_u32("context.max_tokens", value)?;
@@ -849,14 +849,102 @@ fn parse_external_knowledge_source(
 
 fn parse_evolution(
     raw: &str,
+    values: &BTreeMap<String, String>,
 ) -> Result<crate::runtime_config::EvolutionConfig, RuntimeConfigFileError> {
     match raw {
         "noop" => Ok(crate::runtime_config::EvolutionConfig::Noop),
         "dry_run" => Ok(crate::runtime_config::EvolutionConfig::DryRun),
+        "canonical" => parse_canonical_evolution(values),
         other => Err(RuntimeConfigFileError::InvalidValue {
             key: "evolution.kind".to_string(),
             value: other.to_string(),
         }),
+    }
+}
+
+fn parse_canonical_evolution(
+    values: &BTreeMap<String, String>,
+) -> Result<crate::runtime_config::EvolutionConfig, RuntimeConfigFileError> {
+    use crate::runtime_config::{
+        CanonicalEvolutionConfig, CanonicalEvolutionGovernance, EvolutionConfig,
+    };
+    use crate::skill_evolver::FailureDetectorConfig;
+
+    let skill_root = get_any(values, &["evolution.skill_root"])
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("./rules"));
+    let approval_threshold = get_any(values, &["evolution.approval_threshold"])
+        .map(|value| parse_usize("evolution.approval_threshold", value))
+        .transpose()?
+        .unwrap_or(75) as u16;
+    let min_repeats = get_any(values, &["evolution.detector.min_repeats"])
+        .map(|value| parse_usize("evolution.detector.min_repeats", value))
+        .transpose()?
+        .unwrap_or(2);
+    let window = get_any(values, &["evolution.detector.window"])
+        .map(|value| parse_usize("evolution.detector.window", value))
+        .transpose()?;
+    let failure_kinds = match get_any(values, &["evolution.detector.failure_kinds"]) {
+        Some(raw) => parse_event_kinds("evolution.detector.failure_kinds", raw)?,
+        None => FailureDetectorConfig::default().failure_kinds,
+    };
+    let governance = match get_any(values, &["evolution.governance"]) {
+        Some(raw) => raw
+            .parse::<CanonicalEvolutionGovernance>()
+            .map_err(|message| RuntimeConfigFileError::InvalidValue {
+                key: "evolution.governance".to_string(),
+                value: message,
+            })?,
+        None => CanonicalEvolutionGovernance::default(),
+    };
+
+    Ok(EvolutionConfig::Canonical(CanonicalEvolutionConfig {
+        skill_root,
+        approval_threshold,
+        detector: FailureDetectorConfig {
+            min_repeats,
+            window,
+            failure_kinds,
+        },
+        governance,
+    }))
+}
+
+fn parse_event_kinds(
+    key: &str,
+    raw: &str,
+) -> Result<Vec<crate::skill_evolver::RuntimeEventKind>, RuntimeConfigFileError> {
+    let mut kinds = Vec::new();
+    for part in raw.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        kinds.push(parse_runtime_event_kind(part).ok_or_else(|| {
+            RuntimeConfigFileError::InvalidValue {
+                key: key.to_string(),
+                value: part.to_string(),
+            }
+        })?);
+    }
+    if kinds.is_empty() {
+        return Err(RuntimeConfigFileError::InvalidValue {
+            key: key.to_string(),
+            value: raw.to_string(),
+        });
+    }
+    Ok(kinds)
+}
+
+fn parse_runtime_event_kind(raw: &str) -> Option<crate::skill_evolver::RuntimeEventKind> {
+    use crate::skill_evolver::RuntimeEventKind;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "turn_completed" => Some(RuntimeEventKind::TurnCompleted),
+        "tool_succeeded" => Some(RuntimeEventKind::ToolSucceeded),
+        "tool_failed" => Some(RuntimeEventKind::ToolFailed),
+        "user_correction" => Some(RuntimeEventKind::UserCorrection),
+        "manual_observation" => Some(RuntimeEventKind::ManualObservation),
+        _ => None,
     }
 }
 

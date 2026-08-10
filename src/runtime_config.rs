@@ -7,9 +7,10 @@ use crate::hermes_memory::{
 };
 use crate::knowledge_read::KnowledgeReadConfig;
 use crate::provider_openai_compatible::{ProviderTransport, ReasoningEffort};
+use crate::skill_evolver::FailureDetectorConfig;
 use crate::subagent_queue::FileSubagentQueueConfig;
 use crate::tool_runtime::ShellRiskRules;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 默认工作区根（仅作为 RuntimeConfig::new 的初始哨兵值；
 /// 实际生效值由 app_server 按 base_dir / 环境变量归一化）。
@@ -207,10 +208,67 @@ pub struct SubagentLiveWorkerConfig {
     pub starts_worker: bool,
 }
 
+/// canonical 外环的规则修改治理门禁槽。
+/// `policy` = 确定性证据门禁（证据必须能在已观察事件流中验证，否则拒绝）；
+/// `noop` = 永不批准（安全默认，绝不写盘）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalEvolutionGovernance {
+    Policy,
+    Noop,
+}
+
+impl Default for CanonicalEvolutionGovernance {
+    fn default() -> Self {
+        Self::Policy
+    }
+}
+
+impl std::str::FromStr for CanonicalEvolutionGovernance {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "policy" => Ok(Self::Policy),
+            "noop" => Ok(Self::Noop),
+            other => Err(format!(
+                "unsupported evolution governance: {other} (supported: policy, noop)"
+            )),
+        }
+    }
+}
+
+/// canonical 外环配置。所有字段都有默认值：配置只写 `evolution = "canonical"`
+/// 也能解析。serde 向后兼容：新字段缺省时回落到 `Default`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CanonicalEvolutionConfig {
+    /// 技能/规则落盘根目录（canonical markdown 格式；默认与 governance 规则根同源）。
+    pub skill_root: PathBuf,
+    /// 自批准分数线 0-100（低于阈值不写盘）。
+    pub approval_threshold: u16,
+    /// 重复失败检测配置（窗口 / 最低重复次数 / 失败事件类型）。
+    pub detector: FailureDetectorConfig,
+    /// 规则修改治理门禁槽（默认 policy：确定性证据门禁）。
+    pub governance: CanonicalEvolutionGovernance,
+}
+
+impl Default for CanonicalEvolutionConfig {
+    fn default() -> Self {
+        Self {
+            skill_root: PathBuf::from("./rules"),
+            approval_threshold: 75,
+            detector: FailureDetectorConfig::default(),
+            governance: CanonicalEvolutionGovernance::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolutionConfig {
     Noop,
     DryRun,
+    Canonical(CanonicalEvolutionConfig),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1001,11 +1059,39 @@ impl EvolutionConfig {
         match self {
             Self::Noop => "noop",
             Self::DryRun => "dry_run",
+            Self::Canonical(_) => "canonical",
         }
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        Ok(())
+        match self {
+            Self::Noop | Self::DryRun => Ok(()),
+            Self::Canonical(config) => {
+                require_non_empty(
+                    "evolution.skill_root",
+                    &config.skill_root.display().to_string(),
+                )?;
+                if config.approval_threshold == 0 || config.approval_threshold > 100 {
+                    return Err(ConfigError {
+                        field: "evolution.approval_threshold".to_string(),
+                        message: "approval_threshold must be in 1..=100".to_string(),
+                    });
+                }
+                if config.detector.min_repeats == 0 {
+                    return Err(ConfigError {
+                        field: "evolution.detector.min_repeats".to_string(),
+                        message: "min_repeats must be greater than zero".to_string(),
+                    });
+                }
+                if config.detector.failure_kinds.is_empty() {
+                    return Err(ConfigError {
+                        field: "evolution.detector.failure_kinds".to_string(),
+                        message: "failure_kinds must not be empty".to_string(),
+                    });
+                }
+                Ok(())
+            }
+        }
     }
 }
 
