@@ -9,11 +9,11 @@ use chuang_agent::goal_dispatch::{
     load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
     GoalDispatchDiagnostics, GoalDispatchManifest,
 };
-use chuang_agent::goal_mode::{GoalEvidence, GoalSpec};
+use chuang_agent::goal_mode::{AcceptanceCheck, GoalAcceptancePlan, GoalEvidence, GoalSpec};
 use chuang_agent::goal_run::{
-    check_evidence_plan, ConvergenceStatus, ConvergenceVerdict, GoalCheckpoint,
-    GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics, GoalRunReceipt,
-    GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    check_evidence_plan, evaluate_acceptance_plan, ConvergenceStatus, ConvergenceVerdict,
+    GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
+    GoalRunReceipt, GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::skill_evolver::{
@@ -40,6 +40,7 @@ pub(crate) fn goal_command(args: &[String]) -> Result<(), String> {
         Some("collect") => goal_collect_command(&args[1..]),
         Some("step") => goal_step_command(&args[1..]),
         Some("evolve") => goal_evolve_command(&args[1..]),
+        Some("verify") => goal_verify_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -51,6 +52,7 @@ fn goal_plan_command(args: &[String]) -> Result<(), String> {
     goal_spec.goal_id = request.goal_id;
     goal_spec.budget.max_subtasks = request.max_subtasks;
     goal_spec.acceptance_evidence = request.evidence;
+    goal_spec.acceptance_plan = GoalAcceptancePlan::new(request.acceptance_plan);
     let run = GoalRun::new(
         goal_spec,
         request.worker_plan,
@@ -196,6 +198,17 @@ fn goal_show_command(args: &[String]) -> Result<(), String> {
                 "goal_evidence_missing: {}",
                 format_text_list(&diagnostics.evidence_missing)
             );
+            println!(
+                "goal_acceptance_plan: {}",
+                run.goal_spec.acceptance_plan.len()
+            );
+            for check in &run.goal_spec.acceptance_plan.checks {
+                println!(
+                    "goal_acceptance_check: [{}] {}",
+                    check.evaluator(),
+                    check.description()
+                );
+            }
             print_goal_operability_text(&operability);
         }
         ControlOutputFormat::Json => print_json(&GoalShowOutput {
@@ -649,40 +662,49 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
     let run = store
         .load(&request.goal_id)
         .map_err(format_goal_run_error)?;
-    let evidence_verdicts = check_evidence_plan(&request.root, &run.goal_spec);
-    let (summary, completed_worker_ids, validation_notes, source_hint) = match request.source {
-        GoalCheckpointCliSource::Manual {
-            summary,
-            completed_worker_ids,
-            validation_notes,
-            blocker_key,
-        } => {
-            let mut checkpoint = GoalCheckpoint::with_evidence(
-                request.checkpoint_id,
+    let fresh_evidence_verdicts = check_evidence_plan(&request.root, &run.goal_spec);
+    let (summary, completed_worker_ids, validation_notes, evidence_verdicts, source_hint) =
+        match request.source {
+            GoalCheckpointCliSource::Manual {
                 summary,
                 completed_worker_ids,
                 validation_notes,
-                evidence_verdicts,
-            );
-            if let Some(blocker_key) = blocker_key {
-                checkpoint.blocker_key = Some(blocker_key);
+                blocker_key,
+            } => {
+                let mut checkpoint = GoalCheckpoint::with_evidence(
+                    request.checkpoint_id,
+                    summary,
+                    completed_worker_ids,
+                    validation_notes,
+                    fresh_evidence_verdicts,
+                );
+                if let Some(blocker_key) = blocker_key {
+                    checkpoint.blocker_key = Some(blocker_key);
+                }
+                let receipt = store
+                    .record_checkpoint(&request.goal_id, checkpoint)
+                    .map_err(format_goal_run_error)?;
+                return render_goal_checkpoint_receipt(receipt, None, request.output);
             }
-            let receipt = store
-                .record_checkpoint(&request.goal_id, checkpoint)
-                .map_err(format_goal_run_error)?;
-            return render_goal_checkpoint_receipt(receipt, None, request.output);
-        }
-        GoalCheckpointCliSource::FromCollect { queue_root } => {
-            let suggestion =
-                load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
-            (
-                suggestion.summary,
-                suggestion.completed_worker_ids,
-                suggestion.validation_notes,
-                Some("collect"),
-            )
-        }
-    };
+            GoalCheckpointCliSource::FromCollect { queue_root } => {
+                let suggestion =
+                    load_goal_checkpoint_suggestion(&request.root, &queue_root, &request.goal_id)?;
+                // verifier-first：优先落盘 collect 时产出的运行时证据判定快照；
+                // 旧 suggestion 无该字段时回退为 checkpoint 时重新检查。
+                let evidence_verdicts = if suggestion.evidence_verdicts.is_empty() {
+                    fresh_evidence_verdicts
+                } else {
+                    suggestion.evidence_verdicts
+                };
+                (
+                    suggestion.summary,
+                    suggestion.completed_worker_ids,
+                    suggestion.validation_notes,
+                    evidence_verdicts,
+                    Some("collect"),
+                )
+            }
+        };
     let checkpoint = GoalCheckpoint::with_evidence(
         request.checkpoint_id,
         summary,
@@ -719,6 +741,99 @@ fn render_goal_checkpoint_receipt(
         ControlOutputFormat::Json => print_json(&receipt)?,
     }
     Ok(())
+}
+
+/// verifier-first 验收判定入口：按 goal 定义时声明的类型化验收计划
+/// 逐条产出证据判定（文件证据只读检查；命令检查显式执行）。
+/// 只读命令，不写 checkpoint、不修改 goal 文件；`--json` 输出判定详情。
+fn goal_verify_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_verify(args)?;
+    let store = GoalRunStore::new(&request.root);
+    let run = store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    let verdicts = evaluate_acceptance_plan(&request.root, &run.goal_spec.acceptance_plan);
+    let passed = verdicts.iter().all(|verdict| verdict.passed);
+    let missing = verdicts
+        .iter()
+        .filter(|verdict| !verdict.passed)
+        .map(|verdict| {
+            format!(
+                "[{}] {}: {}",
+                verdict.evaluator, verdict.description, verdict.reason
+            )
+        })
+        .collect::<Vec<_>>();
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_verify_goal_id: {}", request.goal_id);
+            println!(
+                "goal_verify_acceptance_checks: {}",
+                run.goal_spec.acceptance_plan.len()
+            );
+            println!("goal_verify_passed: {}", passed);
+            println!("goal_verify_missing: {}", format_text_list(&missing));
+            for verdict in &verdicts {
+                println!(
+                    "goal_verify_verdict: [{}] [{}] {} passed={} reason={}",
+                    verdict.check_index,
+                    verdict.evaluator,
+                    verdict.description,
+                    verdict.passed,
+                    verdict.reason
+                );
+            }
+        }
+        ControlOutputFormat::Json => print_json(&GoalVerifyOutput {
+            goal_id: request.goal_id,
+            acceptance_checks: run.goal_spec.acceptance_plan.len(),
+            passed,
+            missing,
+            verdicts,
+        })?,
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct GoalVerifyOutput {
+    goal_id: String,
+    acceptance_checks: usize,
+    passed: bool,
+    missing: Vec<String>,
+    verdicts: Vec<chuang_agent::goal_mode::AcceptanceVerdict>,
+}
+
+struct GoalVerifyCliRequest {
+    goal_id: String,
+    root: PathBuf,
+    output: ControlOutputFormat,
+}
+
+fn parse_goal_verify(args: &[String]) -> Result<GoalVerifyCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(GoalVerifyCliRequest {
+        goal_id,
+        root,
+        output,
+    })
 }
 
 fn goal_dispatch_command(args: &[String]) -> Result<(), String> {
@@ -877,6 +992,14 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
                 "goal_collect_ready_to_checkpoint: {}",
                 receipt.ready_to_checkpoint
             );
+            println!(
+                "goal_collect_acceptance_complete: {}",
+                receipt.acceptance_complete
+            );
+            println!(
+                "goal_collect_acceptance_missing: {}",
+                format_text_list(&receipt.acceptance_missing)
+            );
             if let Some(suggestion) = &receipt.checkpoint_suggestion {
                 println!("goal_collect_checkpoint_summary: {}", suggestion.summary);
                 println!(
@@ -886,6 +1009,10 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
                 println!(
                     "goal_collect_checkpoint_validation_notes: {}",
                     format_text_list(&suggestion.validation_notes)
+                );
+                println!(
+                    "goal_collect_checkpoint_evidence_verdicts: {}",
+                    suggestion.evidence_verdicts.len()
                 );
             }
             println!("goal_collect_manifest_path: {}", receipt.manifest_path);
@@ -958,6 +1085,14 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
                 receipt.collection.ready_to_checkpoint
             );
             println!(
+                "goal_step_acceptance_complete: {}",
+                receipt.collection.acceptance_complete
+            );
+            println!(
+                "goal_step_acceptance_missing: {}",
+                format_text_list(&receipt.collection.acceptance_missing)
+            );
+            println!(
                 "goal_step_missing_run_ids: {}",
                 format_text_list(&receipt.collection.missing_run_ids)
             );
@@ -1022,6 +1157,7 @@ struct GoalPlanCliRequest {
     worker_plan: Vec<GoalWorkerPlan>,
     validation_commands: Vec<String>,
     evidence: Vec<GoalEvidence>,
+    acceptance_plan: Vec<AcceptanceCheck>,
     max_subtasks: Option<usize>,
     output: ControlOutputFormat,
 }
@@ -1518,6 +1654,7 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
     let mut worker_plan: Vec<GoalWorkerPlan> = Vec::new();
     let mut validation_commands: Vec<String> = Vec::new();
     let mut evidence: Vec<GoalEvidence> = Vec::new();
+    let mut acceptance_plan: Vec<AcceptanceCheck> = Vec::new();
     let mut max_subtasks: Option<usize> = None;
     let mut output = ControlOutputFormat::Text;
 
@@ -1537,10 +1674,17 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
             "--validation" => {
                 validation_commands.push(take_value(args, &mut index, "--validation")?)
             }
-            "--evidence" => evidence.push(parse_goal_evidence(&take_value(
+            "--evidence" => {
+                let evidence_item =
+                    parse_goal_evidence(&take_value(args, &mut index, "--evidence")?)?;
+                // legacy 字段与类型化验收计划同步：--evidence 声明即验收检查。
+                evidence.push(evidence_item.clone());
+                acceptance_plan.push(AcceptanceCheck::Evidence(evidence_item));
+            }
+            "--acceptance" => acceptance_plan.push(parse_goal_acceptance_check(&take_value(
                 args,
                 &mut index,
-                "--evidence",
+                "--acceptance",
             )?)?),
             "--max-subtasks" => {
                 max_subtasks = Some(
@@ -1604,9 +1748,33 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
         worker_plan,
         validation_commands,
         evidence,
+        acceptance_plan,
         max_subtasks,
         output,
     })
+}
+
+/// 解析类型化验收检查（verifier-first 声明）：
+/// - `evidence:path|min_lines|min_content|description`
+/// - `command:CMD`
+fn parse_goal_acceptance_check(raw: &str) -> Result<AcceptanceCheck, String> {
+    let (kind, payload) = raw
+        .split_once(':')
+        .ok_or_else(|| "--acceptance expects evidence:... or command:...".to_string())?;
+    match kind.trim() {
+        "evidence" => Ok(AcceptanceCheck::Evidence(parse_goal_evidence(payload)?)),
+        "command" => {
+            let command = payload.trim().to_string();
+            if command.is_empty() {
+                return Err("--acceptance command must not be empty".to_string());
+            }
+            Ok(AcceptanceCheck::Command(command))
+        }
+        _ => Err(
+            "--acceptance kind must be evidence (path[|min_lines|min_content|description]) or command (CMD)"
+                .to_string(),
+        ),
+    }
 }
 
 /// 解析验收证据：`path|min_lines|min_content|description`
