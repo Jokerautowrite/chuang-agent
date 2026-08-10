@@ -1,3 +1,39 @@
+# 2026-08-10 1/2 并行接线落地：collect Command 门禁 + evolver 外环接入 runtime（双子代理）
+
+- **背景**：上一轮 1/2 落地（goal verifier-first 契约 + evolver 外环闭环）后，
+  本轮接两个缺口：① goal Command 类验收接入 collect 自动门禁；② evolver 外环
+  接入 runtime/slot 层（EvolutionConfig::Canonical）。两个 worker 子代理并行，
+  写范围不相交。
+- **改动① collect Command 门禁**（commit `a3c841a`）：
+  - `src/goal_run.rs`：新增公开只读评估器 `evaluate_acceptance_plan_read_only`
+    （Evidence 走文件只读判定；Command 不执行、结构化判定为未评估）。
+  - `src/goal_dispatch.rs`：collect 按 manifest 快照 `acceptance_plan` 复用
+    `evaluate_acceptance_plan` 对 Command 检查做 `sh -c` 判定（120s 超时复用，
+    未重复实现），结果纳入 `acceptance_complete`/`acceptance_missing`/
+    `ready_to_checkpoint`；receipt 与 checkpoint suggestion 新增
+    `acceptance_verdicts`（serde default 旧 JSON 兼容）；legacy 空计划默认放行。
+  - 只读 collect（status 诊断）不执行 Command，避免只读路径产生 sh -c 副作用。
+  - 测试：goal_dispatch +6、goal_verifier +2，goal 相关全部绿。
+- **改动② evolver 外环接入 runtime**（commits `1a43475`/`78af7c4`/`95c87b4`/
+  `defeca7`）：
+  - `SkillEvolver` trait 扩展外环默认方法（detect/propose/apply/rollback/
+    history/journal，默认结构化报错，旧实现零改动向后兼容）。
+  - `EvolutionConfig` 新增 `Canonical` 变体（serde 默认向后兼容）+
+    `CanonicalEvolutionConfig`/`CanonicalEvolutionGovernance`；配置文件解析支持
+    `canonical` 及子键（skill_root/approval_threshold/detector/governance，
+    缺省回落默认值，validate 校验）。
+  - `EvolutionSlot` 新增 `Canonical` 槽位：构建、分发、治理门禁槽、访问器；
+    Noop/DryRun 对新方法结构化报错。
+  - 测试：runtime_config +、runtime_config_file +、slot_registry +，全链路绿。
+- **附**（commit `6951d2e`）：`src/actuator/command.rs` 在途遗留的 stdin 写入
+  BrokenPipe 容错（子进程提前退出不误报），单独提交。
+- **验证**：干净 env 全量 `cargo test` 通过，123 个测试二进制 0 FAILED。
+- **缺口/下一步**：① `goal checkpoint --from-collect` 落盘时把
+  `suggestion.acceptance_verdicts` 持久化到 `GoalCheckpoint`（CLI 侧接线）；
+  ② runtime 层 ToolFailed 事件流尚未接入 `observe` 并驱动 detect→propose→apply
+  编排（当前 observe 只在 cli_subagent TurnCompleted 路径）；
+  ③ 实际启用 canonical 时建议在 config 显式指定独立 skill_root。
+
 # 2026-08-10 1/2 并行落地：goal 接 verifier-first + evolver 重复失败外环（双子代理）
 
 - **背景**：田楠指令把之前规划的 1/2 两项并行落地：① goal 接 verifier-first
