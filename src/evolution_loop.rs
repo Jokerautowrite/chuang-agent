@@ -41,9 +41,11 @@ impl std::error::Error for EvolutionBridgeError {}
 /// `RuntimeEvent`（观察流）。映射规则：
 /// - `TurnCompleted` → `TurnCompleted`
 /// - `TurnFailed` → `ToolFailed`（带 `ledger_source=turn_failed` 元数据）
-/// - `ToolFinished` 且执行失败（risk_decision 为 blocked / draft_only /
-///   needs_approval）→ `ToolFailed`（带 tool / error_code / error 元数据，
-///   供重复失败检测器形成签名）
+/// - `ToolFinished` / `ApprovalRequested` 且执行失败（risk_decision 为
+///   blocked / draft_only / needs_approval）→ `ToolFailed`（带 tool /
+///   error_code / error 元数据，供重复失败检测器形成签名）。
+///   注意：审批挂起路径在 ledger 里写的是 `ApprovalRequested`（无
+///   `ToolFinished`），不映射就会让外环观察不到被治理挂起的失败。
 /// - `ToolFinished` 且执行成功（allowed 或无 risk_decision）→ `ToolSucceeded`
 /// - 其他事件（ToolStarted、ProviderRequested、MemoryCommitted 等）忽略
 ///
@@ -99,7 +101,7 @@ impl EvolutionEventBridge {
                     metadata,
                 })
             }
-            RuntimeEventKind::ToolFinished => {
+            RuntimeEventKind::ToolFinished | RuntimeEventKind::ApprovalRequested => {
                 let tool = tool_name_from_call_id(ledger_event.call_id.as_deref())
                     .unwrap_or_else(|| "unknown".to_string());
                 if tool_finished_is_failure(ledger_event) {
@@ -451,4 +453,50 @@ fn tool_finished_is_failure(ledger_event: &LedgerRuntimeEvent) -> bool {
         risk_decision_label_prefix(&risk.decision),
         "blocked" | "draft_only" | "needs_approval"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_event_ledger::{RuntimeEvent as LedgerEvent, RuntimeRiskDecision};
+
+    fn approval_requested_event(decision: &str) -> LedgerEvent {
+        LedgerEvent::at(RuntimeEventKind::ApprovalRequested, "agent:chuang", "2026-08-10T00:00:00Z")
+            .with_turn_id("turn-1")
+            .with_call_id("tool:code_execute:cli:turn-1:tool:1")
+            .with_risk_decision(RuntimeRiskDecision::new(
+                decision.to_string(),
+                "profile=full_local_workspace action=delete or cleanup".to_string(),
+            ))
+            .with_evidence_ref("approval://pending/requested")
+    }
+
+    #[test]
+    fn approval_requested_with_needs_approval_maps_to_tool_failed() {
+        let bridge = EvolutionEventBridge::new();
+        let event = bridge.map_event(&approval_requested_event("needs_approval"), 0);
+        let mapped = event.expect("approval_requested should map to an evolver event");
+        assert_eq!(mapped.kind, EvolverRuntimeEventKind::ToolFailed);
+        assert_eq!(mapped.metadata.get("tool").map(String::as_str), Some("code_execute"));
+        assert_eq!(
+            mapped.metadata.get("error_code").map(String::as_str),
+            Some("needs_approval")
+        );
+        assert!(mapped.metadata.get("error").map(String::as_str).is_some_and(|reason| !reason.is_empty()));
+    }
+
+    #[test]
+    fn approval_requested_always_carries_failing_risk_decision() {
+        let bridge = EvolutionEventBridge::new();
+        for decision in ["needs_approval", "blocked", "draft_only"] {
+            let mapped = bridge
+                .map_event(&approval_requested_event(decision), 0)
+                .expect("approval_requested should map to an evolver event");
+            assert_eq!(
+                mapped.kind,
+                EvolverRuntimeEventKind::ToolFailed,
+                "decision={decision} should map to ToolFailed"
+            );
+        }
+    }
 }
