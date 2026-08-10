@@ -1,4 +1,4 @@
-use chuang_agent::goal_mode::GoalSpec;
+use chuang_agent::goal_mode::{AcceptanceVerdict, GoalSpec};
 use chuang_agent::goal_run::{
     GoalCheckpoint, GoalIntegrationPolicy, GoalRun, GoalRunStore, GoalValidationPlan,
     GoalWorkerPlan, GoalWriteScope,
@@ -154,10 +154,108 @@ fn goal_run_rejects_checkpoint_with_invalid_created_at() {
             validation_notes: vec!["cargo test -q --test goal_run_tests".to_string()],
             blocker_key: None,
             evidence_verdicts: Vec::new(),
+            acceptance_verdicts: Vec::new(),
         })
         .expect_err("invalid timestamp should fail");
 
     assert_eq!(err.field, "checkpoint_log.created_at");
+}
+
+#[test]
+fn goal_run_roundtrips_acceptance_verdicts() {
+    let root = temp_goal_root("acceptance-roundtrip");
+    let store = GoalRunStore::new(&root);
+    let mut run = sample_goal_run();
+    run.record_checkpoint(GoalCheckpoint::with_acceptance_verdicts(
+        "c1",
+        "checkpoint with command acceptance",
+        vec!["worker-1".to_string()],
+        vec!["cargo test -q --test goal_run_tests".to_string()],
+        Vec::new(),
+        vec![AcceptanceVerdict {
+            check_index: 0,
+            evaluator: "command".to_string(),
+            description: "test -f done.md".to_string(),
+            passed: true,
+            reason: "ok".to_string(),
+            exit_code: Some(0),
+        }],
+    ))
+    .expect("checkpoint should record");
+    store.create(&run).expect("store should create");
+    let loaded = store.load("mainline-mvp").expect("store should load");
+    let last = loaded.checkpoint_log.last().expect("one checkpoint");
+    assert_eq!(last.acceptance_verdicts.len(), 1);
+    assert_eq!(last.acceptance_verdicts[0].evaluator, "command");
+    assert!(last.acceptance_verdicts[0].passed);
+    assert_eq!(last.acceptance_verdicts[0].exit_code, Some(0));
+}
+
+#[test]
+fn goal_run_rejects_checkpoint_with_invalid_acceptance_verdicts() {
+    let mut run = sample_goal_run();
+    let err = run
+        .record_checkpoint(GoalCheckpoint::with_acceptance_verdicts(
+            "c-bad-acceptance",
+            "checkpoint must carry meaningful acceptance verdicts",
+            vec!["worker-1".to_string()],
+            vec!["cargo test -q --test goal_run_tests".to_string()],
+            Vec::new(),
+            vec![AcceptanceVerdict {
+                check_index: 0,
+                evaluator: "command".to_string(),
+                description: String::new(),
+                passed: true,
+                reason: "ok".to_string(),
+                exit_code: None,
+            }],
+        ))
+        .expect_err("empty description should fail validation");
+
+    assert_eq!(
+        err.field,
+        "checkpoint_log.acceptance_verdicts.description"
+    );
+}
+
+#[test]
+fn goal_run_loads_legacy_checkpoint_without_acceptance_verdicts() {
+    let root = temp_goal_root("legacy-acceptance");
+    let store = GoalRunStore::new(&root);
+    let mut run = sample_goal_run();
+    run.record_checkpoint(GoalCheckpoint::with_acceptance_verdicts(
+        "c-legacy",
+        "legacy checkpoint without acceptance verdicts field",
+        vec!["worker-1".to_string()],
+        vec!["cargo test -q --test goal_run_tests".to_string()],
+        Vec::new(),
+        vec![AcceptanceVerdict {
+            check_index: 0,
+            evaluator: "command".to_string(),
+            description: "test -f done.md".to_string(),
+            passed: true,
+            reason: "ok".to_string(),
+            exit_code: Some(0),
+        }],
+    ))
+    .expect("checkpoint should record");
+    store.create(&run).expect("store should create");
+
+    // 模拟旧版本落盘 JSON：去掉 checkpoint_log[0].acceptance_verdicts 字段。
+    let path = root.join("mainline-mvp.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("run json"))
+            .expect("run json should parse");
+    json["checkpoint_log"][0]
+        .as_object_mut()
+        .expect("checkpoint object")
+        .remove("acceptance_verdicts");
+    std::fs::write(&path, serde_json::to_string_pretty(&json).expect("render json"))
+        .expect("write legacy json");
+
+    let loaded = store.load("mainline-mvp").expect("legacy json should load");
+    let last = loaded.checkpoint_log.last().expect("one checkpoint");
+    assert!(last.acceptance_verdicts.is_empty());
 }
 
 #[test]

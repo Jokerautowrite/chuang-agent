@@ -663,7 +663,7 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
         .load(&request.goal_id)
         .map_err(format_goal_run_error)?;
     let fresh_evidence_verdicts = check_evidence_plan(&request.root, &run.goal_spec);
-    let (summary, completed_worker_ids, validation_notes, evidence_verdicts, source_hint) =
+    let (summary, completed_worker_ids, validation_notes, evidence_verdicts, acceptance_verdicts, source_hint) =
         match request.source {
             GoalCheckpointCliSource::Manual {
                 summary,
@@ -671,6 +671,7 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
                 validation_notes,
                 blocker_key,
             } => {
+                // manual 分支保持行为不变：不携带 acceptance_verdicts（空）。
                 let mut checkpoint = GoalCheckpoint::with_evidence(
                     request.checkpoint_id,
                     summary,
@@ -701,16 +702,18 @@ fn goal_checkpoint_command(args: &[String]) -> Result<(), String> {
                     suggestion.completed_worker_ids,
                     suggestion.validation_notes,
                     evidence_verdicts,
+                    suggestion.acceptance_verdicts,
                     Some("collect"),
                 )
             }
         };
-    let checkpoint = GoalCheckpoint::with_evidence(
+    let checkpoint = GoalCheckpoint::with_acceptance_verdicts(
         request.checkpoint_id,
         summary,
         completed_worker_ids,
         validation_notes,
         evidence_verdicts,
+        acceptance_verdicts,
     );
     let receipt = store
         .record_checkpoint(&request.goal_id, checkpoint)
@@ -735,6 +738,13 @@ fn render_goal_checkpoint_receipt(
             println!(
                 "goal_checkpoint_summary: {}",
                 receipt.last_checkpoint_summary.as_deref().unwrap_or("none")
+            );
+            println!(
+                "goal_checkpoint_acceptance_verdicts: {}",
+                receipt
+                    .last_checkpoint_acceptance_verdicts
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "none".to_string())
             );
             print_goal_checkpoint_writeback("goal", &receipt.checkpoint_writeback);
         }

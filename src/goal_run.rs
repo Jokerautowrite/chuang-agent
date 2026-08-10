@@ -78,6 +78,12 @@ pub struct GoalCheckpoint {
     /// 的 acceptance_evidence 检查文件系统得到。旧 checkpoint JSON 无此字段。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence_verdicts: Vec<EvidenceVerdict>,
+    /// 类型化验收计划判定快照（verifier-first）：collect 时对 manifest 快照的
+    /// acceptance_plan 逐条判定（Evidence 文件检查 + Command 执行），
+    /// `goal checkpoint --from-collect` 落盘以便审计/回放。
+    /// 旧 checkpoint JSON 无此字段。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acceptance_verdicts: Vec<AcceptanceVerdict>,
 }
 
 /// 单条验收证据的检查结果（证据在模型自述之外，由文件系统判定）。
@@ -174,6 +180,9 @@ pub struct GoalRunReceipt {
     pub last_checkpoint_created_at: Option<String>,
     pub last_checkpoint_completed_worker_ids: Option<Vec<String>>,
     pub last_checkpoint_validation_notes: Option<Vec<String>>,
+    /// 最新 checkpoint 的类型化验收判定条数（无判定时为 None）。旧 receipt JSON 无此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checkpoint_acceptance_verdicts: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -535,6 +544,10 @@ impl GoalRunStore {
                 .checkpoint_log
                 .last()
                 .map(|checkpoint| checkpoint.validation_notes.clone()),
+            last_checkpoint_acceptance_verdicts: run
+                .checkpoint_log
+                .last()
+                .map(|checkpoint| checkpoint.acceptance_verdicts.len()),
         })
     }
 }
@@ -637,6 +650,7 @@ impl GoalCheckpoint {
             validation_notes,
             blocker_key: None,
             evidence_verdicts: Vec::new(),
+            acceptance_verdicts: Vec::new(),
         }
     }
 
@@ -676,6 +690,26 @@ impl GoalCheckpoint {
         checkpoint
     }
 
+    /// 带验收证据 + 类型化验收判定的构造（collect → checkpoint 全量落盘）。
+    pub fn with_acceptance_verdicts(
+        checkpoint_id: impl Into<String>,
+        summary: impl Into<String>,
+        completed_worker_ids: Vec<String>,
+        validation_notes: Vec<String>,
+        evidence_verdicts: Vec<EvidenceVerdict>,
+        acceptance_verdicts: Vec<AcceptanceVerdict>,
+    ) -> Self {
+        let mut checkpoint = Self::with_evidence(
+            checkpoint_id,
+            summary,
+            completed_worker_ids,
+            validation_notes,
+            evidence_verdicts,
+        );
+        checkpoint.acceptance_verdicts = acceptance_verdicts;
+        checkpoint
+    }
+
     fn validate(&self) -> Result<(), GoalRunError> {
         require_non_empty("checkpoint_log.checkpoint_id", &self.checkpoint_id)?;
         require_non_empty("checkpoint_log.summary", &self.summary)?;
@@ -697,6 +731,13 @@ impl GoalCheckpoint {
         for verdict in &self.evidence_verdicts {
             require_non_empty("checkpoint_log.evidence_verdicts.path", &verdict.path)?;
             require_non_empty("checkpoint_log.evidence_verdicts.reason", &verdict.reason)?;
+        }
+        for verdict in &self.acceptance_verdicts {
+            require_non_empty(
+                "checkpoint_log.acceptance_verdicts.description",
+                &verdict.description,
+            )?;
+            require_non_empty("checkpoint_log.acceptance_verdicts.reason", &verdict.reason)?;
         }
         Ok(())
     }
