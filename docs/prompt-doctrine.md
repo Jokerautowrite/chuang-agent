@@ -66,7 +66,7 @@ Claude Code：抄 harness 纪律与分片组装，不 1:1 粘贴其 system promp
 
 ## 多子代理并行
 
-- `spawn_subagent`：`task` 或 `tasks[]` + `max_concurrency`（默认 min(n,4)，上限 8）
+- `spawn_subagent`：`task` 或 `tasks[]` + `max_concurrency`（默认 min(n,4)，上限 32，2026-08-11 从 8 放开）
 - 每个 task 自动 wrap 工人简报（C）
 - 主模型只收 admission 后摘要
 

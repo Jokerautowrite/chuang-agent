@@ -26,7 +26,7 @@ GoalRun planning + durable queue + foreground bounded goal step + bounded local 
 cargo run -- subagent run-loop --max-concurrency 2 --max-runs 2
 ```
 
-`--max-concurrency` 支持 `1..8`。每个 worker 仍通过文件队列 claim dispatch，按 capability 匹配任务，执行后写标准 `SubagentReport`，并由主控生成 `ReportAdmission`。
+`--max-concurrency` 支持 `1..32`（2026-08-11 从 1..8 放开）。每个 worker 仍通过文件队列 claim dispatch，按 capability 匹配任务，执行后写标准 `SubagentReport`，并由主控生成 `ReportAdmission`。
 
 ## 约束
 
