@@ -1,3 +1,36 @@
+# 2026-08-10 1/2 并行落地：goal 接 verifier-first + evolver 重复失败外环（双子代理）
+
+- **背景**：田楠指令把之前规划的 1/2 两项并行落地：① goal 接 verifier-first
+  （验收先行）；② evolver 重复失败自动改规则外环落盘。两个写范围不相交的
+  worker 子代理（goal 侧 / evolver 侧）并行开工，各自提交。
+- **改动① goal verifier-first**（commits `3566dc3` / `10bdc13` / `d685615`）：
+  - `src/goal_mode.rs`：新增 `AcceptanceCheck`（Evidence/Command）、
+    `GoalAcceptancePlan`、`AcceptanceVerdict`、`AcceptanceCheckContract` trait；
+    `GoalSpec` 增 `acceptance_plan`（serde default 向后兼容）。
+  - `src/goal_run.rs`：`evaluate_acceptance_check/plan`（Evidence 复用
+    `check_evidence_at`；Command 走 `sh -c` + 120s 超时，输出丢弃防泄漏）。
+  - `src/goal_dispatch.rs`：manifest 快照 `acceptance_plan/evidence`；collect
+    证据门禁（缺失阻断 checkpoint）；suggestion 携带 `evidence_verdicts`。
+  - `src/cli_goal.rs`：新增 `goal verify` 只读验收判定；`goal plan --acceptance`；
+    show/checkpoint/collect 输出验收信息；`cli_output.rs` usage 同步。
+  - 测试：goal_verifier +18、goal_dispatch +3，goal 相关 95 个全绿。
+- **改动② evolver 外环落盘**（commits `3693da6` / `4998c63`）：
+  - 新增 `src/skill_evolver/failure.rs`（`RepeatedFailureDetector`/
+    `FailureDetectorConfig`/`FailurePattern`）与 `src/skill_evolver/rule_change.rs`
+    （`RuleChangeProposal`/`RuleChangeGovernance` trait/`RuleChangeJournal` JSONL）。
+  - `src/skill_evolver/canonical.rs`：外环四阶段 detect→propose（证据必须存在
+    于 observed stream）→apply（治理批准后经既有 solidify 写路径落盘）→
+    rollback（按 journal 回滚，拒绝回滚创建=拒绝删除）；journal 在
+    `<skill_root>/.evolver/rule_changes.jsonl`，记录 before/after 全文与治理决策。
+  - `EvolutionError` 新增 `InvalidRuleChange`；新增契约校验函数。
+  - 测试：skill_evolver_tests +21，共 41 个全绿。
+- **验证**：干净 env 全量 `cargo test` 123 个测试二进制全绿，无失败。
+- **缺口/下一步**：① goal 命令验收（Command 类）尚未接入 `goal collect` 自动
+  门禁（目前 collect 只对文件证据设门禁，命令验收走 verify/checkpoint）；
+  ② evolver 外环尚未从 runtime/slot 层接到实际运行时事件流（当前是模块内闭环，
+  建议接入 `EvolutionConfig` 新变体或 runtime 事件回放）；③ `--evidence` 与
+  `--acceptance evidence:` 双写时展示序号可能不一致（不影响判定）。
+
 # 2026-08-10 evolve 外环落盘收尾：审批固化 + benchmark 验证 auto-revert（缺口 B）
 
 - **背景**：commit 3eec614 的 `goal evolve` 只产出 dry-run 提案；9ddad47 接了
