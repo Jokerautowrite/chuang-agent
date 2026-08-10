@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,6 +35,25 @@ fn cargo_command() -> Command {
         }
     }
     command
+}
+
+/// 写一个无 evolution 段的临时 config：subagent run-once/run-loop 默认
+/// 读到本机 config.toml（现在含 evolution=canonical）时会走 canonical
+/// 真实提案，破坏「Noop→DryRun 默认提升」的测试语义。这里用临时 config
+/// 把测试隔离在默认提升路径上（不写 evolution 段 = Noop → dry_run）。
+fn write_noop_evolution_config(queue_root: &Path) -> PathBuf {
+    std::fs::create_dir_all(queue_root).expect("queue root should be created");
+    let config_path = queue_root.join("config-noop-evolution.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "db_path = \"{}\"\nsubagent_queue_root = \"{}\"\n",
+            queue_root.join("memory.db").display(),
+            queue_root.display()
+        ),
+    )
+    .expect("noop-evolution config should write");
+    config_path
 }
 
 #[test]
@@ -660,6 +679,7 @@ fn cli_subagent_list_marks_released_claim_as_not_claimed() {
 #[test]
 fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() {
     let queue_root = temp_queue_root("run-once");
+    let config_path = write_noop_evolution_config(&queue_root);
     let first = dispatch_task(&queue_root, "task-cli-1", "审计第一段");
     let second = dispatch_task(&queue_root, "task-cli-2", "审计第二段");
     let first_run = first["run_id"].as_str().expect("first run id");
@@ -672,6 +692,8 @@ fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() 
             "--",
             "subagent",
             "run-once",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("temp path should be utf8"),
             "--json",
@@ -722,6 +744,7 @@ fn cli_subagent_run_once_fake_runner_writes_report_for_first_pending_dispatch() 
 #[test]
 fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
     let queue_root = temp_queue_root("run-once-idle");
+    let config_path = write_noop_evolution_config(&queue_root);
     let output = cargo_command()
         .args([
             "run",
@@ -729,6 +752,8 @@ fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
             "--",
             "subagent",
             "run-once",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("temp path should be utf8"),
             "--json",
@@ -754,6 +779,7 @@ fn cli_subagent_run_once_reports_idle_when_no_pending_dispatch_exists() {
 #[test]
 fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
     let queue_root = temp_queue_root("run-loop-limit");
+    let config_path = write_noop_evolution_config(&queue_root);
     let first = dispatch_task(&queue_root, "task-cli-loop-1", "循环任务一");
     let second = dispatch_task(&queue_root, "task-cli-loop-2", "循环任务二");
     let third = dispatch_task(&queue_root, "task-cli-loop-3", "循环任务三");
@@ -768,6 +794,8 @@ fn cli_subagent_run_loop_processes_multiple_pending_dispatches_with_limit() {
             "--",
             "subagent",
             "run-loop",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("temp path should be utf8"),
             "--max-runs",
@@ -1297,6 +1325,7 @@ fn cli_subagent_run_once_releases_claim_immediately_when_command_spawn_fails() {
 #[test]
 fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
     let queue_root = temp_queue_root("command-runner");
+    let config_path = write_noop_evolution_config(&queue_root);
     let dispatch = dispatch_task(&queue_root, "task-cli-command", "命令 runner 任务");
     let run_id = dispatch["run_id"].as_str().expect("run id");
 
@@ -1307,6 +1336,8 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
             "--",
             "subagent",
             "run-once",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
             "--subagent-queue-root",
             queue_root.to_str().expect("temp path should be utf8"),
             "--runner",

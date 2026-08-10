@@ -54,6 +54,8 @@ __pycache__/
 
 # Local operator config / generated identity runtime files
 /config.toml
+# evolver 外环运行时状态（观察流 + 规则变更 journal）不入库
+/rules/.evolver/
 /identity/MEMORY.md
 /identity/USER.md
 /identity/experiences.md
