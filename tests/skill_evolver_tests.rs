@@ -1203,7 +1203,8 @@ fn outer_loop_rejected_by_governance_writes_nothing() {
         .expect_err("noop governance must reject before any write");
 
     assert!(matches!(err, EvolutionError::ValidationRejected(_)));
-    assert!(!root.exists());
+    // 观察流持久化会创建 .evolver/ 目录；拒绝路径的语义是「无规则落盘」。
+    assert!(!root.join("build-for-rule-tool.md").exists());
     assert!(evolver
         .rule_change_history()
         .expect("empty journal should be readable")
@@ -1235,7 +1236,8 @@ fn apply_rule_change_rejects_inconsistent_governance_decision() {
         .expect_err("governance decision must reference the evaluated proposal");
 
     assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
-    assert!(!root.exists());
+    // 治理决策不一致时不得落盘规则（观察流 .evolver/ 目录属有意副作用）。
+    assert!(!root.join("build-for-rule-tool.md").exists());
 }
 
 #[test]
@@ -1375,4 +1377,102 @@ fn outer_loop_rollback_refuses_rule_creation_deletion() {
 
     assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
     assert!(root.join("build-for-rule-tool.md").exists());
+}
+
+#[test]
+fn observed_events_persist_across_instances_for_cross_turn_accumulation() {
+    // 跨 turn 累积失败证据：turn1 的观察流落盘后，新实例（turn2）能恢复，
+    // 使 min_repeats>=2 在真实多 turn 场景可触发。
+    let root = temp_skill_root("observed-persist");
+
+    let mut turn1 = CanonicalSkillEvolver::new(&root);
+    let failed = RuntimeEvent {
+        event_id: "ledger:t1:0:cli".to_string(),
+        task_id: "turn-1".to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        summary: "tool code_execute failed".to_string(),
+        metadata: BTreeMap::from([
+            ("tool".to_string(), "code_execute".to_string()),
+            ("error_code".to_string(), "needs_approval".to_string()),
+            ("error".to_string(), "profile=full_local_workspace action=delete or cleanup".to_string()),
+        ]),
+    };
+    turn1
+        .observe(failed)
+        .expect("turn1 failure event should be observed and persisted");
+
+    let events_path = turn1.observed_events_path();
+    assert!(events_path.exists(), "observed events jsonl should be persisted");
+
+    // 模拟新 CLI 进程：全新 evolver 实例从磁盘恢复观察流。
+    let turn2 = CanonicalSkillEvolver::new(&root);
+    assert_eq!(turn2.observed_events().len(), 1);
+    assert_eq!(
+        turn2.observed_events()[0].metadata.get("tool").map(String::as_str),
+        Some("code_execute")
+    );
+
+    // min_repeats=2 时单条失败不触发；再补一条同签名失败应命中 pattern。
+    let config = FailureDetectorConfig::default().min_repeats(2);
+    let patterns = turn2
+        .detect_repeated_failures(&config)
+        .expect("detect should run over restored stream");
+    assert!(patterns.is_empty(), "single restored failure must not trigger min_repeats=2");
+
+    let mut turn2 = turn2;
+    let second = RuntimeEvent {
+        event_id: "ledger:t2:0:cli".to_string(),
+        task_id: "turn-2".to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        summary: "tool code_execute failed".to_string(),
+        metadata: BTreeMap::from([
+            ("tool".to_string(), "code_execute".to_string()),
+            ("error_code".to_string(), "needs_approval".to_string()),
+            ("error".to_string(), "profile=full_local_workspace action=delete or cleanup".to_string()),
+        ]),
+    };
+    turn2
+        .observe(second)
+        .expect("turn2 failure event should be observed and persisted");
+
+    let patterns = turn2
+        .detect_repeated_failures(&config)
+        .expect("detect should run over accumulated stream");
+    assert_eq!(patterns.len(), 1, "two same-signature failures should form a pattern");
+    assert_eq!(patterns[0].count, 2);
+}
+
+#[test]
+fn observed_events_truncate_oldest_over_max_and_skip_corrupt_lines() {
+    let root = temp_skill_root("observed-bounded");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+
+    // 直接写入超过上限的事件（通过反复 observe 太慢；上限是 4096，用循环补到
+    // 上限 + 3，验证只保留最近 OBSERVED_EVENTS_MAX 条）。
+    for index in 0..(4096 + 3) {
+        evolver
+            .observe(RuntimeEvent {
+                event_id: format!("ev-{index}"),
+                task_id: "task-bounded".to_string(),
+                kind: RuntimeEventKind::TurnCompleted,
+                summary: "bounded stream event".to_string(),
+                metadata: BTreeMap::new(),
+            })
+            .expect("observe should succeed");
+    }
+    assert_eq!(evolver.observed_events().len(), 4096);
+    assert_eq!(evolver.observed_events()[0].event_id, "ev-3");
+
+    // 新实例加载恢复（上限截断后的内容已持久化）。
+    let restored = CanonicalSkillEvolver::new(&root);
+    assert_eq!(restored.observed_events().len(), 4096);
+    assert_eq!(restored.observed_events()[0].event_id, "ev-3");
+
+    // 损坏行应被跳过且不 panic。
+    let path = restored.observed_events_path();
+    let mut content = fs::read_to_string(&path).expect("jsonl should exist");
+    content.push_str("{this-is-not-json}\n");
+    fs::write(&path, content).expect("append corrupt line");
+    let tolerant = CanonicalSkillEvolver::new(&root);
+    assert_eq!(tolerant.observed_events().len(), 4096);
 }

@@ -17,6 +17,10 @@ use super::{
     ValidationReport,
 };
 
+/// 观察流持久化的最大事件数：超过后丢弃最旧事件，防止 `observed-events.jsonl`
+/// 无限膨胀。检测窗口由 `FailureDetectorConfig.window` 控制，这里是存储级硬上限。
+const OBSERVED_EVENTS_MAX: usize = 4096;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillLifecycleStatus {
@@ -128,9 +132,11 @@ pub struct CanonicalSkillEvolver {
 
 impl CanonicalSkillEvolver {
     pub fn new(skill_root: impl Into<PathBuf>) -> Self {
+        let skill_root = skill_root.into();
+        let observed_events = Self::load_observed_events(&skill_root);
         Self {
-            observed_events: Vec::new(),
-            skill_root: skill_root.into(),
+            observed_events,
+            skill_root,
             approval_threshold: 75,
             last_solidify_receipt: None,
             last_rule_change_receipt: None,
@@ -148,6 +154,82 @@ impl CanonicalSkillEvolver {
 
     pub fn skill_root(&self) -> &Path {
         &self.skill_root
+    }
+
+    /// 观察流持久化文件：`<skill_root>/.evolver/observed-events.jsonl`（与规则
+    /// 修改审计 journal 同一目录）。跨 turn 累积失败证据依赖它：每个 CLI 进程
+    /// 结束时观察流不会丢失，下次启动恢复，`min_repeats>=2` 才可能在多 turn
+    /// 上真实触发。
+    pub fn observed_events_path(&self) -> PathBuf {
+        self.skill_root.join(".evolver").join("observed-events.jsonl")
+    }
+
+    /// 从磁盘恢复观察流：文件不存在返回空；损坏行跳过（容忍，不 panic）；
+    /// IO 错误仅告警并返回空（存储问题不应阻断 evolver 启动）。
+    fn load_observed_events(skill_root: &Path) -> Vec<RuntimeEvent> {
+        let path = skill_root.join(".evolver").join("observed-events.jsonl");
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(error) => {
+                eprintln!("observed_events_load_failed path={}: {error}", path.display());
+                return Vec::new();
+            }
+        };
+        let mut events = Vec::new();
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<RuntimeEvent>(line) {
+                Ok(event) => events.push(event),
+                Err(error) => eprintln!(
+                    "observed_events_skip_corrupt_line path={}: {error}",
+                    path.display()
+                ),
+            }
+        }
+        events
+    }
+
+    /// 全量写观察流（JSONL）。截断或恢复后调用；写失败只告警不 panic，
+    /// 调用方自行决定是否继续（内存中的观察流不受影响）。
+    fn persist_observed_events(&self) -> Result<(), EvolutionError> {
+        let path = self.observed_events_path();
+        let parent = path.parent().ok_or_else(|| {
+            EvolutionError::StorageError("observed events path has no parent".to_string())
+        })?;
+        fs::create_dir_all(parent).map_err(storage_error)?;
+        let mut content = String::new();
+        for event in &self.observed_events {
+            content.push_str(
+                &serde_json::to_string(event)
+                    .map_err(|e| EvolutionError::StorageError(e.to_string()))?,
+            );
+            content.push('\n');
+        }
+        fs::write(&path, content).map_err(storage_error)
+    }
+
+    /// append 单条事件到观察流 JSONL（常规路径，避免每次 observe 全量重写）。
+    fn append_observed_event(&self, event: &RuntimeEvent) -> Result<(), EvolutionError> {
+        let path = self.observed_events_path();
+        let parent = path.parent().ok_or_else(|| {
+            EvolutionError::StorageError("observed events path has no parent".to_string())
+        })?;
+        fs::create_dir_all(parent).map_err(storage_error)?;
+        let mut line = serde_json::to_string(event)
+            .map_err(|e| EvolutionError::StorageError(e.to_string()))?;
+        line.push('\n');
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(storage_error)?;
+        file.write_all(line.as_bytes()).map_err(storage_error)?;
+        file.sync_all().map_err(storage_error)
     }
 
     pub fn last_solidify_receipt(&self) -> Option<&SkillUpsertReceipt> {
@@ -691,6 +773,20 @@ impl SkillEvolver for CanonicalSkillEvolver {
     fn observe(&mut self, event: RuntimeEvent) -> Result<EvolutionReceipt, EvolutionError> {
         validate_event(&event)?;
         self.observed_events.push(event);
+        let overflow = self.observed_events.len().saturating_sub(OBSERVED_EVENTS_MAX);
+        if overflow > 0 {
+            // 超存储级上限：丢弃最旧事件并全量重写（保持 bounded）。
+            self.observed_events.drain(..overflow);
+            if let Err(error) = self.persist_observed_events() {
+                eprintln!("observed_events_persist_failed: {error:?}");
+            }
+        } else {
+            // 常规路径：append 单行。
+            let last = self.observed_events.last().expect("just pushed");
+            if let Err(error) = self.append_observed_event(last) {
+                eprintln!("observed_events_persist_failed: {error:?}");
+            }
+        }
 
         Ok(EvolutionReceipt {
             accepted: true,
