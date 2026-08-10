@@ -3432,18 +3432,28 @@ where
         }
     }
 
+    // 身份/经验写入是附带的记忆沉淀，prepare 失败（如容量硬限制超限）只标记 failed，
+    // 绝不允许阻断用户回复。
     let pending_identity_write = if request.remember_identity {
-        Some(prepare_identity_turn_write(options, &turn)?)
+        match prepare_identity_turn_write(options, &turn) {
+            Ok(pending) => Some(pending),
+            Err(error) => {
+                remember_commit.mark_failed(RememberWorkflowStep::Identity, error);
+                None
+            }
+        }
     } else {
         None
     };
 
     let pending_experience_write = if remember_experience {
-        Some(prepare_experience_turn_write(
-            options,
-            &turn,
-            &experience_lesson,
-        )?)
+        match prepare_experience_turn_write(options, &turn, &experience_lesson) {
+            Ok(pending) => Some(pending),
+            Err(error) => {
+                remember_commit.mark_failed(RememberWorkflowStep::Experience, error);
+                None
+            }
+        }
     } else {
         None
     };
@@ -3459,44 +3469,28 @@ where
         remember_commit.mark_applied(RememberWorkflowStep::Archive);
     }
 
-    if request.remember_identity {
-        match pending_identity_write
-            .expect("identity write should be prepared when requested")
-            .commit()
-        {
+    // 身份记忆失败只降级（附带的记忆沉淀），不阻断用户回复。
+    if let Some(pending) = pending_identity_write {
+        match pending.commit() {
             Ok(record_id) => {
                 records.identity_record_id = Some(record_id);
                 remember_commit.mark_applied(RememberWorkflowStep::Identity);
             }
             Err(error) => {
-                if !remember_commit.has_applied_steps() {
-                    return Err(error);
-                }
                 remember_commit.mark_failed(RememberWorkflowStep::Identity, error);
-                insert_session_memory_metadata(&mut turn, request, &records);
-                remember_commit.apply_metadata(&mut turn);
-                return Ok((turn.result, records));
             }
         }
     }
 
-    if remember_experience {
-        match pending_experience_write
-            .expect("experience write should be prepared when requested")
-            .commit()
-        {
+    // 经验写入失败只降级（锦上添花），不阻断用户回复。
+    if let Some(pending) = pending_experience_write {
+        match pending.commit() {
             Ok(record_id) => {
                 records.experience_record_id = Some(record_id);
                 remember_commit.mark_applied(RememberWorkflowStep::Experience);
             }
             Err(error) => {
-                if !remember_commit.has_applied_steps() {
-                    return Err(error);
-                }
                 remember_commit.mark_failed(RememberWorkflowStep::Experience, error);
-                insert_session_memory_metadata(&mut turn, request, &records);
-                remember_commit.apply_metadata(&mut turn);
-                return Ok((turn.result, records));
             }
         }
     }

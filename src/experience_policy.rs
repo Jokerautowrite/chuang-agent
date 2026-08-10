@@ -101,6 +101,11 @@ fn evaluate_deterministic(candidate: &ExperienceCandidate<'_>) -> ExperienceAdmi
     if trimmed.chars().count() < 8 || ["ok", "好的", "完成", "done"].contains(&trimmed) {
         return rejected(ExperienceAdmissionReason::EmptyOrTrivial);
     }
+    // 纯问候/寒暄（无实质内容）不沉淀经验：比如「哈喽，在不在？」「在吗」「你好呀」。
+    // 这类对话对跨会话没有可复用价值，且会白白占用 experiences 容量导致后续写入超限。
+    if is_pure_greeting(trimmed) {
+        return rejected(ExperienceAdmissionReason::EmptyOrTrivial);
+    }
     if contains_any(
         trimmed,
         &[
@@ -238,6 +243,35 @@ fn evaluate_deterministic(candidate: &ExperienceCandidate<'_>) -> ExperienceAdmi
         return accepted(reason);
     }
     rejected(ExperienceAdmissionReason::NoDurableSignal)
+}
+
+fn is_pure_greeting(text: &str) -> bool {
+    const GREETING_WORDS: &[&str] = &[
+        "在不在",
+        "在吗",
+        "哈喽",
+        "hello",
+        "你好",
+        "hi ",
+        "hey",
+        "早上好",
+        "下午好",
+        "晚上好",
+        "辛苦了",
+        "谢谢",
+        "好的收到",
+        "收到",
+    ];
+    let compact = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '？' && *c != '?' && *c != '！' && *c != '!' && *c != '，' && *c != ',')
+        .collect::<String>();
+    // 去掉问候词后剩余内容极少，视为纯寒暄。
+    let mut remainder = compact.clone();
+    for word in GREETING_WORDS {
+        remainder = remainder.replace(word, "");
+    }
+    remainder.trim().chars().count() <= 6
 }
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
