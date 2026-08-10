@@ -878,6 +878,136 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
 }
 
 #[test]
+fn cli_goal_checkpoint_from_collect_persists_acceptance_verdicts() {
+    let root = temp_goal_root("from-collect-acceptance");
+    let queue_root = temp_goal_root("from-collect-acceptance-queue");
+    let done_path = root.join("done.md");
+
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "acceptance-checkpoint-goal",
+            "--objective",
+            "persist command acceptance verdicts at checkpoint",
+            "--worker",
+            "goal-worker|mainline|produce acceptance evidence",
+            "--validation",
+            "cargo test -q",
+            "--acceptance",
+            &format!("command:test -f {}", done_path.display()),
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let dispatch = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "dispatch",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "acceptance-checkpoint-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--json",
+        ])
+        .output()
+        .expect("goal dispatch should execute");
+    assert!(
+        dispatch.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&dispatch.stderr)
+    );
+    let dispatch_receipt: serde_json::Value =
+        serde_json::from_slice(&dispatch.stdout).expect("dispatch should be json");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    for entry in dispatch_receipt["dispatches"]
+        .as_array()
+        .expect("dispatches")
+    {
+        let run_id = entry["run_id"].as_str().expect("run id");
+        let task_id = entry["task_id"].as_str().expect("task id");
+        let agent_id = entry["agent_id"].as_str().expect("agent id");
+        let worker_id = entry["worker_id"].as_str().expect("worker id");
+        queue
+            .write_report_for_test(
+                &chuang_agent::subagent_spawner::RunId(run_id.to_string()),
+                &build_cli_goal_report(run_id, task_id, agent_id, worker_id, "worker completed"),
+            )
+            .expect("report should write");
+    }
+
+    // Command 验收通过所需证据文件出现在 goal root。
+    std::fs::write(&done_path, "acceptance ready\n").expect("write done.md");
+
+    let checkpoint = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "checkpoint",
+            "--from-collect",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "acceptance-checkpoint-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--checkpoint-id",
+            "checkpoint-1",
+            "--json",
+        ])
+        .output()
+        .expect("goal checkpoint should execute");
+    assert!(
+        checkpoint.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&checkpoint.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&checkpoint.stdout).expect("receipt should be json");
+    assert_eq!(receipt["checkpoint_count"], 1);
+    assert_eq!(receipt["last_checkpoint_acceptance_verdicts"], 1);
+
+    // show 可读回：checkpoint_log 中 acceptance_verdicts 已持久化（可审计/回放）。
+    let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "acceptance-checkpoint-goal",
+            "--json",
+        ])
+        .output()
+        .expect("goal show should execute");
+    assert!(
+        show.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    let run: serde_json::Value = serde_json::from_slice(&show.stdout).expect("run should be json");
+    let verdicts = run["checkpoint_log"][0]["acceptance_verdicts"]
+        .as_array()
+        .expect("acceptance verdicts");
+    assert_eq!(verdicts.len(), 1);
+    assert_eq!(verdicts[0]["evaluator"], "command");
+    assert_eq!(verdicts[0]["passed"], true);
+    assert_eq!(verdicts[0]["exit_code"], 0);
+}
+
+#[test]
 fn cli_goal_checkpoint_requires_completed_worker_id() {
     let root = temp_goal_root("checkpoint-requires-worker");
     let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
