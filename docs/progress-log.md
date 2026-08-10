@@ -1,3 +1,16 @@
+# 2026-08-11 memory-recall 基准升级 v4：补 OpenCode 式会话总结落盘 + 压缩保真两个能力点
+
+- **背景**：田楠补充两点——① OpenCode 干活中自动写总结落本地（会话断了也不忘，看重记忆完整性）；② 朋友加了 hook：压缩上下文时强制读最近几轮+回忆相关上下文。要求参考本机 Claude Code 与 OpenCode 实现再优化方案。
+- **调研**（本机资产+源码）：
+  - Claude Code 压缩（`02 查询引擎.md`/`09 服务层.md`）：5 种策略级联；Reactive Compaction = LLM 摘要历史 + 保留最近 KEEP_RECENT_COUNT 条原文；有熔断器防无限重试。
+  - OpenCode 源码（github sst/opencode `session/summary.ts`+`compaction.ts`）：`summarize()` 计算 diff（additions/deletions/files）写回 session/message 落 sqlite；compaction 保留最近 N 轮原文（DEFAULT_TAIL_TURNS=2）+ 保留 recent token 预算（25%，2k-8k）+ 历史 LLM 摘要；全部落 sqlite 可断线恢复。
+  - 创现状：已有 `SqliteSessionArchive`（每轮落盘 user/response/refs + replay）、`turn_summary`（每轮写 memory store，含字符压缩）、`SummaryCompressionContextEngine`（Memory/ToolResult 截断 80 字符）。**缺口 = 会话级滚动总结落盘 + 压缩时保留最近原文/召回相关上下文**。
+- **改动**：`benchmarks/memory-recall/benchmark.json` v3→v4（13→15 case）：
+  - case-014 断线恢复：只给一份落盘会话总结（已完成/进行中/待办/约束），测能否确定接续动作且不编造总结外事实
+  - case-015 压缩保真：给「LLM 摘要 + 最近 2 轮原文」混合上下文，测能否区分两类来源并完整召回细节
+- **验证**：verify ok；真实 evaluate 15/15 case **16/30**，014=2/2、015=1/2（区分度正常：能区分字体/按钮在原文、但遗漏摘要中 TapCanvas/图片存储细节），run-1786386706466 accepted_as_best。
+- **待定**：评测已覆盖两个能力点；运行时侧真正落地「会话滚动总结文件 + 压缩保留最近轮/召回相关」是后续改造，等田楠定优先级。
+
 # 2026-08-11 memory-recall 基准升级 v3：参考本地 Claude Code 记忆召回（清单+侧查询范式）5 个能力点
 
 - **背景**：田楠指令「参考一下 Claude Code 的记忆召回，就是我们本地的 Claude Code，
