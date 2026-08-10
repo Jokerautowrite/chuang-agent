@@ -29,6 +29,9 @@
 /citywall_event_ui_mockups/
 __pycache__/
 
+# BFCL benchmark working tree (contains its own git repo, 200+ MB)
+/.bfcl-ws/
+
 # One-off task drafts at repo root (feishu/citywall intermediate)
 /tmp-*/
 /tmp-*.md
