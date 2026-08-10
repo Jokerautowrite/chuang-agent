@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -362,6 +363,66 @@ pub trait SkillEvolver {
     fn propose(&self, scope: EvolutionScope) -> Result<Vec<SkillProposal>, EvolutionError>;
     fn validate(&self, proposal: &SkillProposal) -> Result<ValidationReport, EvolutionError>;
     fn solidify(&mut self, proposal: SkillProposal) -> Result<SkillId, EvolutionError>;
+
+    /// 外环阶段 1：在已观察的运行时事件流中检测重复失败模式。
+    /// 默认实现返回结构化错误；只有 canonical 槽位支持（向后兼容，旧实现无需改动）。
+    fn detect_repeated_failures(
+        &self,
+        _config: &FailureDetectorConfig,
+    ) -> Result<Vec<FailurePattern>, EvolutionError> {
+        Err(EvolutionError::InvalidScope(
+            "detect_repeated_failures is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 外环阶段 2：把一个已检测的失败模式转成可审计的规则修改提案。
+    /// 提案引用的每条证据必须存在于已观察事件流中。
+    fn propose_rule_change(
+        &self,
+        _pattern: &FailurePattern,
+    ) -> Result<RuleChangeProposal, EvolutionError> {
+        Err(EvolutionError::InvalidRuleChange(
+            "propose_rule_change is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 外环阶段 3+4：规则修改必须先经治理门禁批准，批准后才走既有写路径落盘。
+    /// 治理是强制门禁：本方法绝不绕过治理直接写盘。
+    fn apply_rule_change(
+        &mut self,
+        _proposal: RuleChangeProposal,
+        _governance: &dyn RuleChangeGovernance,
+        _context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        Err(EvolutionError::InvalidRuleChange(
+            "apply_rule_change is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 外环回滚：按 JSONL journal 回滚一个已应用的规则修改。
+    /// 回滚同样必须经过治理门禁批准。
+    fn rollback_rule_change(
+        &mut self,
+        _entry_id: &str,
+        _governance: &dyn RuleChangeGovernance,
+        _context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        Err(EvolutionError::InvalidRuleChange(
+            "rollback_rule_change is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 已应用规则修改的可观测历史（append-only JSONL journal）。
+    fn rule_change_history(&self) -> Result<Vec<RuleChangeJournalEntry>, EvolutionError> {
+        Err(EvolutionError::InvalidRuleChange(
+            "rule_change_history is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 规则修改 journal 路径；不支持的槽位返回 None。
+    fn rule_change_journal_path(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 fn validate_scope(scope: &EvolutionScope) -> Result<(), EvolutionError> {
