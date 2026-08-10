@@ -3404,3 +3404,14 @@
 - 外环失败判定靠 ledger `risk_decision` 前缀（blocked/draft_only/needs_approval），`allowed` 或无决策算成功。
 - 治理拦截的挂起路径没有 `ToolFinished` 事件——桥接层必须覆盖 `ApprovalRequested`，这是本轮发现的第一个真实缺口。
 - 跨 turn 失败累积是 `min_repeats>=2` 的前提，持久化位置选规则 audit journal 同目录（`.evolver/`），语义自洽。
+
+# 2026-08-11 memory-recall benchmark 骨架推进（小创）
+
+- 目标：把第一个 Benchmark 能力（记忆召回）从 2 case 扩成有区分度的多维评测集，跑通端到端 evaluate。
+- 改动：
+  - `benchmarks/memory-recall/benchmark.json` v1→v2：case 2→8，新增维度=项目核心定位(case-003)、决策历史·图片处理(case-004)、模糊查询·老爸速度要求(case-005)、外部记忆查询边界(case-006)、拒答负例·不编造(case-007)、诚实原则·无证据不伪造(case-008)。
+  - `rubric/case-003~008.rubric` 新增（0600 私有），case-001/002 rubric 保留。
+  - `scoreboard.json` 记录首次 8-case 真实 evaluate（run-1786384719274，6/16，accepted_as_best）。
+- evaluate 全链路验证：`benchmark verify` ok；Target 答案由 opencodex-sub2/deepseek-v4-flash 生成（未注入创记忆），evaluator 严格区分答对/不确定/编造（case-001/006 部分对 1 分，case-007/008 拒答/诚实原则 2 分，编造次数/偏离结论 0 分）。
+- 说明：低分符合预期——Target 未带创记忆跑，正好展示评分区分度；真正测创需在创的会话上下文里跑 Target（带 identity/ 注入）。
+- 测试：cargo test benchmark 相关 11 passed。

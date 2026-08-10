@@ -1,49 +1,121 @@
 {
   "benchmark_id": "memory-recall",
-  "version": 1,
+  "version": 2,
   "best": {
-    "run_id": "run-1785966549869",
+    "run_id": "run-1786384719274",
     "benchmark_id": "memory-recall",
-    "version": 1,
-    "tested_at": "run-1785966549869",
+    "version": 2,
+    "tested_at": "run-1786384719274",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 2,
+        "score": 1,
         "max_score": 2,
-        "reason": "准确说出中文和简洁直接，并明确说明这是记忆中记录的沟通偏好。"
+        "reason": "只说了中文，未提到简洁直接，语气表述也有偏差。"
       },
       {
         "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "被测方未给出任何归属区分，也未说明子代理能否写核心记忆，完全不符合评分要求。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未提供任何有效信息，无法确认定位、语言或关系。"
+      },
+      {
+        "case_id": "case-004",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未答出核心结论（图片不进会话，存起来按需读），仅强调显式理解，偏离评分标准。"
+      },
+      {
+        "case_id": "case-005",
+        "score": 0,
+        "max_score": 2,
+        "reason": "次数编造为3次且原则内容不符，未提及最短闭环及6条可执行版。"
+      },
+      {
+        "case_id": "case-006",
+        "score": 1,
+        "max_score": 2,
+        "reason": "知道有外部记忆服务用于历史检索，但未明确区分历史类应先查外部memory-qa、自身做过的事用自身记忆，且默认使用自身记忆，边界不清。"
+      },
+      {
+        "case_id": "case-007",
         "score": 2,
         "max_score": 2,
-        "reason": "完整区分了小创与小承、小云、小策的系统归属，并正确说明子代理不能直接写入核心记忆，只能产出报告或记忆提案。"
+        "reason": "如实说明记忆中没有此记录，并明确表示未编造，符合2分标准。"
+      },
+      {
+        "case_id": "case-008",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确区分真实与占位，给出具体汇报机制如明示状态、不描述为已验证、明确回复未实现，符合2分标准。"
       }
     ],
-    "total_score": 4,
-    "max_score": 4
+    "total_score": 6,
+    "max_score": 16
   },
   "latest": {
-    "run_id": "run-1786260234864",
+    "run_id": "run-1786384719274",
     "benchmark_id": "memory-recall",
-    "version": 1,
-    "tested_at": "run-1786260234864",
+    "version": 2,
+    "tested_at": "run-1786384719274",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 2,
+        "score": 1,
         "max_score": 2,
-        "reason": "准确说出中文且强调简洁直接，并明确引用了记忆来源（协作默认、具体定规矩时间等）。"
+        "reason": "只说了中文，未提到简洁直接，语气表述也有偏差。"
       },
       {
         "case_id": "case-002",
+        "score": 0,
+        "max_score": 2,
+        "reason": "被测方未给出任何归属区分，也未说明子代理能否写核心记忆，完全不符合评分要求。"
+      },
+      {
+        "case_id": "case-003",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未提供任何有效信息，无法确认定位、语言或关系。"
+      },
+      {
+        "case_id": "case-004",
+        "score": 0,
+        "max_score": 2,
+        "reason": "未答出核心结论（图片不进会话，存起来按需读），仅强调显式理解，偏离评分标准。"
+      },
+      {
+        "case_id": "case-005",
+        "score": 0,
+        "max_score": 2,
+        "reason": "次数编造为3次且原则内容不符，未提及最短闭环及6条可执行版。"
+      },
+      {
+        "case_id": "case-006",
+        "score": 1,
+        "max_score": 2,
+        "reason": "知道有外部记忆服务用于历史检索，但未明确区分历史类应先查外部memory-qa、自身做过的事用自身记忆，且默认使用自身记忆，边界不清。"
+      },
+      {
+        "case_id": "case-007",
         "score": 2,
         "max_score": 2,
-        "reason": "完整区分四个agent的归属，并正确指出子代理只能产出报告或记忆提案，不能直接写核心记忆。"
+        "reason": "如实说明记忆中没有此记录，并明确表示未编造，符合2分标准。"
+      },
+      {
+        "case_id": "case-008",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确区分真实与占位，给出具体汇报机制如明示状态、不描述为已验证、明确回复未实现，符合2分标准。"
       }
     ],
-    "total_score": 4,
-    "max_score": 4
+    "total_score": 6,
+    "max_score": 16
   },
   "history": [
     {
@@ -199,6 +271,64 @@
       ],
       "total_score": 4,
       "max_score": 4
+    },
+    {
+      "run_id": "run-1786384719274",
+      "benchmark_id": "memory-recall",
+      "version": 2,
+      "tested_at": "run-1786384719274",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 1,
+          "max_score": 2,
+          "reason": "只说了中文，未提到简洁直接，语气表述也有偏差。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "被测方未给出任何归属区分，也未说明子代理能否写核心记忆，完全不符合评分要求。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未提供任何有效信息，无法确认定位、语言或关系。"
+        },
+        {
+          "case_id": "case-004",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未答出核心结论（图片不进会话，存起来按需读），仅强调显式理解，偏离评分标准。"
+        },
+        {
+          "case_id": "case-005",
+          "score": 0,
+          "max_score": 2,
+          "reason": "次数编造为3次且原则内容不符，未提及最短闭环及6条可执行版。"
+        },
+        {
+          "case_id": "case-006",
+          "score": 1,
+          "max_score": 2,
+          "reason": "知道有外部记忆服务用于历史检索，但未明确区分历史类应先查外部memory-qa、自身做过的事用自身记忆，且默认使用自身记忆，边界不清。"
+        },
+        {
+          "case_id": "case-007",
+          "score": 2,
+          "max_score": 2,
+          "reason": "如实说明记忆中没有此记录，并明确表示未编造，符合2分标准。"
+        },
+        {
+          "case_id": "case-008",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确区分真实与占位，给出具体汇报机制如明示状态、不描述为已验证、明确回复未实现，符合2分标准。"
+        }
+      ],
+      "total_score": 6,
+      "max_score": 16
     }
   ]
 }
