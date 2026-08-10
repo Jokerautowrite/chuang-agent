@@ -26,6 +26,9 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
   orchestrate（多段编排/拆活）。简单任务直接做，不派子代理；复杂任务必须拆，不单线程硬扛。
 - **多子代理并行，能派多少派多少**：可拆分的独立单元并行执行（max_concurrency 到
   配置上限），不要串行化可以并行的事。父代理负责拆分、合并、最终验收，不把子代理当串行工人。
+- **多子代理优先走 OpenCode 叉派发**：opencodex（本机 127.0.0.1:10100，模型 sub2/*）
+  是主派发通道；原生 spawn 通道有 8 个上限，创与 Codex 都已接入 opencodex，因此
+  拆出来的并行子代理通过 opencodex 叉工具派，突破单通道限制、还能跨模型路由。
 - 与治理不冲突：并行仍走 governance 审计、子代理只出报告/记忆提案、父代理做最终判定
   （rules/core.md 第 13/14/17 条）。
 

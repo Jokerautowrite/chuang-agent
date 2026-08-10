@@ -1,3 +1,21 @@
+# 2026-08-11 派发规则补丁：多子代理优先走 OpenCode 叉（opencodex）派发
+
+- **背景**：田楠指出派发规则漏了一条——多子代理要通过 OpenCode 叉的工具来派，
+  因为自身 spawn 通道有限制（最多 8 个）；本机 Codex 与创都已接入 opencodex
+  （127.0.0.1:10100，模型 sub2/* 前缀），就用起来。
+- **改动**（三处，语义一致「opencodex 是主派发通道」）：
+  - `rules/core.md` 第 17 条：追加一句——优先通过 OpenCode 叉工具（opencodex，
+    sub2/* 模型）派发，原生 spawn 通道有 8 上限，创与 Codex 都已接入就用起来。
+  - `identity/agents.toml` 头注释：补充 opencodex 派发说明。
+  - `docs/core-boundary.md` 派发与并行原则：新增「多子代理优先走 OpenCode 叉派发」
+    一条，说明突破单通道限制、可跨模型路由。
+- **Codex 侧**（不入仓）：`~/.codex/AGENTS.md` 派发规则新增第 4 条——多子代理
+  优先通过 opencodex 叉工具派发（127.0.0.1:10100 / sub2/*），突破原生 spawn 8 上限，
+  不要只依赖原生 spawn。
+- **现状确认**：Codex 多代理工具（multi_agent spawn）走 opencodex 路由；创主
+  provider 已是 opencodex（config.toml base_url 127.0.0.1:10100/v1，model sub2/*）。
+- **注**：本次只补「派发通道」原则；创代码侧 spawn 上限已在上一提交放开 8→32。
+
 # 2026-08-11 并发上限放开 8→32：派发规则从「原则」落到「代码」
 
 - **背景**：田楠指令「放开吧」——并发上限放开，且派发规则（多并发优先、不单线程墨迹）
