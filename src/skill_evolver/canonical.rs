@@ -2,11 +2,18 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use serde::Serialize;
 
+use super::failure::{FailureDetectorConfig, FailurePattern, RepeatedFailureDetector};
+use super::rule_change::{
+    FailureEvidence, GovernanceContext, RuleChangeGovernance, RuleChangeJournal,
+    RuleChangeJournalEntry, RuleChangeKind, RuleChangeProposal, RuleChangeReceipt,
+};
 use super::{
-    validate_event, validate_proposal, validate_scope, EvolutionError, EvolutionReceipt,
-    EvolutionScope, RuntimeEvent, SkillApprovalReceipt, SkillEvolver, SkillId, SkillProposal,
+    validate_event, validate_governance_decision, validate_proposal, validate_rule_change_proposal,
+    validate_scope, EvolutionError, EvolutionReceipt, EvolutionScope, RuntimeEvent,
+    SkillApprovalReceipt, SkillEvolver, SkillId, SkillProposal, SkillProposalProvenance,
     ValidationReport,
 };
 
@@ -116,6 +123,7 @@ pub struct CanonicalSkillEvolver {
     skill_root: PathBuf,
     approval_threshold: u16,
     last_solidify_receipt: Option<SkillUpsertReceipt>,
+    last_rule_change_receipt: Option<RuleChangeReceipt>,
 }
 
 impl CanonicalSkillEvolver {
@@ -125,6 +133,7 @@ impl CanonicalSkillEvolver {
             skill_root: skill_root.into(),
             approval_threshold: 75,
             last_solidify_receipt: None,
+            last_rule_change_receipt: None,
         }
     }
 
@@ -143,6 +152,10 @@ impl CanonicalSkillEvolver {
 
     pub fn last_solidify_receipt(&self) -> Option<&SkillUpsertReceipt> {
         self.last_solidify_receipt.as_ref()
+    }
+
+    pub fn last_rule_change_receipt(&self) -> Option<&RuleChangeReceipt> {
+        self.last_rule_change_receipt.as_ref()
     }
 
     pub fn self_approve(
@@ -294,6 +307,249 @@ impl CanonicalSkillEvolver {
             writes_skills: true,
             deletes_skill: false,
         })
+    }
+
+    /// Stage 1 of the evolver outer loop: detect repeated-failure patterns in
+    /// the observed runtime stream. Pure and read-only.
+    pub fn detect_repeated_failures(
+        &self,
+        config: &FailureDetectorConfig,
+    ) -> Result<Vec<FailurePattern>, EvolutionError> {
+        if config.min_repeats == 0 {
+            return Err(EvolutionError::InvalidScope(
+                "min_repeats must be greater than zero".to_string(),
+            ));
+        }
+        if config.failure_kinds.is_empty() {
+            return Err(EvolutionError::InvalidScope(
+                "failure_kinds must not be empty".to_string(),
+            ));
+        }
+        Ok(RepeatedFailureDetector::new(config.clone()).detect(&self.observed_events))
+    }
+
+    /// Stage 2 of the evolver outer loop: turn one detected failure pattern
+    /// into a structured, auditable rule-modification proposal. Every cited
+    /// evidence event must exist in the observed runtime stream.
+    pub fn propose_rule_change(
+        &self,
+        pattern: &FailurePattern,
+    ) -> Result<RuleChangeProposal, EvolutionError> {
+        if pattern.signature.trim().is_empty() {
+            return Err(EvolutionError::InvalidProposal(
+                "pattern signature must not be empty".to_string(),
+            ));
+        }
+        if pattern.count == 0 || pattern.event_ids.is_empty() {
+            return Err(EvolutionError::InvalidProposal(
+                "pattern must carry failure evidence".to_string(),
+            ));
+        }
+        for event_id in &pattern.event_ids {
+            if !self
+                .observed_events
+                .iter()
+                .any(|event| &event.event_id == event_id)
+            {
+                return Err(EvolutionError::InvalidProposal(format!(
+                    "pattern references unknown observed event {event_id}"
+                )));
+            }
+        }
+
+        let title = format!("Rule for {}", pattern.signature);
+        let proposal_id = format!(
+            "rule-change-{}-{}",
+            stable_id_part(&pattern.signature),
+            stable_id_part(&pattern.last_seen_event_id)
+        );
+        let rule_id = canonical_skill_id_for(&title, &proposal_id);
+        let old_procedure = self.existing_procedure(&rule_id)?;
+        let change_kind = if old_procedure.is_empty() {
+            RuleChangeKind::CreateRule
+        } else {
+            RuleChangeKind::UpdateRule
+        };
+
+        let provenance = pattern
+            .event_ids
+            .iter()
+            .filter_map(|event_id| {
+                self.observed_events
+                    .iter()
+                    .find(|event| &event.event_id == event_id)
+                    .map(|event| SkillProposalProvenance {
+                        source_event_id: event.event_id.clone(),
+                        source_task_id: event.task_id.clone(),
+                        source_kind: event.kind.clone(),
+                        source_summary: event.summary.clone(),
+                        source_metadata: event.metadata.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(RuleChangeProposal {
+            proposal_id,
+            rule_id: rule_id.clone(),
+            change_kind,
+            title,
+            trigger: format!(
+                "repeated failure {} observed {} times across {} task(s)",
+                pattern.signature,
+                pattern.count,
+                pattern.task_ids.len()
+            ),
+            old_procedure,
+            new_procedure: default_repair_procedure(&pattern.signature),
+            rationale: format!(
+                "auto-proposed by the evolver outer loop: repeated failure {} observed {} times across {} task(s); the existing rule needs to change so the failure does not recur",
+                pattern.signature,
+                pattern.count,
+                pattern.task_ids.len()
+            ),
+            evidence: vec![FailureEvidence::from_pattern(pattern)],
+            writes_rules: true,
+            requires_governance: true,
+            provenance,
+        })
+    }
+
+    /// Stage 3+4 of the evolver outer loop: run a rule-change proposal through
+    /// governance and, only after approval, persist the new rule with the
+    /// existing canonical markdown write path. Every applied change is
+    /// appended to the audit journal so the loop stays observable and
+    /// rollback-able.
+    pub fn apply_rule_change(
+        &mut self,
+        proposal: RuleChangeProposal,
+        governance: &dyn RuleChangeGovernance,
+        context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        validate_rule_change_proposal(&proposal)?;
+        let decision = governance.evaluate(&proposal, context)?;
+        validate_governance_decision(&decision, &proposal.proposal_id)?;
+        if !decision.approved {
+            return Err(EvolutionError::ValidationRejected(decision.reasons));
+        }
+
+        let skill_proposal = skill_proposal_from_rule_change(&proposal)?;
+        let records = self.load_existing_records()?;
+        let duplicate = duplicate_decision(&skill_proposal, &records);
+        let before = match &duplicate.existing_path {
+            Some(path) => Some(fs::read_to_string(path).map_err(storage_error)?),
+            None => None,
+        };
+
+        let receipt = self.solidify_with_receipt(skill_proposal)?;
+        let after = fs::read_to_string(&receipt.path).map_err(storage_error)?;
+        let actual_kind = if duplicate.duplicate_found {
+            RuleChangeKind::UpdateRule
+        } else {
+            RuleChangeKind::CreateRule
+        };
+        let previous_version = if duplicate.duplicate_found {
+            Some(receipt.version - 1)
+        } else {
+            None
+        };
+
+        let journal_entry = RuleChangeJournalEntry {
+            entry_id: format!("rc-{}", proposal.proposal_id),
+            applied_at: Utc::now().to_rfc3339(),
+            proposal: proposal.clone(),
+            decision: decision.clone(),
+            rule_id: receipt.skill_id.clone(),
+            path: receipt.path.display().to_string(),
+            version: receipt.version,
+            previous_version,
+            before,
+            after,
+        };
+        self.rule_change_journal().append(&journal_entry)?;
+
+        let rule_change_receipt = RuleChangeReceipt {
+            proposal_id: proposal.proposal_id,
+            rule_id: receipt.skill_id,
+            change_kind: actual_kind,
+            path: receipt.path,
+            version: receipt.version,
+            previous_version,
+            decision,
+            writes_rules: true,
+            deletes_rules: false,
+        };
+        self.last_rule_change_receipt = Some(rule_change_receipt.clone());
+        Ok(rule_change_receipt)
+    }
+
+    /// Restore the rule content that existed before a previously applied rule
+    /// change, by replaying the change's old procedure through the same
+    /// governance-gated write path. Refuses to roll back a rule creation
+    /// because that would require deletion.
+    pub fn rollback_rule_change(
+        &mut self,
+        entry_id: &str,
+        governance: &dyn RuleChangeGovernance,
+        context: &GovernanceContext,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        if entry_id.trim().is_empty() {
+            return Err(EvolutionError::InvalidRuleChange(
+                "entry_id must not be empty".to_string(),
+            ));
+        }
+        let entry = self.rule_change_journal().find(entry_id)?.ok_or_else(|| {
+            EvolutionError::StorageError(format!("rule change journal entry not found: {entry_id}"))
+        })?;
+        if entry.proposal.old_procedure.is_empty() {
+            return Err(EvolutionError::InvalidRuleChange(format!(
+                "refusing to roll back rule creation {}; use retire instead of delete",
+                entry.proposal.proposal_id
+            )));
+        }
+
+        let rollback_proposal = RuleChangeProposal {
+            proposal_id: format!("rollback-{}", entry.proposal.proposal_id),
+            rule_id: entry.proposal.rule_id,
+            change_kind: RuleChangeKind::UpdateRule,
+            title: entry.proposal.title,
+            trigger: entry.proposal.trigger,
+            old_procedure: entry.proposal.new_procedure,
+            new_procedure: entry.proposal.old_procedure,
+            rationale: format!(
+                "rollback of {} applied at {}",
+                entry.proposal.proposal_id, entry.applied_at
+            ),
+            evidence: entry.proposal.evidence,
+            writes_rules: true,
+            requires_governance: true,
+            provenance: entry.proposal.provenance,
+        };
+        self.apply_rule_change(rollback_proposal, governance, context)
+    }
+
+    /// Observable history of every applied rule change (append-only journal).
+    pub fn rule_change_history(&self) -> Result<Vec<RuleChangeJournalEntry>, EvolutionError> {
+        self.rule_change_journal().load()
+    }
+
+    pub fn rule_change_journal_path(&self) -> PathBuf {
+        self.skill_root.join(".evolver").join("rule_changes.jsonl")
+    }
+
+    fn rule_change_journal(&self) -> RuleChangeJournal {
+        RuleChangeJournal::new(self.rule_change_journal_path())
+    }
+
+    fn existing_procedure(&self, rule_id: &str) -> Result<Vec<String>, EvolutionError> {
+        let records = self.load_existing_records()?;
+        let record = records.iter().find(|record| record.skill_id == rule_id);
+        match record {
+            Some(record) => {
+                let content = fs::read_to_string(&record.path).map_err(storage_error)?;
+                Ok(extract_procedure_from_markdown(&content))
+            }
+            None => Ok(Vec::new()),
+        }
     }
 
     fn score(&self, proposal: &SkillProposal) -> Result<SkillScoreCard, EvolutionError> {
@@ -875,4 +1131,65 @@ fn unquote_yaml_scalar(value: &str) -> String {
 
 fn storage_error(err: std::io::Error) -> EvolutionError {
     EvolutionError::StorageError(err.to_string())
+}
+
+/// Bridge a governance-approved rule change into the existing canonical skill
+/// proposal shape so it is written through the exact same markdown storage
+/// format as ordinary skills (same frontmatter, duplicate handling, version).
+fn skill_proposal_from_rule_change(
+    proposal: &RuleChangeProposal,
+) -> Result<SkillProposal, EvolutionError> {
+    validate_rule_change_proposal(proposal)?;
+    let mut evidence_event_ids = Vec::new();
+    for evidence in &proposal.evidence {
+        for event_id in &evidence.event_ids {
+            if !evidence_event_ids.contains(event_id) {
+                evidence_event_ids.push(event_id.clone());
+            }
+        }
+    }
+    Ok(SkillProposal {
+        proposal_id: format!("rule-change-{}", proposal.proposal_id),
+        title: proposal.title.clone(),
+        trigger: proposal.trigger.clone(),
+        procedure: proposal.new_procedure.clone(),
+        evidence_event_ids,
+        dry_run: false,
+        writes_skills: true,
+        requires_approval: false,
+        provenance: proposal.provenance.clone(),
+    })
+}
+
+/// Default repair procedure produced by the evolver outer loop. It is written
+/// to be concrete enough to execute repeatedly and to keep governance/verify
+/// boundaries visible, so the canonical darwin self-approval gate stays
+/// meaningful as a second quality gate after governance.
+fn default_repair_procedure(signature: &str) -> Vec<String> {
+    vec![
+        "Review the repeated failure evidence and the existing rule before changing it.".to_string(),
+        format!(
+            "Apply the corrective procedure for {signature}: retry with the recorded fallback and capture the outcome."
+        ),
+        "Verify the fix with a check or test, record the result, and keep governance and approval boundaries visible.".to_string(),
+    ]
+}
+
+/// Extract the bullet steps under `## Procedure` from an existing rule file so
+/// an update proposal can carry the auditable old procedure.
+fn extract_procedure_from_markdown(content: &str) -> Vec<String> {
+    let mut in_procedure = false;
+    let mut steps = Vec::new();
+    for line in content.lines() {
+        if let Some(section) = line.strip_prefix("## ") {
+            in_procedure = section.trim() == "Procedure";
+            continue;
+        }
+        if in_procedure {
+            if let Some(step) = line.strip_prefix("- ") {
+                steps.push(step.trim().to_string());
+            }
+        }
+    }
+    steps
 }

@@ -4,10 +4,13 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::skill_evolver::{
-    CanonicalSkillEvolver, DryRunProposalEvolver, EvolutionError, EvolutionScope, NoopEvolver,
-    RuntimeEvent, RuntimeEventKind, SkillApprovalReceipt, SkillApprovalState, SkillEvolver,
-    SkillLifecycleStatus, SkillProposal, SkillProposalProvenance, SkillRetirementRequest,
-    SkillSolidifyTicket, SkillUpsertKind, ValidationReport,
+    CanonicalSkillEvolver, DryRunProposalEvolver, EvolutionError, EvolutionScope,
+    FailureDetectorConfig, FailureEvidence, FailurePattern, GovernanceContext, GovernanceDecision,
+    NoopEvolver, NoopRuleChangeGovernance, PolicyRuleChangeGovernance, RepeatedFailureDetector,
+    RuleChangeGovernance, RuleChangeKind, RuleChangeProposal, RuntimeEvent, RuntimeEventKind,
+    SkillApprovalReceipt, SkillApprovalState, SkillEvolver, SkillLifecycleStatus, SkillProposal,
+    SkillProposalProvenance, SkillRetirementRequest, SkillSolidifyTicket, SkillUpsertKind,
+    ValidationReport,
 };
 
 fn event() -> RuntimeEvent {
@@ -653,4 +656,723 @@ fn canonical_evolver_upserts_repo_skill_seed_using_frontmatter_metadata() {
     assert!(updated.contains("status: active"));
     assert!(updated
         .contains("duplicate policy: update the canonical skill instead of creating copies."));
+}
+
+// ======================= repeated-failure detection =======================
+
+fn failure_event(id: &str, task: &str, tool: &str) -> RuntimeEvent {
+    RuntimeEvent {
+        event_id: id.to_string(),
+        task_id: task.to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        summary: format!("tool {tool} failed"),
+        metadata: BTreeMap::from([("tool".to_string(), tool.to_string())]),
+    }
+}
+
+fn success_event(id: &str, tool: &str) -> RuntimeEvent {
+    RuntimeEvent {
+        event_id: id.to_string(),
+        task_id: "task-success".to_string(),
+        kind: RuntimeEventKind::ToolSucceeded,
+        summary: format!("tool {tool} succeeded"),
+        metadata: BTreeMap::from([("tool".to_string(), tool.to_string())]),
+    }
+}
+
+#[test]
+fn failure_detector_emits_pattern_when_repeats_meet_threshold() {
+    let detector = RepeatedFailureDetector::new(FailureDetectorConfig::default());
+    let events = vec![
+        failure_event("f1", "t1", "build"),
+        failure_event("f2", "t1", "build"),
+        failure_event("f3", "t2", "build"),
+    ];
+
+    let patterns = detector.detect(&events);
+
+    assert_eq!(patterns.len(), 1);
+    let pattern = &patterns[0];
+    assert_eq!(pattern.signature, "tool=build");
+    assert_eq!(pattern.kind, RuntimeEventKind::ToolFailed);
+    assert_eq!(pattern.count, 3);
+    assert_eq!(pattern.event_ids, vec!["f1", "f2", "f3"]);
+    assert_eq!(pattern.task_ids, vec!["t1", "t2"]);
+    assert_eq!(pattern.first_seen_event_id, "f1");
+    assert_eq!(pattern.last_seen_event_id, "f3");
+    assert_eq!(pattern.window_size, 3);
+    assert!(pattern.summary.contains("tool=build"));
+    assert!(pattern.summary.contains("3 times"));
+}
+
+#[test]
+fn failure_detector_ignores_below_threshold_and_non_failure_events() {
+    let detector = RepeatedFailureDetector::new(FailureDetectorConfig::default());
+
+    let below_threshold = vec![failure_event("f1", "t1", "build")];
+    assert!(detector.detect(&below_threshold).is_empty());
+
+    let mixed = vec![
+        failure_event("f1", "t1", "build"),
+        success_event("s1", "build"),
+    ];
+    assert!(detector.detect(&mixed).is_empty());
+}
+
+#[test]
+fn failure_detector_honors_window() {
+    let config = FailureDetectorConfig::default().window(2);
+    let detector = RepeatedFailureDetector::new(config);
+    let events = vec![
+        failure_event("old", "t1", "build"),
+        failure_event("new1", "t2", "build"),
+        failure_event("new2", "t3", "build"),
+    ];
+
+    let patterns = detector.detect(&events);
+
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].count, 2);
+    assert_eq!(patterns[0].event_ids, vec!["new1", "new2"]);
+    assert_eq!(patterns[0].window_size, 2);
+    assert_eq!(patterns[0].first_seen_event_id, "new1");
+}
+
+#[test]
+fn failure_detector_skips_events_without_classifiable_signature() {
+    let mut event = failure_event("f1", "t1", "build");
+    event.metadata.clear();
+    let detector = RepeatedFailureDetector::new(FailureDetectorConfig::default().min_repeats(1));
+
+    assert!(detector.detect(&[event]).is_empty());
+}
+
+#[test]
+fn failure_detector_groups_distinct_signatures_separately() {
+    let detector = RepeatedFailureDetector::new(FailureDetectorConfig::default());
+    let events = vec![
+        failure_event("f1", "t1", "build"),
+        failure_event("f2", "t1", "deploy"),
+        failure_event("f3", "t2", "build"),
+    ];
+
+    let patterns = detector.detect(&events);
+
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].signature, "tool=build");
+    assert_eq!(patterns[0].count, 2);
+}
+
+#[test]
+fn canonical_evolver_detect_rejects_invalid_config() {
+    let root = temp_skill_root("detect-invalid-config");
+    let evolver = CanonicalSkillEvolver::new(&root);
+
+    let err = evolver
+        .detect_repeated_failures(&FailureDetectorConfig {
+            min_repeats: 0,
+            window: None,
+            failure_kinds: vec![RuntimeEventKind::ToolFailed],
+        })
+        .expect_err("zero min_repeats should fail");
+
+    assert!(matches!(err, EvolutionError::InvalidScope(_)));
+
+    let err = evolver
+        .detect_repeated_failures(&FailureDetectorConfig {
+            min_repeats: 2,
+            window: None,
+            failure_kinds: Vec::new(),
+        })
+        .expect_err("empty failure_kinds should fail");
+
+    assert!(matches!(err, EvolutionError::InvalidScope(_)));
+}
+
+// ======================= rule-change proposal =======================
+
+#[test]
+fn canonical_evolver_proposes_structured_rule_change_from_pattern() {
+    let root = temp_skill_root("propose-rule-change");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    assert_eq!(patterns.len(), 1);
+
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("pattern from observed events should produce a proposal");
+
+    assert_eq!(proposal.change_kind, RuleChangeKind::CreateRule);
+    assert_eq!(proposal.rule_id, "build-for-rule-tool");
+    assert!(proposal.writes_rules);
+    assert!(proposal.requires_governance);
+    assert_eq!(proposal.evidence.len(), 1);
+    assert_eq!(proposal.evidence[0].pattern_signature, "tool=build");
+    assert_eq!(proposal.evidence[0].event_ids, vec!["f1", "f2"]);
+    assert_eq!(proposal.evidence[0].task_ids, vec!["t1", "t2"]);
+    assert_eq!(proposal.provenance.len(), 2);
+    assert_eq!(proposal.provenance[0].source_event_id, "f1");
+    assert!(proposal.old_procedure.is_empty());
+    assert_eq!(proposal.new_procedure.len(), 3);
+    assert!(proposal.rationale.contains("repeated failure tool=build"));
+}
+
+#[test]
+fn canonical_evolver_propose_rejects_pattern_with_unknown_events() {
+    let root = temp_skill_root("propose-invalid-pattern");
+    let evolver = CanonicalSkillEvolver::new(&root);
+    let pattern = FailurePattern {
+        signature: "tool=build".to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        count: 1,
+        window_size: 1,
+        event_ids: vec!["ghost-event".to_string()],
+        task_ids: vec!["t1".to_string()],
+        first_seen_event_id: "ghost-event".to_string(),
+        last_seen_event_id: "ghost-event".to_string(),
+        summary: "not grounded".to_string(),
+    };
+
+    let err = evolver
+        .propose_rule_change(&pattern)
+        .expect_err("unverifiable evidence must not become a proposal");
+
+    assert!(matches!(err, EvolutionError::InvalidProposal(_)));
+}
+
+// ======================= governance =======================
+
+fn governance_context(events: Vec<RuntimeEvent>) -> GovernanceContext {
+    GovernanceContext {
+        observed_events: events,
+        detector_config: FailureDetectorConfig::default(),
+    }
+}
+
+fn base_rule_change_proposal() -> RuleChangeProposal {
+    RuleChangeProposal {
+        proposal_id: "proposal-rule-1".to_string(),
+        rule_id: "build-for-rule-tool".to_string(),
+        change_kind: RuleChangeKind::CreateRule,
+        title: "Rule for tool=build".to_string(),
+        trigger: "repeated failure tool=build observed 2 times".to_string(),
+        old_procedure: Vec::new(),
+        new_procedure: vec![
+            "Review the repeated failure evidence and the existing rule before changing it."
+                .to_string(),
+            "Apply the corrective procedure for tool=build and capture the outcome.".to_string(),
+            "Verify the fix with a check or test and record the governance boundary.".to_string(),
+        ],
+        rationale: "repeated failure needs a rule update".to_string(),
+        evidence: vec![FailureEvidence {
+            pattern_signature: "tool=build".to_string(),
+            count: 2,
+            event_ids: vec!["f1".to_string(), "f2".to_string()],
+            task_ids: vec!["t1".to_string(), "t2".to_string()],
+            summary: "repeated failure tool=build observed 2 times".to_string(),
+        }],
+        writes_rules: true,
+        requires_governance: true,
+        provenance: vec![SkillProposalProvenance {
+            source_event_id: "f1".to_string(),
+            source_task_id: "t1".to_string(),
+            source_kind: RuntimeEventKind::ToolFailed,
+            source_summary: "tool build failed".to_string(),
+            source_metadata: BTreeMap::from([("tool".to_string(), "build".to_string())]),
+        }],
+    }
+}
+
+#[test]
+fn policy_governance_approves_verifiable_evidence() {
+    let root = temp_skill_root("governance-approve");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+
+    let decision = PolicyRuleChangeGovernance::default()
+        .evaluate(&proposal, &context)
+        .expect("well-formed proposal should be evaluable");
+
+    assert!(decision.approved);
+    assert_eq!(decision.proposal_id, proposal.proposal_id);
+    assert_eq!(
+        decision.approval_source,
+        "policy:repeated_failure_evidence_v1"
+    );
+    assert_eq!(decision.decided_by, "governance.policy");
+    assert!(decision.decided_at.is_some());
+    assert!(decision
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("verified 2 evidence event(s)")));
+}
+
+#[test]
+fn policy_governance_rejects_missing_evidence_events() {
+    let proposal = base_rule_change_proposal();
+    let context = governance_context(Vec::new());
+
+    let decision = PolicyRuleChangeGovernance::default()
+        .evaluate(&proposal, &context)
+        .expect("proposal should be evaluable");
+
+    assert!(!decision.approved);
+    assert!(decision
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("not found in observed runtime events")));
+    assert!(decision
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("nothing is written to disk")));
+}
+
+#[test]
+fn policy_governance_rejects_weak_evidence_below_min_repeats() {
+    let mut proposal = base_rule_change_proposal();
+    proposal.evidence[0].count = 1;
+    let context = governance_context(vec![failure_event("f1", "t1", "build")]);
+
+    let decision = PolicyRuleChangeGovernance::default()
+        .evaluate(&proposal, &context)
+        .expect("proposal should be evaluable");
+
+    assert!(!decision.approved);
+    assert!(decision
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("below min_repeats")));
+}
+
+#[test]
+fn policy_governance_rejects_non_failure_kind_evidence() {
+    let mut proposal = base_rule_change_proposal();
+    proposal.evidence[0].event_ids = vec!["s1".to_string()];
+    let context = governance_context(vec![success_event("s1", "build")]);
+
+    let decision = PolicyRuleChangeGovernance::default()
+        .evaluate(&proposal, &context)
+        .expect("proposal should be evaluable");
+
+    assert!(!decision.approved);
+    assert!(decision
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("not a configured failure kind")));
+}
+
+#[test]
+fn noop_governance_never_approves_rule_changes() {
+    let proposal = base_rule_change_proposal();
+    let context = governance_context(vec![failure_event("f1", "t1", "build")]);
+
+    let decision = NoopRuleChangeGovernance
+        .evaluate(&proposal, &context)
+        .expect("noop governance should be evaluable");
+
+    assert!(!decision.approved);
+    assert_eq!(decision.approval_source, "noop_governance");
+    assert!(decision.reasons[0].contains("never approves"));
+}
+
+struct MismatchedGovernance;
+
+impl RuleChangeGovernance for MismatchedGovernance {
+    fn evaluate(
+        &self,
+        proposal: &RuleChangeProposal,
+        _context: &GovernanceContext,
+    ) -> Result<GovernanceDecision, EvolutionError> {
+        Ok(GovernanceDecision {
+            proposal_id: format!("other-{}", proposal.proposal_id),
+            approved: true,
+            reasons: vec!["test approval".to_string()],
+            approval_source: "test".to_string(),
+            decided_by: "test".to_string(),
+            decided_at: None,
+        })
+    }
+}
+
+struct ApproveAllGovernance;
+
+impl RuleChangeGovernance for ApproveAllGovernance {
+    fn evaluate(
+        &self,
+        proposal: &RuleChangeProposal,
+        _context: &GovernanceContext,
+    ) -> Result<GovernanceDecision, EvolutionError> {
+        Ok(GovernanceDecision {
+            proposal_id: proposal.proposal_id.clone(),
+            approved: true,
+            reasons: vec!["test approval".to_string()],
+            approval_source: "test".to_string(),
+            decided_by: "test".to_string(),
+            decided_at: Some("2026-08-10T00:00:00Z".to_string()),
+        })
+    }
+}
+
+// ======================= outer loop: apply / persist / rollback =======================
+
+#[test]
+fn outer_loop_approves_and_persists_new_rule_in_existing_format() {
+    let root = temp_skill_root("outer-loop-create");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+
+    let receipt = evolver
+        .apply_rule_change(
+            proposal.clone(),
+            &PolicyRuleChangeGovernance::default(),
+            &context,
+        )
+        .expect("governance-approved rule change should persist");
+
+    assert_eq!(receipt.change_kind, RuleChangeKind::CreateRule);
+    assert_eq!(receipt.rule_id, "build-for-rule-tool");
+    assert_eq!(receipt.version, 1);
+    assert_eq!(receipt.previous_version, None);
+    assert!(receipt.writes_rules);
+    assert!(!receipt.deletes_rules);
+    assert_eq!(receipt.path, root.join("build-for-rule-tool.md"));
+    assert!(receipt.path.exists());
+
+    let written = fs::read_to_string(&receipt.path).expect("rule file should be readable");
+    assert!(written.contains("skill_id: build-for-rule-tool"));
+    assert!(written.contains("status: active"));
+    assert!(written.contains("version: 1"));
+    assert!(written.contains("approval_source: self_policy:darwin_rubric"));
+    assert!(written.contains("evidence_event_ids:"));
+    assert!(written.contains("  - f1"));
+    assert!(written.contains("  - f2"));
+
+    let history = evolver
+        .rule_change_history()
+        .expect("journal should be observable");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].entry_id, format!("rc-{}", proposal.proposal_id));
+    assert_eq!(history[0].rule_id, "build-for-rule-tool");
+    assert_eq!(history[0].version, 1);
+    assert_eq!(history[0].previous_version, None);
+    assert!(history[0].before.is_none());
+    assert!(history[0].after.contains("skill_id: build-for-rule-tool"));
+    assert_eq!(history[0].decision.proposal_id, proposal.proposal_id);
+    assert!(history[0].decision.approved);
+    assert!(evolver
+        .last_rule_change_receipt()
+        .is_some_and(|receipt| receipt.rule_id == "build-for-rule-tool"));
+
+    assert!(evolver
+        .rule_change_journal_path()
+        .ends_with(".evolver/rule_changes.jsonl"));
+    assert!(evolver.rule_change_journal_path().exists());
+}
+
+#[test]
+fn outer_loop_updates_existing_rule_and_records_before_content() {
+    let root = temp_skill_root("outer-loop-update");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let first = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+    let first_receipt = evolver
+        .apply_rule_change(first, &PolicyRuleChangeGovernance::default(), &context)
+        .expect("first rule change should persist");
+    assert_eq!(first_receipt.version, 1);
+
+    evolver
+        .observe(failure_event("f3", "t3", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f4", "t4", "build"))
+        .expect("failure event should be observed");
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let second = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+
+    assert_eq!(second.change_kind, RuleChangeKind::UpdateRule);
+    assert_eq!(second.rule_id, "build-for-rule-tool");
+    assert_eq!(second.old_procedure.len(), 3);
+    assert_eq!(
+        second.old_procedure[0],
+        "Review the repeated failure evidence and the existing rule before changing it."
+    );
+
+    let second_receipt = evolver
+        .apply_rule_change(second, &PolicyRuleChangeGovernance::default(), &context)
+        .expect("governance-approved update should persist");
+
+    assert_eq!(second_receipt.change_kind, RuleChangeKind::UpdateRule);
+    assert_eq!(second_receipt.version, 2);
+    assert_eq!(second_receipt.previous_version, Some(1));
+    assert_eq!(first_receipt.path, second_receipt.path);
+
+    let history = evolver
+        .rule_change_history()
+        .expect("journal should be observable");
+    assert_eq!(history.len(), 2);
+    let update_entry = &history[1];
+    assert_eq!(update_entry.previous_version, Some(1));
+    let before = update_entry
+        .before
+        .as_deref()
+        .expect("update entry must keep before content for rollback");
+    assert!(before.contains("version: 1"));
+    assert!(update_entry.after.contains("version: 2"));
+
+    let md_count = fs::read_dir(&root)
+        .expect("skill root should be readable")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("md"))
+        .count();
+    assert_eq!(md_count, 1);
+}
+
+#[test]
+fn outer_loop_rejected_by_governance_writes_nothing() {
+    let root = temp_skill_root("outer-loop-rejected");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+
+    let err = evolver
+        .apply_rule_change(proposal, &NoopRuleChangeGovernance, &context)
+        .expect_err("noop governance must reject before any write");
+
+    assert!(matches!(err, EvolutionError::ValidationRejected(_)));
+    assert!(!root.exists());
+    assert!(evolver
+        .rule_change_history()
+        .expect("empty journal should be readable")
+        .is_empty());
+    assert!(evolver.last_rule_change_receipt().is_none());
+}
+
+#[test]
+fn apply_rule_change_rejects_inconsistent_governance_decision() {
+    let root = temp_skill_root("outer-loop-mismatched-decision");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    let context = governance_context(evolver.observed_events().to_vec());
+
+    let err = evolver
+        .apply_rule_change(proposal, &MismatchedGovernance, &context)
+        .expect_err("governance decision must reference the evaluated proposal");
+
+    assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
+    assert!(!root.exists());
+}
+
+#[test]
+fn apply_rule_change_rejects_invalid_proposal_before_governance() {
+    let root = temp_skill_root("outer-loop-invalid-proposal");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    let mut proposal = base_rule_change_proposal();
+    proposal.title.clear();
+    let context = governance_context(Vec::new());
+
+    let err = evolver
+        .apply_rule_change(proposal, &ApproveAllGovernance, &context)
+        .expect_err("invalid proposal must fail before governance");
+
+    assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
+    assert!(!root.exists());
+}
+
+#[test]
+fn apply_rule_change_surfaces_storage_errors() {
+    let root = temp_skill_root("outer-loop-storage-error");
+    fs::write(&root, "this path is a file, not a directory")
+        .expect("blocking file should be writable");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    let proposal = base_rule_change_proposal();
+    let context = governance_context(Vec::new());
+
+    let err = evolver
+        .apply_rule_change(proposal, &ApproveAllGovernance, &context)
+        .expect_err("write path must surface storage failure instead of falling back");
+
+    assert!(matches!(err, EvolutionError::StorageError(_)));
+}
+
+#[test]
+fn outer_loop_rollback_restores_previous_procedure() {
+    let root = temp_skill_root("outer-loop-rollback");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let context = governance_context(evolver.observed_events().to_vec());
+    let governance = PolicyRuleChangeGovernance::default();
+
+    let first = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    evolver
+        .apply_rule_change(first, &governance, &context)
+        .expect("first rule change should persist");
+
+    let mut update = base_rule_change_proposal();
+    update.proposal_id = "proposal-rule-update".to_string();
+    update.change_kind = RuleChangeKind::UpdateRule;
+    update.old_procedure = vec![
+        "Review the repeated failure evidence and the existing rule before changing it."
+            .to_string(),
+        "Apply the corrective procedure for tool=build and capture the outcome.".to_string(),
+        "Verify the fix with a check or test and record the governance boundary.".to_string(),
+    ];
+    update.new_procedure = vec![
+        "Run the new fallback path for tool=build and capture the outcome.".to_string(),
+        "Check the result against the expected contract and record it.".to_string(),
+        "Keep the governance and approval boundaries visible after the change.".to_string(),
+    ];
+    update.evidence[0].event_ids = vec!["f1".to_string(), "f2".to_string()];
+    let update_receipt = evolver
+        .apply_rule_change(update.clone(), &governance, &context)
+        .expect("governance-approved update should persist");
+    assert_eq!(update_receipt.version, 2);
+
+    let rollback_receipt = evolver
+        .rollback_rule_change(&format!("rc-{}", update.proposal_id), &governance, &context)
+        .expect("rollback of an update should restore the old procedure");
+
+    assert_eq!(rollback_receipt.version, 3);
+    assert_eq!(rollback_receipt.change_kind, RuleChangeKind::UpdateRule);
+    assert_eq!(rollback_receipt.previous_version, Some(2));
+
+    let written = fs::read_to_string(&rollback_receipt.path)
+        .expect("rolled-back rule file should be readable");
+    assert!(written.contains("Review the repeated failure evidence and the existing rule"));
+    assert!(!written.contains("Run the new fallback path"));
+
+    let history = evolver
+        .rule_change_history()
+        .expect("journal should be observable");
+    assert_eq!(history.len(), 3);
+    assert!(history[2]
+        .proposal
+        .rationale
+        .contains("rollback of proposal-rule-update"));
+    let md_count = fs::read_dir(&root)
+        .expect("skill root should be readable")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("md"))
+        .count();
+    assert_eq!(md_count, 1);
+}
+
+#[test]
+fn outer_loop_rollback_refuses_rule_creation_deletion() {
+    let root = temp_skill_root("outer-loop-rollback-create");
+    let mut evolver = CanonicalSkillEvolver::new(&root);
+    evolver
+        .observe(failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    evolver
+        .observe(failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+    let patterns = evolver
+        .detect_repeated_failures(&FailureDetectorConfig::default())
+        .expect("valid config should detect");
+    let context = governance_context(evolver.observed_events().to_vec());
+    let governance = PolicyRuleChangeGovernance::default();
+
+    let proposal = evolver
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    evolver
+        .apply_rule_change(proposal.clone(), &governance, &context)
+        .expect("rule creation should persist");
+
+    let err = evolver
+        .rollback_rule_change(
+            &format!("rc-{}", proposal.proposal_id),
+            &governance,
+            &context,
+        )
+        .expect_err("rollback of a creation must refuse deletion");
+
+    assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
+    assert!(root.join("build-for-rule-tool.md").exists());
 }
