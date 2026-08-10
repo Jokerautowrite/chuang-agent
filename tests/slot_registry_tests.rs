@@ -14,7 +14,9 @@ use chuang_agent::runtime_config::{
     EvolutionConfig, OpenAICompatibleConfig, ProviderConfig, ProviderFallbackPolicy, RuntimeConfig,
     SubagentConfig, SubagentQueueConfig,
 };
-use chuang_agent::skill_evolver::{EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver};
+use chuang_agent::skill_evolver::{
+    EvolutionScope, GovernanceContext, RuntimeEvent, RuntimeEventKind, SkillEvolver,
+};
 use chuang_agent::slot_registry::{
     build_genesis_actuator, build_provider_responder, build_runtime_slots, summarize_runtime_slots,
     EmotionSlotRuntime, SubagentRuntimeSlot,
@@ -1098,4 +1100,351 @@ fn build_runtime_slots_installs_jiwen_emotion_slot_by_default() {
     let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     let slots = build_runtime_slots(&config).expect("default slots should build");
     assert_eq!(slots.emotion.kind(), "jiwen");
+}
+
+fn temp_skill_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-slot-evolver-{name}-{nanos}"))
+}
+
+fn slot_failure_event(id: &str, task: &str, tool: &str) -> RuntimeEvent {
+    RuntimeEvent {
+        event_id: id.to_string(),
+        task_id: task.to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        summary: format!("tool {tool} failed"),
+        metadata: std::collections::BTreeMap::from([("tool".to_string(), tool.to_string())]),
+    }
+}
+
+fn canonical_slot_config(root: PathBuf) -> RuntimeConfig {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
+    canonical.skill_root = root;
+    canonical.detector.min_repeats = 2;
+    config.evolution = EvolutionConfig::Canonical(canonical);
+    config
+}
+
+#[test]
+fn slot_registry_builds_canonical_evolution_slot_from_runtime_config() {
+    let config = canonical_slot_config(temp_skill_root("build-slot"));
+
+    let mut slots = build_runtime_slots(&config).expect("canonical evolution slots should build");
+    let summary = summarize_runtime_slots(&config);
+    assert_eq!(summary.evolution, "canonical");
+
+    let receipt = slots
+        .evolution
+        .observe(RuntimeEvent {
+            event_id: "event-1".to_string(),
+            task_id: "task-1".to_string(),
+            kind: RuntimeEventKind::TurnCompleted,
+            summary: "completed slot evolution canonical".to_string(),
+            metadata: Default::default(),
+        })
+        .expect("canonical evolver should accept observed event");
+    assert!(receipt.accepted);
+
+    assert!(slots.evolution.rule_change_governance().is_some());
+    assert!(slots.evolution.rule_change_governance_context().is_some());
+    assert!(slots.evolution.rule_change_detector_config().is_some());
+    assert!(slots.evolution.rule_change_journal_path().is_some());
+}
+
+#[test]
+fn slot_registry_canonical_evolution_runs_full_outer_loop_with_governance() {
+    let root = temp_skill_root("outer-loop");
+    let config = canonical_slot_config(root.clone());
+    let mut slots = build_runtime_slots(&config).expect("canonical evolution slots should build");
+
+    // 1) 运行时事件流进入外环。
+    slots
+        .evolution
+        .observe(slot_failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    slots
+        .evolution
+        .observe(slot_failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    // 2) detect：从已观察事件流检测重复失败模式。
+    let detector_config = slots
+        .evolution
+        .rule_change_detector_config()
+        .expect("canonical slot exposes detector config")
+        .clone();
+    let patterns = slots
+        .evolution
+        .detect_repeated_failures(&detector_config)
+        .expect("valid config should detect repeated failures");
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].signature, "tool=build");
+    assert_eq!(
+        patterns[0].event_ids,
+        vec!["f1".to_string(), "f2".to_string()]
+    );
+
+    // 3) propose：把模式转成可审计提案，证据必须来自已观察事件流。
+    let proposal = slots
+        .evolution
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    assert!(proposal.writes_rules);
+    assert!(proposal.requires_governance);
+    assert_eq!(
+        proposal.evidence[0].event_ids,
+        vec!["f1".to_string(), "f2".to_string()]
+    );
+
+    // 4) 治理批准 + apply：只有批准后才落盘，并写入 JSONL journal。
+    let governance = chuang_agent::slot_registry::CanonicalGovernanceSlot::default();
+    let context = slots
+        .evolution
+        .rule_change_governance_context()
+        .expect("canonical slot exposes governance context");
+    let create_receipt = slots
+        .evolution
+        .apply_rule_change(proposal.clone(), &governance, &context)
+        .expect("policy governance should approve grounded rule change");
+    assert!(create_receipt.writes_rules);
+    assert!(create_receipt.path.exists());
+
+    let history = slots
+        .evolution
+        .rule_change_history()
+        .expect("journal history should be readable");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].proposal.proposal_id, proposal.proposal_id);
+    assert!(history[0].before.is_none());
+    assert!(history[0].after.contains("tool=build"));
+    let journal_path = slots
+        .evolution
+        .rule_change_journal_path()
+        .expect("canonical slot exposes journal path");
+    assert!(journal_path.exists());
+    assert!(journal_path.ends_with(".evolver/rule_changes.jsonl"));
+
+    // 5) 同一签名再次失败 → 提案变成 UpdateRule；再次经治理批准落盘。
+    slots
+        .evolution
+        .observe(slot_failure_event("f3", "t3", "build"))
+        .expect("failure event should be observed");
+    slots
+        .evolution
+        .observe(slot_failure_event("f4", "t4", "build"))
+        .expect("failure event should be observed");
+    let patterns = slots
+        .evolution
+        .detect_repeated_failures(&detector_config)
+        .expect("detect should find the grown pattern");
+    let update_proposal = slots
+        .evolution
+        .propose_rule_change(&patterns[0])
+        .expect("grounded pattern should propose");
+    assert_eq!(
+        update_proposal.change_kind,
+        chuang_agent::skill_evolver::RuleChangeKind::UpdateRule
+    );
+    assert!(!update_proposal.old_procedure.is_empty());
+    let context = slots
+        .evolution
+        .rule_change_governance_context()
+        .expect("refreshed governance context");
+    let update_receipt = slots
+        .evolution
+        .apply_rule_change(update_proposal.clone(), &governance, &context)
+        .expect("update should pass governance and write");
+    assert_eq!(update_receipt.version, create_receipt.version + 1);
+    assert_eq!(
+        slots
+            .evolution
+            .rule_change_history()
+            .expect("history")
+            .len(),
+        2
+    );
+
+    // 6) rollback：回滚 Update 同样必须经过治理门禁，按 journal 恢复旧内容。
+    let history = slots.evolution.rule_change_history().expect("history");
+    let update_entry = history
+        .iter()
+        .find(|entry| entry.proposal.proposal_id == update_proposal.proposal_id)
+        .expect("update journal entry exists");
+    let rollback = slots
+        .evolution
+        .rollback_rule_change(&update_entry.entry_id, &governance, &context)
+        .expect("rollback should pass governance and write");
+    assert!(rollback.writes_rules);
+    assert_eq!(
+        rollback.proposal_id,
+        format!("rollback-{}", update_proposal.proposal_id)
+    );
+    assert_eq!(
+        slots
+            .evolution
+            .rule_change_history()
+            .expect("history")
+            .len(),
+        3
+    );
+    let after_rollback = fs::read_to_string(&create_receipt.path).expect("rule file readable");
+    assert!(after_rollback.contains("tool=build"));
+}
+
+#[test]
+fn slot_registry_canonical_governance_noop_rejects_and_writes_nothing() {
+    let root = temp_skill_root("noop-governance");
+    let mut config = canonical_slot_config(root.clone());
+    if let EvolutionConfig::Canonical(canonical) = &mut config.evolution {
+        canonical.governance = chuang_agent::runtime_config::CanonicalEvolutionGovernance::Noop;
+    }
+    let mut slots = build_runtime_slots(&config).expect("canonical evolution slots should build");
+    slots
+        .evolution
+        .observe(slot_failure_event("f1", "t1", "build"))
+        .expect("failure event should be observed");
+    slots
+        .evolution
+        .observe(slot_failure_event("f2", "t2", "build"))
+        .expect("failure event should be observed");
+
+    let detector_config = slots
+        .evolution
+        .rule_change_detector_config()
+        .expect("detector config")
+        .clone();
+    let patterns = slots
+        .evolution
+        .detect_repeated_failures(&detector_config)
+        .expect("detect should succeed");
+    let proposal = slots
+        .evolution
+        .propose_rule_change(&patterns[0])
+        .expect("propose should succeed");
+
+    let governance = chuang_agent::slot_registry::CanonicalGovernanceSlot::Noop(
+        chuang_agent::skill_evolver::NoopRuleChangeGovernance,
+    );
+    let context = slots
+        .evolution
+        .rule_change_governance_context()
+        .expect("governance context");
+    let err = slots
+        .evolution
+        .apply_rule_change(proposal, &governance, &context)
+        .expect_err("noop governance must never approve");
+
+    assert!(matches!(
+        err,
+        chuang_agent::skill_evolver::EvolutionError::ValidationRejected(_)
+    ));
+    assert!(slots
+        .evolution
+        .rule_change_history()
+        .expect("history")
+        .is_empty());
+    assert!(!root.join(".evolver").exists());
+}
+
+#[test]
+fn slot_registry_canonical_propose_rejects_unverifiable_evidence() {
+    let config = canonical_slot_config(temp_skill_root("propose-invalid"));
+    let slots = build_runtime_slots(&config).expect("canonical evolution slots should build");
+    let pattern = chuang_agent::skill_evolver::FailurePattern {
+        signature: "tool=ghost".to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        count: 1,
+        window_size: 1,
+        event_ids: vec!["ghost-event".to_string()],
+        task_ids: vec!["t1".to_string()],
+        first_seen_event_id: "ghost-event".to_string(),
+        last_seen_event_id: "ghost-event".to_string(),
+        summary: "not grounded".to_string(),
+    };
+
+    let err = slots
+        .evolution
+        .propose_rule_change(&pattern)
+        .expect_err("proposal citing unknown events must fail");
+
+    assert!(matches!(
+        err,
+        chuang_agent::skill_evolver::EvolutionError::InvalidProposal(_)
+    ));
+}
+
+#[test]
+fn slot_registry_non_canonical_slots_return_structured_errors_for_outer_loop() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let slots = build_runtime_slots(&config).expect("noop evolution slots should build");
+
+    // Noop 槽位：外环方法必须结构化报错，不能 panic，也不提供治理/上下文。
+    assert!(slots.evolution.rule_change_governance().is_none());
+    assert!(slots.evolution.rule_change_governance_context().is_none());
+    assert!(slots.evolution.rule_change_detector_config().is_none());
+    assert!(slots.evolution.rule_change_journal_path().is_none());
+    assert!(matches!(
+        slots
+            .evolution
+            .detect_repeated_failures(&Default::default()),
+        Err(chuang_agent::skill_evolver::EvolutionError::InvalidScope(_))
+    ));
+    let pattern = chuang_agent::skill_evolver::FailurePattern {
+        signature: "tool=build".to_string(),
+        kind: RuntimeEventKind::ToolFailed,
+        count: 2,
+        window_size: 2,
+        event_ids: vec!["f1".to_string()],
+        task_ids: vec!["t1".to_string()],
+        first_seen_event_id: "f1".to_string(),
+        last_seen_event_id: "f1".to_string(),
+        summary: "x".to_string(),
+    };
+    assert!(matches!(
+        slots.evolution.propose_rule_change(&pattern),
+        Err(chuang_agent::skill_evolver::EvolutionError::InvalidRuleChange(_))
+    ));
+
+    // DryRun 槽位：同样结构化报错。
+    config.evolution = EvolutionConfig::DryRun;
+    let mut slots = build_runtime_slots(&config).expect("dry_run evolution slots should build");
+    let proposal = chuang_agent::skill_evolver::RuleChangeProposal {
+        proposal_id: "p1".to_string(),
+        rule_id: "rule-tool-build".to_string(),
+        change_kind: chuang_agent::skill_evolver::RuleChangeKind::CreateRule,
+        title: "Rule for tool=build".to_string(),
+        trigger: "repeated failure".to_string(),
+        old_procedure: Vec::new(),
+        new_procedure: vec!["step".to_string()],
+        rationale: "rationale".to_string(),
+        evidence: Vec::new(),
+        writes_rules: true,
+        requires_governance: true,
+        provenance: Vec::new(),
+    };
+    let context = GovernanceContext {
+        observed_events: Vec::new(),
+        detector_config: Default::default(),
+    };
+    assert!(matches!(
+        slots.evolution.apply_rule_change(
+            proposal,
+            &chuang_agent::slot_registry::CanonicalGovernanceSlot::default(),
+            &context
+        ),
+        Err(chuang_agent::skill_evolver::EvolutionError::InvalidRuleChange(_))
+    ));
+    assert!(matches!(
+        slots.evolution.rollback_rule_change(
+            "missing",
+            &chuang_agent::slot_registry::CanonicalGovernanceSlot::default(),
+            &context
+        ),
+        Err(chuang_agent::skill_evolver::EvolutionError::InvalidRuleChange(_))
+    ));
+    assert!(slots.evolution.rule_change_history().is_err());
 }

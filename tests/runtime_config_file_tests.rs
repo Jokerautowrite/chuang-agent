@@ -631,3 +631,115 @@ fn temp_test_path(name: &str) -> PathBuf {
         .as_nanos();
     std::env::temp_dir().join(format!("chuang-agent-runtime-config-{name}-{nanos}"))
 }
+
+#[test]
+fn config_file_parses_canonical_evolution_with_defaults() {
+    let config = parse_runtime_config_file(
+        r#"
+evolution = "canonical"
+"#,
+    )
+    .expect("canonical evolution config should parse with defaults");
+
+    assert!(matches!(
+        &config.evolution,
+        EvolutionConfig::Canonical(canonical)
+            if canonical.skill_root == PathBuf::from("./rules")
+                && canonical.approval_threshold == 75
+                && canonical.detector.min_repeats == 2
+                && canonical.detector.window.is_none()
+                && canonical.detector.failure_kinds.len() == 1
+    ));
+    assert_eq!(config.summary().evolution_kind, "canonical");
+}
+
+#[test]
+fn config_file_parses_canonical_evolution_with_full_section() {
+    let config = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+skill_root = "./tmp/evolver-skills"
+approval_threshold = 60
+governance = "noop"
+
+[evolution.detector]
+min_repeats = 3
+window = 20
+failure_kinds = "tool_failed,user_correction"
+"#,
+    )
+    .expect("canonical evolution full section should parse");
+
+    let EvolutionConfig::Canonical(canonical) = &config.evolution else {
+        panic!("expected canonical evolution config");
+    };
+    assert_eq!(canonical.skill_root, PathBuf::from("./tmp/evolver-skills"));
+    assert_eq!(canonical.approval_threshold, 60);
+    assert_eq!(canonical.detector.min_repeats, 3);
+    assert_eq!(canonical.detector.window, Some(20));
+    assert_eq!(canonical.detector.failure_kinds.len(), 2);
+    assert_eq!(
+        canonical.governance,
+        chuang_agent::runtime_config::CanonicalEvolutionGovernance::Noop
+    );
+    config
+        .validate()
+        .expect("fully-specified canonical evolution should validate");
+}
+
+#[test]
+fn config_file_rejects_canonical_evolution_invalid_min_repeats() {
+    let err = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+[evolution.detector]
+min_repeats = "not-a-number"
+"#,
+    )
+    .expect_err("non-numeric min_repeats should fail");
+
+    assert!(matches!(
+        err,
+        RuntimeConfigFileError::InvalidValue { key, .. }
+            if key == "evolution.detector.min_repeats"
+    ));
+}
+
+#[test]
+fn config_file_rejects_canonical_evolution_unknown_event_kind() {
+    let err = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+[evolution.detector]
+failure_kinds = "tool_failed,ghost_kind"
+"#,
+    )
+    .expect_err("unknown failure kind should fail");
+
+    assert!(matches!(
+        err,
+        RuntimeConfigFileError::InvalidValue { key, .. }
+            if key == "evolution.detector.failure_kinds"
+    ));
+}
+
+#[test]
+fn config_file_rejects_canonical_evolution_unknown_governance() {
+    let err = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+governance = "ghost"
+"#,
+    )
+    .expect_err("unknown governance should fail");
+
+    assert!(matches!(
+        err,
+        RuntimeConfigFileError::InvalidValue { key, .. }
+            if key == "evolution.governance"
+    ));
+}

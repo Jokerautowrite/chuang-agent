@@ -414,3 +414,67 @@ fn identity_memory_config_rejects_zero_limits() {
 
     assert_eq!(err.field, "identity_memory.user_max_chars");
 }
+
+#[test]
+fn canonical_evolution_config_defaults_are_backward_compatible_and_valid() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.evolution = EvolutionConfig::Canonical(Default::default());
+
+    config
+        .validate()
+        .expect("canonical evolution config with defaults should be valid");
+    let summary = config.summary();
+
+    assert_eq!(summary.evolution_kind, "canonical");
+    if let EvolutionConfig::Canonical(canonical) = &config.evolution {
+        assert_eq!(canonical.skill_root, PathBuf::from("./rules"));
+        assert_eq!(canonical.approval_threshold, 75);
+        assert_eq!(canonical.detector.min_repeats, 2);
+        assert_eq!(canonical.detector.window, None);
+        assert_eq!(canonical.detector.failure_kinds.len(), 1);
+    } else {
+        panic!("expected canonical evolution config");
+    }
+}
+
+#[test]
+fn canonical_evolution_config_rejects_zero_approval_threshold() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
+    canonical.approval_threshold = 0;
+    config.evolution = EvolutionConfig::Canonical(canonical);
+
+    let err = config
+        .validate()
+        .expect_err("zero approval threshold should be rejected");
+
+    assert_eq!(err.field, "evolution.approval_threshold");
+}
+
+#[test]
+fn canonical_evolution_config_rejects_zero_min_repeats() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
+    canonical.detector.min_repeats = 0;
+    config.evolution = EvolutionConfig::Canonical(canonical);
+
+    let err = config
+        .validate()
+        .expect_err("zero min_repeats should be rejected");
+
+    assert_eq!(err.field, "evolution.detector.min_repeats");
+}
+
+#[test]
+fn canonical_evolution_config_rejects_empty_failure_kinds() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
+    canonical.detector.failure_kinds = Vec::new();
+    config.evolution = EvolutionConfig::Canonical(canonical);
+
+    let err = config
+        .validate()
+        .expect_err("empty failure_kinds should be rejected");
+
+    assert_eq!(err.field, "evolution.detector.failure_kinds");
+}
