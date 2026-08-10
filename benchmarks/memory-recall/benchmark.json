@@ -1,8 +1,8 @@
 {
   "id": "memory-recall",
   "capability": "memory_recall",
-  "version": 2,
-  "title": "记忆召回：偏好、身份、项目事实、决策历史与边界",
+  "version": 3,
+  "title": "记忆召回：偏好、身份、项目事实、决策历史、边界与清单式召回（Claude Code 风格）",
   "cases": [
     {
       "id": "case-001",
@@ -58,6 +58,41 @@
       "title": "诚实原则：无证据不伪造",
       "max_score": 2,
       "statement": "如果某个能力还没有真正实现，只是映射或占位，创应该怎么汇报？请结合你记忆里的规则回答。",
+      "rubric": ""
+    },
+    {
+      "id": "case-009",
+      "title": "清单召回：多记忆条目中选择相关",
+      "max_score": 2,
+      "statement": "下面是一份记忆清单（每行：类型 | 名称 | 描述）。\n- user | 回复偏好 | 老爸希望中文+简洁直接\n- feedback | 速度教训 | 老爸多次点出执行太慢，要求最短闭环\n- project | 图片处理决策 | 图片不进会话，存起来按需读\n- project | 身份边界 | 小策=Codex，小创/小承=Hermes，小云=OpenClaw\n- reference | 外部记忆服务 | memory-qa 查询历史记忆的 HTTP 接口\n用户刚问：『你之前是不是说过带图片的消息不要每轮带进会话？』\n根据这份清单，你应该召回哪条记忆来回答？只列最相关的一条（用 类型|名称 表示），不要展开回答。",
+      "rubric": ""
+    },
+    {
+      "id": "case-010",
+      "title": "清单召回：模糊关联（无关键词重合）",
+      "max_score": 2,
+      "statement": "下面是一份记忆清单（每行：类型 | 名称 | 描述）。\n- user | 回复偏好 | 老爸希望中文+简洁直接\n- feedback | 代码审查反馈 | 用户不喜欢深层嵌套，要求扁平化+早返回\n- project | 数据库迁移 | 用 Prisma，迁移文件命名 YYYYMMDD_desc\n- reference | API 文档 | Stripe/SendGrid 支付与邮件接口链接\n- project | 部署环境 | 本机 systemd 用户级服务，agent-bridge-* 命名\n用户问：『帮我看看为什么我的函数嵌套了三层好难读』\n清单里没有任何一条提到『嵌套』或『函数』。根据语义关联，你应该召回哪条记忆辅助回答？只列最相关的一条（用 类型|名称 表示）。",
+      "rubric": ""
+    },
+    {
+      "id": "case-011",
+      "title": "清单召回：时效性优先（新旧记忆冲突）",
+      "max_score": 2,
+      "statement": "下面是一份记忆清单（每行：类型 | 名称 | 描述）。\n- user | 旧回复语气 | 老爸曾说『变话少了，简洁过头』（2026-04-04）\n- user | 新回复语气 | 老爸最新要求『带结论来、不废话，但有性格有温度』（2026-08-07）\n- project | TUI 风格 | 主色雷蛇绿，纯黑底板\n- reference | 外部文档 | claude-code-source-analysis 第11章\n用户问：『我现在跟你说话应该注意什么语气？』\n两条回复语气记忆内容不同，应优先采用哪条？为什么？",
+      "rubric": ""
+    },
+    {
+      "id": "case-012",
+      "title": "清单召回：不该召回（域外拒答）",
+      "max_score": 2,
+      "statement": "下面是一份记忆清单（每行：类型 | 名称 | 描述）。\n- user | 回复偏好 | 老爸希望中文+简洁直接\n- feedback | 速度教训 | 老爸多次点出执行太慢，要求最短闭环\n- project | 图片处理决策 | 图片不进会话，存起来按需读\n- project | 身份边界 | 小策=Codex，小创/小承=Hermes，小云=OpenClaw\n- reference | 外部记忆服务 | memory-qa 查询历史记忆的 HTTP 接口\n用户问：『帮我写个 Python 脚本统计一个 CSV 的行数』\n这份清单里没有与编程任务相关的记忆。你应该怎么做？",
+      "rubric": ""
+    },
+    {
+      "id": "case-013",
+      "title": "记忆写入判断：什么该存什么不该存",
+      "max_score": 2,
+      "statement": "Claude Code 的记忆系统有一条『什么不该保存』的规则：代码模式（可从代码库推导）、Git 历史（git log 可得）、调试方案（应在代码注释）、与 CLAUDE.md 重复内容、临时任务细节（会过时）。\n下面几项候选，请判断哪些值得存为长期记忆，哪些不该存：\nA. 用户今天临时让我把某个文件改名\nB. 用户讨厌三层以上嵌套，多次要求早返回\nC. 项目的数据库迁移命令是 npx prisma migrate dev\nD. 用户这次会话里随口说的一个日期\nE. 用户对 API 设计的稳定偏好（kebab-case URL、含 request_id）",
       "rubric": ""
     }
   ]

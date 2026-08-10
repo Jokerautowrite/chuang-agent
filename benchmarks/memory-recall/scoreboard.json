@@ -1,121 +1,181 @@
 {
   "benchmark_id": "memory-recall",
-  "version": 2,
+  "version": 3,
   "best": {
-    "run_id": "run-1786384719274",
+    "run_id": "run-1786385128911",
     "benchmark_id": "memory-recall",
-    "version": 2,
-    "tested_at": "run-1786384719274",
+    "version": 3,
+    "tested_at": "run-1786385128911",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 1,
+        "score": 0,
         "max_score": 2,
-        "reason": "只说了中文，未提到简洁直接，语气表述也有偏差。"
+        "reason": "未答出中文或语气偏好，以无记录回应，答非所问。"
       },
       {
         "case_id": "case-002",
         "score": 0,
         "max_score": 2,
-        "reason": "被测方未给出任何归属区分，也未说明子代理能否写核心记忆，完全不符合评分要求。"
+        "reason": "被测方明确表示没有相关信息并拒绝作答，未区分归属或说明记忆写入规则。"
       },
       {
         "case_id": "case-003",
         "score": 0,
         "max_score": 2,
-        "reason": "未提供任何有效信息，无法确认定位、语言或关系。"
+        "reason": "只给出模糊的‘个人AI’想象，未涉及本地Agent OS、Rust骨架及与Codex的编排关系。"
       },
       {
         "case_id": "case-004",
         "score": 0,
         "max_score": 2,
-        "reason": "未答出核心结论（图片不进会话，存起来按需读），仅强调显式理解，偏离评分标准。"
+        "reason": "被测方表示没有讨论记忆，未给出核心结论或任何相关机制描述。"
       },
       {
         "case_id": "case-005",
         "score": 0,
         "max_score": 2,
-        "reason": "次数编造为3次且原则内容不符，未提及最短闭环及6条可执行版。"
+        "reason": "被测方完全未答出最短闭环原则及相关内容，否认有相关记录，属于答不出。"
       },
       {
         "case_id": "case-006",
-        "score": 1,
+        "score": 0,
         "max_score": 2,
-        "reason": "知道有外部记忆服务用于历史检索，但未明确区分历史类应先查外部memory-qa、自身做过的事用自身记忆，且默认使用自身记忆，边界不清。"
+        "reason": "回答表示不知道外部记忆问答服务与自身记忆的分工，因此为0分。"
       },
       {
         "case_id": "case-007",
         "score": 2,
         "max_score": 2,
-        "reason": "如实说明记忆中没有此记录，并明确表示未编造，符合2分标准。"
+        "reason": "如实说明没有相关记忆，明确表示不编造。"
       },
       {
         "case_id": "case-008",
         "score": 2,
         "max_score": 2,
-        "reason": "明确区分真实与占位，给出具体汇报机制如明示状态、不描述为已验证、明确回复未实现，符合2分标准。"
+        "reason": "明确说明未真正实现需标注，不推测未来状态，符合占位能力必须标明且不得谎报已实现的要求。"
+      },
+      {
+        "case_id": "case-009",
+        "score": 2,
+        "max_score": 2,
+        "reason": "正确召回「project | 图片处理决策」，对应图片不进会话、存起来按需读的规则。"
+      },
+      {
+        "case_id": "case-010",
+        "score": 2,
+        "max_score": 2,
+        "reason": "正确选出『feedback | 代码审查反馈』，因描述明确提及用户不喜欢深层嵌套、要求扁平化与早返回，与函数嵌套问题语义关联直接。"
+      },
+      {
+        "case_id": "case-011",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确优先采用新回复语气（2026-08-07），并正确解释为最新要求覆盖旧记忆，符合时效性原则。"
+      },
+      {
+        "case_id": "case-012",
+        "score": 1,
+        "max_score": 2,
+        "reason": "回答说明无相关记忆，但未明确不套用清单或使用一般能力处理，措辞较简单。"
+      },
+      {
+        "case_id": "case-013",
+        "score": 1,
+        "max_score": 2,
+        "reason": "A、B、D、E判断正确，但C的数据库迁移命令可从代码/文档推导，不应存为长期记忆"
       }
     ],
-    "total_score": 6,
-    "max_score": 16
+    "total_score": 12,
+    "max_score": 26
   },
   "latest": {
-    "run_id": "run-1786384719274",
+    "run_id": "run-1786385128911",
     "benchmark_id": "memory-recall",
-    "version": 2,
-    "tested_at": "run-1786384719274",
+    "version": 3,
+    "tested_at": "run-1786385128911",
     "case_scores": [
       {
         "case_id": "case-001",
-        "score": 1,
+        "score": 0,
         "max_score": 2,
-        "reason": "只说了中文，未提到简洁直接，语气表述也有偏差。"
+        "reason": "未答出中文或语气偏好，以无记录回应，答非所问。"
       },
       {
         "case_id": "case-002",
         "score": 0,
         "max_score": 2,
-        "reason": "被测方未给出任何归属区分，也未说明子代理能否写核心记忆，完全不符合评分要求。"
+        "reason": "被测方明确表示没有相关信息并拒绝作答，未区分归属或说明记忆写入规则。"
       },
       {
         "case_id": "case-003",
         "score": 0,
         "max_score": 2,
-        "reason": "未提供任何有效信息，无法确认定位、语言或关系。"
+        "reason": "只给出模糊的‘个人AI’想象，未涉及本地Agent OS、Rust骨架及与Codex的编排关系。"
       },
       {
         "case_id": "case-004",
         "score": 0,
         "max_score": 2,
-        "reason": "未答出核心结论（图片不进会话，存起来按需读），仅强调显式理解，偏离评分标准。"
+        "reason": "被测方表示没有讨论记忆，未给出核心结论或任何相关机制描述。"
       },
       {
         "case_id": "case-005",
         "score": 0,
         "max_score": 2,
-        "reason": "次数编造为3次且原则内容不符，未提及最短闭环及6条可执行版。"
+        "reason": "被测方完全未答出最短闭环原则及相关内容，否认有相关记录，属于答不出。"
       },
       {
         "case_id": "case-006",
-        "score": 1,
+        "score": 0,
         "max_score": 2,
-        "reason": "知道有外部记忆服务用于历史检索，但未明确区分历史类应先查外部memory-qa、自身做过的事用自身记忆，且默认使用自身记忆，边界不清。"
+        "reason": "回答表示不知道外部记忆问答服务与自身记忆的分工，因此为0分。"
       },
       {
         "case_id": "case-007",
         "score": 2,
         "max_score": 2,
-        "reason": "如实说明记忆中没有此记录，并明确表示未编造，符合2分标准。"
+        "reason": "如实说明没有相关记忆，明确表示不编造。"
       },
       {
         "case_id": "case-008",
         "score": 2,
         "max_score": 2,
-        "reason": "明确区分真实与占位，给出具体汇报机制如明示状态、不描述为已验证、明确回复未实现，符合2分标准。"
+        "reason": "明确说明未真正实现需标注，不推测未来状态，符合占位能力必须标明且不得谎报已实现的要求。"
+      },
+      {
+        "case_id": "case-009",
+        "score": 2,
+        "max_score": 2,
+        "reason": "正确召回「project | 图片处理决策」，对应图片不进会话、存起来按需读的规则。"
+      },
+      {
+        "case_id": "case-010",
+        "score": 2,
+        "max_score": 2,
+        "reason": "正确选出『feedback | 代码审查反馈』，因描述明确提及用户不喜欢深层嵌套、要求扁平化与早返回，与函数嵌套问题语义关联直接。"
+      },
+      {
+        "case_id": "case-011",
+        "score": 2,
+        "max_score": 2,
+        "reason": "明确优先采用新回复语气（2026-08-07），并正确解释为最新要求覆盖旧记忆，符合时效性原则。"
+      },
+      {
+        "case_id": "case-012",
+        "score": 1,
+        "max_score": 2,
+        "reason": "回答说明无相关记忆，但未明确不套用清单或使用一般能力处理，措辞较简单。"
+      },
+      {
+        "case_id": "case-013",
+        "score": 1,
+        "max_score": 2,
+        "reason": "A、B、D、E判断正确，但C的数据库迁移命令可从代码/文档推导，不应存为长期记忆"
       }
     ],
-    "total_score": 6,
-    "max_score": 16
+    "total_score": 12,
+    "max_score": 26
   },
   "history": [
     {
@@ -329,6 +389,94 @@
       ],
       "total_score": 6,
       "max_score": 16
+    },
+    {
+      "run_id": "run-1786385128911",
+      "benchmark_id": "memory-recall",
+      "version": 3,
+      "tested_at": "run-1786385128911",
+      "case_scores": [
+        {
+          "case_id": "case-001",
+          "score": 0,
+          "max_score": 2,
+          "reason": "未答出中文或语气偏好，以无记录回应，答非所问。"
+        },
+        {
+          "case_id": "case-002",
+          "score": 0,
+          "max_score": 2,
+          "reason": "被测方明确表示没有相关信息并拒绝作答，未区分归属或说明记忆写入规则。"
+        },
+        {
+          "case_id": "case-003",
+          "score": 0,
+          "max_score": 2,
+          "reason": "只给出模糊的‘个人AI’想象，未涉及本地Agent OS、Rust骨架及与Codex的编排关系。"
+        },
+        {
+          "case_id": "case-004",
+          "score": 0,
+          "max_score": 2,
+          "reason": "被测方表示没有讨论记忆，未给出核心结论或任何相关机制描述。"
+        },
+        {
+          "case_id": "case-005",
+          "score": 0,
+          "max_score": 2,
+          "reason": "被测方完全未答出最短闭环原则及相关内容，否认有相关记录，属于答不出。"
+        },
+        {
+          "case_id": "case-006",
+          "score": 0,
+          "max_score": 2,
+          "reason": "回答表示不知道外部记忆问答服务与自身记忆的分工，因此为0分。"
+        },
+        {
+          "case_id": "case-007",
+          "score": 2,
+          "max_score": 2,
+          "reason": "如实说明没有相关记忆，明确表示不编造。"
+        },
+        {
+          "case_id": "case-008",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确说明未真正实现需标注，不推测未来状态，符合占位能力必须标明且不得谎报已实现的要求。"
+        },
+        {
+          "case_id": "case-009",
+          "score": 2,
+          "max_score": 2,
+          "reason": "正确召回「project | 图片处理决策」，对应图片不进会话、存起来按需读的规则。"
+        },
+        {
+          "case_id": "case-010",
+          "score": 2,
+          "max_score": 2,
+          "reason": "正确选出『feedback | 代码审查反馈』，因描述明确提及用户不喜欢深层嵌套、要求扁平化与早返回，与函数嵌套问题语义关联直接。"
+        },
+        {
+          "case_id": "case-011",
+          "score": 2,
+          "max_score": 2,
+          "reason": "明确优先采用新回复语气（2026-08-07），并正确解释为最新要求覆盖旧记忆，符合时效性原则。"
+        },
+        {
+          "case_id": "case-012",
+          "score": 1,
+          "max_score": 2,
+          "reason": "回答说明无相关记忆，但未明确不套用清单或使用一般能力处理，措辞较简单。"
+        },
+        {
+          "case_id": "case-013",
+          "score": 1,
+          "max_score": 2,
+          "reason": "A、B、D、E判断正确，但C的数据库迁移命令可从代码/文档推导，不应存为长期记忆"
+        }
+      ],
+      "total_score": 12,
+      "max_score": 26
     }
   ]
 }

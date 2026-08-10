@@ -1,3 +1,25 @@
+# 2026-08-11 memory-recall 基准升级 v3：参考本地 Claude Code 记忆召回（清单+侧查询范式）5 个能力点
+
+- **背景**：田楠指令「参考一下 Claude Code 的记忆召回，就是我们本地的 Claude Code，
+  再把这个方案给优化一下」。已调研 `claude-code-source-analysis/11 记忆系统.md`
+  全文：Claude Code 召回 = frontmatter 清单（manifest）+ Sonnet 侧查询（sideQuery），
+  非嵌入向量检索；记忆 4 类型（user/feedback/project/reference）；MEMORY.md 两级截断；
+  时效追踪 🟢🟡🟠🔴；`shouldSaveAsMemory` 过滤「代码模式/Git 历史/调试方案/CLAUDE.md
+  重复/临时细节」。
+- **改动**：`benchmarks/memory-recall/benchmark.json` v2→v3（8→13 case），新增 5 个
+  Claude Code 式召回 case，每 case 配私有 rubric（0600）：
+  - case-009 清单召回·多条目选择（正确命中「project | 图片处理决策」）
+  - case-010 清单召回·模糊关联（清单无关键词重合，靠语义选「feedback | 代码审查反馈」）
+  - case-011 时效性优先（新旧冲突记忆选新，2026-08-07 覆盖 2026-04-04）
+  - case-012 域外拒答（清单无编程相关记忆时，不硬套清单）
+  - case-013 记忆写入判断（Claude Code shouldSaveAsMemory 规则：B/E 该存，A/C/D 不该存）
+- **验证**：`benchmark verify` ok；真实 evaluate（sub2/deepseek-v4-flash 经本机
+  10100 代理）13/13 case 全量评分 **12/26**，新 5 case = 2/2/2/1/1，
+  run-1786385128911 accepted_as_best（区分度：模糊关联/时效/拒答全对，写入判断与
+  拒答措辞各扣 1 分，说明 rubric 能区分部分掌握）。
+- **待定**：本改动只把「Claude Code 式召回能力」变成可评测维度；创运行时真正落地
+  manifest+sideQuery 侧查询是另一件事，等田楠定优先级。
+
 # 2026-08-10 1/2 全部缺口做完：checkpoint 验收持久化 + evolver 运行时喂入/外环驱动（双子代理）
 
 - **背景**：接上轮遗留缺口全部收口：① `goal checkpoint --from-collect` 落盘
