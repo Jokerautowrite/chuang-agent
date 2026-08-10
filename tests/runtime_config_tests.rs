@@ -171,6 +171,26 @@ fn runtime_config_rejects_zero_recall_limit() {
 }
 
 #[test]
+fn runtime_config_defaults_to_ten_recent_context_turns() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+
+    assert_eq!(config.context_recent_turns, 10);
+    assert_eq!(config.summary().context_recent_turns, 10);
+}
+
+#[test]
+fn runtime_config_rejects_zero_recent_context_turns() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.context_recent_turns = 0;
+
+    let err = config
+        .validate()
+        .expect_err("zero recent turns should fail");
+
+    assert_eq!(err.field, "context.recent_turns");
+}
+
+#[test]
 fn runtime_config_rejects_context_system_reserve_over_budget() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.context_budget.max_tokens = 32;

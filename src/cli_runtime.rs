@@ -19,6 +19,10 @@ use chuang_agent::emotion_slot::EmotionTrigger;
 use chuang_agent::emotion_store::{
     resolve_emotion_state_path, EmotionStateFile, PersistedEmotionState,
 };
+use chuang_agent::evolution_loop::{
+    EvolutionEventBridge, OuterLoopDriveInput, OuterLoopDriver, OuterLoopReport,
+};
+use chuang_agent::experience_policy::{ExperienceCandidate, ExperienceWritePolicy};
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
@@ -30,14 +34,11 @@ use chuang_agent::memory_admission::{
 };
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::evolution_loop::{
-    EvolutionEventBridge, OuterLoopDriver, OuterLoopDriveInput, OuterLoopReport,
-};
 use chuang_agent::runtime_config::{EvolutionConfig, RuntimeConfig, SubagentConfig};
 use chuang_agent::runtime_event_ledger::{
     InMemoryRuntimeEventLedger, RuntimeEvent, RuntimeEventLedger,
 };
-use chuang_agent::session_archive::SqliteSessionArchive;
+use chuang_agent::session_archive::{SessionRollingSummary, SqliteSessionArchive};
 use chuang_agent::slot_registry::{build_runtime_slots, EmotionSlotRuntime, EvolutionSlot};
 use chuang_agent::subagent_queue::FileSubagentQueueConfig;
 use chuang_agent::subagent_report::governance_metadata;
@@ -149,6 +150,10 @@ pub(crate) fn run_with_options(
             .metadata
             .insert("memory_scope".to_string(), "session".to_string());
     }
+    runtime.metadata.insert(
+        "context_recent_turns".to_string(),
+        runtime.context_recent_turns.to_string(),
+    );
 
     let tool_workspace_root = request.workspace_root.clone().map(Ok).unwrap_or_else(|| {
         std::env::current_dir().map_err(|e| format!("workspace_root_discovery_failed: {e}"))
@@ -171,6 +176,25 @@ pub(crate) fn run_with_options(
     let mut kernel =
         ChuangKernel::with_responder(kernel_config_from_runtime(&runtime)?, store, slots.provider);
     let mut runtime_context = goal_context_segments(request.goal_spec.as_ref())?;
+    if let Some(session_id) = request.session_id.as_deref() {
+        if let Ok(Some(summary)) = SqliteSessionArchive::open(&runtime.db_path)
+            .and_then(|archive| archive.rolling_summary(session_id))
+        {
+            runtime_context.push(ContextSegment {
+                id: "session-rolling-summary".to_string(),
+                source: chuang_agent::context_engine::SegmentSource::Working,
+                tokens: None,
+                content: summary.render(),
+                priority: 244,
+                created_at: default_cli_context_timestamp(),
+                last_accessed: default_cli_context_timestamp(),
+                metadata: std::collections::HashMap::from([(
+                    "kind".to_string(),
+                    "session_rolling_summary".to_string(),
+                )]),
+            });
+        }
+    }
     runtime_context.extend(conversation_history_context_segments(
         &request.conversation_history,
     ));
@@ -522,48 +546,34 @@ fn ensure_cli_channel_metadata(metadata: &mut BTreeMap<String, String>) {
 fn conversation_history_context_segments(
     history: &[ConversationHistoryItem],
 ) -> Vec<ContextSegment> {
-    let content = render_conversation_history(history);
-    if content.is_empty() {
-        return Vec::new();
-    }
-    vec![ContextSegment {
-        id: "recent-conversation-history".to_string(),
-        source: chuang_agent::context_engine::SegmentSource::Working,
-        tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
-        content,
-        priority: 241,
-        created_at: default_cli_context_timestamp(),
-        last_accessed: default_cli_context_timestamp(),
-        metadata: std::collections::HashMap::from([(
-            "kind".to_string(),
-            "recent_conversation_history".to_string(),
-        )]),
-    }]
-}
-
-fn render_conversation_history(history: &[ConversationHistoryItem]) -> String {
-    let rendered = history
+    history
         .iter()
-        .filter_map(|item| {
-            let role = item.role.trim();
+        .enumerate()
+        .filter_map(|(index, item)| {
             let text = item.text.trim();
             if text.is_empty() {
                 return None;
             }
-            let role = match role {
-                "user" | "assistant" | "system" | "tool" => role,
+            let role = match item.role.trim() {
+                "user" | "assistant" | "system" | "tool" => item.role.trim(),
                 _ => "note",
             };
-            Some(format!("{role}: {}", truncate_history_text(text, 1200)))
+            let content = format!("{role}: {}", truncate_history_text(text, 1200));
+            Some(ContextSegment {
+                id: format!("recent-conversation-turn-{index}"),
+                source: chuang_agent::context_engine::SegmentSource::Working,
+                tokens: Some(content.chars().count().min(u32::MAX as usize) as u32),
+                content,
+                priority: 241,
+                created_at: default_cli_context_timestamp(),
+                last_accessed: default_cli_context_timestamp(),
+                metadata: std::collections::HashMap::from([(
+                    "kind".to_string(),
+                    "recent_conversation_turn".to_string(),
+                )]),
+            })
         })
-        .collect::<Vec<_>>();
-    if rendered.is_empty() {
-        return String::new();
-    }
-    format!(
-        "[recent-conversation-history]\n说明：这是同一 thread/session 的最近原文对话，优先用于理解“继续/刚才/他说的”等承接短句。\n{}",
-        rendered.join("\n")
-    )
+        .collect()
 }
 
 fn truncate_history_text(value: &str, max_chars: usize) -> String {
@@ -592,7 +602,7 @@ fn insert_conversation_history_metadata(
         .result
         .dropped_segment_ids
         .iter()
-        .any(|id| id == "recent-conversation-history");
+        .any(|id| id.starts_with("recent-conversation-turn-"));
     let injected = non_empty_item_count > 0 && !dropped;
 
     let extra = &mut turn.result.response.meta.extra;
@@ -3030,18 +3040,11 @@ fn drive_evolution_outer_loop_after_turn(
         return;
     };
     let Some(governance_context) = evolution.rule_change_governance_context() else {
-        record_outer_loop_error_metadata(
-            turn,
-            "slot",
-            "canonical slot missing governance context",
-        );
+        record_outer_loop_error_metadata(turn, "slot", "canonical slot missing governance context");
         return;
     };
-    let input = OuterLoopDriveInput::new(
-        &detector_config,
-        governance.as_ref(),
-        &governance_context,
-    );
+    let input =
+        OuterLoopDriveInput::new(&detector_config, governance.as_ref(), &governance_context);
     let report = OuterLoopDriver::new().drive(evolution, input);
 
     // 5) 报告进 turn 元数据 + 日志。
@@ -3309,9 +3312,34 @@ where
 {
     let mut records = RememberedRecords::default();
     let mut pending_session_archive: Option<PendingSessionArchive> = None;
-    let mut remember_commit = RememberCommitTracker::new(request);
+    let experience_lesson = extract_experience_lesson(&turn);
+    let experience_policy = experience_policy_for_request(request);
+    let experience_decision = experience_policy.evaluate(&ExperienceCandidate {
+        user_input: &turn.user_input,
+        summary: &turn.report.summary,
+        lesson: &experience_lesson,
+    });
+    let remember_experience = experience_decision.should_write();
+    let mut remember_commit = RememberCommitTracker::new(request, remember_experience);
     records.runtime_report_id = Some(turn.report.report_id.0.clone());
     insert_runtime_report_metadata(&mut turn);
+    turn.result.response.meta.extra.insert(
+        "experience_write_policy".to_string(),
+        experience_policy.as_str().to_string(),
+    );
+    turn.result.response.meta.extra.insert(
+        "experience_write_decision".to_string(),
+        if remember_experience {
+            "accepted"
+        } else {
+            "rejected"
+        }
+        .to_string(),
+    );
+    turn.result.response.meta.extra.insert(
+        "experience_write_reason".to_string(),
+        experience_decision.reason().as_str().to_string(),
+    );
 
     if let Some(decision) = &turn.report.governance_decision {
         turn.result
@@ -3410,8 +3438,12 @@ where
         None
     };
 
-    let pending_experience_write = if request.remember_experience {
-        Some(prepare_experience_turn_write(options, &turn)?)
+    let pending_experience_write = if remember_experience {
+        Some(prepare_experience_turn_write(
+            options,
+            &turn,
+            &experience_lesson,
+        )?)
     } else {
         None
     };
@@ -3448,7 +3480,7 @@ where
         }
     }
 
-    if request.remember_experience {
+    if remember_experience {
         match pending_experience_write
             .expect("experience write should be prepared when requested")
             .commit()
@@ -3587,16 +3619,13 @@ struct RememberCommitTracker {
 }
 
 impl RememberCommitTracker {
-    fn new(request: &RunCliRequest) -> Self {
+    fn new(request: &RunCliRequest, remember_experience: bool) -> Self {
         let mut requested_steps = Vec::new();
         let mut step_statuses = BTreeMap::new();
         for (requested, step) in [
             (request.remember_session, RememberWorkflowStep::Archive),
             (request.remember_identity, RememberWorkflowStep::Identity),
-            (
-                request.remember_experience,
-                RememberWorkflowStep::Experience,
-            ),
+            (remember_experience, RememberWorkflowStep::Experience),
             (
                 request.dispatch_subagent,
                 RememberWorkflowStep::QueuedDispatch,
@@ -3823,9 +3852,42 @@ fn archive_session_turn(
     );
     extra.insert(
         "session_archive_created_at".to_string(),
-        archived.created_at,
+        archived.created_at.clone(),
     );
     extra.insert("session_archive_replayable".to_string(), "true".to_string());
+    let turns = archive
+        .replay(session_id)
+        .map_err(|error| format!("session_archive_replay_failed: {error}"))?;
+    let completed = if turns.is_empty() {
+        "暂无".to_string()
+    } else {
+        turns
+            .iter()
+            .map(|turn| {
+                format!(
+                    "第{}轮：用户请求：{}；响应：{}",
+                    turn.sequence, turn.raw_user_input, turn.raw_response
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let rolling = SessionRollingSummary {
+        session_id: session_id.to_string(),
+        updated_at: archived.created_at.clone(),
+        turn_count: turns.len() as u64,
+        completed,
+        in_progress: "以最新一轮上下文为准，未标记为已完成的工作继续跟进".to_string(),
+        pending: "由后续用户指令或最新响应中的待办决定".to_string(),
+        constraints: "保留原始会话归档；压缩上下文时保留最近 10 轮原文".to_string(),
+    };
+    archive
+        .update_rolling_summary(rolling)
+        .map_err(|error| format!("session_rolling_summary_update_failed: {error}"))?;
+    extra.insert(
+        "session_rolling_summary_status".to_string(),
+        "written".to_string(),
+    );
     Ok(())
 }
 
@@ -3960,6 +4022,7 @@ fn prepare_identity_turn_write(
 fn prepare_experience_turn_write(
     options: &CliOptions,
     turn: &chuang_agent::chuang_kernel::ChuangKernelTurn,
+    experience_lesson: &str,
 ) -> Result<PendingExperienceTurnWrite, String> {
     let dual_file_config = options
         .runtime
@@ -3982,7 +4045,7 @@ fn prepare_experience_turn_write(
         governance,
         turn.user_input,
         turn.report.summary,
-        extract_experience_lesson(turn),
+        experience_lesson,
     );
     preview_identity_experience_append(&dual_file_config, &entry_id, &content)?;
     Ok(PendingExperienceTurnWrite {
@@ -4108,6 +4171,23 @@ fn extract_experience_lesson(turn: &chuang_agent::chuang_kernel::ChuangKernelTur
         .find(|line| !line.trim().is_empty())
         .map(|line| line.trim().chars().take(180).collect())
         .unwrap_or_else(|| "本轮没有可沉淀正文，保留 report summary 作为来源。".to_string())
+}
+
+fn experience_policy_for_request(request: &RunCliRequest) -> ExperienceWritePolicy {
+    if request.remember_experience {
+        ExperienceWritePolicy::Always
+    } else if request
+        .options
+        .runtime
+        .metadata
+        .get("channel")
+        .map(String::as_str)
+        == Some("app-server")
+    {
+        ExperienceWritePolicy::Deterministic
+    } else {
+        ExperienceWritePolicy::Disabled
+    }
 }
 
 fn format_identity_memory_error(err: chuang_agent::hermes_memory::DualFileMemoryError) -> String {
@@ -4993,6 +5073,87 @@ allowed_channels = ["app-server"]
                 .map(String::as_str),
             Some("false")
         );
+    }
+
+    #[test]
+    fn experience_policy_defaults_to_app_server_quality_gate() {
+        let mut request = test_run_request_for_unit_tests("长期约束：以后不要自动删除文件。");
+        assert_eq!(
+            experience_policy_for_request(&request),
+            ExperienceWritePolicy::Disabled
+        );
+        request
+            .options
+            .runtime
+            .metadata
+            .insert("channel".to_string(), "app-server".to_string());
+        assert_eq!(
+            experience_policy_for_request(&request),
+            ExperienceWritePolicy::Deterministic
+        );
+        request.remember_experience = true;
+        assert_eq!(
+            experience_policy_for_request(&request),
+            ExperienceWritePolicy::Always
+        );
+    }
+
+    #[test]
+    fn app_server_quality_gate_writes_durable_experience_and_rejects_noise() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-app-server-experience-policy-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        let mut durable = test_run_request_for_unit_tests("长期约束：以后不要自动删除文件。");
+        durable.options.runtime = test_runtime(temp_dir.join("durable.db"), identity_root.clone());
+        durable
+            .options
+            .runtime
+            .metadata
+            .insert("channel".to_string(), "app-server".to_string());
+        durable.workspace_root = Some(temp_dir.clone());
+
+        let (durable_result, durable_records) =
+            run_with_options(&durable).expect("durable app-server turn should succeed");
+        assert!(durable_records.experience_record_id.is_some());
+        assert_eq!(
+            durable_result
+                .response
+                .meta
+                .extra
+                .get("experience_write_reason")
+                .map(String::as_str),
+            Some("durable_constraint")
+        );
+
+        let noise_identity_root = temp_dir.join("noise-identity");
+        let mut noise = test_run_request_for_unit_tests("git log 显示本轮提交历史。");
+        noise.options.runtime =
+            test_runtime(temp_dir.join("noise.db"), noise_identity_root.clone());
+        noise
+            .options
+            .runtime
+            .metadata
+            .insert("channel".to_string(), "app-server".to_string());
+        noise.workspace_root = Some(temp_dir.clone());
+
+        let (noise_result, noise_records) =
+            run_with_options(&noise).expect("noise app-server turn should succeed");
+        assert!(noise_records.experience_record_id.is_none());
+        assert_eq!(
+            noise_result
+                .response
+                .meta
+                .extra
+                .get("experience_write_reason")
+                .map(String::as_str),
+            Some("git_history")
+        );
+        let noise_experiences =
+            fs::read_to_string(noise_identity_root.join("experiences.md")).unwrap_or_default();
+        assert!(!noise_experiences.contains("source=runtime_turn"));
     }
 
     #[test]
@@ -6779,7 +6940,9 @@ allowed_channels = ["app-server"]
 
         assert_eq!(turn.result.response.body, "ok");
         let captured = captured.lock().expect("capture lock should succeed");
-        assert!(captured[0].prompt.contains("[recent-conversation-history]"));
+        assert!(captured[0]
+            .prompt
+            .contains("user: 第一句：我叫这个变量 anchor_alpha"));
         assert!(captured[0].prompt.contains("anchor_alpha"));
         assert_eq!(captured[0].user_input, "继续刚才那个");
         assert_eq!(
@@ -6869,7 +7032,9 @@ allowed_channels = ["app-server"]
 
         assert!(result.prompt.contains("[session-context]"));
         assert!(result.prompt.contains("[tool-catalog]"));
-        assert!(result.prompt.contains("[recent-conversation-history]"));
+        assert!(result
+            .prompt
+            .contains("user: 刚才我们确认 workspace_root 不能丢"));
         assert!(result.prompt.contains("workspace_root="));
         assert!(result.prompt.contains("thread-pressure"));
         assert!(result.prompt.contains("workspace_root"));
@@ -8370,6 +8535,28 @@ allowed_channels = ["app-server"]
             model_name: "session-stub".to_string(),
         };
         runtime
+    }
+
+    fn test_run_request_for_unit_tests(input: &str) -> RunCliRequest {
+        let root = std::env::temp_dir().join("chuang-agent-experience-policy-test");
+        RunCliRequest {
+            options: CliOptions {
+                runtime: test_runtime(root.join("memory.db"), root.join("identity")),
+            },
+            user_input: input.to_string(),
+            workspace_root: Some(root),
+            remember: false,
+            session_id: None,
+            remember_session: false,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        }
     }
 
     fn unique_record_suffix_for_test() -> String {

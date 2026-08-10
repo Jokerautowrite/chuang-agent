@@ -28,6 +28,8 @@ pub struct RuntimeConfig {
     pub metadata: BTreeMap<String, String>,
     pub context_budget: ContextBudget,
     pub context_engine: ContextEngineConfig,
+    /// 压缩时保留的最近完整对话轮数。
+    pub context_recent_turns: usize,
     pub provider: ProviderConfig,
     /// 视觉模型（用于识图兜底：主模型不支持视觉时，用它把图片描述成文字）。
     /// 形如 "sub2/mimo-v2.5"，走 opencodex 路由。
@@ -338,6 +340,7 @@ pub struct ConfigSummary {
     pub db_path: String,
     pub recall_limit: usize,
     pub context_engine_kind: String,
+    pub context_recent_turns: usize,
     pub context_max_tokens: u32,
     pub context_reserve_system_tokens: u32,
     pub context_min_working_tokens: u32,
@@ -371,6 +374,7 @@ impl RuntimeConfig {
             metadata: BTreeMap::new(),
             context_budget: default_context_budget(),
             context_engine: ContextEngineConfig::DeterministicBudget,
+            context_recent_turns: 10,
             provider: ProviderConfig::Fake {
                 provider_id: "fake-runtime".to_string(),
                 model_name: "stub-responder".to_string(),
@@ -447,6 +451,12 @@ impl RuntimeConfig {
             return Err(ConfigError {
                 field: "context.reserve_system_tokens".to_string(),
                 message: "context reserve_system_tokens must not exceed max_tokens".to_string(),
+            });
+        }
+        if self.context_recent_turns == 0 {
+            return Err(ConfigError {
+                field: "context.recent_turns".to_string(),
+                message: "context recent_turns must be greater than zero".to_string(),
             });
         }
 
@@ -541,6 +551,7 @@ impl RuntimeConfig {
             db_path: self.db_path.display().to_string(),
             recall_limit: self.recall_limit,
             context_engine_kind: self.context_engine.kind().to_string(),
+            context_recent_turns: self.context_recent_turns,
             context_max_tokens: self.context_budget.max_tokens,
             context_reserve_system_tokens: self.context_budget.reserve_system_tokens,
             context_min_working_tokens: self.context_budget.min_working_tokens,
@@ -678,9 +689,7 @@ impl ToolLoopConfig {
         if self.max_rounds > TOOL_LOOP_MAX_ROUNDS_CAP {
             return Err(ConfigError {
                 field: "tool_loop.max_rounds".to_string(),
-                message: format!(
-                    "tool loop max_rounds must not exceed {TOOL_LOOP_MAX_ROUNDS_CAP}"
-                ),
+                message: format!("tool loop max_rounds must not exceed {TOOL_LOOP_MAX_ROUNDS_CAP}"),
             });
         }
         if self.shell_timeout_ms == 0 {

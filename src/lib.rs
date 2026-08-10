@@ -28,6 +28,7 @@ pub mod emotion_heartbeat;
 pub mod emotion_slot;
 pub mod emotion_store;
 pub mod evolution_loop;
+pub mod experience_policy;
 pub mod external_ai_dispatch;
 pub mod external_knowledge;
 pub mod genesis_actuator;

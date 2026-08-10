@@ -634,12 +634,8 @@ transport = "http"
         .expect("provider should receive both turns");
     assert_eq!(requests.len(), 2);
     assert!(
-        requests[1].contains("[recent-conversation-history]"),
-        "second provider request should include the history context"
-    );
-    assert!(
         requests[1].contains("restart_anchor_alpha"),
-        "second provider request should include the prior user turn"
+        "second provider request should include the prior user turn in history context"
     );
     provider.join().expect("provider should finish");
 

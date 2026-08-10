@@ -55,6 +55,7 @@ max_memory_segments = 3
     assert_eq!(config.db_path.display().to_string(), "./tmp/chuang.db");
     assert_eq!(config.recall_limit, 7);
     assert_eq!(config.tool_loop.max_rounds, 6);
+    assert_eq!(config.context_recent_turns, 10);
     assert_eq!(config.tool_loop.shell_timeout_ms, 45_000);
     assert_eq!(config.permission.profile, "full_local_workspace");
     assert_eq!(config.permission.approval_policy, "auto_for_workspace");

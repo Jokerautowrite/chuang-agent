@@ -4,7 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::memory_store::{MemoryRecord, MemoryStore};
 use chuang_agent::memory_store_sqlite::SqliteMemoryStore;
-use chuang_agent::session_archive::{SessionArchiveError, SqliteSessionArchive};
+use chuang_agent::session_archive::{
+    SessionArchiveError, SessionRollingSummary, SqliteSessionArchive,
+};
 use rusqlite::{params, Connection};
 
 fn temp_db_path(name: &str) -> PathBuf {
@@ -137,6 +139,68 @@ fn replay_of_unknown_session_is_empty() {
             .expect("replay should succeed"),
         Vec::new()
     );
+}
+
+#[test]
+fn rolling_summary_is_updated_and_survives_reopen() {
+    let path = temp_db_path("rolling-summary");
+    let archive = SqliteSessionArchive::open(&path).expect("archive should open");
+    archive
+        .append("session-a", "first", "done", vec![], vec![], None)
+        .unwrap();
+    let summary = SessionRollingSummary {
+        session_id: "session-a".to_string(),
+        updated_at: "2026-08-11T00:00:00Z".to_string(),
+        turn_count: 1,
+        completed: "first 已完成".to_string(),
+        in_progress: "第二步进行中".to_string(),
+        pending: "第三步待办".to_string(),
+        constraints: "不要丢失原文".to_string(),
+    };
+    archive.update_rolling_summary(summary.clone()).unwrap();
+    let reopened = SqliteSessionArchive::open(&path).unwrap();
+    assert_eq!(
+        reopened.rolling_summary("session-a").unwrap(),
+        Some(summary)
+    );
+    assert!(reopened
+        .rolling_summary("session-a")
+        .unwrap()
+        .unwrap()
+        .render()
+        .contains("第三步待办"));
+}
+
+#[test]
+fn rolling_summary_can_accumulate_multiple_turns() {
+    let path = temp_db_path("rolling-summary-multiple");
+    let archive = SqliteSessionArchive::open(&path).expect("archive should open");
+    archive
+        .append("session-a", "first", "done first", vec![], vec![], None)
+        .unwrap();
+    archive
+        .append("session-a", "second", "done second", vec![], vec![], None)
+        .unwrap();
+
+    archive
+        .update_rolling_summary(SessionRollingSummary {
+            session_id: "session-a".to_string(),
+            updated_at: "2026-08-11T00:00:01Z".to_string(),
+            turn_count: 2,
+            completed: "第1轮：first；第2轮：second".to_string(),
+            in_progress: "继续当前会话".to_string(),
+            pending: "等待下一步指令".to_string(),
+            constraints: "保留最近 10 轮原文".to_string(),
+        })
+        .unwrap();
+
+    let summary = archive
+        .rolling_summary("session-a")
+        .unwrap()
+        .expect("summary should exist");
+    assert_eq!(summary.turn_count, 2);
+    assert!(summary.completed.contains("first"));
+    assert!(summary.completed.contains("second"));
 }
 
 #[test]

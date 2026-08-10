@@ -119,6 +119,53 @@ fn summary_compression_context_engine_is_selectable_and_compresses_long_memory_s
 }
 
 #[test]
+fn summary_compression_preserves_configured_recent_turns() {
+    let engine = SummaryCompressionContextEngine::with_recent_turns(budget(5000, 10, 0), 2);
+    let mut segments = Vec::new();
+    for index in 0..6 {
+        let mut item = segment(
+            &format!("turn-{index}"),
+            SegmentSource::Working,
+            &format!("turn-{index}-{}", "detail".repeat(40)),
+            None,
+            100,
+            "2026-04-30T18:00:00Z",
+            "2026-04-30T18:00:00Z",
+        );
+        item.metadata
+            .insert("kind".to_string(), "recent_conversation_turn".to_string());
+        segments.push(item);
+    }
+    let packed = engine.pack(segments).unwrap();
+    for index in 0..2 {
+        let item = packed
+            .segments
+            .iter()
+            .find(|item| item.id == format!("turn-{index}"))
+            .unwrap();
+        assert!(
+            item.content.ends_with("..."),
+            "old turn {index} should compress"
+        );
+    }
+    for index in 2..6 {
+        let item = packed
+            .segments
+            .iter()
+            .find(|item| item.id == format!("turn-{index}"))
+            .unwrap();
+        assert!(
+            !item.content.ends_with("..."),
+            "recent turn {index} should remain raw"
+        );
+        assert_eq!(
+            item.metadata.get("recent_turn_protected"),
+            Some(&"true".to_string())
+        );
+    }
+}
+
+#[test]
 fn pack_rejects_when_system_budget_cannot_be_reserved() {
     let packer = ContextPacker::new(budget(20, 30, 0));
     let segments = vec![segment(

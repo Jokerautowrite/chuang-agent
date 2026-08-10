@@ -236,6 +236,9 @@ pub fn parse_runtime_config_file_with_options(
     if let Some(value) = get_any(&values, &["context.engine", "context_engine"]) {
         config.context_engine = parse_context_engine(value)?;
     }
+    if let Some(value) = get_any(&values, &["context.recent_turns", "context_recent_turns"]) {
+        config.context_recent_turns = parse_usize("context.recent_turns", value)?;
+    }
     if let Some(value) = get_any(&values, &["evolution.kind", "evolution"]) {
         config.evolution = parse_evolution(value, &values)?;
     }

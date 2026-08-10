@@ -229,12 +229,17 @@ impl<S: MemoryStore, R: Responder> AgentRuntime<S, R> {
         segments.extend(request.extra_context_segments.iter().cloned());
         segments.extend(recall_segments.iter().cloned());
 
-        let mut packed = self.context_engine_kind.pack(
+        let mut packed = self.context_engine_kind.pack_with_recent_turns(
             request
                 .context_budget
                 .clone()
                 .unwrap_or_else(default_context_budget),
             segments,
+            request
+                .metadata
+                .get("context_recent_turns")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(10),
         )?;
         // Compact/trim must not erase always-on harness cards.
         repin_always_on_norms(&mut packed);

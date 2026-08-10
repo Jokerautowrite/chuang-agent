@@ -1918,41 +1918,47 @@ fn prepare_live_turn(
     }
     let goal_spec = extract_turn_goal(params)?;
 
-    let (thread_id, turn_id, workspace_root, conversation_history) =
-        with_app_server_state(state, |state| {
-            let thread_id = if requested_thread_id.is_empty() {
-                let workspace_root =
-                    requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
-                create_thread(
-                    state,
-                    workspace_root.clone(),
-                    thread_display_name(&workspace_root),
-                )
-                .id
-            } else if let Some(thread) = state.threads.get(&requested_thread_id) {
-                if let Some(workspace_root) = requested_workspace_root.as_deref() {
-                    ensure_thread_workspace_matches(thread, workspace_root)?;
-                }
-                requested_thread_id.clone()
-            } else {
-                return Err(format!("unknown_thread: {requested_thread_id}"));
-            };
-
-            if state.active_turns.contains_key(&thread_id) {
-                return Err(format!("thread_busy: threadId={thread_id}"));
+    let (thread_id, turn_id, workspace_root) = with_app_server_state(state, |state| {
+        let thread_id = if requested_thread_id.is_empty() {
+            let workspace_root =
+                requested_workspace_root.unwrap_or_else(|| normalize_workspace_root(""));
+            create_thread(
+                state,
+                workspace_root.clone(),
+                thread_display_name(&workspace_root),
+            )
+            .id
+        } else if let Some(thread) = state.threads.get(&requested_thread_id) {
+            if let Some(workspace_root) = requested_workspace_root.as_deref() {
+                ensure_thread_workspace_matches(thread, workspace_root)?;
             }
+            requested_thread_id.clone()
+        } else {
+            return Err(format!("unknown_thread: {requested_thread_id}"));
+        };
 
-            let workspace_root = state
-                .threads
-                .get(&thread_id)
-                .map(|thread| thread.workspace_root.clone())
-                .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
-            let turn_id = next_turn_id(state);
-            let conversation_history = recent_thread_history(state, &thread_id, 6);
-            persist_app_server_state(state)?;
+        if state.active_turns.contains_key(&thread_id) {
+            return Err(format!("thread_busy: threadId={thread_id}"));
+        }
 
-            Ok((thread_id, turn_id, workspace_root, conversation_history))
-        })?;
+        let workspace_root = state
+            .threads
+            .get(&thread_id)
+            .map(|thread| thread.workspace_root.clone())
+            .ok_or_else(|| format!("unknown_thread: {thread_id}"))?;
+        let turn_id = next_turn_id(state);
+        persist_app_server_state(state)?;
+
+        Ok((thread_id, turn_id, workspace_root))
+    })?;
+    let runtime = build_runtime_for_workspace(&app_server_config_workspace_root(&workspace_root))?;
+    let conversation_history = with_app_server_state(state, |state| {
+        Ok(recent_thread_history(
+            &*state,
+            &thread_id,
+            runtime.context_recent_turns,
+        ))
+    })?;
 
     let storage = create_live_turn_storage()?;
     with_app_server_state(state, |state| {
@@ -2537,7 +2543,8 @@ fn handle_turn_start(
         .live_readiness;
     let context_max_tokens = runtime.context_budget.max_tokens;
     let started_at = Instant::now();
-    let conversation_history = recent_thread_history(state, &thread_id, 6);
+    let conversation_history =
+        recent_thread_history(state, &thread_id, runtime.context_recent_turns);
     let tool_run = run_turn_with_tools(
         &runtime,
         &thread_id,

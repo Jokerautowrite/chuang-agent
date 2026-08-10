@@ -3250,6 +3250,7 @@ mod tests {
             tool_shell_risk_rule_counts: "0".to_string(),
             db_path: "db.sqlite".to_string(),
             recall_limit: 5,
+            context_recent_turns: 10,
             context_max_tokens: 8192,
             context_reserve_system_tokens: 512,
             context_min_working_tokens: 1024,

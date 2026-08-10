@@ -241,6 +241,21 @@ impl ContextEngineKind {
             Self::SummaryCompression => SummaryCompressionContextEngine::new(budget).pack(segments),
         }
     }
+
+    pub fn pack_with_recent_turns(
+        &self,
+        budget: ContextBudget,
+        segments: Vec<ContextSegment>,
+        recent_turns: usize,
+    ) -> Result<PackedContext, ContextPackError> {
+        match self {
+            Self::DeterministicBudget => DeterministicContextEngine::new(budget).pack(segments),
+            Self::SummaryCompression => {
+                SummaryCompressionContextEngine::with_recent_turns(budget, recent_turns)
+                    .pack(segments)
+            }
+        }
+    }
 }
 
 impl ContextPacker {
@@ -662,12 +677,12 @@ fn is_reserved_segment(segment: &ContextSegment) -> bool {
     if segment.id.starts_with("norm-") {
         return true;
     }
-
     match segment.id.as_str() {
         "system-capabilities"
         | "tool-instructions"
         | "session-context"
-        | "recent-conversation-history" => true,
+        | "recent-conversation-history"
+        | "session-rolling-summary" => true,
         _ => matches!(
             segment.metadata.get("kind").map(String::as_str),
             Some(

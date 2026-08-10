@@ -1,11 +1,13 @@
-//! `session_archive` 模块。公开接口：struct SessionTurnArchive, SqliteSessionArchive；enum SessionArchiveError；fn open, append, append_with_summary, replay。
+//! `session_archive` 模块。公开接口：struct SessionTurnArchive, SessionRollingSummary,
+//! SqliteSessionArchive；enum SessionArchiveError；fn open, append, append_with_summary,
+//! replay, rolling_summary。
 
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{params, Connection, Transaction, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::memory_store::MemoryRecord;
@@ -20,6 +22,27 @@ pub struct SessionTurnArchive {
     pub runtime_event_refs: Vec<String>,
     pub runtime_report_refs: Vec<String>,
     pub searchable_summary_pointer: Option<String>,
+}
+
+/// 可在会话中断或上下文压缩后恢复的、会话级累计摘要。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRollingSummary {
+    pub session_id: String,
+    pub updated_at: String,
+    pub turn_count: u64,
+    pub completed: String,
+    pub in_progress: String,
+    pub pending: String,
+    pub constraints: String,
+}
+
+impl SessionRollingSummary {
+    pub fn render(&self) -> String {
+        format!(
+            "[session-rolling-summary]\n已完成：{}\n进行中：{}\n待办：{}\n约束：{}\n轮次：{}\n更新时间：{}",
+            self.completed, self.in_progress, self.pending, self.constraints, self.turn_count, self.updated_at
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,6 +227,55 @@ impl SqliteSessionArchive {
         Ok(turns)
     }
 
+    pub fn rolling_summary(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionRollingSummary>, SessionArchiveError> {
+        validate_session_id(session_id)?;
+        let conn = self.connection()?;
+        conn.query_row(
+            "SELECT session_id, updated_at, turn_count, completed, in_progress, pending, constraints
+             FROM session_rolling_summary WHERE session_id = ?1",
+            params![session_id],
+            |row| Ok(SessionRollingSummary {
+                session_id: row.get(0)?, updated_at: row.get(1)?, turn_count: row.get(2)?,
+                completed: row.get(3)?, in_progress: row.get(4)?, pending: row.get(5)?,
+                constraints: row.get(6)?,
+            }),
+        )
+        .optional()
+        .map_err(|_| SessionArchiveError::storage("read_rolling_summary"))
+    }
+
+    /// 在已落盘的回合之后更新会话摘要。采用 UPSERT，重复恢复安全。
+    pub fn update_rolling_summary(
+        &self,
+        summary: SessionRollingSummary,
+    ) -> Result<(), SessionArchiveError> {
+        validate_session_id(&summary.session_id)?;
+        let conn = self.connection()?;
+        conn.execute(
+            "INSERT INTO session_rolling_summary
+                (session_id, updated_at, turn_count, completed, in_progress, pending, constraints)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(session_id) DO UPDATE SET
+                updated_at=excluded.updated_at, turn_count=excluded.turn_count,
+                completed=excluded.completed, in_progress=excluded.in_progress,
+                pending=excluded.pending, constraints=excluded.constraints",
+            params![
+                summary.session_id,
+                summary.updated_at,
+                summary.turn_count,
+                summary.completed,
+                summary.in_progress,
+                summary.pending,
+                summary.constraints
+            ],
+        )
+        .map_err(|_| SessionArchiveError::storage("write_rolling_summary"))?;
+        Ok(())
+    }
+
     fn connection(&self) -> Result<Connection, SessionArchiveError> {
         Connection::open(&self.path).map_err(|_| SessionArchiveError::storage("open_database"))
     }
@@ -234,6 +306,15 @@ impl SqliteSessionArchive {
             );
             CREATE INDEX IF NOT EXISTS idx_session_turn_archive_created_at
                 ON session_turn_archive(created_at);
+            CREATE TABLE IF NOT EXISTS session_rolling_summary (
+                session_id TEXT PRIMARY KEY,
+                updated_at TEXT NOT NULL,
+                turn_count INTEGER NOT NULL CHECK(turn_count >= 0),
+                completed TEXT NOT NULL,
+                in_progress TEXT NOT NULL,
+                pending TEXT NOT NULL,
+                constraints TEXT NOT NULL
+            );
             ",
         )
         .map_err(|_| SessionArchiveError::storage("initialize_schema"))
