@@ -649,8 +649,43 @@ evolution = "canonical"
                 && canonical.detector.min_repeats == 2
                 && canonical.detector.window.is_none()
                 && canonical.detector.failure_kinds.len() == 1
+                && !canonical.auto_outer_loop
     ));
     assert_eq!(config.summary().evolution_kind, "canonical");
+}
+
+#[test]
+fn config_file_parses_canonical_evolution_with_auto_outer_loop_enabled() {
+    let config = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+auto_outer_loop = true
+"#,
+    )
+    .expect("canonical evolution with auto_outer_loop=true should parse");
+
+    let EvolutionConfig::Canonical(canonical) = &config.evolution else {
+        panic!("expected canonical evolution config");
+    };
+    assert!(canonical.auto_outer_loop);
+}
+
+#[test]
+fn config_file_rejects_canonical_evolution_invalid_auto_outer_loop() {
+    let err = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+auto_outer_loop = "yes"
+"#,
+    )
+    .expect_err("auto_outer_loop must be a bool");
+
+    assert!(matches!(
+        err,
+        RuntimeConfigFileError::InvalidValue { key, .. } if key == "evolution.auto_outer_loop"
+    ));
 }
 
 #[test]

@@ -432,9 +432,29 @@ fn canonical_evolution_config_defaults_are_backward_compatible_and_valid() {
         assert_eq!(canonical.detector.min_repeats, 2);
         assert_eq!(canonical.detector.window, None);
         assert_eq!(canonical.detector.failure_kinds.len(), 1);
+        assert!(
+            !canonical.auto_outer_loop,
+            "auto_outer_loop must default to off for backward compatibility"
+        );
     } else {
         panic!("expected canonical evolution config");
     }
+}
+
+#[test]
+fn canonical_evolution_config_auto_outer_loop_can_be_enabled() {
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
+    canonical.auto_outer_loop = true;
+    config.evolution = EvolutionConfig::Canonical(canonical);
+
+    config
+        .validate()
+        .expect("canonical evolution config with auto_outer_loop enabled should be valid");
+    let EvolutionConfig::Canonical(canonical) = &config.evolution else {
+        panic!("expected canonical evolution config");
+    };
+    assert!(canonical.auto_outer_loop);
 }
 
 #[test]

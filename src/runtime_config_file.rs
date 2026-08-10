@@ -897,6 +897,10 @@ fn parse_canonical_evolution(
             })?,
         None => CanonicalEvolutionGovernance::default(),
     };
+    let auto_outer_loop = get_any(values, &["evolution.auto_outer_loop"])
+        .map(|value| parse_bool("evolution.auto_outer_loop", value))
+        .transpose()?
+        .unwrap_or(false);
 
     Ok(EvolutionConfig::Canonical(CanonicalEvolutionConfig {
         skill_root,
@@ -907,6 +911,7 @@ fn parse_canonical_evolution(
             failure_kinds,
         },
         governance,
+        auto_outer_loop,
     }))
 }
 

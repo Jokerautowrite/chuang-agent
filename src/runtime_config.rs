@@ -251,6 +251,10 @@ pub struct CanonicalEvolutionConfig {
     pub detector: FailureDetectorConfig,
     /// 规则修改治理门禁槽（默认 policy：确定性证据门禁）。
     pub governance: CanonicalEvolutionGovernance,
+    /// 是否在每个 agent turn 结束后自动驱动 evolver 外环
+    /// （detect → propose → governance → apply）。默认关闭，向后兼容：
+    /// 配置只写 `evolution = "canonical"` 时不会突然开始自动写规则。
+    pub auto_outer_loop: bool,
 }
 
 impl Default for CanonicalEvolutionConfig {
@@ -260,6 +264,7 @@ impl Default for CanonicalEvolutionConfig {
             approval_threshold: 75,
             detector: FailureDetectorConfig::default(),
             governance: CanonicalEvolutionGovernance::default(),
+            auto_outer_loop: false,
         }
     }
 }
