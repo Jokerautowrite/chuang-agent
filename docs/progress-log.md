@@ -1,3 +1,17 @@
+# 2026-08-11 调度原则落盘：按功能复杂程度派子代理 + 多子代理并行能派多少派多少
+
+- **背景**：田楠指令「视功能的复杂程度派子代理，多子代理并行能派多少派多少」写入 agents。
+- **改动**（三处，语义一致，都是「复杂度定策略 + 并行最大化」）：
+  - `rules/core.md` 新增第 17 条：analyze=只读调研 / execute=有界实现 / orchestrate=多段编排；
+    可拆分的独立单元多子代理并行（max_concurrency 到配置上限）；简单任务不派，困难任务不单线程硬扛。
+  - `identity/agents.toml` 文件头注释：调度原则说明（不改变解析，`status` 验证 registry 正常加载）。
+  - `docs/core-boundary.md` 新增「派发与并行原则（2026-08-11）」：与治理不冲突，并行仍走
+    governance 审计、子代理只出报告/记忆提案、父代理最终判定（rules 13/14/17）。
+- **验证**：`cargo build --bins` 通过；`cargo test --lib governance` 2 passed（规则注入上下文
+  测试仍绿）；`status --json` 确认 agents.toml 正常解析、rules_core_path 正常。
+- **注**：本次只落「原则/规则」（模型可见、治理可读）。subagent 派发能力本身已有
+  analyze/execute/orchestrate 策略与 max_concurrency 上限，无需改代码；上限放开与否由田楠定。
+
 # 2026-08-11 memory-recall 基准升级 v4：补 OpenCode 式会话总结落盘 + 压缩保真两个能力点
 
 - **背景**：田楠补充两点——① OpenCode 干活中自动写总结落本地（会话断了也不忘，看重记忆完整性）；② 朋友加了 hook：压缩上下文时强制读最近几轮+回忆相关上下文。要求参考本机 Claude Code 与 OpenCode 实现再优化方案。

@@ -20,6 +20,15 @@ input -> identity/memory -> context -> governance -> execution port -> report ->
 
 补模块时先问：这是在加强 **调度与边界**，还是在错误赛道重复造工人？后者不做。详见 `docs/blueprint-v1.md` §0.1。
 
+### 派发与并行原则（2026-08-11）
+
+- **按复杂度派子代理**：analyze（只读调研/证据收集）→ execute（有界实现/集成）→
+  orchestrate（多段编排/拆活）。简单任务直接做，不派子代理；复杂任务必须拆，不单线程硬扛。
+- **多子代理并行，能派多少派多少**：可拆分的独立单元并行执行（max_concurrency 到
+  配置上限），不要串行化可以并行的事。父代理负责拆分、合并、最终验收，不把子代理当串行工人。
+- 与治理不冲突：并行仍走 governance 审计、子代理只出报告/记忆提案、父代理做最终判定
+  （rules/core.md 第 13/14/17 条）。
+
 ## Core
 
 - `chuang_kernel`：回合生命周期和记忆写回。
