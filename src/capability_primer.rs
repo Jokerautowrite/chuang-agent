@@ -1,3 +1,5 @@
+//! `capability_primer` 模块。公开接口：fn capability_primer_content, capability_primer_text, capability_primer_segment；const DEFAULT_CAPABILITY_PRIMER_ID, DEFAULT_CAPABILITY_PRIMER_KIND。
+
 use crate::context_engine::{ContextSegment, SegmentSource};
 
 pub const DEFAULT_CAPABILITY_PRIMER_ID: &str = "system-capabilities";

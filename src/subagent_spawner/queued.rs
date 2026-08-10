@@ -1,3 +1,5 @@
+//! `subagent_spawner::queued` 模块。公开接口：struct QueuedSubagentSpawner；fn new, spawn_with_ids, restore_dispatch, pending_dispatches, dispatch_snapshot, take_next_dispatch, attach_report, state。
+
 use std::collections::BTreeMap;
 
 use crate::common::AgentId;

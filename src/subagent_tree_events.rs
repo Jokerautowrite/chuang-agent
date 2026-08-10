@@ -1,3 +1,5 @@
+//! `subagent_tree_events` 模块。公开接口：struct SubagentTreeEventBuilder, SubagentTreeRuntimeEvent, SubagentTreeListRuntimeEvent, SubagentTreeChildSnapshot；enum SubagentTreeBridgeEventKind；fn new, with_turn_id, spawn_event, report_event, close_event, message_sent_event, wait_started_event, list_event。
+
 use serde::{Deserialize, Serialize};
 
 use crate::runtime_event_ledger::{RuntimeEvent, RuntimeEventKind};

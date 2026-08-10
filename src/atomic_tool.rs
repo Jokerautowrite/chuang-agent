@@ -1,3 +1,5 @@
+//! `atomic_tool` 模块。公开接口：struct AtomicToolManifest, ActuatorAtomicBinding, AtomicToolCallMapping, AtomicToolRegistry；enum AtomicToolKind, AtomicToolStatus, ToolCallAtomicKind；fn as_str, schema_version, schema_fields, ga_atomic_tool_manifests, generic_agent_mvp, manifests, mapping_for_call, mapped_atomic_names；const ATOMIC_TOOL_MANIFEST_SCHEMA_VERSION, ATOMIC_TOOL_MANIFEST_SCHEMA_FIELDS。
+
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

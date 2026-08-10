@@ -1,3 +1,5 @@
+//! `genesis_actuator::autocli` 模块。公开接口：trait GenesisCommandRunner；struct GenesisCommandSpec, GenesisCommandOutput, SystemGenesisCommandRunner, AutoCliGenesisActuator；fn audit_label, new, with_runner, primary_spec, fallback_spec。
+
 use std::process::Command;
 use std::time::{Duration, Instant};
 

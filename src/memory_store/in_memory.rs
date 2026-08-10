@@ -1,3 +1,5 @@
+//! `memory_store::in_memory` 模块。公开接口：struct InMemoryMemoryStore；fn new。
+
 use std::collections::BTreeMap;
 
 use super::{MemoryQuery, MemoryRecord, MemoryStore, MemoryStoreError, SearchHit};

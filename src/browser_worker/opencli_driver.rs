@@ -1,3 +1,5 @@
+//! `browser_worker::opencli_driver` 模块。公开接口：trait OpenCliRunner；struct OpenCliCommandSpec, OpenCliCommandResult, SystemOpenCliRunner, OpenCliRealBrowserDriver；fn new, with_runner。
+
 use std::process::Command;
 
 use crate::browser_worker::{

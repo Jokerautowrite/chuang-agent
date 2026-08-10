@@ -1,3 +1,5 @@
+//! `responder::scripted` 模块。公开接口：struct ScriptedResponder；fn new, with_extra_meta。
+
 use std::collections::BTreeMap;
 
 use super::{

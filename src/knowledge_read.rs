@@ -1,3 +1,5 @@
+//! `knowledge_read` 模块。公开接口：trait KnowledgeReadAdapter；struct KnowledgeReadSourceConfig, KnowledgeReadConfig, KnowledgeReadStatus, KnowledgeReadQuery, KnowledgeReadHit, KnowledgeReadResult, KnowledgeReadError, ReadonlyHttpKnowledgeReadAdapter；fn disabled, new_wiki, new_gbrain, preflight_knowledge_read_status, new, unavailable_knowledge_read_status；const KNOWLEDGE_READ_CONTRACT_VERSION, KNOWLEDGE_READ_SOURCES。
+
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{Method, Request};

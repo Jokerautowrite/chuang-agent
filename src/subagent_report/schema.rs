@@ -1,3 +1,5 @@
+//! `subagent_report::schema` 模块。公开接口：struct ArtifactRef, ContextDropReasonSummary, ContextDebugSummary, WorkingReservationDebug, GovernanceDecisionSummary, ResourceUsage, SubagentReport, ReportAdmission；enum ExecutionStatus, ArtifactKind, ReportAdmissionStatus；fn from_str。
+
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
 use crate::skill_evolver::SkillProposal;
 use serde::{Deserialize, Serialize};

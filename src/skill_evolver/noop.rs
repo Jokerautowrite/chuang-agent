@@ -1,3 +1,5 @@
+//! `skill_evolver::noop` 模块。公开接口：struct NoopEvolver；fn new, observed_events。
+
 use super::{
     validate_event, validate_proposal, validate_scope, EvolutionError, EvolutionReceipt,
     EvolutionScope, RuntimeEvent, SkillEvolver, SkillId, SkillProposal, ValidationReport,

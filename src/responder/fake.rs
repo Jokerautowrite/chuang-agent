@@ -1,3 +1,5 @@
+//! `responder::fake` 模块。公开接口：struct FakeResponder；fn new。
+
 use std::collections::BTreeMap;
 
 use super::{

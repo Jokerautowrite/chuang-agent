@@ -1,3 +1,5 @@
+//! `control_plane` 模块。公开接口：trait ControlPlane；struct ManagedUnit, ControlRequest, ControlCommandContract, ControlReceipt；enum ManagedUnitKind, ManagedUnitStatus, ControlAction, ControlError, ControlActionKind；fn proposed_action_for_control, audit_record_for_control, contract_for_control_unit, validate_control_contract, validate_control_receipt, as_str, kind；use command, fake。
+
 use std::collections::BTreeMap;
 
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};

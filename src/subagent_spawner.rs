@@ -1,3 +1,5 @@
+//! `subagent_spawner` 模块。公开接口：trait SubagentSpawner；struct RunId, SpawnRequest, SpawnReceipt, SubagentDispatch；enum SubagentToolPolicy, ContextIsolation, KillReason, SubagentState, SubagentError, SubagentSlot；const QUEUED_STEER_MESSAGES_METADATA_KEY；use fake, queued。
+
 use std::collections::BTreeMap;
 
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};

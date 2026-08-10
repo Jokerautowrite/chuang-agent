@@ -1,3 +1,5 @@
+//! `browser_worker::coordinator` 模块。公开接口：struct BrowserWorkerCoordinator；fn new, enqueue, attach_receipt, attach_output。
+
 use crate::browser_worker::{
     BrowserWorkerError, BrowserWorkerSession, DispatchReceipt, DispatchStatus, WorkerOutput,
     WorkerState, WorkerTask,

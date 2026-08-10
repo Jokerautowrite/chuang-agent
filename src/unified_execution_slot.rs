@@ -1,3 +1,5 @@
+//! `unified_execution_slot` 模块。公开接口：trait UnifiedExecutionOrchestrator；struct ExecutionRequest, ExecutionResult, ExecutionFailure, ExecutionOutputPreview, ExecutionEnvironmentSnapshot, ExecutionEnvVarSnapshot, FakeUnifiedExecutionOrchestrator；enum ExecutionFailureKind, EnvValueState, FakeExecutionOutcome；fn new, with_environment, code, capture, empty, from_pairs_redacted, with_preview_limit, with_timestamps；const UNIFIED_EXECUTION_SCHEMA_VERSION, DEFAULT_OUTPUT_PREVIEW_LIMIT, REDACTED_SECRET_LIKE_PREVIEW, REDACTED_SECRET_LIKE_ENV, REDACTED_SECRET_LIKE_REASON。
+
 use std::path::PathBuf;
 
 use chrono::{SecondsFormat, Utc};

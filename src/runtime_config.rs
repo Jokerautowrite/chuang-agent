@@ -1,3 +1,5 @@
+//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig；enum ProviderConfig, ProviderApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

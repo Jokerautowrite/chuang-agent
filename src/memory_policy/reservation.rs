@@ -1,3 +1,5 @@
+//! `memory_policy::reservation` 模块。公开接口：struct ReservationToken；fn is_expired_at。
+
 use crate::common::Timestamp;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,3 +1,5 @@
+//! `memory_admission` 模块。公开接口：struct MemoryEntryView, TextMemoryAdmission；enum TextMemoryAdmissionDecision；fn new, evaluate, preview_chars；const DEFAULT_MEMORY_WRITE_MAX_CHARS。
+
 pub const DEFAULT_MEMORY_WRITE_MAX_CHARS: usize = 2200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,3 +1,5 @@
+//! `browser_worker::adapters::mod` 模块。公开接口：trait BrowserWorkerAdapter, BrowserProviderDriver, RealBrowserDriver；struct ProviderBackedRealBrowserDriver, FakeBrowserProviderDriver；enum RealBrowserCommand, RealBrowserObservation；fn new, into_inner, adapter_session, adapter_ensure_expert_mode, adapter_mark_ready, adapter_submit_task, adapter_read_output；mod deepseek_web；use deepseek_web。
+
 pub mod deepseek_web;
 
 use crate::browser_worker::{

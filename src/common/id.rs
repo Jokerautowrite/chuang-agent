@@ -1,3 +1,5 @@
+//! `common::id` 模块。公开接口：struct TaskId, AgentId, AllocationId, ReportId。
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

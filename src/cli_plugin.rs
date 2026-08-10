@@ -1,3 +1,5 @@
+//! `cli_plugin` 模块。内部实现模块（无公开顶层项）。
+
 use std::path::PathBuf;
 
 use chuang_agent::plugin_registry::{check_plugin_registry, load_plugin_registry};

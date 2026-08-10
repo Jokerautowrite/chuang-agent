@@ -1,3 +1,5 @@
+//! `actuator::command` 模块。公开接口：struct CommandActuator；fn new。
+
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};

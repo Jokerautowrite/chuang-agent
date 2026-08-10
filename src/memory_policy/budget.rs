@@ -1,3 +1,5 @@
+//! `memory_policy::budget` 模块。公开接口：struct BudgetConfig, AdmissionRequest, ActiveAllocation, MemoryAdmissionPolicy；enum BudgetMode, DenyReason, AdmissionDecision。
+
 use crate::common::{AgentId, AllocationId, TaskId, Timestamp};
 use crate::memory_policy::ReservationToken;
 

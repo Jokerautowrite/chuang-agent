@@ -1,3 +1,5 @@
+//! `responder` 模块。公开接口：trait Responder, ProviderAdapterResponder；struct ResponderRequest, ProviderIdentity, ResponderProvider, ResponderMeta, ResponderOutput, ProviderAdapterResponse；use fake, scripted。
+
 use std::collections::BTreeMap;
 
 mod fake;

@@ -1,3 +1,5 @@
+//! `subagent_report::validation` 模块。公开接口：trait ReportValidator, ReportBuilder；struct RuntimeReportInput, SubagentReportValidator, SubagentReportBuilder；enum ReportRejectReason；fn new, admit_raw, from_runtime。
+
 use super::schema::{
     ContextDebugSummary, ContextDropReasonSummary, ExecutionStatus, ReportAdmission,
     ReportAdmissionStatus, SubagentReport,

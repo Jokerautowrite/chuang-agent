@@ -1,3 +1,5 @@
+//! `cli_channel` 模块。内部实现模块（无公开顶层项）。
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;

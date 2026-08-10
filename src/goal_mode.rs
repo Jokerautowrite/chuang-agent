@@ -1,3 +1,5 @@
+//! `goal_mode` 模块。公开接口：trait AcceptanceCheckContract；struct GoalSpec, GoalEvidence, GoalAcceptancePlan, AcceptanceVerdict, GoalConvergencePolicy, GoalBudget, GoalCheckpointPolicy, GoalFinalReportPolicy；enum AcceptanceCheck；fn new, with_min_lines, with_min_content, with_description, validate, evaluator, description, is_empty。
+
 use crate::context_engine::{ContextSegment, SegmentSource};
 use serde::{Deserialize, Serialize};
 use std::path::Path;

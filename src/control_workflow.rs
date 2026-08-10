@@ -1,3 +1,5 @@
+//! `control_workflow` 模块。公开接口：struct ControlWorkflowRequest, ControlWorkflowResult, ControlWorkflowView, ControlUnitView；enum ControlWorkflowError；fn run_control_workflow, run_control_workflow_for_unit, build_decision_view, build_unit_views, build_unit_view。
+
 use crate::control_plane::{
     audit_record_for_control, proposed_action_for_control, ControlError, ControlPlane,
     ControlReceipt, ControlRequest, ManagedUnit,

@@ -1,3 +1,5 @@
+//! `genesis_actuator` 模块。公开接口：trait GenesisActuator；struct GenesisAskRequest, GenesisAskResponse, GenesisRepairPlan, GenesisConfig；enum GenesisChannel, GenesisError；fn as_str, new, session_expired_marker；use autocli, fake。
+
 use std::path::PathBuf;
 
 use serde::Serialize;

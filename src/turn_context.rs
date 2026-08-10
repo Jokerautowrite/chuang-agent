@@ -1,3 +1,5 @@
+//! `turn_context` 模块。公开接口：struct TurnContextSnapshot, ProviderModelSummary, ToolDescriptorSummary, EnvVarStateSnapshot, TurnContextSnapshotInput, RuntimeTurnContextInput；enum TurnContextSnapshotError；fn from_fake_input, from_runtime_config_summary。
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

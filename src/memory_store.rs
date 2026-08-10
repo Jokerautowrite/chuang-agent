@@ -1,3 +1,5 @@
+//! `memory_store` 模块。公开接口：trait MemoryStore；struct MemoryRecord, MemoryQuery, SearchHit, MemoryLayerBoundary；enum MemoryMatchMode, MemoryLayer, MemoryStoreError；fn text_match_score_in_mode, exact_phrase_match_score, text_match_score, as_str, for_record, classify_memory_layer；use in_memory。
+
 use std::collections::BTreeMap;
 
 mod in_memory;

@@ -1,3 +1,5 @@
+//! `cli_approval` 模块。内部实现模块（无公开顶层项）。
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

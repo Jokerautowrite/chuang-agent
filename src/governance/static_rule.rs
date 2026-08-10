@@ -1,3 +1,5 @@
+//! `governance::static_rule` 模块。公开接口：struct StaticRuleGovernance；fn new, with_rules, with_profile, with_rules_and_profile, audit_records, register_operator_approval。
+
 use crate::common::AuditRecord;
 use std::collections::BTreeSet;
 

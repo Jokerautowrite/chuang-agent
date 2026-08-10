@@ -1,3 +1,5 @@
+//! `agent_runtime` 模块。公开接口：struct RuntimeRequest, RuntimeResponse, RuntimeResult, ContextDebugInfo, AgentRuntime；enum AgentRuntimeError；fn with_responder, with_responder_and_context_engine, memory_store_mut, run, run_with_ledger, debug_pack_for_test。
+
 use std::collections::BTreeMap;
 
 use crate::capability_primer::capability_primer_segment;

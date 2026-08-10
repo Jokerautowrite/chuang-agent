@@ -1,3 +1,5 @@
+//! `browser_worker::session` 模块。公开接口：struct BrowserWorkerSession；fn new, apply_task, apply_receipt, apply_output。
+
 use crate::browser_worker::{
     hash::stable_content_hash, BrowserMode, BrowserWorkerError, DispatchReceipt, ProviderKind,
     WorkerOutput, WorkerState, WorkerTask,

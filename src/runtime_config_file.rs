@@ -1,3 +1,5 @@
+//! `runtime_config_file` 模块。公开接口：struct RuntimeConfigFileOptions；enum RuntimeConfigFileError；fn load_runtime_config_file, load_runtime_config_file_with_options, parse_runtime_config_file, parse_runtime_config_file_with_options, strict, allow_missing_env。
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

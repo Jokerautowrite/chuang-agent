@@ -1,3 +1,5 @@
+//! `plugin_registry` 模块。公开接口：struct PluginRegistry, PluginManifest, PluginRegistryCheck, PluginCheckItem, PluginReadinessEvidence, PluginCheckBoundary, PluginCheckEvidence, PluginPathEvidence；enum PluginKind；fn load_plugin_registry, check_plugin_registry, summarize_plugin_registry。
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

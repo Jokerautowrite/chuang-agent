@@ -1,3 +1,5 @@
+//! `browser_read` 模块。公开接口：trait BrowserReadAdapter；struct BrowserReadStatus, BrowserPageRead, BrowserReadError, FakeBrowserReadAdapter, UnavailableBrowserReadAdapter, CdpBrowserReadAdapter；fn new, unavailable_browser_read_status, resolve_cdp_browser_read_adapter, ensure_cdp_browser_read_adapter, find_headless_chrome_script, cdp_port_from_env, resolve_cdp_port, port；const BROWSER_READ_CONTRACT_VERSION, BROWSER_READ_CAPABILITIES。
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};

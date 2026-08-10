@@ -1,3 +1,5 @@
+//! `lifecycle::state` 模块。公开接口：enum LifecycleState, LifecycleCommand, CommandEffect, CommandRejectReason。
+
 use crate::common::Timestamp;
 use serde::{Deserialize, Serialize};
 

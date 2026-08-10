@@ -1,3 +1,5 @@
+//! `context_engine::deterministic` 模块。公开接口：struct DeterministicContextEngine；fn new。
+
 use super::{
     ContextBudget, ContextEngine, ContextPackError, ContextPacker, ContextSegment, PackedContext,
 };

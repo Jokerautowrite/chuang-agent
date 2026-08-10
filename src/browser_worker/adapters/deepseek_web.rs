@@ -1,3 +1,5 @@
+//! `browser_worker::adapters::deepseek_web` 模块。公开接口：struct DeepSeekWebAdapter；fn new, with_driver, ensure_expert_mode, mark_ready, submit_task, read_output。
+
 use crate::browser_worker::{
     BrowserMode, BrowserWorkerError, BrowserWorkerSession, DispatchReceipt, ProviderKind,
     WorkerOutput, WorkerState, WorkerTask,

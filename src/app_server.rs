@@ -1,3 +1,5 @@
+//! `app_server` 模块。内部实现模块（无公开顶层项）。
+
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};

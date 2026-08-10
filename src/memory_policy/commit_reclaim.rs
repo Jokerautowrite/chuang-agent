@@ -1,3 +1,5 @@
+//! `memory_policy::commit_reclaim` 模块。公开接口：trait BudgetManager；struct FreedBytes；enum CommitError, ReclaimError；fn expire_reservations_at, try_reserve_at, commit_at。
+
 use crate::common::{AgentId, AllocationId, TaskId, Timestamp};
 use crate::memory_policy::{
     ActiveAllocation, AdmissionDecision, AdmissionRequest, BudgetConfig, DenyReason,

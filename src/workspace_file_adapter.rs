@@ -1,3 +1,5 @@
+//! `workspace_file_adapter` 模块。公开接口：struct WorkspaceListResult, WorkspaceDirectoryEntry, WorkspaceReadResult, WorkspaceWriteResult, WorkspacePatchResult, WorkspaceFileAdapter；enum WorkspaceWriteOperation；fn new, list_dir, read_file, write_file, apply_patch。
+
 use chrono::Utc;
 use serde::Serialize;
 use std::fs;

@@ -1,3 +1,5 @@
+//! `hermes_memory` 模块。公开接口：trait DualFileMemoryStore；struct DualFileMemoryConfig, DualFileMemorySnapshot, HotMemoryEntry；enum DualFileMemoryError, DualFileMemoryScope；fn new, user_path, memory_path, experiences_path；const DEFAULT_USER_MEMORY_MAX_CHARS, DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_FILE, DEFAULT_HOT_MEMORY_FILE, DEFAULT_EXPERIENCES_MEMORY_FILE；use file。
+
 use std::path::PathBuf;
 
 use crate::memory_admission::{MemoryEntryView, DEFAULT_MEMORY_WRITE_MAX_CHARS};

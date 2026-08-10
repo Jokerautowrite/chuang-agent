@@ -1,3 +1,5 @@
+//! `cli_genesis` 模块。内部实现模块（无公开顶层项）。
+
 use chuang_agent::common::{AgentId, AuditRecord, TaskId, Timestamp};
 use chuang_agent::genesis_actuator::{GenesisActuator, GenesisAskRequest, GenesisConfig};
 use chuang_agent::governance::{

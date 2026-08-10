@@ -1,3 +1,5 @@
+//! `actuator` 模块。公开接口：trait Actuator；struct Observation, OpenAppRequest, AppHandle, EvidenceRef, ActuatorCommandContract, ActuatorError；enum ObserveTarget, FocusTarget, ClickTarget, InputTarget, SecretOrPlainText, ScreenshotTarget, ActuatorCommandKind；fn as_str, validate_actuator_command_contract；use command, fake。
+
 mod command;
 mod fake;
 

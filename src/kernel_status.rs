@@ -1,3 +1,5 @@
+//! `kernel_status` 模块。公开接口：struct ChuangMvpStatus, PolicyToolStatusSurface, GaToolDescriptorStatus, RuntimeReportSurfaceStatus, ProjectReadinessStatus, LocalContractReadinessStatus, LocalContractStatus, ProjectModuleStatus；fn build_chuang_mvp_status, summarize_goal_run_readiness。
+
 use crate::app_server_service::{
     collect_app_server_service_runtime_snapshot, effective_gate_value,
     AppServerServiceRuntimeSnapshot,

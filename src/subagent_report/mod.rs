@@ -1,3 +1,5 @@
+//! `subagent_report::mod` 模块。公开接口：fn governance_metadata, build_parent_context_handoff；use schema, size_limit, validation。
+
 use std::collections::BTreeMap;
 
 mod schema;

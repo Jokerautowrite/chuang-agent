@@ -1,3 +1,5 @@
+//! `skill_evolver::canonical` 模块。公开接口：struct SkillScoreDimension, SkillScoreCard, SkillSelfApprovalDecision, DuplicateDecision, SkillUpsertReceipt, SkillRetirementRequest, SkillRetirementReceipt, CanonicalSkillEvolver；enum SkillLifecycleStatus, SkillUpsertKind；fn new, with_approval_threshold, observed_events, skill_root, observed_events_path, last_solidify_receipt, last_rule_change_receipt, self_approve。
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,3 +1,5 @@
+//! `memory_policy::mod` 模块。公开接口：use budget, commit_reclaim, eviction, reservation。
+
 mod budget;
 mod commit_reclaim;
 mod eviction;

@@ -1,3 +1,5 @@
+//! `control_plane::command` 模块。公开接口：struct ControlPlaneCommandResult, CommandControlPlane；fn new, try_list_units。
+
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command, Stdio};

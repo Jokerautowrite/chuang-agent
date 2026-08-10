@@ -1,3 +1,5 @@
+//! `lifecycle::engine` 模块。公开接口：trait LifecycleStateMachine；struct LifecycleEngine；enum LifecyclePersistenceError；fn new, checkpoint, restore, reopen, handle_command_persisted, drive_deferred_checked。
+
 use crate::lifecycle::{
     checkpoint::{now_timestamp, parse_timestamp},
     CheckpointStoreError, CommandEffect, CommandRejectReason, DeferredLifecycleCommand,

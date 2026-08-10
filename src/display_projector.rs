@@ -1,3 +1,5 @@
+//! `display_projector` 模块。公开接口：struct DisplayEvent, DisplayProjectionOptions, DisplayProjector；enum DisplayEventKind, DisplayState, DisplayProminence；fn repl_default, repl_trace, new, project, project_all；const fn schema_version。
+
 use serde::{Deserialize, Serialize};
 
 use crate::terminal_event::{StepStatus, TerminalEvent};

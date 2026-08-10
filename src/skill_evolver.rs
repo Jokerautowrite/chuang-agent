@@ -1,3 +1,5 @@
+//! `skill_evolver` 模块。公开接口：trait SkillEvolver；struct RuntimeEvent, EvolutionScope, SkillProposal, SkillProposalProvenance, ValidationReport, SkillApprovalReceipt, SkillSolidifyTicket, SkillId；enum RuntimeEventKind, SkillApprovalState, EvolutionError；fn pending_receipt, approved_receipt, pending, approved, approval_state, is_pending, is_approved, validate_consistency；use canonical, dry_run, failure, noop, rule_change。
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

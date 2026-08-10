@@ -1,3 +1,5 @@
+//! `lib` 模块。公开接口：mod actuator, agent_runtime, app_server_service, atomic_tool, benchmark, benchmark_evaluator, browser_read, browser_worker。
+
 pub mod actuator;
 pub mod agent_runtime;
 pub mod app_server_service;

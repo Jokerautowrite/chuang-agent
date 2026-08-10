@@ -1,3 +1,5 @@
+//! `browser_worker::types` 模块。公开接口：struct WorkerTask, DispatchReceipt, WorkerOutput；enum ProviderKind, BrowserMode, WorkerState, DispatchStatus, WorkerFinishReason, BrowserWorkerError。
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderKind {
     DeepSeekWeb,

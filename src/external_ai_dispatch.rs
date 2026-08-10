@@ -1,3 +1,5 @@
+//! `external_ai_dispatch` 模块。公开接口：struct ExternalAiDispatchRequest, ExternalAiDispatchOutput, UnifiedIdentityEngineRequest, UnifiedIdentityEngineResult, ExternalAiStructuredResult, ExternalAiDispatchError；fn new, build_external_ai_dispatch。
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

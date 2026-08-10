@@ -1,3 +1,5 @@
+//! `cli_config` 模块。内部实现模块（无公开顶层项）。
+
 use std::fs;
 
 use chuang_agent::kernel_status::build_chuang_mvp_status;

@@ -1,3 +1,5 @@
+//! `skill_evolver::failure` 模块。公开接口：struct FailureDetectorConfig, FailurePattern, RepeatedFailureDetector；fn min_repeats, window, failure_kinds, new, default_config, failure_signature, detect。
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

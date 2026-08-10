@@ -1,3 +1,5 @@
+//! `cli_control` 模块。内部实现模块（无公开顶层项）。
+
 use chuang_agent::control_intent::{parse_control_intent, ControlIntentInput};
 use chuang_agent::control_plane::ManagedUnit;
 use chuang_agent::control_workflow::{

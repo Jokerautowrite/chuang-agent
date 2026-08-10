@@ -1,3 +1,5 @@
+//! `provider_openai_compatible` 模块。公开接口：struct ProviderConfigError, OpenAICompatibleRequestEnvelope, HttpRequestPreview, StubHttpCallResult, HttpCallResult, OpenAICompatibleProviderAdapter；enum ProviderTransport, ReasoningEffort；fn as_str, new, with_transport, with_endpoint, with_reasoning_effort, with_max_output_tokens, with_request_timeout_ms, with_tls_ca_cert_path。
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;

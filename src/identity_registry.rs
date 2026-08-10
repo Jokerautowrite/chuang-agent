@@ -1,3 +1,5 @@
+//! `identity_registry` 模块。公开接口：struct AgentIdentity, IdentityRegistry；enum IdentityRegistryError；fn parse, load, select_active, compatibility_default_identity。
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

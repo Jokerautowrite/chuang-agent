@@ -1,3 +1,5 @@
+//! `terminal_event` 模块。公开接口：enum TerminalEvent, StepStatus。
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

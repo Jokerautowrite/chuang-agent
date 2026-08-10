@@ -1,3 +1,5 @@
+//! `actuator::fake` 模块。公开接口：struct FakeActuator；fn new, calls。
+
 use crate::actuator::{
     Actuator, ActuatorError, AppHandle, ClickTarget, EvidenceRef, FocusTarget, InputTarget,
     Observation, ObserveTarget, OpenAppRequest, ScreenshotTarget, SecretOrPlainText,

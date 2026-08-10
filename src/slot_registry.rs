@@ -1,3 +1,5 @@
+//! `slot_registry` 模块。公开接口：struct RuntimeSlots, CanonicalEvolutionSlot, GenesisSlot, RuntimeSlotsSummary；enum ProviderSlot, GovernanceSlot, ActuatorSlot, EvolutionSlot, CanonicalGovernanceSlot, ControlPlaneSlot, SubagentRuntimeSlot, EmotionSlotRuntime；fn provider_name, model_name, register_operator_approval, clone_boxed, new, evolver, evolver_mut, governance。
+
 use crate::actuator::{
     Actuator, ActuatorError, AppHandle, ClickTarget, CommandActuator, EvidenceRef, FakeActuator,
     FocusTarget, InputTarget, Observation, ObserveTarget, OpenAppRequest, ScreenshotTarget,

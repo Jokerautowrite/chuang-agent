@@ -1,3 +1,5 @@
+//! `live_subagent_rehearsal` 模块。公开接口：struct LiveSubagentRehearsalInput, LiveSubagentRehearsalReport, LiveSubagentGateCheck, LiveSubagentRunnerAllowlistCheck, LiveSubagentCapabilityRoutingCheck, LiveSubagentReportAdmissionCheck, LiveSubagentForbiddenCapabilityCheck, LiveSubagentApprovalAuditPrerequisitesCheck；fn rehearse_live_subagent_adapter, rehearse_live_subagent_adapter_with_lookup。
+
 use crate::live_adapter_gate::{evaluate_live_adapter_gate_with_lookup, LiveAdapterSlot};
 use serde::Serialize;
 

@@ -1,3 +1,5 @@
+//! `tool_loop_meta` 模块。公开接口：struct ToolLoopMeta；fn from_extra, typed_from_extra, parse_json_field, parse_json_vec, parse_json_value, parse_json_vec_value, derive_tool_protocol_correction_context, derive_tool_protocol_typed_failure。
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;

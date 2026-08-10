@@ -1,3 +1,5 @@
+//! `permission_profile_slot` 模块。公开接口：struct PermissionRule, PermissionProfile, ToolDescriptorRisk, PermissionRiskDecision；enum PermissionProfileId, PermissionTag, PermissionDecision；fn local_ga_profile, full_local_workspace_profile, safe_default_profile, unrestricted_profile, classify_tag, decide_tag, decide_descriptor_risk。
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

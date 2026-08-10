@@ -1,3 +1,5 @@
+//! `browser_worker::hash` 模块。公开接口：fn stable_content_hash。
+
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x00000100000001b3;
 

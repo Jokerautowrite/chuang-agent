@@ -1,3 +1,5 @@
+//! `tool_runtime` 模块。公开接口：struct ToolProtocolError, ToolLoopEvent, ToolExecutionRecord, ToolDirectoryEntry, GovernedToolExecutionRecord, PendingApproval, PendingRiskDecision, OperatorApprovalReceipt；enum ToolCall, ToolModelOutput, ToolActionEnvelope, WriteOperation；fn build_subagent_tool_context, generic_agent_mvp, registry, tool_catalog_block, tool_detail_block, tool_instruction_block, execute_with_governance, execute_or_reject_with_governance；const TOOL_EXECUTION_RECORD_SCHEMA_FIELDS, TOOL_LOOP_REPORT_SCHEMA_VERSION, TOOL_ACTION_SCHEMA_VERSION, TOOL_LOOP_REPORT_SCHEMA_FIELDS, TOOL_ACTION_SCHEMA_FIELDS, TOOL_ACTION_CALL_FIELDS, PENDING_APPROVAL_MAX_CALL_BYTES, DEFAULT_SUBAGENT_WORKER_MODEL。
+
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;

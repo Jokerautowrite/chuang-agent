@@ -1,3 +1,5 @@
+//! `goal_dispatch` 模块。公开接口：struct GoalDispatchReceipt, GoalDispatchManifest, GoalDispatchCollectionReceipt, GoalCheckpointSuggestion, GoalDispatchHandoffSummary, GoalReportAdmissionRef, GoalDispatchDiagnostics, GoalWorkerDispatchReceipt；fn dispatch_goal_run_to_queue, dispatch_goal_run, load_goal_dispatch_manifest, collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only。
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

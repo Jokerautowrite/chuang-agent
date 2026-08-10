@@ -1,3 +1,5 @@
+//! `mcp_fake_adapter` 模块。公开接口：struct McpToolSpec, McpToolCall, McpToolResult, McpToolDescriptor, McpRuntimeEventInput, McpRuntimeEvents, McpElicitationRequest, McpToolRiskView；enum McpAdapterError；fn new, read_only, destructive, open_world, external_commit, risk_tags, risk_view, with_stderr_noise。
+
 use std::collections::BTreeMap;
 
 use crate::permission_profile_slot::ToolDescriptorRisk;

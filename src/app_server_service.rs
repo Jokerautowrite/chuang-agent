@@ -1,3 +1,5 @@
+//! `app_server_service` 模块。公开接口：struct AppServerServiceEvidence, AppServerServiceRuntimeSnapshot, AppServerPersistenceRuntimeSnapshot, AppServerGateEnvironment, AppServerGateState；fn collect_app_server_service_runtime_snapshot, app_server_service_runtime_snapshot_from_evidence, canonical_app_server_socket, app_server_persistence_runtime_snapshot_from_socket, effective_gate_value；const APP_SERVER_SERVICE_NAME。
+
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;

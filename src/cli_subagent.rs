@@ -1,3 +1,5 @@
+//! `cli_subagent` 模块。内部实现模块（无公开顶层项）。
+
 use std::collections::BTreeSet;
 use std::io::{ErrorKind, Read, Write};
 use std::process::{Command, Stdio};

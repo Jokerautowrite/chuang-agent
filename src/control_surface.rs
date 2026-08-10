@@ -1,3 +1,5 @@
+//! `control_surface` 模块。公开接口：struct ControlSurfaceRequest, ControlSurfaceOutcome；enum ControlSurfaceError；fn list_control_surface_units, run_control_surface_intent, run_control_surface_outcome。
+
 use crate::control_intent::{
     parse_control_intent, resolve_control_unit_id, ControlIntentError, ControlIntentInput,
 };

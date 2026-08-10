@@ -1,3 +1,5 @@
+//! `lifecycle::checkpoint` 模块。公开接口：struct DeferredLifecycleCommand, RuntimeCheckpoint, LocalCheckpointStore；enum CheckpointStoreError；fn new, with_optional_runtime_refs, with_runtime_refs, path, append, replace, load_all, load_latest；const RUNTIME_CHECKPOINT_SCHEMA_VERSION。
+
 use crate::common::Timestamp;
 use crate::lifecycle::{LifecycleCommand, LifecycleState};
 use chrono::{SecondsFormat, Utc};

@@ -1,3 +1,5 @@
+//! `session_archive` 模块。公开接口：struct SessionTurnArchive, SqliteSessionArchive；enum SessionArchiveError；fn open, append, append_with_summary, replay。
+
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};

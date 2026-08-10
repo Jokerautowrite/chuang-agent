@@ -1,3 +1,5 @@
+//! `cli_external_ai` 模块。内部实现模块（无公开顶层项）。
+
 use chuang_agent::external_ai_dispatch::{
     build_external_ai_dispatch, ExternalAiDispatchError, ExternalAiDispatchRequest,
 };

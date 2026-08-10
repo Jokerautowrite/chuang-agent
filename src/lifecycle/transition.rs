@@ -1,3 +1,5 @@
+//! `lifecycle::transition` 模块。公开接口：struct LifecycleTransitionTable；fn evaluate。
+
 use crate::lifecycle::checkpoint::now_timestamp;
 use crate::lifecycle::{CommandEffect, LifecycleCommand, LifecycleState};
 

@@ -1,3 +1,5 @@
+//! `governance` 模块。公开接口：trait Governance；struct ProposedAction, GovernanceError, OperatorApprovalEvidence；enum ActionKind, RiskDecision；fn risk_decision_label, risk_decision_reason, risk_decision_parts；use rules_markdown, static_rule。
+
 use crate::common::AuditRecord;
 
 mod rules_markdown;

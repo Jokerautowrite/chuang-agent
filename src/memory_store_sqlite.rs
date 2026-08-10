@@ -1,3 +1,5 @@
+//! `memory_store_sqlite` 模块。公开接口：struct SqliteMemoryStore；fn open。
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;

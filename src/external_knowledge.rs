@@ -1,3 +1,5 @@
+//! `external_knowledge` 模块。公开接口：trait ExternalKnowledgeRead；struct ExternalKnowledgeSourceConfig, ExternalKnowledgeConfig, ExternalKnowledgeReadRequest, ExternalKnowledgeReadHit, ExternalKnowledgePreflightStatus, ExternalKnowledgeReadStatus, FakeExternalKnowledgeReader, LiveExternalKnowledgeReader；enum ExternalKnowledgeSource；fn as_str, disabled, source_config, new, preflight_for_source, unavailable_preflight, unavailable_read_status。
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

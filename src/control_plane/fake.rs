@@ -1,3 +1,5 @@
+//! `control_plane::fake` 模块。公开接口：struct FakeControlPlane；fn new, default_local_agents。
+
 use std::collections::BTreeMap;
 
 use crate::control_plane::{

@@ -1,3 +1,5 @@
+//! `genesis_actuator::fake` 模块。公开接口：struct FakeGenesisActuator；fn new, with_channel, calls。
+
 use crate::genesis_actuator::{
     GenesisActuator, GenesisAskRequest, GenesisAskResponse, GenesisChannel, GenesisError,
 };

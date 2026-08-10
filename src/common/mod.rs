@@ -1,3 +1,5 @@
+//! `common::mod` 模块。公开接口：use audit, id, timestamp。
+
 mod audit;
 mod id;
 mod timestamp;

@@ -1,3 +1,5 @@
+//! `cli_args` 模块。内部实现模块（无公开顶层项）。
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

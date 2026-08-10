@@ -1,3 +1,5 @@
+//! `governance::rules_markdown` 模块。公开接口：struct MarkdownRuleSet, RuleCheck；fn load, from_content, path, check。
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

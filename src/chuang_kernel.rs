@@ -1,3 +1,5 @@
+//! `chuang_kernel` 模块。公开接口：struct ChuangKernelConfig, GovernanceRulesSnapshot, IdentityBootstrapSnapshot, ChuangKernelTurn, ChuangKernelSnapshot, RememberTurnReceipt, PreparedTurnMemory, ChuangKernel；enum ChuangKernelMemoryError, ChuangKernelGovernanceError；fn mvp_default, with_responder, snapshot, run_governed_turn, run_governed_turn_with_extra_context, remember_turn, remember_turn_with_metadata_tags, remember_session_turn；use crate。
+
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -1,3 +1,5 @@
+//! `control_intent` 模块。公开接口：struct ControlIntentInput；enum ControlIntentError；fn resolve_control_unit_id, parse_control_intent。
+
 use crate::control_plane::{ControlAction, ControlRequest, ManagedUnit};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,3 +1,5 @@
+//! `cli_skill` 模块。内部实现模块（无公开顶层项）。
+
 use std::{
     collections::BTreeMap,
     fs,

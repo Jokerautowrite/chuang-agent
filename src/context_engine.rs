@@ -1,3 +1,5 @@
+//! `context_engine` 模块。公开接口：trait ContextEngine；struct ContextSegment, ContextBudget, PackedContext, ContextPackTraceStep, ContextCompactionEvent, ContextCompactionSummary, WorkingReservation, DropReason；enum SegmentSource, ContextCompactionEventKind, WorkingReservationReason, DropReasonKind, BudgetExceededReason, ContextEngineKind, ContextPackError；fn as_str, compaction_summary, pack, new, render_prompt；use deterministic, summary_compression。
+
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 

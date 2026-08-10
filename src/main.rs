@@ -1,3 +1,5 @@
+//! `main` 模块。内部实现模块（无公开顶层项）。
+
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, IsTerminal, Write};

@@ -1,3 +1,5 @@
+//! `skill_evolver::dry_run` 模块。公开接口：struct DryRunProposalEvolver；fn new, observed_events。
+
 use super::{
     validate_event, validate_proposal, validate_scope, EvolutionError, EvolutionReceipt,
     EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver, SkillId, SkillProposal,

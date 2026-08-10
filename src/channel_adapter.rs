@@ -1,3 +1,5 @@
+//! `channel_adapter` 模块。公开接口：struct ChannelInboundMessage, ChannelOutboundMessage；fn validate, app_server_turn_start_request, outbound_from_app_server_event, outbounds_from_app_server_events。
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 

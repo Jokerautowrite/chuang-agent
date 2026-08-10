@@ -1,3 +1,5 @@
+//! `runtime_report` 模块。公开接口：fn build_runtime_report, runtime_observability_meta, report_metadata。
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 

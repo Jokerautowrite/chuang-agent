@@ -1,3 +1,5 @@
+//! `lifecycle::mod` 模块。公开接口：use checkpoint, engine, state, transition。
+
 mod checkpoint;
 mod engine;
 mod state;

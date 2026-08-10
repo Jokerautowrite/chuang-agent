@@ -1,3 +1,5 @@
+//! `subagent_tree_ledger` 模块。公开接口：trait SubagentTreeLedger；struct SubagentTreePolicy, ThreadRelation, SpawnEdge, ReportAdmissionRef, SubagentThreadRecord, SubagentChildrenSummary, SpawnRequest, SpawnValidation；enum AgentRole, SubagentTreeStatus, SubagentTreeLedgerError；fn new, is_open, root_thread_id, policy, get, records, summarize_children, validate_spawn。
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

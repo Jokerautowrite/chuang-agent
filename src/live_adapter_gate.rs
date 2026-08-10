@@ -1,3 +1,5 @@
+//! `live_adapter_gate` 模块。公开接口：struct LiveAdapterGate, LiveAdapterGateError；enum LiveAdapterSlot；fn name, required_env, audit_label, preflight_checks, must_reject_capabilities, evaluate_live_adapter_gate, require_live_adapter_enabled, evaluate_live_adapter_gate_with_lookup。
+
 use std::env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

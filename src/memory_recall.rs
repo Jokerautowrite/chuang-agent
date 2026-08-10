@@ -1,3 +1,5 @@
+//! `memory_recall` 模块。公开接口：struct RecallRequest, RecallHit, RecallResult, MemoryRecallPipeline；enum MemoryRecallError；fn new, store_mut, recall。
+
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};

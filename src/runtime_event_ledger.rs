@@ -1,3 +1,5 @@
+//! `runtime_event_ledger` 模块。公开接口：trait RuntimeEventLedger；struct RuntimeRiskDecision, RuntimeEvent, RuntimeTurnSummary, InMemoryRuntimeEventLedger, JsonlRuntimeEventLedger；enum RuntimeEventKind, RuntimeEventLedgerError；fn new, with_policy_ref, at, with_turn_id, with_call_id, with_risk_decision, with_evidence_ref, from_events；const RUNTIME_EVENT_SCHEMA_VERSION。
+
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};

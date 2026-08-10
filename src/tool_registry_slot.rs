@@ -1,3 +1,5 @@
+//! `tool_registry_slot` 模块。公开接口：struct ToolDescriptor, ToolRegistrySlot；fn schema_version, descriptor_schema_fields, schema_fields, builtin, builtin_tool_descriptors, descriptor_for_tool, default_tool_registry_slot；const TOOL_DESCRIPTOR_SCHEMA_VERSION, TOOL_DESCRIPTOR_SCHEMA_FIELDS, TOOL_REGISTRY_SLOT_SCHEMA_FIELDS。
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

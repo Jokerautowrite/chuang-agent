@@ -1,3 +1,5 @@
+//! `cli_browser` 模块。内部实现模块（无公开顶层项）。
+
 use std::process::{Command, Stdio};
 
 use chuang_agent::browser_read::{find_headless_chrome_script, resolve_cdp_port};

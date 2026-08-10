@@ -1,3 +1,5 @@
+//! `browser_worker::transcript` 模块。公开接口：struct BrowserTranscriptEntry, BrowserTranscriptRecord, BrowserTranscript；fn new, start_record, complete_record。
+
 use crate::browser_worker::{DispatchReceipt, ProviderKind, WorkerOutput, WorkerTask};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

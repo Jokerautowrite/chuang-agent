@@ -1,3 +1,5 @@
+//! `goal_run` 模块。公开接口：struct GoalRun, GoalWorkerPlan, GoalWriteScope, GoalValidationPlan, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalCheckpoint, EvidenceVerdict；enum ConvergenceStatus；fn new, assert_time_budget_allows_continue, step_run_cap, record_checkpoint, diagnostics, evidence_diagnostics, convergence_verdict, validate；const ACCEPTANCE_COMMAND_TIMEOUT_SECS。
+
 use crate::goal_mode::{
     AcceptanceCheck, AcceptanceCheckContract, AcceptanceVerdict, GoalAcceptancePlan,
     GoalCheckpointPolicy, GoalConvergencePolicy, GoalEvidence, GoalSpec, GoalSpecError,

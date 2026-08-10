@@ -1,3 +1,5 @@
+//! `self_experiment` 模块。公开接口：struct ExperimentRequest, ExperimentReceipt, ExperimentCompleteRequest, ExperimentReportReceipt, ExperimentListOutput, ExperimentListItem, ExperimentShowOutput, SelfExperimentPlanner；enum ExperimentOutcome；fn new, create_plan, complete, list, show, root, parse, as_str。
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};

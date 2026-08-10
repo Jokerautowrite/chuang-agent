@@ -1,3 +1,5 @@
+//! `subagent_queue` 模块。公开接口：struct FileSubagentQueueConfig, FileSubagentQueue；enum FileSubagentQueueError；fn new, dispatch_path, report_path, claim_path, claim_release_path, open, write_dispatch, read_dispatch。
+
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;

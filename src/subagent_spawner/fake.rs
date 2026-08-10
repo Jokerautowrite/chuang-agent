@@ -1,3 +1,5 @@
+//! `subagent_spawner::fake` 模块。公开接口：struct FakeSubagentSpawner；fn new, state, messages。
+
 use std::collections::BTreeMap;
 
 use crate::common::AgentId;

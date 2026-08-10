@@ -1,3 +1,5 @@
+//! `common::audit` 模块。公开接口：trait Auditable, IdempotentKey；struct AuditRecord。
+
 use crate::common::{AgentId, TaskId, Timestamp};
 use serde::{Deserialize, Serialize};
 

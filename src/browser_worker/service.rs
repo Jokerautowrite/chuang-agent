@@ -1,3 +1,5 @@
+//! `browser_worker::service` 模块。公开接口：struct BrowserWorkerDemoService, DemoRun；fn new, with_driver, run；type SimulatedResponseFn。
+
 use crate::browser_worker::{
     BrowserProviderDriver, BrowserTranscriptRecord, BrowserWorkerCoordinator, BrowserWorkerError,
     BrowserWorkerSession, DeepSeekWebAdapter, DispatchReceipt, FakeBrowserProviderDriver,

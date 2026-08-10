@@ -1,3 +1,5 @@
+//! `hermes_memory::file` 模块。公开接口：struct FileDualFileMemoryStore；fn open, config。
+
 use std::fs;
 use std::path::Path;
 

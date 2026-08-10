@@ -1,3 +1,5 @@
+//! `cli_console` 模块。内部实现模块（无公开顶层项）。
+
 use chuang_agent::control_workflow::{build_unit_views, ControlUnitView};
 use chuang_agent::kernel_status::{build_chuang_mvp_status, ChuangMvpStatus};
 use chuang_agent::plugin_registry::{load_plugin_registry, PluginKind, PluginManifest};

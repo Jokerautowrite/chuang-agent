@@ -1,3 +1,5 @@
+//! `operator_approval` 模块。公开接口：struct OperatorApprovalTicket；fn signing_payload, verify_operator_approval_ticket；const OPERATOR_APPROVAL_TICKET_SCHEMA_VERSION, OPERATOR_APPROVAL_MAX_AGE_SECONDS, OPERATOR_APPROVAL_MAX_FUTURE_SKEW_SECONDS。
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{DateTime, Duration, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};

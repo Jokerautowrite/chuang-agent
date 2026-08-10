@@ -1,3 +1,5 @@
+//! `secret_redaction` 模块。公开接口：struct RedactedText；fn redact_sensitive_text, is_secret_material_path。
+
 use std::path::Path;
 use std::sync::OnceLock;
 

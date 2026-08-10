@@ -1,3 +1,5 @@
+//! `path_utils` 模块。公开接口：fn normalize_path_lexically, resolve_candidate_preserving_existing_symlinks。
+
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 

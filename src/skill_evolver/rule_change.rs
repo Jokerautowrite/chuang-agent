@@ -1,3 +1,5 @@
+//! `skill_evolver::rule_change` 模块。公开接口：trait RuleChangeGovernance；struct FailureEvidence, RuleChangeProposal, GovernanceContext, GovernanceDecision, PolicyRuleChangeGovernance, NoopRuleChangeGovernance, RuleChangeReceipt, RuleChangeJournalEntry；enum RuleChangeKind；fn from_pattern, new, path, append, load, find。
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

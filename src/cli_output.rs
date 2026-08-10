@@ -1,3 +1,5 @@
+//! `cli_output` 模块。公开接口：enum ControlOutputFormat；fn print_json, print_control_view, print_control_view_with_format, print_control_unit_view, print_status, print_config_summary, print_runtime_result, print_runtime_result_verbose。
+
 use chuang_agent::agent_runtime::{ContextDebugInfo, RuntimeResult};
 use chuang_agent::context_engine::{BudgetExceededReason, DropReason};
 use chuang_agent::control_workflow::{ControlUnitView, ControlWorkflowView};

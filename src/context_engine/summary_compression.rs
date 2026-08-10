@@ -1,3 +1,5 @@
+//! `context_engine::summary_compression` 模块。公开接口：struct SummaryCompressionContextEngine；fn new。
+
 use super::{
     ContextBudget, ContextEngine, ContextPackError, ContextPacker, ContextSegment, PackedContext,
     SegmentSource,
