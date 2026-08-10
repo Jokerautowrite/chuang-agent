@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -6,7 +7,7 @@ use chuang_agent::goal_dispatch::{
     collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, dispatch_goal_run,
     load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
 };
-use chuang_agent::goal_mode::GoalSpec;
+use chuang_agent::goal_mode::{AcceptanceCheck, GoalAcceptancePlan, GoalEvidence, GoalSpec};
 use chuang_agent::goal_run::{
     GoalIntegrationPolicy, GoalRun, GoalRunStore, GoalValidationPlan, GoalWorkerPlan,
     GoalWriteScope,
@@ -622,6 +623,115 @@ fn goal_report_admission_ref_deserializes_legacy_json_without_admission_id() {
 
     assert_eq!(admission_ref.admission_id, None);
     assert_eq!(admission_ref.report_id, "report-1");
+}
+
+#[test]
+fn goal_dispatch_manifest_snapshots_acceptance_plan_and_evidence() {
+    let store_root = temp_goal_root("manifest-snapshot-store");
+    let queue_root = temp_goal_root("manifest-snapshot-queue");
+    let mut goal = sample_goal_run();
+    goal.goal_spec.acceptance_evidence = vec![GoalEvidence::new("done.md")];
+    goal.goal_spec.acceptance_plan = GoalAcceptancePlan::new(vec![
+        AcceptanceCheck::Evidence(GoalEvidence::new("done.md")),
+        AcceptanceCheck::Command("cargo test -q".to_string()),
+    ]);
+    let store = GoalRunStore::new(&store_root);
+    store.create(&goal).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    let manifest =
+        load_goal_dispatch_manifest(&store_root, "goal-dispatch").expect("manifest should load");
+    assert_eq!(manifest.acceptance_plan.len(), 2);
+    assert_eq!(manifest.acceptance_plan[0].evaluator(), "evidence");
+    assert_eq!(manifest.acceptance_plan[1].evaluator(), "command");
+    assert_eq!(manifest.acceptance_evidence.len(), 1);
+    assert_eq!(manifest.acceptance_evidence[0].path, "done.md");
+}
+
+#[test]
+fn goal_collect_blocks_checkpoint_when_acceptance_evidence_missing() {
+    let store_root = temp_goal_root("evidence-gate-store");
+    let queue_root = temp_goal_root("evidence-gate-queue");
+    let mut goal = sample_goal_run();
+    goal.goal_spec.acceptance_evidence = vec![GoalEvidence::new("done.md")];
+    let store = GoalRunStore::new(&store_root);
+    store.create(&goal).expect("goal should store");
+    let loaded = store.load("goal-dispatch").expect("goal should load");
+    let receipt = dispatch_goal_run(&loaded, &store_root, &queue_root, "goal-controller")
+        .expect("dispatch should succeed");
+
+    let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&queue_root))
+        .expect("queue should open");
+    for dispatch in &receipt.dispatches {
+        queue
+            .write_report_for_test(
+                &chuang_agent::subagent_spawner::RunId(dispatch.run_id.clone()),
+                &sample_report(dispatch, &format!("{} finished", dispatch.worker_id)),
+            )
+            .expect("report should write");
+    }
+
+    // 报告全齐、身份对齐、Success，但验收证据文件缺失 → 不能 checkpoint。
+    let collection = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("collection should succeed");
+    assert_eq!(collection.available_report_count, 2);
+    assert!(collection.missing_run_ids.is_empty());
+    assert!(!collection.ready_to_checkpoint);
+    assert!(!collection.acceptance_complete);
+    assert_eq!(collection.acceptance_missing.len(), 1);
+    assert!(collection.acceptance_missing[0].contains("done.md"));
+    assert!(collection.acceptance_evidence.len() == 1);
+    assert!(!collection.acceptance_evidence[0].passed);
+    assert!(collection.checkpoint_suggestion.is_none());
+    let err = checkpoint_suggestion_from_collection(&collection)
+        .expect_err("missing evidence must block checkpoint handoff");
+    assert_eq!(err, "goal collect is not ready to checkpoint");
+
+    // 补上证据文件 → collect 证据通过，产出带证据判定的 checkpoint 建议。
+    fs::write(store_root.join("done.md"), "evidence ready\n")
+        .expect("write evidence into goal root");
+    let collection2 = collect_goal_dispatch_reports(&store_root, &queue_root, "goal-dispatch")
+        .expect("second collection should succeed");
+    assert!(collection2.ready_to_checkpoint);
+    assert!(collection2.acceptance_complete);
+    assert!(collection2.acceptance_missing.is_empty());
+    let suggestion = checkpoint_suggestion_from_collection(&collection2)
+        .expect("evidence complete should expose checkpoint handoff");
+    assert_eq!(suggestion.evidence_verdicts.len(), 1);
+    assert!(suggestion.evidence_verdicts[0].passed);
+}
+
+#[test]
+fn goal_collect_receipt_deserializes_legacy_json_without_acceptance_fields() {
+    let receipt: GoalDispatchCollectionReceipt = serde_json::from_str(
+        r#"{
+            "goal_id":"legacy-goal",
+            "goal_objective":"legacy objective",
+            "goal_root":"/tmp/legacy-goal-root",
+            "queue_root":"/tmp/legacy-queue-root",
+            "dispatch_count":1,
+            "available_report_count":1,
+            "missing_run_ids":[],
+            "report_run_ids":["run-1"],
+            "blocked_report_run_ids":[],
+            "blocked_report_reasons":[],
+            "completed_worker_ids":["worker-1"],
+            "report_summaries":["worker-1 finished"],
+            "parent_context_handoffs":[],
+            "ready_to_checkpoint":true,
+            "checkpoint_suggestion":null,
+            "manifest_path":"/tmp/legacy-goal-root/goal-dispatch.dispatch.json"
+        }"#,
+    )
+    .expect("legacy receipt should deserialize");
+
+    // 向后兼容：旧 receipt 无 acceptance_* 字段时，默认视为证据门禁通过。
+    assert!(receipt.acceptance_complete);
+    assert!(receipt.acceptance_evidence.is_empty());
+    assert!(receipt.acceptance_missing.is_empty());
+    assert!(receipt.ready_to_checkpoint);
 }
 
 fn checkpoint_suggestion_from_collection(

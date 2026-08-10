@@ -3,7 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common::{AgentId, TaskId, Timestamp};
-use crate::goal_run::{GoalRun, GoalRunDiagnostics, GoalRunError, GoalWorkerPlan};
+use crate::goal_mode::{AcceptanceCheck, GoalEvidence};
+use crate::goal_run::{
+    check_evidence_items, EvidenceVerdict, GoalRun, GoalRunDiagnostics, GoalRunError,
+    GoalWorkerPlan,
+};
 use crate::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use crate::subagent_report::{
     build_parent_context_handoff, ExecutionStatus, ParentContextHandoff, ReportAdmissionStatus,
@@ -37,6 +41,13 @@ pub struct GoalDispatchManifest {
     pub dispatch_count: usize,
     pub dispatch_diagnostics: GoalDispatchDiagnostics,
     pub dispatches: Vec<GoalWorkerDispatchReceipt>,
+    /// 类型化验收检查快照（verifier-first）：派发时把 goal 定义的验收计划
+    /// 固化进 manifest，collect 在运行时按它产出证据，不事后补验。
+    #[serde(default)]
+    pub acceptance_plan: Vec<AcceptanceCheck>,
+    /// 文件证据快照（legacy 兼容）：collect 只读检查的依据。
+    #[serde(default)]
+    pub acceptance_evidence: Vec<GoalEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +65,16 @@ pub struct GoalDispatchCollectionReceipt {
     pub completed_worker_ids: Vec<String>,
     pub report_summaries: Vec<String>,
     pub parent_context_handoffs: Vec<ParentContextHandoff>,
+    /// 运行时验收证据判定（verifier-first）：collect 时对 manifest 快照的
+    /// 文件证据逐条检查文件系统得到，不依赖模型自述。旧 receipt JSON 无此字段。
+    #[serde(default)]
+    pub acceptance_evidence: Vec<EvidenceVerdict>,
+    /// 声明了文件证据时，是否全部通过（未声明/旧 receipt 缺字段时为 true）。
+    #[serde(default = "default_acceptance_complete")]
+    pub acceptance_complete: bool,
+    /// 未通过/缺失的证据列表（`path: reason`）。
+    #[serde(default)]
+    pub acceptance_missing: Vec<String>,
     #[serde(default)]
     pub handoff_query_summary: GoalDispatchHandoffSummary,
     pub ready_to_checkpoint: bool,
@@ -67,6 +88,9 @@ pub struct GoalCheckpointSuggestion {
     pub summary: String,
     pub completed_worker_ids: Vec<String>,
     pub validation_notes: Vec<String>,
+    /// 运行时验收证据判定快照（collect 时产出；checkpoint --from-collect 直接落盘）。
+    #[serde(default)]
+    pub evidence_verdicts: Vec<EvidenceVerdict>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +198,8 @@ pub fn dispatch_goal_run_to_queue(
         dispatch_count: dispatches.len(),
         dispatch_diagnostics: build_dispatch_diagnostics(goal_run),
         dispatches: dispatches.clone(),
+        acceptance_plan: goal_run.goal_spec.acceptance_plan.checks.clone(),
+        acceptance_evidence: goal_run.goal_spec.acceptance_evidence.clone(),
     };
     let manifest_path = write_goal_dispatch_manifest(&goal_root, &manifest)?;
 
@@ -336,10 +362,22 @@ where
         }
     }
 
+    // 运行时验收证据判定（verifier-first）：collect 时按 manifest 快照的
+    // 文件证据逐条检查文件系统；模型自述完成但证据缺失 = 未完成，
+    // 不能进入 checkpoint 建议。未声明文件证据时不设门禁（向后兼容）。
+    let acceptance_evidence = check_evidence_items(goal_root, &manifest.acceptance_evidence);
+    let acceptance_missing = acceptance_evidence
+        .iter()
+        .filter(|verdict| !verdict.passed)
+        .map(|verdict| format!("{}: {}", verdict.path, verdict.reason))
+        .collect::<Vec<_>>();
+    let acceptance_complete =
+        manifest.acceptance_evidence.is_empty() || acceptance_missing.is_empty();
     let ready_to_checkpoint = manifest.dispatch_diagnostics.ready_to_dispatch
         && available_report_count == manifest.dispatch_count
         && missing_run_ids.is_empty()
-        && blocked_report_run_ids.is_empty();
+        && blocked_report_run_ids.is_empty()
+        && acceptance_complete;
     let handoff_query_summary = GoalDispatchHandoffSummary {
         parent_context_handoff_count: parent_context_handoffs.len(),
         parent_context_handoff_refs: parent_context_handoff_refs(&parent_context_handoffs),
@@ -352,6 +390,7 @@ where
             &manifest,
             &completed_worker_ids,
             &report_summaries,
+            &acceptance_evidence,
         ))
     } else {
         None
@@ -371,6 +410,9 @@ where
         completed_worker_ids,
         report_summaries,
         parent_context_handoffs,
+        acceptance_evidence,
+        acceptance_complete,
+        acceptance_missing,
         handoff_query_summary,
         ready_to_checkpoint,
         checkpoint_suggestion,
@@ -650,6 +692,7 @@ fn build_checkpoint_suggestion(
     manifest: &GoalDispatchManifest,
     completed_worker_ids: &[String],
     report_summaries: &[String],
+    acceptance_evidence: &[EvidenceVerdict],
 ) -> GoalCheckpointSuggestion {
     let validation_notes = manifest
         .dispatches
@@ -675,6 +718,7 @@ fn build_checkpoint_suggestion(
         ),
         completed_worker_ids: completed_worker_ids.to_vec(),
         validation_notes,
+        evidence_verdicts: acceptance_evidence.to_vec(),
     }
 }
 
@@ -738,6 +782,10 @@ fn current_dispatch_token() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     format!("{pid}-{nanos}")
+}
+
+fn default_acceptance_complete() -> bool {
+    true
 }
 
 fn current_rfc3339_timestamp() -> String {
