@@ -1,3 +1,39 @@
+# 2026-08-10 1/2 全部缺口做完：checkpoint 验收持久化 + evolver 运行时喂入/外环驱动（双子代理）
+
+- **背景**：接上轮遗留缺口全部收口：① `goal checkpoint --from-collect` 落盘
+  acceptance_verdicts；② evolver 运行时事件喂入 + 外环自动驱动编排。两个 worker
+  子代理并行，写范围不相交。
+- **改动① checkpoint 验收持久化**（commits `8df43fa`/`988be05`）：
+  - `GoalCheckpoint` 新增 `acceptance_verdicts: Vec<AcceptanceVerdict>`
+    （serde default + skip_serializing_if，旧 JSON 兼容）；新构造器
+    `with_acceptance_verdicts`；validate 校验；`GoalRunReceipt` 加
+    `last_checkpoint_acceptance_verdicts`。
+  - `goal checkpoint --from-collect`：把 suggestion.acceptance_verdicts 带进
+    checkpoint 持久化；manual 分支保持无该字段；文本输出展示条数。
+  - 测试：goal_run +3、cli_goal FromCollect 端到端（plan --acceptance command →
+    dispatch → 报告 → checkpoint --from-collect → 读回断言 command 判定）。
+- **改动② evolver 运行时喂入/外环驱动**（commits `c3aeeea`/`885a907`/`58cbc02`）：
+  - 新增 `src/evolution_loop.rs`：`EvolutionEventBridge`（ledger 事件→evolver
+    事件：TurnCompleted→TurnCompleted；TurnFailed→ToolFailed；ToolFinished 按
+    risk_decision blocked/draft_only/needs_approval→ToolFailed，否则
+    ToolSucceeded；其余忽略）；`OuterLoopDriver`（detect→propose→治理
+    evaluate→批准才 apply 落盘→结构化 `OuterLoopReport`，拒绝记录原因不落盘，
+    阶段错误结构化不 panic）。
+  - `CanonicalEvolutionConfig` 增 `auto_outer_loop: bool`（serde default false
+    向后兼容）+ runtime_config_file 解析。
+  - `cli_runtime`：turn 结束后薄接线 `drive_evolution_outer_loop_after_turn`
+    （canonical + auto_outer_loop=true 时驱动，非阻塞，失败仅记日志）。
+  - 测试：evolution_loop_tests 19 个（bridge 映射/driver 全链路/治理门禁不被
+    绕过/拒绝不落盘/错误结构化）。
+- **验证**：干净 env 全量 `cargo test` 绿（124 个测试二进制；全量并行时 1 个
+  内嵌 cargo run 的测试偶发构建锁 flaky，单独跑全绿，与改动无关）；
+  `cargo build --bins` 通过、`cargo check --all-targets` 无 warning。
+- **已知说明**：裸 `CanonicalSkillEvolver` 直接喂 `impl SkillEvolver` 会命中
+  trait 默认实现（外环方法是固有方法、trait impl 未覆写）；全链路走
+  `EvolutionSlot`（trait 分发解析到固有方法），与 cli_runtime 实际接线一致。
+  如需裸 evolver 也走 trait 外环，后续在 canonical.rs 的 `impl SkillEvolver`
+  补覆写。未做真实 CLI 端到端实跑（需真实 config+会话），覆盖为编译+单测。
+
 # 2026-08-10 1/2 并行接线落地：collect Command 门禁 + evolver 外环接入 runtime（双子代理）
 
 - **背景**：上一轮 1/2 落地（goal verifier-first 契约 + evolver 外环闭环）后，
