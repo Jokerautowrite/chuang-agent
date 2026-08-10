@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 mod canonical;
 mod dry_run;
+mod failure;
 mod noop;
+mod rule_change;
 
 pub use canonical::{
     CanonicalSkillEvolver, DuplicateDecision, SkillLifecycleStatus, SkillRetirementReceipt,
@@ -12,7 +14,13 @@ pub use canonical::{
     SkillUpsertKind, SkillUpsertReceipt,
 };
 pub use dry_run::DryRunProposalEvolver;
+pub use failure::{FailureDetectorConfig, FailurePattern, RepeatedFailureDetector};
 pub use noop::NoopEvolver;
+pub use rule_change::{
+    FailureEvidence, GovernanceContext, GovernanceDecision, NoopRuleChangeGovernance,
+    PolicyRuleChangeGovernance, RuleChangeGovernance, RuleChangeJournal, RuleChangeJournalEntry,
+    RuleChangeKind, RuleChangeProposal, RuleChangeReceipt,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeEvent {
@@ -344,6 +352,7 @@ pub enum EvolutionError {
     InvalidEvent(String),
     InvalidScope(String),
     InvalidProposal(String),
+    InvalidRuleChange(String),
     ValidationRejected(Vec<String>),
     StorageError(String),
 }
@@ -421,6 +430,109 @@ fn validate_proposal(proposal: &SkillProposal) -> Result<(), EvolutionError> {
     if proposal.evidence_event_ids.is_empty() {
         return Err(EvolutionError::InvalidProposal(
             "evidence_event_ids must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_rule_change_proposal(
+    proposal: &crate::skill_evolver::rule_change::RuleChangeProposal,
+) -> Result<(), EvolutionError> {
+    if proposal.proposal_id.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "proposal_id must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.rule_id.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "rule_id must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.title.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "title must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.trigger.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "trigger must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.new_procedure.is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "new_procedure must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.rationale.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "rationale must not be empty".to_string(),
+        ));
+    }
+
+    if proposal.evidence.is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "evidence must not be empty".to_string(),
+        ));
+    }
+
+    if !proposal.writes_rules {
+        return Err(EvolutionError::InvalidRuleChange(
+            "applying rule changes requires writes_rules=true".to_string(),
+        ));
+    }
+
+    if !proposal.requires_governance {
+        return Err(EvolutionError::InvalidRuleChange(
+            "applying rule changes requires requires_governance=true".to_string(),
+        ));
+    }
+
+    if proposal.provenance.is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "provenance must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_governance_decision(
+    decision: &crate::skill_evolver::rule_change::GovernanceDecision,
+    expected_proposal_id: &str,
+) -> Result<(), EvolutionError> {
+    if decision.proposal_id.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "governance decision proposal_id must not be empty".to_string(),
+        ));
+    }
+
+    if decision.proposal_id != expected_proposal_id {
+        return Err(EvolutionError::InvalidRuleChange(
+            "governance decision proposal_id must match the evaluated proposal".to_string(),
+        ));
+    }
+
+    if decision.approval_source.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "approval_source must not be empty".to_string(),
+        ));
+    }
+
+    if decision.decided_by.trim().is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "decided_by must not be empty".to_string(),
+        ));
+    }
+
+    if decision.reasons.is_empty() {
+        return Err(EvolutionError::InvalidRuleChange(
+            "governance decision must record audit reasons".to_string(),
         ));
     }
 
