@@ -64,6 +64,10 @@ fn app_server_command() -> Command {
     // of the test's params.workspaceRoot.
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_chuang-agent"));
     cmd.env_remove("CHUANG_AGENT_WORKSPACE_ROOT");
+    // Tests must also be deterministic about live-actor gating: the outer
+    // shell may have CHUANG_REAL_ACTUATOR_ENABLE set, which would flip the
+    // actuator_operation gate to enabled and break liveReadiness assertions.
+    cmd.env_remove("CHUANG_REAL_ACTUATOR_ENABLE");
     cmd
 }
 
