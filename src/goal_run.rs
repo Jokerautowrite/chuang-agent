@@ -1,10 +1,17 @@
 use crate::goal_mode::{
+    AcceptanceCheck, AcceptanceCheckContract, AcceptanceVerdict, GoalAcceptancePlan,
     GoalCheckpointPolicy, GoalConvergencePolicy, GoalEvidence, GoalSpec, GoalSpecError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// 命令类验收检查的执行超时（秒）。`goal verify` 显式执行验收命令时兜底，
+/// 避免声明错误的命令把 operator 卡死。
+pub const ACCEPTANCE_COMMAND_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalRun {
@@ -1050,11 +1057,150 @@ pub fn check_evidence_at(
 
 /// 检查 goal spec 全部验收证据（按声明顺序，含 evidence_index）。
 pub fn check_evidence_plan(root: &Path, spec: &GoalSpec) -> Vec<EvidenceVerdict> {
-    spec.acceptance_evidence
+    check_evidence_items(root, &spec.acceptance_evidence)
+}
+
+/// 检查一组验收证据条目（按声明顺序，含 evidence_index）。
+/// 供 dispatch/collect 对 manifest 快照直接判定，无需构造 GoalSpec。
+pub fn check_evidence_items(root: &Path, items: &[GoalEvidence]) -> Vec<EvidenceVerdict> {
+    items
         .iter()
         .enumerate()
         .map(|(index, evidence)| check_evidence_at(root, evidence, index))
         .collect()
+}
+
+/// 评估单条类型化验收检查（verifier-first 纯逻辑 + 只读/命令判定）：
+/// - `Evidence` 检查 → 文件系统证据判定（复用 `check_evidence_at`）；
+/// - `Command` 检查 → 显式执行命令（`goal verify` 入口），按退出码判定。
+pub fn evaluate_acceptance_check(
+    root: &Path,
+    check: &AcceptanceCheck,
+    check_index: usize,
+) -> AcceptanceVerdict {
+    let evaluator = check.evaluator().to_string();
+    let description = check.description();
+    match check {
+        AcceptanceCheck::Evidence(evidence) => {
+            let verdict = check_evidence_at(root, evidence, check_index);
+            AcceptanceVerdict {
+                check_index,
+                evaluator,
+                description,
+                passed: verdict.passed,
+                reason: verdict.reason,
+                exit_code: None,
+            }
+        }
+        AcceptanceCheck::Command(command) => evaluate_command_check(command, check_index),
+    }
+}
+
+/// 评估类型化验收计划全部检查（按声明顺序，含 check_index）。
+pub fn evaluate_acceptance_plan(root: &Path, plan: &GoalAcceptancePlan) -> Vec<AcceptanceVerdict> {
+    plan.checks
+        .iter()
+        .enumerate()
+        .map(|(index, check)| evaluate_acceptance_check(root, check, index))
+        .collect()
+}
+
+/// 命令类验收检查：`sh -c` 执行并等待退出码（带超时兜底）。
+/// 输出不进入 verdict（避免命令输出中的敏感内容泄漏到日志/回执）。
+fn evaluate_command_check(command: &str, check_index: usize) -> AcceptanceVerdict {
+    let description = command.to_string();
+    let started = Instant::now();
+    let timeout = Duration::from_secs(ACCEPTANCE_COMMAND_TIMEOUT_SECS);
+    let mut child = match Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return AcceptanceVerdict {
+                check_index,
+                evaluator: "command".to_string(),
+                description,
+                passed: false,
+                reason: format!("command could not be started: {error}"),
+                exit_code: None,
+            };
+        }
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let exit_code = status.code();
+                return AcceptanceVerdict {
+                    check_index,
+                    evaluator: "command".to_string(),
+                    description,
+                    passed: status.success(),
+                    reason: if status.success() {
+                        "ok".to_string()
+                    } else {
+                        format!(
+                            "command exited with code {}",
+                            exit_code
+                                .map(|code| code.to_string())
+                                .unwrap_or_else(|| "unknown".to_string())
+                        )
+                    },
+                    exit_code,
+                };
+            }
+            Ok(None) => {
+                if started.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return AcceptanceVerdict {
+                        check_index,
+                        evaluator: "command".to_string(),
+                        description,
+                        passed: false,
+                        reason: format!(
+                            "command timed out after {ACCEPTANCE_COMMAND_TIMEOUT_SECS}s"
+                        ),
+                        exit_code: None,
+                    };
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                return AcceptanceVerdict {
+                    check_index,
+                    evaluator: "command".to_string(),
+                    description,
+                    passed: false,
+                    reason: format!("command wait failed: {error}"),
+                    exit_code: None,
+                };
+            }
+        }
+    }
+}
+
+/// verifier-first 验收检查契约实现：可验证（定义时）+ 可评估（运行时证据判定）。
+impl AcceptanceCheckContract for AcceptanceCheck {
+    fn validate_contract(&self) -> Result<(), GoalSpecError> {
+        self.validate()
+    }
+
+    fn evaluator(&self) -> &'static str {
+        self.evaluator()
+    }
+
+    fn description(&self) -> String {
+        self.description()
+    }
+
+    fn evaluate_contract(&self, root: &Path, check_index: usize) -> AcceptanceVerdict {
+        evaluate_acceptance_check(root, self, check_index)
+    }
 }
 
 /// checkpoint 的进度指纹：有 blocker_key 用它（同一失败原因去重），
