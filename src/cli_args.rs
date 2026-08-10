@@ -876,9 +876,9 @@ fn parse_subagent_runner_args(
                 if parsed == 0 {
                     return Err("--max-concurrency must be greater than zero".to_string());
                 }
-                if parsed > 8 {
+                if parsed > 32 {
                     return Err(
-                        "--max-concurrency above 8 is not supported by the MVP worker loop"
+                        "--max-concurrency above 32 is not supported by the worker loop"
                             .to_string(),
                     );
                 }

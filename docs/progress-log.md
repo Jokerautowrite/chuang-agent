@@ -1,3 +1,22 @@
+# 2026-08-11 并发上限放开 8→32：派发规则从「原则」落到「代码」
+
+- **背景**：田楠指令「放开吧」——并发上限放开，且派发规则（多并发优先、不单线程墨迹）
+  写入 Codex 的 `~/.codex/AGENTS.md`，作为本机所有智能体通用规则。
+- **改动**（创侧，6 处代码 + 2 处测试同步）：
+  - `src/cli_args.rs`：`subagent run-loop --max-concurrency` 校验 `> 8` → `> 32`，报错文案
+    「above 8」→「above 32」。
+  - `src/cli_goal.rs`：`goal step --max-concurrency` 同样放开到 32。
+  - `src/tool_runtime.rs`：单次 tool call fork 上限 `truncate(8)` → `truncate(32)`；
+    并发钳制 `clamp(1, 8)` → `clamp(1, 32)`（注释注明 2026-08-11 放开原因）。
+  - `src/cli_output.rs`：usage 两处 `[--max-concurrency 1..8]` → `1..32`。
+  - `tests/cli_subagent_dispatch_tests.rs` / `tests/cli_goal_tests.rs`：拒绝用例改为
+    `--max-concurrency 33` 并断言新文案。
+  - 默认并发 `job_list.len().min(4)` 保持不变（不指定时仍保守，指定后放开）。
+- **Codex 侧**：`~/.codex/AGENTS.md` Core laws 后新增「派发规则（本机所有智能体通用）」：
+  能多并发就多并发；不单线程墨迹；复杂任务拆分子代理并行，主代理负责拆解/集成/验收；
+  并发不等于全上最强模型，仍按复杂度选最小合适角色。
+- **验证**：`cargo build --bins` 通过；两个拒绝用例（33 触发）均绿。
+
 # 2026-08-11 调度原则落盘：按功能复杂程度派子代理 + 多子代理并行能派多少派多少
 
 - **背景**：田楠指令「视功能的复杂程度派子代理，多子代理并行能派多少派多少」写入 agents。

@@ -2411,9 +2411,10 @@ fn execute_spawn_subagent(
     if job_list.is_empty() {
         return failed_record(registry, call, "subagent_task_empty".to_string());
     }
-    // Safety cap: one tool call should not fork dozens of workers.
-    if job_list.len() > 8 {
-        job_list.truncate(8);
+    // Safety cap: one tool call should not fork an unbounded number of workers.
+    // 2026-08-11: raised 8 -> 32 per dispatch principle (maximize parallelism).
+    if job_list.len() > 32 {
+        job_list.truncate(32);
     }
 
     let policy = policy.unwrap_or("analyze").trim().to_ascii_lowercase();
@@ -2430,7 +2431,7 @@ fn execute_spawn_subagent(
     let concurrency = max_concurrency
         .map(|v| v as usize)
         .unwrap_or_else(|| job_list.len().min(4))
-        .clamp(1, 8)
+        .clamp(1, 32)
         .min(job_list.len());
 
     let run_suffix = match SystemTime::now().duration_since(UNIX_EPOCH) {

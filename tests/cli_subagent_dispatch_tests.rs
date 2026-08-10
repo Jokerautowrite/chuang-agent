@@ -926,14 +926,14 @@ fn cli_subagent_run_loop_rejects_unbounded_parallel_concurrency() {
             "--subagent-queue-root",
             queue_root.to_str().expect("temp path should be utf8"),
             "--max-concurrency",
-            "9",
+            "33",
         ])
         .output()
         .expect("cargo run should execute");
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("--max-concurrency above 8 is not supported"));
+        .contains("--max-concurrency above 32 is not supported"));
 }
 
 #[test]

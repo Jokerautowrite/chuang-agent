@@ -2180,9 +2180,9 @@ fn parse_goal_step(args: &[String]) -> Result<GoalStepCliRequest, String> {
                     "--max-concurrency",
                     &take_value(args, &mut index, "--max-concurrency")?,
                 )?;
-                if max_concurrency > 8 {
+                if max_concurrency > 32 {
                     return Err(
-                        "--max-concurrency above 8 is not supported by the MVP worker loop"
+                        "--max-concurrency above 32 is not supported by the worker loop"
                             .to_string(),
                     );
                 }

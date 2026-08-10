@@ -2264,14 +2264,14 @@ fn cli_goal_step_rejects_unbounded_parallel_concurrency() {
             "--subagent-queue-root",
             queue_root.to_str().expect("queue root should be utf8"),
             "--max-concurrency",
-            "9",
+            "33",
         ])
         .output()
         .expect("goal step should execute");
 
     assert!(!step.status.success());
     let stderr = String::from_utf8_lossy(&step.stderr);
-    assert!(stderr.contains("--max-concurrency above 8 is not supported"));
+    assert!(stderr.contains("--max-concurrency above 32 is not supported"));
 }
 
 #[test]
