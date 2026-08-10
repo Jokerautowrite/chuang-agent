@@ -138,7 +138,7 @@ fn runtime_config_rejects_invalid_tool_loop_rounds() {
 
     assert_eq!(err.field, "tool_loop.max_rounds");
 
-    config.tool_loop.max_rounds = 33;
+    config.tool_loop.max_rounds = 257;
     let err = config
         .validate()
         .expect_err("oversized tool loop max rounds should fail");

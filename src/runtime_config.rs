@@ -14,6 +14,9 @@ use serde::Serialize;
 /// 默认工作区根（仅作为 RuntimeConfig::new 的初始哨兵值；
 /// 实际生效值由 app_server 按 base_dir / 环境变量归一化）。
 pub const DEFAULT_WORKSPACE_ROOT: &str = "/home/user/projects/chuang-agent";
+/// 工具循环最大轮数上限（防失控保护）。
+/// 32 轮跑长任务不够，放宽到 256；config 中 max_rounds 超过此值仍会被拒绝。
+pub const TOOL_LOOP_MAX_ROUNDS_CAP: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -607,10 +610,12 @@ impl ToolLoopConfig {
                 message: "tool loop max_rounds must be greater than zero".to_string(),
             });
         }
-        if self.max_rounds > 32 {
+        if self.max_rounds > TOOL_LOOP_MAX_ROUNDS_CAP {
             return Err(ConfigError {
                 field: "tool_loop.max_rounds".to_string(),
-                message: "tool loop max_rounds must not exceed 32".to_string(),
+                message: format!(
+                    "tool loop max_rounds must not exceed {TOOL_LOOP_MAX_ROUNDS_CAP}"
+                ),
             });
         }
         if self.shell_timeout_ms == 0 {
