@@ -143,6 +143,16 @@ impl RuleChangeGovernance for CanonicalGovernanceSlot {
     }
 }
 
+impl CanonicalGovernanceSlot {
+    /// owned 拷贝（接线层在持有 `&mut evolver` 时使用，避免借用冲突）。
+    pub fn clone_boxed(&self) -> Box<dyn RuleChangeGovernance> {
+        match self {
+            Self::Policy(governance) => Box::new(governance.clone()),
+            Self::Noop(governance) => Box::new(governance.clone()),
+        }
+    }
+}
+
 /// canonical 外环运行时槽：承载 `CanonicalSkillEvolver` + 治理门禁 + 检测配置。
 /// 运行时事件流经 `SkillEvolver::observe` 进入外环，随后可走
 /// detect → propose → governance apply 闭环。
@@ -197,6 +207,15 @@ impl EvolutionSlot {
     pub fn rule_change_governance(&self) -> Option<&dyn RuleChangeGovernance> {
         match self {
             Self::Canonical(slot) => Some(slot.governance()),
+            Self::Noop(_) | Self::DryRun(_) => None,
+        }
+    }
+
+    /// 外环治理门禁的 owned 拷贝；仅 canonical 槽位提供。
+    /// 供接线层在持有 `&mut evolver` 时仍能调用治理门禁（避免借用冲突）。
+    pub fn cloned_rule_change_governance(&self) -> Option<Box<dyn RuleChangeGovernance>> {
+        match self {
+            Self::Canonical(slot) => Some(slot.governance.clone_boxed()),
             Self::Noop(_) | Self::DryRun(_) => None,
         }
     }

@@ -1153,6 +1153,50 @@ fn slot_registry_builds_canonical_evolution_slot_from_runtime_config() {
     assert!(slots.evolution.rule_change_governance_context().is_some());
     assert!(slots.evolution.rule_change_detector_config().is_some());
     assert!(slots.evolution.rule_change_journal_path().is_some());
+    // 接线层需要的 owned 治理拷贝：与 `&mut evolver` 同帧使用时避免借用冲突。
+    let owned_governance = slots
+        .evolution
+        .cloned_rule_change_governance()
+        .expect("canonical slot exposes owned governance");
+    assert!(owned_governance
+        .evaluate(
+            &dummy_rule_change_proposal(),
+            &slots
+                .evolution
+                .rule_change_governance_context()
+                .expect("governance context"),
+        )
+        .is_ok());
+}
+
+fn dummy_rule_change_proposal() -> chuang_agent::skill_evolver::RuleChangeProposal {
+    use chuang_agent::skill_evolver::{FailureEvidence, RuleChangeKind, SkillProposalProvenance};
+    chuang_agent::skill_evolver::RuleChangeProposal {
+        proposal_id: "slot-test-proposal".to_string(),
+        rule_id: "rule-for-slot-test".to_string(),
+        change_kind: RuleChangeKind::CreateRule,
+        title: "Slot test rule".to_string(),
+        trigger: "slot test trigger".to_string(),
+        old_procedure: Vec::new(),
+        new_procedure: vec!["apply the slot test rule".to_string()],
+        rationale: "slot registry owned governance test".to_string(),
+        evidence: vec![FailureEvidence {
+            pattern_signature: "tool=slot-test".to_string(),
+            count: 2,
+            event_ids: vec!["f1".to_string(), "f2".to_string()],
+            task_ids: vec!["t1".to_string()],
+            summary: "repeated failure observed".to_string(),
+        }],
+        writes_rules: true,
+        requires_governance: true,
+        provenance: vec![SkillProposalProvenance {
+            source_event_id: "f1".to_string(),
+            source_task_id: "t1".to_string(),
+            source_kind: RuntimeEventKind::ToolFailed,
+            source_summary: "tool slot-test failed".to_string(),
+            source_metadata: Default::default(),
+        }],
+    }
 }
 
 #[test]
