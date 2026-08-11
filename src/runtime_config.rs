@@ -1,4 +1,4 @@
-//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig；enum ProviderConfig, ProviderApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
+//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig, ContextCompactionConfig；enum ProviderConfig, ProviderApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind, context_compaction_config；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -157,6 +157,29 @@ pub struct RulesConfig {
 pub enum ContextEngineConfig {
     DeterministicBudget,
     SummaryCompression,
+}
+
+/// 上下文压缩熔断配置（Claude Code 5：连续 3 次 autocompact 失败停止重试）。
+/// 真值源：RuntimeConfig.metadata 透传键（config 的 [metadata] 段）：
+/// - `context_compaction_breaker_threshold`：连续失败 N 次熔断（默认 3）；
+/// - `context_compaction_breaker_cooldown_secs`：熔断冷却秒数，冷却后自动复位（默认 60）。
+/// 未配置时用默认值；引擎侧默认与之一致（summary_compression 模块常量）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompactionConfig {
+    pub breaker_threshold: usize,
+    pub breaker_cooldown_secs: u64,
+}
+
+pub const DEFAULT_CONTEXT_COMPACTION_BREAKER_THRESHOLD: usize = 3;
+pub const DEFAULT_CONTEXT_COMPACTION_BREAKER_COOLDOWN_SECS: u64 = 60;
+
+impl Default for ContextCompactionConfig {
+    fn default() -> Self {
+        Self {
+            breaker_threshold: DEFAULT_CONTEXT_COMPACTION_BREAKER_THRESHOLD,
+            breaker_cooldown_secs: DEFAULT_CONTEXT_COMPACTION_BREAKER_COOLDOWN_SECS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -475,6 +498,15 @@ impl RuntimeConfig {
         self.control_plane.validate()
     }
 
+    /// knowledge_context（GBrain 直连 API 通道）显式开关：metadata
+    /// `knowledge_context=1` 时启用（与 emotion_brain 同款约定）。
+    pub fn knowledge_context_enabled(&self) -> bool {
+        self.metadata
+            .get("knowledge_context")
+            .map(|value| value == "1")
+            .unwrap_or(false)
+    }
+
     pub fn summary(&self) -> ConfigSummary {
         let provider = self.provider.summary_parts();
         let identity_memory = self.identity_memory.summary_parts();
@@ -612,25 +644,80 @@ impl RuntimeConfig {
                     .to_string(),
             );
         }
-        if self.external_knowledge.wiki.endpoint.is_some()
-            || self.external_knowledge.wiki.token_env.is_some()
-        {
-            warnings.push(
-                "external_knowledge.wiki is configured; live read remains unavailable until endpoint, token env, and an audited adapter are all wired"
-                    .to_string(),
-            );
-        }
-        if self.external_knowledge.gbrain.endpoint.is_some()
-            || self.external_knowledge.gbrain.token_env.is_some()
-        {
-            warnings.push(
-                "external_knowledge.gbrain is configured; live read remains unavailable until endpoint, token env, and an audited adapter are all wired"
-                    .to_string(),
-            );
-        }
+        push_external_knowledge_warning(
+            &mut warnings,
+            "wiki",
+            &self.external_knowledge.wiki,
+        );
+        push_external_knowledge_warning(
+            &mut warnings,
+            "gbrain",
+            &self.external_knowledge.gbrain,
+        );
 
         warnings
     }
+
+    /// 上下文压缩熔断配置：优先读 [metadata] 透传键，未配置/非法时回退默认值。
+    pub fn context_compaction_config(&self) -> ContextCompactionConfig {
+        let breaker_threshold = self
+            .metadata
+            .get("context_compaction_breaker_threshold")
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value >= 1)
+            .unwrap_or(DEFAULT_CONTEXT_COMPACTION_BREAKER_THRESHOLD);
+        let breaker_cooldown_secs = self
+            .metadata
+            .get("context_compaction_breaker_cooldown_secs")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_CONTEXT_COMPACTION_BREAKER_COOLDOWN_SECS);
+        ContextCompactionConfig {
+            breaker_threshold,
+            breaker_cooldown_secs,
+        }
+    }
+}
+
+fn push_external_knowledge_warning(
+    warnings: &mut Vec<String>,
+    source: &str,
+    config: &crate::knowledge_read::KnowledgeReadSourceConfig,
+) {
+    let endpoint_configured = config
+        .endpoint
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let token_env_configured = config
+        .token_env
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    if !endpoint_configured && !token_env_configured {
+        return;
+    }
+    let token_available = config
+        .token_env
+        .as_ref()
+        .map(|name| {
+            std::env::var(name)
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    if endpoint_configured && token_env_configured && token_available {
+        return;
+    }
+    let missing = if !endpoint_configured {
+        "endpoint"
+    } else if !token_env_configured {
+        "token_env"
+    } else {
+        "token (export the env named by external_knowledge.{source}.token_env)"
+    };
+    warnings.push(format!(
+        "external_knowledge.{source} is partially configured; live read remains unavailable until {missing} is set"
+    ));
 }
 
 impl RulesConfig {

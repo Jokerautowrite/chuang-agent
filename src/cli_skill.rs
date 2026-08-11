@@ -8,8 +8,8 @@ use std::{
 
 use chuang_agent::benchmark::{BenchmarkStore, Scoreboard};
 use chuang_agent::skill_evolver::{
-    DryRunProposalEvolver, EvolutionScope, RuntimeEvent, RuntimeEventKind, SkillEvolver,
-    SkillProposal, SkillSolidifyTicket, ValidationReport,
+    CandidatePoolEntry, DryRunProposalEvolver, EvolutionScope, RuntimeEvent, RuntimeEventKind,
+    SkillCandidatePool, SkillEvolver, SkillProposal, SkillSolidifyTicket, ValidationReport,
 };
 use serde::Serialize;
 
@@ -28,6 +28,8 @@ pub(crate) fn skill_command(args: &[String]) -> Result<(), String> {
         // Curator: read-only hygiene alias for monitor (never auto-writes).
         Some("monitor") | Some("curator") => skill_monitor_command(&args[1..]),
         Some("rollback") => skill_rollback_command(&args[1..]),
+        // 评分门禁候选池：只读审计（未达标提案记录，不落盘正式规则）。
+        Some("candidates") | Some("candidate-pool") => skill_candidates_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -681,6 +683,101 @@ fn skill_rollback_command(args: &[String]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// 评分门禁候选池只读审计：列出未达标提案（记录在
+/// `<skills_root>/.evolver/candidates.jsonl`，从未落盘为正式规则）。
+fn skill_candidates_command(args: &[String]) -> Result<(), String> {
+    let request = parse_skill_candidates(args)?;
+    let pool = SkillCandidatePool::new(
+        request
+            .skills_root
+            .join(".evolver")
+            .join("candidates.jsonl"),
+    );
+    let entries = pool
+        .load()
+        .map_err(|err| format!("skill_candidates_load_failed: {err:?}"))?;
+    let output = SkillCandidatesOutput {
+        skills_root: request.skills_root.display().to_string(),
+        candidate_pool_path: pool.path().display().to_string(),
+        candidate_count: entries.len(),
+        candidates: entries,
+        boundary: SkillCandidatesBoundary {
+            reads_candidate_pool: true,
+            writes_skill_files: false,
+            connects_llm: false,
+            connects_external_service: false,
+        },
+    };
+
+    match request.output {
+        ControlOutputFormat::Json => print_json(&output)?,
+        ControlOutputFormat::Text => {
+            println!(
+                "skill_candidates candidate_pool_path={} candidates={}",
+                output.candidate_pool_path, output.candidate_count
+            );
+            println!(
+                "boundary reads_candidate_pool=true writes_skill_files=false connects_llm=false connects_external_service=false"
+            );
+            for candidate in &output.candidates {
+                println!(
+                    "candidate entry_id={} proposal_id={} rule_id={} change_kind={} admitted={} baseline={} after={} reasons={}",
+                    candidate.entry_id,
+                    candidate.proposal.proposal_id,
+                    candidate.proposal.rule_id,
+                    skill_rule_change_kind_str(candidate.decision.change_kind),
+                    candidate.decision.admitted,
+                    candidate
+                        .decision
+                        .baseline_score
+                        .map(|score| score.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    candidate
+                        .decision
+                        .after_score
+                        .map(|score| score.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    candidate.decision.reasons.join("|"),
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn skill_rule_change_kind_str(kind: chuang_agent::skill_evolver::RuleChangeKind) -> &'static str {
+    match kind {
+        chuang_agent::skill_evolver::RuleChangeKind::CreateRule => "create_rule",
+        chuang_agent::skill_evolver::RuleChangeKind::UpdateRule => "update_rule",
+    }
+}
+
+fn parse_skill_candidates(args: &[String]) -> Result<SkillCandidatesRequest, String> {
+    let mut output = ControlOutputFormat::Text;
+    let mut skills_root = default_skills_root();
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--skills-root" => {
+                let value = take_value(args, &mut index, "--skills-root")?;
+                if value.trim().is_empty() {
+                    return Err("skill candidates --skills-root must not be empty".to_string());
+                }
+                skills_root = PathBuf::from(value);
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(SkillCandidatesRequest { output, skills_root })
 }
 
 fn build_skill_review(request: &SkillProposeRequest) -> Result<SkillReviewBuild, String> {
@@ -1906,6 +2003,11 @@ struct SkillRollbackRequest {
     rollback_at: Option<String>,
 }
 
+struct SkillCandidatesRequest {
+    output: ControlOutputFormat,
+    skills_root: PathBuf,
+}
+
 pub(crate) struct SkillReviewBuild {
     pub(crate) proposals: Vec<SkillProposal>,
     pub(crate) proposal_validation_reports: Vec<ValidationReport>,
@@ -2158,6 +2260,23 @@ struct SkillRollbackReceiptOutput {
     version: u32,
     restored_from_snapshot: bool,
     bytes_written: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillCandidatesOutput {
+    skills_root: String,
+    candidate_pool_path: String,
+    candidate_count: usize,
+    candidates: Vec<CandidatePoolEntry>,
+    boundary: SkillCandidatesBoundary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SkillCandidatesBoundary {
+    reads_candidate_pool: bool,
+    writes_skill_files: bool,
+    connects_llm: bool,
+    connects_external_service: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

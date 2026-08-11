@@ -12,6 +12,10 @@ use super::rule_change::{
     FailureEvidence, GovernanceContext, RuleChangeGovernance, RuleChangeJournal,
     RuleChangeJournalEntry, RuleChangeKind, RuleChangeProposal, RuleChangeReceipt,
 };
+use super::scoring_gate::{
+    CandidatePoolEntry, ScoringGateDecision, SkillCandidatePool, SkillChangeSnapshot,
+    SkillScoringGate,
+};
 use super::{
     validate_event, validate_governance_decision, validate_proposal, validate_rule_change_proposal,
     validate_scope, EvolutionError, EvolutionReceipt, EvolutionScope, RuntimeEvent,
@@ -571,6 +575,95 @@ impl CanonicalSkillEvolver {
         Ok(rule_change_receipt)
     }
 
+    /// 带评分门禁的规则修改应用（外环阶段 3+4 + 评分门禁）：
+    /// 1. 治理门禁（强制，与 `apply_rule_change` 一致，绝不绕过治理写盘）；
+    /// 2. 评分门禁：statement/rubric 隔离防作弊、无基线不优化（UpdateRule 拒绝、
+    ///    只允许首次登记）、分数严格提升才 upsert；
+    /// 3. 未达标 → 记录进候选池（不落盘正式规则）并返回 ValidationRejected；
+    /// 4. 达标 → 变更前自动快照（快照读取失败则拒绝继续，fail-closed），走既有
+    ///    治理写路径（journal 记录 before/after 供回滚）。
+    pub fn apply_rule_change_gated(
+        &mut self,
+        proposal: RuleChangeProposal,
+        governance: &dyn RuleChangeGovernance,
+        context: &GovernanceContext,
+        gate: &dyn SkillScoringGate,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        validate_rule_change_proposal(&proposal)?;
+        let decision = governance.evaluate(&proposal, context)?;
+        validate_governance_decision(&decision, &proposal.proposal_id)?;
+        if !decision.approved {
+            return Err(EvolutionError::ValidationRejected(decision.reasons));
+        }
+
+        // 评分门禁（隔离校验失败会直接 Err，fail-closed）。
+        let gate_decision = gate.evaluate(&proposal)?;
+        if !gate_decision.admitted {
+            // 未达标：记录候选池，不落盘正式规则。
+            self.record_candidate(&proposal, &gate_decision)?;
+            return Err(EvolutionError::ValidationRejected(gate_decision.reasons.clone()));
+        }
+
+        // 变更前自动快照（回滚走 RuleChangeJournal 的 before/after）。
+        let _snapshot = self.snapshot_before_change(&proposal.rule_id)?;
+
+        // 走既有治理写路径（内部再次过治理门禁 + journal 记录 before/after）。
+        self.apply_rule_change(proposal, governance, context)
+    }
+
+    /// 未达标提案的候选池历史（append-only JSONL，记录但不落盘正式规则）。
+    pub fn candidate_pool_history(&self) -> Result<Vec<CandidatePoolEntry>, EvolutionError> {
+        self.candidate_pool().load()
+    }
+
+    /// 候选池路径：`<skill_root>/.evolver/candidates.jsonl`（与规则修改审计
+    /// journal 同一目录）。
+    pub fn candidate_pool_path(&self) -> PathBuf {
+        self.skill_root.join(".evolver").join("candidates.jsonl")
+    }
+
+    /// 记录一个未达标提案进候选池。只追加审计记录，绝不写正式规则文件。
+    pub fn record_candidate(
+        &self,
+        proposal: &RuleChangeProposal,
+        decision: &ScoringGateDecision,
+    ) -> Result<(), EvolutionError> {
+        let entry = CandidatePoolEntry {
+            entry_id: format!("cand-{}", proposal.proposal_id),
+            recorded_at: Utc::now().to_rfc3339(),
+            proposal: proposal.clone(),
+            decision: decision.clone(),
+        };
+        self.candidate_pool().append(&entry)
+    }
+
+    /// 变更前自动快照：读取目标规则当前内容（CreateRule 无既有内容，before=None）。
+    /// 回滚复用 RuleChangeJournal 的 before/after 语义；本方法在写路径之前显式
+    /// 捕获，快照读取失败返回 Err（调用方应 fail-closed 拒绝继续）。
+    pub fn snapshot_before_change(&self, rule_id: &str) -> Result<SkillChangeSnapshot, EvolutionError> {
+        if rule_id.trim().is_empty() {
+            return Err(EvolutionError::InvalidRuleChange(
+                "rule_id must not be empty".to_string(),
+            ));
+        }
+        let records = self.load_existing_records()?;
+        let record = records.iter().find(|record| record.skill_id == rule_id);
+        Ok(match record {
+            Some(record) => SkillChangeSnapshot {
+                rule_id: rule_id.to_string(),
+                path: Some(record.path.clone()),
+                before: Some(fs::read_to_string(&record.path).map_err(storage_error)?),
+                captured_at: Utc::now().to_rfc3339(),
+            },
+            None => SkillChangeSnapshot {
+                rule_id: rule_id.to_string(),
+                path: None,
+                before: None,
+                captured_at: Utc::now().to_rfc3339(),
+            },
+        })
+    }
+
     /// Restore the rule content that existed before a previously applied rule
     /// change, by replaying the change's old procedure through the same
     /// governance-gated write path. Refuses to roll back a rule creation
@@ -627,6 +720,10 @@ impl CanonicalSkillEvolver {
 
     fn rule_change_journal(&self) -> RuleChangeJournal {
         RuleChangeJournal::new(self.rule_change_journal_path())
+    }
+
+    fn candidate_pool(&self) -> SkillCandidatePool {
+        SkillCandidatePool::new(self.candidate_pool_path())
     }
 
     fn existing_procedure(&self, rule_id: &str) -> Result<Vec<String>, EvolutionError> {

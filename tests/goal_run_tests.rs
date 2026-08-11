@@ -1,7 +1,8 @@
+use chuang_agent::goal_mode::GoalStatus;
 use chuang_agent::goal_mode::{AcceptanceVerdict, GoalSpec};
 use chuang_agent::goal_run::{
-    GoalCheckpoint, GoalIntegrationPolicy, GoalRun, GoalRunStore, GoalValidationPlan,
-    GoalWorkerPlan, GoalWriteScope,
+    GoalBudgetState, GoalCheckpoint, GoalIntegrationPolicy, GoalRun, GoalRunStore,
+    GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
 };
 
 #[test]
@@ -901,4 +902,133 @@ fn goal_run_time_budget_skips_legacy_without_started_at() {
     run.goal_spec.budget.max_minutes = Some(1);
     run.assert_time_budget_allows_continue()
         .expect("legacy runs without started_at must not hard-block");
+}
+
+#[test]
+fn goal_run_budget_state_tracks_within_and_exhausted() {
+    let mut run = sample_goal_run();
+    assert_eq!(run.budget_state(), GoalBudgetState::WithinBudget);
+
+    run.goal_spec.budget.max_minutes = Some(1);
+    run.started_at = Some((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
+    assert_eq!(run.budget_state(), GoalBudgetState::Exhausted);
+
+    // 未设预算 → WithinBudget。
+    run.goal_spec.budget.max_minutes = None;
+    assert_eq!(run.budget_state(), GoalBudgetState::WithinBudget);
+}
+
+#[test]
+fn goal_run_budget_state_corrupt_timestamp_fails_closed_exhausted() {
+    let mut run = sample_goal_run();
+    run.goal_spec.budget.max_minutes = Some(1);
+    run.started_at = Some("not-a-timestamp".to_string());
+    assert_eq!(run.budget_state(), GoalBudgetState::Exhausted);
+}
+
+#[test]
+fn goal_run_may_mark_complete_false_when_budget_exhausted() {
+    let mut run = sample_goal_run();
+    assert!(run.may_mark_complete());
+
+    run.goal_spec.budget.max_minutes = Some(1);
+    run.started_at = Some((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
+    assert!(!run.may_mark_complete());
+}
+
+#[test]
+fn goal_run_may_mark_complete_false_when_convergence_blocked() {
+    let mut run = sample_goal_run();
+    for i in 0..run.goal_spec.convergence_policy.max_repeated_blockers {
+        run.record_checkpoint(GoalCheckpoint::with_blocker_key(
+            format!("blocked-{i}"),
+            "same blocker repeats",
+            vec!["worker-1".to_string()],
+            vec!["validation blocked".to_string()],
+            "same-blocker",
+        ))
+        .expect("checkpoint should record");
+    }
+    assert_eq!(
+        run.convergence_verdict().status,
+        chuang_agent::goal_run::ConvergenceStatus::Blocked
+    );
+    assert!(!run.may_mark_complete());
+}
+
+#[test]
+fn goal_run_apply_model_control_status_rejects_active() {
+    let mut run = sample_goal_run();
+    let err = run
+        .apply_model_control_status(GoalStatus::Active)
+        .expect_err("active is system-owned");
+    assert_eq!(err.field, "goal_spec.status");
+}
+
+#[test]
+fn goal_run_apply_model_control_status_accepts_complete_and_blocked() {
+    let mut run = sample_goal_run();
+    run.apply_model_control_status(GoalStatus::Complete)
+        .expect("complete should be accepted");
+    assert_eq!(run.goal_spec.status, GoalStatus::Complete);
+
+    run.apply_model_control_status(GoalStatus::Blocked)
+        .expect("blocked should be accepted");
+    assert_eq!(run.goal_spec.status, GoalStatus::Blocked);
+}
+
+#[test]
+fn goal_run_apply_model_control_status_rejects_complete_when_budget_exhausted() {
+    let mut run = sample_goal_run();
+    run.goal_spec.budget.max_minutes = Some(1);
+    run.started_at = Some((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
+    let err = run
+        .apply_model_control_status(GoalStatus::Complete)
+        .expect_err("completion forbidden in wrap-up mode");
+    assert_eq!(err.field, "goal_spec.status");
+
+    // blocked 仍可写（预算耗尽时可宣告 blocked）。
+    run.apply_model_control_status(GoalStatus::Blocked)
+        .expect("blocked should be accepted even when budget exhausted");
+}
+
+#[test]
+fn goal_run_apply_model_control_status_rejects_complete_when_convergence_blocked() {
+    let mut run = sample_goal_run();
+    for i in 0..run.goal_spec.convergence_policy.max_repeated_blockers {
+        run.record_checkpoint(GoalCheckpoint::with_blocker_key(
+            format!("blocked-c-{i}"),
+            "same blocker repeats",
+            vec!["worker-1".to_string()],
+            vec!["validation blocked".to_string()],
+            "same-blocker",
+        ))
+        .expect("checkpoint should record");
+    }
+    let err = run
+        .apply_model_control_status(GoalStatus::Complete)
+        .expect_err("completion forbidden when convergence blocked");
+    assert_eq!(err.field, "goal_spec.status");
+}
+
+#[test]
+fn goal_run_store_save_overwrites_existing_run() {
+    let root = std::env::temp_dir().join(format!(
+        "chuang-agent-goal-run-save-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos()
+    ));
+    let store = GoalRunStore::new(&root);
+    let mut run = sample_goal_run();
+    store.create(&run).expect("create should succeed");
+
+    run.goal_spec.status = GoalStatus::Blocked;
+    store
+        .save(&run)
+        .expect("save should overwrite existing run");
+
+    let loaded = store.load("mainline-mvp").expect("load should succeed");
+    assert_eq!(loaded.goal_spec.status, GoalStatus::Blocked);
 }

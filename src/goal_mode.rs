@@ -1,4 +1,4 @@
-//! `goal_mode` 模块。公开接口：trait AcceptanceCheckContract；struct GoalSpec, GoalEvidence, GoalAcceptancePlan, AcceptanceVerdict, GoalConvergencePolicy, GoalBudget, GoalCheckpointPolicy, GoalFinalReportPolicy；enum AcceptanceCheck；fn new, with_min_lines, with_min_content, with_description, validate, evaluator, description, is_empty。
+//! `goal_mode` 模块。公开接口：trait AcceptanceCheckContract；struct GoalSpec, GoalEvidence, GoalAcceptancePlan, AcceptanceVerdict, GoalConvergencePolicy, GoalBudget, GoalCheckpointPolicy, GoalFinalReportPolicy, GoalStatus, GoalControlFile；enum AcceptanceCheck；fn new, with_min_lines, with_min_content, with_description, validate, evaluator, description, is_empty；const DEFAULT_MAX_REPEATED_BLOCKERS。
 
 use crate::context_engine::{ContextSegment, SegmentSource};
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,11 @@ use std::path::Path;
 pub struct GoalSpec {
     pub goal_id: String,
     pub objective: String,
+    /// GOAL.yaml 控制通道状态（升级点 1）：
+    /// - `Active` 由系统持有（默认，模型不可写）；
+    /// - `Complete|Blocked` 模型唯一可写；解析失败归一化为 blocked（fail-closed）。
+    #[serde(default)]
+    pub status: GoalStatus,
     pub acceptance_checks: Vec<String>,
     /// 验收证据（verifier-first）：目标完成必须有文件系统证据，
     /// 不能只靠模型自述。checkpoint 时由 CLI 自动检查。
@@ -202,6 +207,8 @@ pub struct AcceptanceVerdict {
 /// - 每个 checkpoint 可携带规范化 `blocker_key`（同一失败原因的去重键）。
 /// - 尾部连续相同 blocker_key（或完全相同的 validation_notes）达到
 ///   `max_repeated_blockers` 次 → 判定 blocked，禁止再以同策略重试。
+///   blocked 审计：同一阻塞条件**连续 3 轮**才允许 blocked（防过早放弃），
+///   默认值 `DEFAULT_MAX_REPEATED_BLOCKERS = 3`。
 /// - `max_repeated_blockers = 0` 表示禁用重复卡点判定。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalConvergencePolicy {
@@ -211,8 +218,11 @@ pub struct GoalConvergencePolicy {
     pub require_progress_between_checkpoints: bool,
 }
 
+/// blocked 审计轮数：同一阻塞条件连续 3 轮才允许 blocked（防过早放弃）。
+pub const DEFAULT_MAX_REPEATED_BLOCKERS: usize = 3;
+
 fn default_max_repeated_blockers() -> usize {
-    3
+    DEFAULT_MAX_REPEATED_BLOCKERS
 }
 
 fn default_require_progress_between_checkpoints() -> bool {
@@ -225,6 +235,100 @@ impl Default for GoalConvergencePolicy {
             max_repeated_blockers: default_max_repeated_blockers(),
             require_progress_between_checkpoints: default_require_progress_between_checkpoints(),
         }
+    }
+}
+
+/// goal 控制通道中的模型可写状态（Penguin GOAL.yaml 语义，升级点 1）。
+///
+/// - `Active`：系统持有（运行中默认），模型不可写。
+/// - `Complete|Blocked`：模型唯一可写的两个值。
+/// 解析失败/非法值一律归一化为 `Blocked`（fail-closed：控制通道坏了就停，不空转）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalStatus {
+    Active,
+    Complete,
+    Blocked,
+}
+
+impl Default for GoalStatus {
+    fn default() -> Self {
+        GoalStatus::Active
+    }
+}
+
+impl GoalStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GoalStatus::Active => "active",
+            GoalStatus::Complete => "complete",
+            GoalStatus::Blocked => "blocked",
+        }
+    }
+}
+
+/// GOAL.yaml 收敛控制通道（Penguin goal-file 语义，升级点 1）。
+///
+/// - `objective` 由系统写：文件中出现的 objective 仅作为审计信息保留，
+///   系统读取时永远以 `GoalSpec.objective`（系统持有值）为准，模型写入无效。
+/// - `status` 模型唯一可写：只允许 `complete|blocked` 两个值。
+/// - 解析失败（格式错误、status 缺失或非法值）归一化为 `Blocked`
+///   （fail-closed：控制通道坏了就停，不空转）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalControlFile {
+    /// 文件中出现的 objective（审计用；系统以自身持有值为准）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
+    /// 归一化后的 status（模型可写值；解析失败时为 Blocked）。
+    pub status: GoalStatus,
+}
+
+impl GoalControlFile {
+    /// 解析 GOAL.yaml 文本。status 只接受 `complete|blocked`（大小写不敏感）；
+    /// 缺失、非法值或格式损坏一律归一化为 `Blocked`。
+    pub fn parse(raw: &str) -> Self {
+        let mut objective: Option<String> = None;
+        let mut status_value: Option<String> = None;
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("objective:") {
+                let value = rest.trim();
+                if !value.is_empty() {
+                    objective = Some(value.to_string());
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("status:") {
+                status_value = Some(rest.trim().to_string());
+                continue;
+            }
+        }
+        let status = match status_value
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+        {
+            Some(value) if value == "complete" => GoalStatus::Complete,
+            Some(value) if value == "blocked" => GoalStatus::Blocked,
+            // 缺失、非法值、损坏 → fail-closed：归一化为 blocked。
+            _ => GoalStatus::Blocked,
+        };
+        Self { objective, status }
+    }
+
+    /// 渲染 GOAL.yaml：objective 由系统写（调用方传入系统持有值），
+    /// status 反映当前值。
+    pub fn render(objective: &str, status: GoalStatus) -> String {
+        format!(
+            "# GOAL control file\n\
+# objective is system-written; model may only write status: complete|blocked\n\
+objective: {objective}\n\
+status: {}\n",
+            status.as_str()
+        )
     }
 }
 
@@ -253,6 +357,7 @@ impl GoalSpec {
         Self {
             goal_id: "mainline-mvp".to_string(),
             objective: objective.into(),
+            status: GoalStatus::Active,
             acceptance_checks: vec![
                 "cargo fmt --all".to_string(),
                 "git diff --check".to_string(),
@@ -297,6 +402,12 @@ impl GoalSpec {
     pub fn with_acceptance_plan(mut self, plan: GoalAcceptancePlan) -> Self {
         self.acceptance_plan = plan;
         self
+    }
+
+    /// GOAL.yaml 控制通道内容（系统写 objective；status 反映当前值）。
+    /// 模型只能通过控制通道写 status（complete|blocked），objective 由系统写。
+    pub fn control_file_contents(&self) -> String {
+        GoalControlFile::render(&self.objective, self.status)
     }
 
     pub fn validate(&self) -> Result<(), GoalSpecError> {

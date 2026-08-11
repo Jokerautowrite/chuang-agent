@@ -4,8 +4,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chuang_agent::common::{AgentId, ReportId, Timestamp};
 use chuang_agent::goal_dispatch::{
-    collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, dispatch_goal_run,
-    load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
+    already_completed_run_ids, collect_goal_dispatch_reports,
+    collect_goal_dispatch_reports_read_only, consume_goal_wrap_up_round, dispatch_goal_run,
+    goal_round_ledger_path, goal_step_candidates, load_goal_dispatch_manifest,
+    load_goal_round_ledger, mark_goal_rounds_landed, phantom_skipped_run_ids, settle_goal_rounds,
+    write_goal_round_ledger, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
+    GoalRoundLedger,
 };
 use chuang_agent::goal_mode::{AcceptanceCheck, GoalAcceptancePlan, GoalEvidence, GoalSpec};
 use chuang_agent::goal_run::{
@@ -14,6 +18,7 @@ use chuang_agent::goal_run::{
 };
 use chuang_agent::subagent_queue::{FileSubagentQueue, FileSubagentQueueConfig};
 use chuang_agent::subagent_report::{ExecutionStatus, ResourceUsage, SubagentReport};
+use std::collections::{BTreeMap, BTreeSet};
 
 fn temp_goal_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -992,4 +997,125 @@ fn sample_report(
         truncated: false,
         skill_proposals: vec![],
     }
+}
+
+#[test]
+fn goal_round_ledger_missing_file_returns_empty_ledger() {
+    let root = temp_goal_root("ledger-missing");
+    let ledger = load_goal_round_ledger(&root, "goal-ledger")
+        .expect("missing ledger should be an empty ledger");
+    assert_eq!(ledger.goal_id, "goal-ledger");
+    assert!(ledger.landed.is_empty());
+    assert!(ledger.completed.is_empty());
+    assert!(!ledger.wrap_up_consumed);
+}
+
+#[test]
+fn goal_round_ledger_write_read_roundtrips() {
+    let root = temp_goal_root("ledger-roundtrip");
+    let ledger = GoalRoundLedger {
+        goal_id: "goal-ledger".to_string(),
+        landed: BTreeMap::new(),
+        completed: BTreeSet::new(),
+        wrap_up_consumed: true,
+    };
+    write_goal_round_ledger(&root, &ledger).expect("ledger should write");
+
+    let loaded = load_goal_round_ledger(&root, "goal-ledger").expect("ledger should load");
+    assert_eq!(loaded.goal_id, "goal-ledger");
+    assert!(loaded.wrap_up_consumed);
+    assert!(goal_round_ledger_path(&root, "goal-ledger").exists());
+}
+
+#[test]
+fn goal_round_mark_landed_then_candidates_exclude_phantom_rounds() {
+    let root = temp_goal_root("ledger-landed");
+    let allowed: BTreeSet<String> = ["run-1", "run-2", "run-3"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+
+    let ledger = mark_goal_rounds_landed(&root, "goal-ledger", &["run-1".to_string()], "step-1")
+        .expect("mark landed should write");
+    assert!(ledger.landed.contains_key("run-1"));
+    assert_eq!(ledger.landed["run-1"].step_token, "step-1");
+
+    // run-1 已 landed（abort/截断受害者）：不再出现在候选里。
+    let candidates = goal_step_candidates(&ledger, &allowed);
+    assert_eq!(candidates, vec!["run-2".to_string(), "run-3".to_string()]);
+    let phantom = phantom_skipped_run_ids(&ledger, &allowed);
+    assert_eq!(phantom, vec!["run-1".to_string()]);
+    assert!(already_completed_run_ids(&ledger, &allowed).is_empty());
+}
+
+#[test]
+fn goal_round_settle_marks_completed_and_releases_unexecuted_candidates() {
+    let root = temp_goal_root("ledger-settle");
+    let allowed: BTreeSet<String> = ["run-1", "run-2", "run-3"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+
+    mark_goal_rounds_landed(
+        &root,
+        "goal-ledger",
+        &["run-1".to_string(), "run-2".to_string()],
+        "step-1",
+    )
+    .expect("mark landed should write");
+
+    // 只执行了 run-1；run-2 未执行（如 max_runs 截断），settle 后取消 landed。
+    let settled = settle_goal_rounds(
+        &root,
+        "goal-ledger",
+        &["run-1".to_string(), "run-2".to_string()],
+        &["run-1".to_string()],
+    )
+    .expect("settle should write");
+
+    assert!(settled.completed.contains("run-1"));
+    assert!(!settled.landed.contains_key("run-2"));
+    let phantom = phantom_skipped_run_ids(&settled, &allowed);
+    assert!(phantom.is_empty());
+    assert_eq!(
+        already_completed_run_ids(&settled, &allowed),
+        vec!["run-1".to_string()]
+    );
+    // run-2 重新可派发。
+    let candidates = goal_step_candidates(&settled, &allowed);
+    assert_eq!(candidates, vec!["run-2".to_string(), "run-3".to_string()]);
+}
+
+#[test]
+fn goal_round_phantom_persists_across_processes_via_disk() {
+    let root = temp_goal_root("ledger-persist");
+    let allowed: BTreeSet<String> = ["run-1", "run-2"]
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+
+    // 模拟 abort：mark landed 后进程中断，settle 从未执行。
+    mark_goal_rounds_landed(&root, "goal-ledger", &["run-1".to_string()], "step-1")
+        .expect("mark landed should write");
+
+    // 新进程重新加载：run-1 仍是幻影轮，绝不重发。
+    let reloaded = load_goal_round_ledger(&root, "goal-ledger").expect("ledger should reload");
+    let phantom = phantom_skipped_run_ids(&reloaded, &allowed);
+    assert_eq!(phantom, vec!["run-1".to_string()]);
+    // run-1 被幻影轮排除；run-2 未 landed，仍是候选。
+    assert_eq!(
+        goal_step_candidates(&reloaded, &allowed),
+        vec!["run-2".to_string()]
+    );
+}
+
+#[test]
+fn goal_round_wrap_up_consume_is_persisted_and_one_shot() {
+    let root = temp_goal_root("ledger-wrap-up");
+    let ledger =
+        consume_goal_wrap_up_round(&root, "goal-ledger").expect("wrap-up consume should write");
+    assert!(ledger.wrap_up_consumed);
+
+    let reloaded = load_goal_round_ledger(&root, "goal-ledger").expect("ledger should reload");
+    assert!(reloaded.wrap_up_consumed);
 }

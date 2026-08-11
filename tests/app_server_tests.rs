@@ -5,7 +5,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{fs, path::PathBuf};
 
 fn temp_workspace(name: &str) -> PathBuf {
@@ -2835,10 +2835,30 @@ fn app_server_turn_surfaces_provider_timeout_reason_codes() {
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
+    // provider 层 withRetry 会重试多次（实际观测到 9 次连接），mock 需接受
+    // 所有连接并每次 hang 1000ms，保证每次都触发 curl_wait 超时，最终 reason
+    // code 仍是 curl_wait（与断言语义一致）。非阻塞 accept，2s 无新连接即退出，
+    // 避免 server.join() 永久等待。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let _ = read_http_request(&mut stream);
-        thread::sleep(Duration::from_millis(1000));
+        listener.set_nonblocking(true).ok();
+        let mut idle_polls = 0u32;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    idle_polls = 0;
+                    let _ = read_http_request(&mut stream);
+                    thread::sleep(Duration::from_millis(1000));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    idle_polls += 1;
+                    if idle_polls > 20 {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(_) => break,
+            }
+        }
     });
 
     fs::write(

@@ -44,6 +44,7 @@ pub struct EvaluateReceipt {
     pub dry_run: bool,
 }
 
+#[derive(Debug)]
 pub struct BenchmarkEvaluator {
     store: BenchmarkStore,
     provider_slot: ProviderSlot,
@@ -57,19 +58,25 @@ impl BenchmarkEvaluator {
         }
     }
 
-    /// Build an evaluator from the active runtime config. Fails when the
-    /// configured provider is not a real OpenAI-compatible adapter.
+    /// Build an evaluator from the active runtime config.
+    ///
+    /// 默认模型跟随主模型：直接用 config 里主 provider/model（Fallback 时取
+    /// primary），保证评分口径稳定；fails when the configured provider is not
+    /// a real OpenAI-compatible adapter (no silent fake fallback).
     pub fn from_runtime_config(
         store: BenchmarkStore,
         runtime: &RuntimeConfig,
     ) -> Result<Self, String> {
-        if matches!(runtime.provider, ProviderConfig::Fake { .. }) {
-            return Err(
-                "provider=fake is a local test responder; configure a real provider for evaluation"
-                    .to_string(),
-            );
-        }
-        let slot = build_provider_responder(&runtime.provider)
+        let main_provider = match &runtime.provider {
+            ProviderConfig::Fake { provider_id, .. } => {
+                return Err(format!(
+                    "provider={provider_id} is fake; configure a real provider for evaluation"
+                ))
+            }
+            ProviderConfig::OpenAICompatible(_) => &runtime.provider,
+            ProviderConfig::Fallback { primary, .. } => primary.as_ref(),
+        };
+        let slot = build_provider_responder(main_provider)
             .map_err(|e| format!("provider slot build failed: {}", e.message))?;
         Ok(Self::new(store, slot))
     }
@@ -318,6 +325,11 @@ pub fn parse_case_score(output: &str) -> Result<ParsedCaseScore, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_openai_compatible::ProviderTransport;
+    use crate::runtime_config::{
+        OpenAICompatibleConfig, ProviderApiEndpoint, ProviderFallbackPolicy,
+    };
+    use std::path::PathBuf;
 
     fn sample_case() -> BenchmarkCase {
         BenchmarkCase {
@@ -327,6 +339,68 @@ mod tests {
             statement: "召回用户偏好".to_string(),
             rubric: "2分：准确；0分：错误".to_string(),
         }
+    }
+
+    fn openai_config(model_name: &str) -> OpenAICompatibleConfig {
+        OpenAICompatibleConfig {
+            provider_id: format!("provider-{model_name}"),
+            base_url: "https://api.example.invalid/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model_name: model_name.to_string(),
+            transport: ProviderTransport::Stub,
+            endpoint: ProviderApiEndpoint::Responses,
+            reasoning_effort: None,
+            request_timeout_ms: None,
+            tls_ca_cert_path: None,
+        }
+    }
+
+    fn runtime_with_provider(provider: ProviderConfig) -> RuntimeConfig {
+        let mut runtime = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+        runtime.provider = provider;
+        runtime
+    }
+
+    #[test]
+    fn from_runtime_config_uses_main_provider_model() {
+        let store = BenchmarkStore::new(PathBuf::from("./benchmarks"));
+        let runtime = runtime_with_provider(ProviderConfig::OpenAICompatible(openai_config(
+            "main-model",
+        )));
+        let evaluator = BenchmarkEvaluator::from_runtime_config(store, &runtime).expect("build");
+        assert_eq!(evaluator.provider_slot.model_name(), "main-model");
+        assert_eq!(evaluator.provider_slot.provider_name(), "provider-main-model");
+    }
+
+    #[test]
+    fn from_runtime_config_follows_main_provider_through_fallback() {
+        let store = BenchmarkStore::new(PathBuf::from("./benchmarks"));
+        let runtime = runtime_with_provider(ProviderConfig::Fallback {
+            primary: Box::new(ProviderConfig::OpenAICompatible(openai_config(
+                "main-model",
+            ))),
+            fallback: Box::new(ProviderConfig::OpenAICompatible(openai_config(
+                "backup-model",
+            ))),
+            policy: ProviderFallbackPolicy::default(),
+        });
+        let evaluator = BenchmarkEvaluator::from_runtime_config(store, &runtime).expect("build");
+        assert_eq!(evaluator.provider_slot.model_name(), "main-model");
+        assert_eq!(evaluator.provider_slot.provider_name(), "provider-main-model");
+    }
+
+    #[test]
+    fn from_runtime_config_rejects_fake_provider_without_silent_fallback() {
+        let store = BenchmarkStore::new(PathBuf::from("./benchmarks"));
+        let runtime = runtime_with_provider(ProviderConfig::Fake {
+            provider_id: "fake-runtime".to_string(),
+            model_name: "stub-responder".to_string(),
+        });
+        let error = match BenchmarkEvaluator::from_runtime_config(store, &runtime) {
+            Ok(_) => panic!("fake provider must be rejected for evaluation"),
+            Err(error) => error,
+        };
+        assert!(error.contains("fake"));
     }
 
     #[test]

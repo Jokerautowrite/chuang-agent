@@ -1119,3 +1119,69 @@ fn cli_skill_approve_rejects_benchmark_gate_flags() {
         "stderr={stderr}"
     );
 }
+
+#[test]
+fn cli_skill_candidates_lists_pool_read_only_without_writing_skills() {
+    let skills_root = test_skills_root("candidates-readonly");
+    let pool_dir = skills_root.join(".evolver");
+    fs::create_dir_all(&pool_dir).expect("candidate pool dir should be creatable");
+    let entry = serde_json::json!({
+        "entry_id": "cand-proposal-gate-1",
+        "recorded_at": "2026-08-12T00:00:00Z",
+        "proposal": {
+            "proposal_id": "proposal-gate-1",
+            "rule_id": "build-for-rule-tool",
+            "change_kind": "update_rule",
+            "title": "gate test proposal",
+            "trigger": "repeated failure tool=build",
+            "old_procedure": ["old step"],
+            "new_procedure": ["new step"],
+            "rationale": "needs strict improvement",
+            "evidence": [],
+            "writes_rules": true,
+            "requires_governance": true,
+            "provenance": []
+        },
+        "decision": {
+            "proposal_id": "proposal-gate-1",
+            "rule_id": "build-for-rule-tool",
+            "change_kind": "update_rule",
+            "admitted": false,
+            "baseline_score": 6,
+            "after_score": 5,
+            "reasons": ["not strictly improved"]
+        }
+    });
+    fs::write(
+        pool_dir.join("candidates.jsonl"),
+        format!("{}\n", serde_json::to_string(&entry).expect("candidate json")),
+    )
+    .expect("candidate pool should be seeded");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "skill",
+            "candidates",
+            "--skills-root",
+            skills_root.to_str().expect("utf8 test path"),
+            "--json",
+        ])
+        .output()
+        .expect("skill candidates should execute");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value =
+        serde_json::from_slice(&output.stdout).expect("skill candidates should output json");
+    assert_eq!(parsed["candidate_count"], 1);
+    assert_eq!(parsed["boundary"]["writes_skill_files"], false);
+    assert_eq!(parsed["boundary"]["reads_candidate_pool"], true);
+    assert_eq!(parsed["candidates"][0]["entry_id"], "cand-proposal-gate-1");
+    assert_eq!(parsed["candidates"][0]["decision"]["admitted"], false);
+    assert_eq!(parsed["candidates"][0]["decision"]["baseline_score"], 6);
+    // 只读：不产生任何技能文件。
+    assert!(!skills_root.join("build-for-rule-tool.md").exists());
+}

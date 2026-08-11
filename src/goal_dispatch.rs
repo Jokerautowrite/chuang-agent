@@ -1,6 +1,6 @@
-//! `goal_dispatch` 模块。公开接口：struct GoalDispatchReceipt, GoalDispatchManifest, GoalDispatchCollectionReceipt, GoalCheckpointSuggestion, GoalDispatchHandoffSummary, GoalReportAdmissionRef, GoalDispatchDiagnostics, GoalWorkerDispatchReceipt；fn dispatch_goal_run_to_queue, dispatch_goal_run, load_goal_dispatch_manifest, collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only。
+//! `goal_dispatch` 模块。公开接口：struct GoalDispatchReceipt, GoalDispatchManifest, GoalDispatchCollectionReceipt, GoalCheckpointSuggestion, GoalDispatchHandoffSummary, GoalReportAdmissionRef, GoalDispatchDiagnostics, GoalWorkerDispatchReceipt, GoalRoundLedger, GoalRoundLanding；fn dispatch_goal_run_to_queue, dispatch_goal_run, load_goal_dispatch_manifest, collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, goal_round_ledger_path, load_goal_round_ledger, write_goal_round_ledger, goal_step_candidates, phantom_skipped_run_ids, already_completed_run_ids, mark_goal_rounds_landed, settle_goal_rounds, consume_goal_wrap_up_round。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -159,6 +159,31 @@ pub struct GoalDispatchError {
     pub message: String,
 }
 
+/// 防幻影轮账本（升级点 4：abort 落轮间不重发、截断轮不重发，防重复烧钱）。
+///
+/// 每个 `goal step` 在执行前先把候选 dispatch run_id 标记为 landed（落盘先于执行）；
+/// 若 step 被 abort（进程中断落轮间）或截断（runner 失败），这些 run_id 保持 landed，
+/// 后续 step 不再重发。成功完成的 run_id 记入 completed。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalRoundLedger {
+    pub goal_id: String,
+    /// run_id -> 落地标记（执行前写入；一旦 landed 绝不重发）。
+    #[serde(default)]
+    pub landed: BTreeMap<String, GoalRoundLanding>,
+    /// 报告已落盘、正常完成的 run_id。
+    #[serde(default)]
+    pub completed: BTreeSet<String>,
+    /// 预算耗尽后的 wrap-up 收尾轮是否已消耗（升级点 3：只允许一轮收尾）。
+    #[serde(default)]
+    pub wrap_up_consumed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalRoundLanding {
+    pub step_token: String,
+    pub landed_at: String,
+}
+
 pub fn dispatch_goal_run_to_queue(
     goal_run: &GoalRun,
     goal_root: impl Into<PathBuf>,
@@ -262,6 +287,164 @@ pub fn load_goal_dispatch_manifest(
         }
     })?;
     Ok(manifest)
+}
+
+/// 防幻影轮账本文件路径：`{goal_root}/{goal_id}.rounds.json`。
+pub fn goal_round_ledger_path(goal_root: &Path, goal_id: &str) -> PathBuf {
+    goal_root.join(format!("{}.rounds.json", sanitize_identifier(goal_id)))
+}
+
+/// 读取防幻影轮账本；文件缺失时返回空账本（首次 step 前无历史）。
+pub fn load_goal_round_ledger(
+    goal_root: &Path,
+    goal_id: &str,
+) -> Result<GoalRoundLedger, GoalDispatchError> {
+    let path = goal_round_ledger_path(goal_root, goal_id);
+    if !path.exists() {
+        return Ok(GoalRoundLedger {
+            goal_id: goal_id.to_string(),
+            landed: BTreeMap::new(),
+            completed: BTreeSet::new(),
+            wrap_up_consumed: false,
+        });
+    }
+    let payload = fs::read_to_string(&path).map_err(|error| GoalDispatchError {
+        field: "goal_round_ledger.path".to_string(),
+        message: format!(
+            "goal round ledger read failed path={} error={error}",
+            path.display()
+        ),
+    })?;
+    serde_json::from_str::<GoalRoundLedger>(&payload).map_err(|error| GoalDispatchError {
+        field: "goal_round_ledger.json".to_string(),
+        message: format!(
+            "goal round ledger parse failed path={} error={error}",
+            path.display()
+        ),
+    })
+}
+
+/// 写入防幻影轮账本。
+pub fn write_goal_round_ledger(
+    goal_root: &Path,
+    ledger: &GoalRoundLedger,
+) -> Result<PathBuf, GoalDispatchError> {
+    fs::create_dir_all(goal_root).map_err(|error| GoalDispatchError {
+        field: "goal_round_ledger.root".to_string(),
+        message: format!(
+            "goal round ledger root create failed path={} error={error}",
+            goal_root.display()
+        ),
+    })?;
+    let path = goal_round_ledger_path(goal_root, &ledger.goal_id);
+    let payload = serde_json::to_string_pretty(ledger).map_err(|error| GoalDispatchError {
+        field: "goal_round_ledger.json".to_string(),
+        message: format!("goal round ledger render failed: {error}"),
+    })?;
+    fs::write(&path, payload).map_err(|error| GoalDispatchError {
+        field: "goal_round_ledger.path".to_string(),
+        message: format!(
+            "goal round ledger write failed path={} error={error}",
+            path.display()
+        ),
+    })?;
+    Ok(path)
+}
+
+/// 本轮可派发候选：允许集减去已 landed（防幻影轮：已尝试过的轮次绝不重发）。
+pub fn goal_step_candidates(
+    ledger: &GoalRoundLedger,
+    allowed_run_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    allowed_run_ids
+        .iter()
+        .filter(|run_id| !ledger.landed.contains_key(*run_id))
+        .cloned()
+        .collect()
+}
+
+/// 幻影轮：已 landed 但未 completed 的 run_id（abort 落轮间 / 截断轮受害者，
+/// 钱可能已烧，绝不重发）。由 operator 在 collect 中看到 missing 后人工裁决。
+pub fn phantom_skipped_run_ids(
+    ledger: &GoalRoundLedger,
+    allowed_run_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    allowed_run_ids
+        .iter()
+        .filter(|run_id| ledger.landed.contains_key(*run_id) && !ledger.completed.contains(*run_id))
+        .cloned()
+        .collect()
+}
+
+/// 已正常完成（报告已落盘）的 run_id；无需重发，也非幻影轮。
+pub fn already_completed_run_ids(
+    ledger: &GoalRoundLedger,
+    allowed_run_ids: &BTreeSet<String>,
+) -> Vec<String> {
+    allowed_run_ids
+        .iter()
+        .filter(|run_id| ledger.completed.contains(*run_id))
+        .cloned()
+        .collect()
+}
+
+/// 执行前标记 landed（先落盘后执行；abort/截断后不重发）。
+/// `run_ids` 为空时跳过写盘。
+pub fn mark_goal_rounds_landed(
+    goal_root: &Path,
+    goal_id: &str,
+    run_ids: &[String],
+    step_token: &str,
+) -> Result<GoalRoundLedger, GoalDispatchError> {
+    let mut ledger = load_goal_round_ledger(goal_root, goal_id)?;
+    if run_ids.is_empty() {
+        return Ok(ledger);
+    }
+    let landed_at = current_rfc3339_timestamp();
+    for run_id in run_ids {
+        ledger.landed.insert(
+            run_id.clone(),
+            GoalRoundLanding {
+                step_token: step_token.to_string(),
+                landed_at: landed_at.clone(),
+            },
+        );
+    }
+    write_goal_round_ledger(goal_root, &ledger)?;
+    Ok(ledger)
+}
+
+/// step 成功收尾：已执行的 run_id 记 completed；未执行的候选取消 landed
+/// （如 max_runs 限制下未跑的部分，可后续 step 再跑）。
+pub fn settle_goal_rounds(
+    goal_root: &Path,
+    goal_id: &str,
+    candidates: &[String],
+    executed_run_ids: &[String],
+) -> Result<GoalRoundLedger, GoalDispatchError> {
+    let mut ledger = load_goal_round_ledger(goal_root, goal_id)?;
+    let executed = executed_run_ids.iter().collect::<BTreeSet<_>>();
+    for run_id in executed_run_ids {
+        ledger.completed.insert(run_id.clone());
+    }
+    for run_id in candidates {
+        if !executed.contains(run_id) {
+            ledger.landed.remove(run_id);
+        }
+    }
+    write_goal_round_ledger(goal_root, &ledger)?;
+    Ok(ledger)
+}
+
+/// 标记 wrap-up 收尾轮已消耗（预算耗尽只允许一轮收尾；升级点 3）。
+pub fn consume_goal_wrap_up_round(
+    goal_root: &Path,
+    goal_id: &str,
+) -> Result<GoalRoundLedger, GoalDispatchError> {
+    let mut ledger = load_goal_round_ledger(goal_root, goal_id)?;
+    ledger.wrap_up_consumed = true;
+    write_goal_round_ledger(goal_root, &ledger)?;
+    Ok(ledger)
 }
 
 pub fn collect_goal_dispatch_reports(

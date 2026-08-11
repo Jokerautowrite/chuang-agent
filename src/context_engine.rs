@@ -1,4 +1,4 @@
-//! `context_engine` 模块。公开接口：trait ContextEngine；struct ContextSegment, ContextBudget, PackedContext, ContextPackTraceStep, ContextCompactionEvent, ContextCompactionSummary, WorkingReservation, DropReason；enum SegmentSource, ContextCompactionEventKind, WorkingReservationReason, DropReasonKind, BudgetExceededReason, ContextEngineKind, ContextPackError；fn as_str, compaction_summary, pack, new, render_prompt；use deterministic, summary_compression。
+//! `context_engine` 模块。公开接口：trait ContextEngine；struct ContextSegment, ContextBudget, PackedContext, ContextPackTraceStep, ContextCompactionEvent, ContextCompactionSummary, WorkingReservation, DropReason, CompactionCircuitBreakerStatus；enum SegmentSource, ContextCompactionEventKind, WorkingReservationReason, DropReasonKind, BudgetExceededReason, ContextEngineKind, ContextPackError, CompactionStrategy；fn as_str, compaction_summary, pack, new, render_prompt, strip_image_payloads；use deterministic, summary_compression。
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
@@ -10,7 +10,10 @@ mod deterministic;
 mod summary_compression;
 
 pub use deterministic::DeterministicContextEngine;
-pub use summary_compression::SummaryCompressionContextEngine;
+pub use summary_compression::{
+    strip_image_payloads, CompactionCircuitBreakerStatus, CompactionStrategy,
+    SummaryCompressionContextEngine,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSegment {
@@ -83,6 +86,18 @@ pub struct ContextCompactionSummary {
     pub dropped_segment_ids: Vec<String>,
     pub drop_reason_counts: BTreeMap<String, usize>,
     pub trace_steps: Vec<String>,
+    /// 本次 pack 实际采用的压缩策略（snip/micro/collapse/auto/session_memory/none）。
+    #[serde(default)]
+    pub strategy: String,
+    /// 压缩前被 strip 掉图片内容的 segment 数（压缩入口先 strip images）。
+    #[serde(default)]
+    pub image_stripped_count: usize,
+    /// 本次 pack 因熔断跳过自动压缩的次数。
+    #[serde(default)]
+    pub compression_skipped_count: usize,
+    /// 跳过自动压缩的原因（如 circuit_breaker_open）。
+    #[serde(default)]
+    pub compression_skipped_reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +105,8 @@ pub enum ContextCompactionEventKind {
     Started,
     SegmentDropped,
     Completed,
+    /// 自动压缩被跳过（如熔断器打开），本次 pack 走未压缩路径。
+    CompressionSkipped,
 }
 
 impl ContextCompactionEventKind {
@@ -98,6 +115,7 @@ impl ContextCompactionEventKind {
             Self::Started => "context_compaction_started",
             Self::SegmentDropped => "context_segment_dropped",
             Self::Completed => "context_compaction_completed",
+            Self::CompressionSkipped => "context_compression_skipped",
         }
     }
 }
@@ -109,6 +127,8 @@ impl PackedContext {
         let mut dropped_segment_ids = Vec::new();
         let mut drop_reason_counts = BTreeMap::new();
         let mut trace_steps = Vec::new();
+        let mut compression_skipped_count = 0usize;
+        let mut compression_skipped_reasons = Vec::new();
 
         for event in &self.compaction_events {
             match event.kind {
@@ -122,11 +142,33 @@ impl PackedContext {
                         *drop_reason_counts.entry(reason.clone()).or_insert(0) += 1;
                     }
                 }
+                ContextCompactionEventKind::CompressionSkipped => {
+                    compression_skipped_count += 1;
+                    if let Some(reason) = &event.reason {
+                        if !compression_skipped_reasons.iter().any(|existing| existing == reason) {
+                            compression_skipped_reasons.push(reason.clone());
+                        }
+                    }
+                }
             }
             if let Some(trace_step) = event.trace_step {
                 let step = trace_step.to_string();
                 if !trace_steps.iter().any(|existing| existing == &step) {
                     trace_steps.push(step);
+                }
+            }
+        }
+
+        // 压缩策略 / strip 统计来自最终保留的 segment 元数据（确定性引擎无压缩 → "none"）。
+        let mut strategy = "none".to_string();
+        let mut image_stripped_count = 0usize;
+        for segment in &self.segments {
+            if segment.metadata.get("image_stripped").map(String::as_str) == Some("true") {
+                image_stripped_count += 1;
+            }
+            if strategy == "none" {
+                if let Some(label) = segment.metadata.get("compaction_strategy") {
+                    strategy = label.clone();
                 }
             }
         }
@@ -139,6 +181,10 @@ impl PackedContext {
             dropped_segment_ids,
             drop_reason_counts,
             trace_steps,
+            strategy,
+            image_stripped_count,
+            compression_skipped_count,
+            compression_skipped_reasons,
         }
     }
 }

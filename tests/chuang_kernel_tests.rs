@@ -405,6 +405,42 @@ fn chuang_kernel_compacts_session_turn_memory_when_hard_limit_is_exceeded() {
 }
 
 #[test]
+fn chuang_kernel_compaction_strips_image_payloads_before_truncation() {
+    // 压缩入口先 strip images：user_input 携带 base64 图片时，压缩摘要不残留图片内容。
+    let config = ChuangKernelConfig {
+        memory_write_max_chars: Some(500),
+        ..kernel_config()
+    };
+    let mut kernel = kernel(config, InMemoryMemoryStore::new());
+
+    let image = format!("data:image/png;base64,{}", "E".repeat(400));
+    let turn = run_turn(&mut kernel, &format!("看图 {image} 继续说"));
+    let prepared = kernel
+        .prepare_session_turn_memory(&turn, "img")
+        .expect("session memory should compact and prepare");
+    assert!(prepared.receipt.compacted, "image-heavy turn should need compaction");
+
+    let stored = &prepared.record;
+    assert!(
+        !stored.content.contains("base64"),
+        "compacted turn summary must not contain base64 image payload"
+    );
+    assert!(
+        stored.content.contains("data:image/png;base64") == false,
+        "image data URL should be stripped in compacted summary"
+    );
+    assert_eq!(
+        stored.metadata.get("compaction_source").map(String::as_str),
+        Some("true"),
+        "turn summary memory must be marked as compaction source for recursion guard"
+    );
+    assert_eq!(
+        stored.metadata.get("kind").map(String::as_str),
+        Some("turn_summary")
+    );
+}
+
+#[test]
 fn chuang_kernel_rejects_invalid_runtime_request_without_incrementing_turn() {
     let config = ChuangKernelConfig {
         recall_limit: 0,

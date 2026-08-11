@@ -224,6 +224,40 @@ fn context_engine_config_exposes_summary_compression_kind() {
 }
 
 #[test]
+fn context_compaction_config_defaults_and_metadata_overrides() {
+    let config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    let defaults = config.context_compaction_config();
+    assert_eq!(defaults.breaker_threshold, 3);
+    assert_eq!(defaults.breaker_cooldown_secs, 60);
+
+    let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
+    config.metadata.insert(
+        "context_compaction_breaker_threshold".to_string(),
+        "7".to_string(),
+    );
+    config.metadata.insert(
+        "context_compaction_breaker_cooldown_secs".to_string(),
+        "300".to_string(),
+    );
+    let overridden = config.context_compaction_config();
+    assert_eq!(overridden.breaker_threshold, 7);
+    assert_eq!(overridden.breaker_cooldown_secs, 300);
+
+    // 非法值（0 / 非数字）回退默认。
+    config.metadata.insert(
+        "context_compaction_breaker_threshold".to_string(),
+        "0".to_string(),
+    );
+    config.metadata.insert(
+        "context_compaction_breaker_cooldown_secs".to_string(),
+        "abc".to_string(),
+    );
+    let fallback = config.context_compaction_config();
+    assert_eq!(fallback.breaker_threshold, 3);
+    assert_eq!(fallback.breaker_cooldown_secs, 60);
+}
+
+#[test]
 fn openai_provider_config_redacts_api_key_in_summary() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
     config.provider = ProviderConfig::OpenAICompatible(OpenAICompatibleConfig {

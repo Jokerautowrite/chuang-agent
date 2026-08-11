@@ -2640,3 +2640,477 @@ fn build_goal_checkpoint_args_from_collect(
     args.push("--json".to_string());
     Ok(args)
 }
+
+#[test]
+fn cli_goal_status_reads_current_status() {
+    let root = temp_goal_root("status-read");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-read-goal",
+            "--objective",
+            "goal status read",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let status = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-read-goal",
+            "--json",
+        ])
+        .output()
+        .expect("goal status should execute");
+    assert!(
+        status.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let output: serde_json::Value =
+        serde_json::from_slice(&status.stdout).expect("status should be json");
+    assert_eq!(output["goal_status"], "active");
+    assert_eq!(output["goal_budget_state"], "within_budget");
+    assert_eq!(output["goal_may_mark_complete"], true);
+    assert!(output["goal_control_file"]
+        .as_str()
+        .expect("control file")
+        .contains("objective: goal status read"));
+}
+
+#[test]
+fn cli_goal_status_writes_complete_and_persists() {
+    let root = temp_goal_root("status-write");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-write-goal",
+            "--objective",
+            "goal status write",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let status = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-write-goal",
+            "--status",
+            "complete",
+            "--json",
+        ])
+        .output()
+        .expect("goal status should execute");
+    assert!(
+        status.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let output: serde_json::Value =
+        serde_json::from_slice(&status.stdout).expect("status should be json");
+    assert_eq!(output["goal_status"], "complete");
+
+    // show 读回：status 已持久化（可审计/回放）。
+    let show = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "show",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-write-goal",
+            "--json",
+        ])
+        .output()
+        .expect("goal show should execute");
+    assert!(
+        show.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    let run: serde_json::Value = serde_json::from_slice(&show.stdout).expect("run should be json");
+    assert_eq!(run["goal_spec"]["status"], "complete");
+}
+
+#[test]
+fn cli_goal_status_rejects_active_as_model_writable() {
+    let root = temp_goal_root("status-reject-active");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-active-goal",
+            "--objective",
+            "goal status reject active",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let status = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-active-goal",
+            "--status",
+            "active",
+        ])
+        .output()
+        .expect("goal status should execute");
+    assert!(!status.status.success());
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(stderr.contains("only accepts complete|blocked"));
+}
+
+#[test]
+fn cli_goal_status_rejects_invalid_status_value() {
+    let root = temp_goal_root("status-reject-invalid");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-invalid-goal",
+            "--objective",
+            "goal status reject invalid",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let status = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-invalid-goal",
+            "--status",
+            "done",
+        ])
+        .output()
+        .expect("goal status should execute");
+    assert!(!status.status.success());
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(stderr.contains("only accepts complete|blocked"));
+}
+
+#[test]
+fn cli_goal_status_rejects_complete_when_budget_exhausted() {
+    let root = temp_goal_root("status-reject-exhausted");
+    let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "plan",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-exhausted-goal",
+            "--objective",
+            "goal status reject complete when budget exhausted",
+            "--json",
+        ])
+        .output()
+        .expect("goal plan should execute");
+    assert!(
+        planned.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    let plan_receipt: serde_json::Value =
+        serde_json::from_slice(&planned.stdout).expect("plan should be json");
+    let goal_path = plan_receipt["path"]
+        .as_str()
+        .expect("goal path")
+        .to_string();
+
+    // 手工把 run 改成预算已耗尽（max_minutes=1、started_at 两小时前）。
+    let mut run: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&goal_path).expect("goal json should exist"))
+            .expect("goal json should parse");
+    run["goal_spec"]["budget"]["max_minutes"] = serde_json::json!(1);
+    run["started_at"] =
+        serde_json::json!((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
+    std::fs::write(
+        &goal_path,
+        serde_json::to_vec_pretty(&run).expect("render goal json"),
+    )
+    .expect("goal json should write");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-exhausted-goal",
+            "--status",
+            "complete",
+        ])
+        .output()
+        .expect("goal status should execute");
+    assert!(!status.status.success());
+    let stderr = String::from_utf8_lossy(&status.stderr);
+    assert!(stderr.contains("goal_run_invalid: goal_spec.status"));
+    assert!(stderr.contains("budget exhausted"));
+
+    // blocked 仍可写：预算耗尽时可宣告 blocked（不空转）。
+    let blocked = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "status",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "status-reject-exhausted-goal",
+            "--status",
+            "blocked",
+            "--json",
+        ])
+        .output()
+        .expect("goal status blocked should execute");
+    assert!(
+        blocked.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&blocked.stderr)
+    );
+    let blocked_output: serde_json::Value =
+        serde_json::from_slice(&blocked.stdout).expect("blocked should be json");
+    assert_eq!(blocked_output["goal_status"], "blocked");
+    assert_eq!(blocked_output["goal_may_mark_complete"], false);
+}
+
+#[test]
+fn cli_goal_step_does_not_replay_landed_rounds() {
+    let root = temp_goal_root("step-no-replay");
+    let queue_root = temp_goal_root("step-no-replay-queue");
+    plan_dispatch_goal(&root, &queue_root, "step-no-replay-goal");
+
+    // 第一次 step 只跑 1 个 run（模拟截断/部分轮）。
+    let first = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-no-replay-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "1",
+            "--json",
+        ])
+        .output()
+        .expect("first goal step should execute");
+    assert!(
+        first.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_receipt: serde_json::Value =
+        serde_json::from_slice(&first.stdout).expect("first step should be json");
+    assert_eq!(first_receipt["run_loop"]["ran_count"], 1);
+    let first_run_id = first_receipt["run_loop"]["run_ids"][0]
+        .as_str()
+        .expect("run id")
+        .to_string();
+
+    // 第二次 step：已完成的 run 不重发，只跑剩余 1 个。
+    let second = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-no-replay-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "2",
+            "--json",
+        ])
+        .output()
+        .expect("second goal step should execute");
+    assert!(
+        second.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_receipt: serde_json::Value =
+        serde_json::from_slice(&second.stdout).expect("second step should be json");
+    assert_eq!(second_receipt["run_loop"]["ran_count"], 1);
+    let second_run_ids = second_receipt["run_loop"]["run_ids"]
+        .as_array()
+        .expect("run ids")
+        .iter()
+        .map(|value| value.as_str().expect("run id string").to_string())
+        .collect::<Vec<_>>();
+    assert!(!second_run_ids.contains(&first_run_id));
+    assert_eq!(
+        second_receipt["completed_run_ids"]
+            .as_array()
+            .expect("completed run ids")
+            .len(),
+        1
+    );
+    assert_eq!(
+        second_receipt["phantom_skipped_run_ids"]
+            .as_array()
+            .expect("phantom run ids")
+            .len(),
+        0
+    );
+
+    // 第三次 step：全部完成，无剩余候选，不重发任何 run。
+    let third = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-no-replay-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "2",
+            "--json",
+        ])
+        .output()
+        .expect("third goal step should execute");
+    assert!(
+        third.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&third.stderr)
+    );
+    let third_receipt: serde_json::Value =
+        serde_json::from_slice(&third.stdout).expect("third step should be json");
+    assert_eq!(third_receipt["run_loop"]["ran_count"], 0);
+    assert_eq!(third_receipt["run_loop"]["idle"], true);
+    assert_eq!(
+        third_receipt["completed_run_ids"]
+            .as_array()
+            .expect("completed run ids")
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn cli_goal_step_wrap_up_round_allowed_once_after_budget_exhausted() {
+    let root = temp_goal_root("step-wrap-up");
+    let queue_root = temp_goal_root("step-wrap-up-queue");
+    plan_dispatch_goal(&root, &queue_root, "step-wrap-up-goal");
+
+    // 手工把 run 改成预算已耗尽。
+    let goal_path = root.join("step-wrap-up-goal.json");
+    let mut run: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&goal_path).expect("goal json should exist"))
+            .expect("goal json should parse");
+    run["goal_spec"]["budget"]["max_minutes"] = serde_json::json!(1);
+    run["started_at"] =
+        serde_json::json!((chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339());
+    std::fs::write(
+        &goal_path,
+        serde_json::to_vec_pretty(&run).expect("render goal json"),
+    )
+    .expect("goal json should write");
+
+    // 预算耗尽但 wrap-up 未消耗：允许一轮收尾（至多 1 个 run）。
+    let first = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-wrap-up-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "2",
+            "--json",
+        ])
+        .output()
+        .expect("wrap-up goal step should execute");
+    assert!(
+        first.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_receipt: serde_json::Value =
+        serde_json::from_slice(&first.stdout).expect("wrap-up step should be json");
+    assert_eq!(first_receipt["wrap_up_round"], true);
+    assert_eq!(first_receipt["run_loop"]["max_runs"], 1);
+    assert_eq!(first_receipt["run_loop"]["ran_count"], 1);
+
+    // wrap-up 已消耗：后续 step 拒绝（不许继续烧钱）。
+    let second = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .args([
+            "goal",
+            "step",
+            "--root",
+            root.to_str().expect("root should be utf8"),
+            "--goal-id",
+            "step-wrap-up-goal",
+            "--subagent-queue-root",
+            queue_root.to_str().expect("queue root should be utf8"),
+            "--max-runs",
+            "1",
+        ])
+        .output()
+        .expect("second goal step should execute");
+    assert!(!second.status.success());
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(stderr.contains("wrap-up round already consumed"));
+}

@@ -457,3 +457,80 @@ fn request_contains_full_body(request: &[u8]) -> bool {
     };
     body.len() >= content_length
 }
+
+struct ReadOnlyEnvGuard {
+    name: String,
+}
+
+impl ReadOnlyEnvGuard {
+    fn set(name: &str, value: &str) -> Self {
+        std::env::set_var(name, value);
+        Self {
+            name: name.to_string(),
+        }
+    }
+
+    fn clear(name: &str) -> Self {
+        std::env::remove_var(name);
+        Self {
+            name: name.to_string(),
+        }
+    }
+}
+
+impl Drop for ReadOnlyEnvGuard {
+    fn drop(&mut self) {
+        std::env::remove_var(&self.name);
+    }
+}
+
+#[test]
+fn readonly_http_gbrain_from_config_resolves_token_from_env_and_reads() {
+    let _guard = ReadOnlyEnvGuard::set("CHUANG_TEST_FROM_CONFIG_TOKEN", "from-config-secret");
+    let (endpoint, request_rx) = spawn_knowledge_read_server(
+        200,
+        r#"{"hits":[{"source":"gbrain","title":"Note","uri":"gbrain://note/1","preview":"From config","provenance":"gbrain_fixture"}]}"#,
+    );
+    let config = KnowledgeReadSourceConfig {
+        endpoint: Some(endpoint),
+        token_env: Some("CHUANG_TEST_FROM_CONFIG_TOKEN".to_string()),
+        timeout_ms: Some(5_000),
+    };
+
+    let adapter =
+        ReadonlyHttpKnowledgeReadAdapter::new_gbrain_from_config(&config).expect("build from config");
+    let result = adapter
+        .query(KnowledgeReadQuery {
+            source: "gbrain".to_string(),
+            query: "note".to_string(),
+            limit: 1,
+        })
+        .expect("gbrain from-config adapter should return hits");
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].uri, "gbrain://note/1");
+    let request = request_rx
+        .recv()
+        .expect("test server should capture request");
+    assert!(request
+        .to_ascii_lowercase()
+        .contains("authorization: bearer from-config-secret"));
+    assert!(!result.receipt.contains("from-config-secret"));
+}
+
+#[test]
+fn readonly_http_from_config_returns_structured_error_when_token_env_unset() {
+    let _guard = ReadOnlyEnvGuard::clear("CHUANG_TEST_FROM_CONFIG_UNSET_TOKEN");
+    let config = KnowledgeReadSourceConfig {
+        endpoint: Some("https://gbrain.example.invalid/query".to_string()),
+        token_env: Some("CHUANG_TEST_FROM_CONFIG_UNSET_TOKEN".to_string()),
+        timeout_ms: Some(5_000),
+    };
+
+    let error = match ReadonlyHttpKnowledgeReadAdapter::new_gbrain_from_config(&config) {
+        Ok(_) => panic!("unset token must be a structured error"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "knowledge_read_token_missing");
+    assert_eq!(error.adapter_kind, "readonly_http");
+    assert!(!error.retryable);
+}

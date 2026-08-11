@@ -8,7 +8,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -28,6 +28,19 @@ use crate::responder::{
 use crate::runtime_config::ProviderApiEndpoint;
 
 const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
+
+// 错误恢复级联（蓝本 docs/reference-dig-20260810.md §2.5 withRetry）：
+// - 退避：base 500ms，指数 ×2，上限 32s，jitter ±25%。
+// - 重试类目：[429,529]（限流/上游不可达）+ ECONNRESET/ETIMEDOUT 类传输错误；
+//   保留 408/5xx 既有网关语义（fallback 与既有测试依赖）。
+const RETRY_BACKOFF_BASE_MS: u64 = 500;
+const RETRY_BACKOFF_MAX_MS: u64 = 32_000;
+const RETRY_BACKOFF_JITTER_RATIO: f64 = 0.25;
+
+// 空闲看门狗（蓝本 §2.5）：单次 provider 调用（含重试序列）45s 告警、90s 中断。
+// 单次 transport 尝试仍受 request_timeout_ms（provider_timeout_ms 配置）约束。
+const PROVIDER_IDLE_WATCHDOG_WARN_MS: u64 = 45_000;
+const PROVIDER_IDLE_WATCHDOG_KILL_MS: u64 = 90_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfigError {
@@ -716,28 +729,61 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
         } else {
             format!("len:{}", self.api_key.len())
         };
+        let started = Instant::now();
+        let mut retry_attempts = 0usize;
 
         for attempt in 0..MAX_PROVIDER_ATTEMPTS {
+            // 空闲看门狗：单次调用（含重试序列）总时长超过 90s 即中断，不再发起新尝试。
+            // 单次 transport 尝试本身仍受 request_timeout_ms（provider_timeout_ms 配置）约束。
+            if started.elapsed() >= Duration::from_millis(PROVIDER_IDLE_WATCHDOG_KILL_MS) {
+                return self.build_watchdog_kill_response(request, &masked_key, started.elapsed());
+            }
             match self.execute_transport(request) {
                 Ok(call) => {
                     let status_code = call.status_code();
                     if !http_status_is_success(status_code) {
+                        // 扣留机制：可恢复错误先扣留（重试），全部恢复失败才释放冒泡。
                         // Transient gateway/limit errors are retried with
                         // backoff; auth and other hard errors are not.
                         if attempt + 1 < MAX_PROVIDER_ATTEMPTS
                             && RETRYABLE_STATUS_CODES.contains(&status_code)
                         {
+                            retry_attempts += 1;
                             std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
                             continue;
                         }
-                        return self.build_http_error_response(request, call, &masked_key);
+                        let mut response =
+                            self.build_http_error_response(request, call, &masked_key);
+                        self.annotate_retry_and_watchdog(
+                            &mut response,
+                            started,
+                            retry_attempts,
+                            "released",
+                        );
+                        return response;
                     }
-                    return self.build_success_response(request, call, &masked_key);
+                    let mut response = self.build_success_response(request, call, &masked_key);
+                    self.annotate_retry_and_watchdog(
+                        &mut response,
+                        started,
+                        retry_attempts,
+                        "recovered",
+                    );
+                    return response;
                 }
                 Err(error) => {
                     let preview = self.build_http_request_preview(request).ok();
-
-                    return ProviderAdapterResponse {
+                    let error_class = provider_error_class(&error);
+                    // ECONNRESET / ETIMEDOUT 类传输错误与 429/529 一样先扣留重试，
+                    // 重试耗尽才释放；配置/协议等硬错误不重试直接释放。
+                    if attempt + 1 < MAX_PROVIDER_ATTEMPTS
+                        && transport_retryable(&error, error_class)
+                    {
+                        retry_attempts += 1;
+                        std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
+                        continue;
+                    }
+                    let mut response = ProviderAdapterResponse {
                         body: format!(
                             "CONFIG_ERROR: openai-compatible provider invalid field={} reason={}",
                             error.field, error.message
@@ -757,6 +803,13 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
                             self.request_timeout_ms,
                         ),
                     };
+                    self.annotate_retry_and_watchdog(
+                        &mut response,
+                        started,
+                        retry_attempts,
+                        "released",
+                    );
+                    return response;
                 }
             }
         }
@@ -764,18 +817,114 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
     }
 }
 
-const RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504];
+const RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504, 529];
 const MAX_PROVIDER_ATTEMPTS: usize = 3;
 
 fn backoff_ms(attempt: usize) -> u64 {
-    match attempt {
-        0 => 500,
-        1 => 1500,
-        _ => 3000,
-    }
+    // withRetry（蓝本 §2.5）：base 500ms，指数 ×2，上限 32s，jitter ±25%。
+    let exponent = attempt.min(6) as u32; // 500 * 2^6 = 32000 = 上限
+    let base = RETRY_BACKOFF_BASE_MS
+        .saturating_mul(1u64 << exponent)
+        .min(RETRY_BACKOFF_MAX_MS);
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    // jitter 在 cap 之后施加：最终值不得超过 32s 上限。
+    jittered_backoff(base, seed).min(RETRY_BACKOFF_MAX_MS)
+}
+
+/// ±RETRY_BACKOFF_JITTER_RATIO 抖动；确定性：同 seed 同结果（便于测试）。
+fn jittered_backoff(base_ms: u64, seed: u64) -> u64 {
+    let span = ((base_ms as f64) * RETRY_BACKOFF_JITTER_RATIO) as u64;
+    let offset = (seed % (span * 2 + 1)) as i64 - span as i64;
+    (base_ms as i64 + offset).max(1) as u64
 }
 
 impl OpenAICompatibleProviderAdapter {
+    fn annotate_retry_and_watchdog(
+        &self,
+        response: &mut ProviderAdapterResponse,
+        started: Instant,
+        retry_attempts: usize,
+        retry_outcome: &str,
+    ) {
+        if retry_attempts > 0 {
+            response
+                .extra_meta
+                .insert("provider_retry_attempts".to_string(), retry_attempts.to_string());
+            response.extra_meta.insert(
+                "provider_retry_outcome".to_string(),
+                retry_outcome.to_string(),
+            );
+        }
+        let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        if elapsed_ms >= PROVIDER_IDLE_WATCHDOG_WARN_MS {
+            response
+                .extra_meta
+                .insert("provider_watchdog_warned".to_string(), "true".to_string());
+            response.extra_meta.insert(
+                "provider_watchdog_elapsed_ms".to_string(),
+                elapsed_ms.to_string(),
+            );
+        }
+    }
+
+    fn build_watchdog_kill_response(
+        &self,
+        request: &ResponderRequest,
+        masked_key: &str,
+        elapsed: Duration,
+    ) -> ProviderAdapterResponse {
+        let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        let message = format!(
+            "request timed out after {elapsed_ms}ms (idle watchdog kill, limit {PROVIDER_IDLE_WATCHDOG_KILL_MS}ms)"
+        );
+        let preview = self.build_http_request_preview(request).ok();
+        let mut extra_meta = BTreeMap::from([
+            ("transport".to_string(), "openai-compatible".to_string()),
+            ("provider_response_ok".to_string(), "false".to_string()),
+            ("provider_error_class".to_string(), "transport".to_string()),
+            ("provider_error_message".to_string(), message.clone()),
+            // 看门狗中断即扣留释放：本调用已耗尽恢复预算，交给上层（fallback/循环层）。
+            ("provider_retryable".to_string(), "false".to_string()),
+            ("provider_watchdog_killed".to_string(), "true".to_string()),
+            (
+                "provider_watchdog_elapsed_ms".to_string(),
+                elapsed_ms.to_string(),
+            ),
+        ]);
+        if let Some(preview) = preview {
+            extra_meta.insert("request_url".to_string(), preview.url.clone());
+            extra_meta.insert("request_method".to_string(), preview.method.clone());
+            extra_meta.insert(
+                "request_message_count".to_string(),
+                request_message_count(&preview.body_json).to_string(),
+            );
+        }
+        insert_provider_failure_meta(&mut extra_meta, None, "transport", Some(&message));
+        insert_provider_timeout_meta(&mut extra_meta, None, "transport", Some(&message));
+        ProviderAdapterResponse {
+            body: format!(
+                "PROVIDER_IDLE_TIMEOUT: provider={} model={} transport={} elapsed_ms={elapsed_ms}",
+                self.identity.provider_id,
+                self.identity.model_name,
+                self.transport.as_str(),
+            ),
+            trace: format!(
+                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} transport_mode={} provider_idle_timeout_elapsed_ms={elapsed_ms}",
+                self.identity.provider_id,
+                self.identity.model_name,
+                self.base_url,
+                masked_key,
+                request.recall_hit_count,
+                self.transport.as_str(),
+            ),
+            finish_reason: Some("provider-idle-timeout".to_string()),
+            extra_meta,
+        }
+    }
+
     fn build_success_response(
         &self,
         request: &ResponderRequest,
@@ -1246,8 +1395,33 @@ fn provider_error_retryable(error: &ProviderConfigError, error_class: &str) -> b
     )
 }
 
+/// withRetry 传输层重试判定（蓝本 §2.5）：只重试 ECONNRESET / ETIMEDOUT 类错误
+/// （connection reset / broken pipe / timed out / would block）。配置/协议等
+/// 硬错误不重试。比 provider_error_retryable 更窄，供 respond 重试循环使用。
+fn transport_retryable(error: &ProviderConfigError, error_class: &str) -> bool {
+    if error.field == "curl_spawn" {
+        return false;
+    }
+    if matches!(
+        error.field.as_str(),
+        "native_http_timeout" | "http_timeout" | "curl_wait"
+    ) {
+        return true;
+    }
+    if error_class == "transport" {
+        let message = error.message.to_ascii_lowercase();
+        return message.contains("timed out")
+            || message.contains("connection reset")
+            || message.contains("broken pipe")
+            || message.contains("reset by peer")
+            || message.contains("would block");
+    }
+    false
+}
+
 fn http_status_retryable(status_code: u16) -> bool {
-    status_code == 408 || status_code == 429 || (500..=599).contains(&status_code)
+    // 蓝本 withRetry 关键类目 429（限流）/529（上游不可达）；保留 408/5xx 网关语义。
+    matches!(status_code, 408 | 429 | 529) || (500..=599).contains(&status_code)
 }
 
 fn http_status_is_success(status_code: u16) -> bool {
@@ -1569,7 +1743,13 @@ fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static
 mod tests {
     use super::extract_assistant_content_from_value;
     use super::extract_finish_reason;
-    use super::{backoff_ms, MAX_PROVIDER_ATTEMPTS, RETRYABLE_STATUS_CODES};
+    use super::{
+        backoff_ms, jittered_backoff, provider_error_class, provider_error_retryable,
+        transport_retryable, MAX_PROVIDER_ATTEMPTS, PROVIDER_IDLE_WATCHDOG_KILL_MS,
+        PROVIDER_IDLE_WATCHDOG_WARN_MS, RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_JITTER_RATIO,
+        RETRY_BACKOFF_MAX_MS, RETRYABLE_STATUS_CODES, http_status_retryable,
+        ProviderConfigError,
+    };
     use serde_json::json;
 
     #[test]
@@ -1577,8 +1757,105 @@ mod tests {
         assert!(RETRYABLE_STATUS_CODES.contains(&502));
         assert!(RETRYABLE_STATUS_CODES.contains(&503));
         assert!(RETRYABLE_STATUS_CODES.contains(&429));
+        // 蓝本 withRetry 关键类目：429 限流 / 529 上游不可达。
+        assert!(RETRYABLE_STATUS_CODES.contains(&529));
+        assert!(http_status_retryable(429));
+        assert!(http_status_retryable(529));
         assert!(MAX_PROVIDER_ATTEMPTS >= 2);
         assert!(backoff_ms(0) < backoff_ms(1));
+    }
+
+    #[test]
+    fn backoff_matches_blueprint_bounds() {
+        assert_eq!(RETRY_BACKOFF_BASE_MS, 500);
+        assert_eq!(RETRY_BACKOFF_MAX_MS, 32_000);
+        for attempt in 0..10 {
+            let value = backoff_ms(attempt);
+            assert!(
+                value <= RETRY_BACKOFF_MAX_MS,
+                "attempt={attempt} value={value} must cap at max"
+            );
+            let base = RETRY_BACKOFF_BASE_MS
+                .saturating_mul(1u64 << attempt.min(6))
+                .min(RETRY_BACKOFF_MAX_MS);
+            let span = (base as f64 * RETRY_BACKOFF_JITTER_RATIO) as u64;
+            assert!(
+                value >= base.saturating_sub(span) && value <= base + span,
+                "attempt={attempt} value={value} base={base} span={span}"
+            );
+        }
+        // jitter ±25% 下指数退避仍严格单调（下界 0.75*2^n > 上界 1.25*2^(n-1)）。
+        for attempt in 1..6 {
+            assert!(
+                backoff_ms(attempt - 1) < backoff_ms(attempt),
+                "attempt {attempt} should back off monotonically"
+            );
+        }
+    }
+
+    #[test]
+    fn jittered_backoff_is_deterministic_and_bounded() {
+        assert_eq!(jittered_backoff(500, 42), jittered_backoff(500, 42));
+        for seed in [0u64, 1, 7, 123_456_789] {
+            let value = jittered_backoff(500, seed);
+            assert!((375..=625).contains(&value), "seed={seed} value={value}");
+        }
+    }
+
+    #[test]
+    fn retryable_categories_cover_blueprint_transport_errors() {
+        // ETIMEDOUT：超时字段（native_http_timeout / http_timeout / curl_wait）必重试。
+        let timeout = ProviderConfigError {
+            field: "native_http_timeout".to_string(),
+            message: "request timed out after 60000ms".to_string(),
+        };
+        assert_eq!(provider_error_class(&timeout), "transport");
+        assert!(provider_error_retryable(&timeout, "transport"));
+        assert!(transport_retryable(&timeout, "transport"));
+
+        // ECONNRESET：connection reset / broken pipe / reset by peer。
+        for message in [
+            "Connection reset by peer",
+            "broken pipe",
+            "read error: connection reset",
+            "operation would block",
+        ] {
+            let reset = ProviderConfigError {
+                field: "http_read".to_string(),
+                message: message.to_string(),
+            };
+            assert!(
+                transport_retryable(&reset, "transport"),
+                "message={message} should be retryable"
+            );
+        }
+
+        // 硬错误不重试：配置错误、curl 无法 spawn、非重置类传输错误。
+        let config_error = ProviderConfigError {
+            field: "base_url".to_string(),
+            message: "base_url must not be empty".to_string(),
+        };
+        assert_eq!(provider_error_class(&config_error), "config");
+        assert!(!provider_error_retryable(&config_error, "config"));
+        assert!(!transport_retryable(&config_error, "config"));
+
+        let spawn_error = ProviderConfigError {
+            field: "curl_spawn".to_string(),
+            message: "No such file or directory".to_string(),
+        };
+        assert!(!transport_retryable(&spawn_error, "transport"));
+
+        let generic_transport = ProviderConfigError {
+            field: "http_read".to_string(),
+            message: "unexpected EOF".to_string(),
+        };
+        assert!(!transport_retryable(&generic_transport, "transport"));
+    }
+
+    #[test]
+    fn watchdog_constants_follow_blueprint() {
+        assert_eq!(PROVIDER_IDLE_WATCHDOG_WARN_MS, 45_000);
+        assert_eq!(PROVIDER_IDLE_WATCHDOG_KILL_MS, 90_000);
     }
 
     #[test]

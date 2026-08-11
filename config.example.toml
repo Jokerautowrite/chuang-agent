@@ -46,6 +46,13 @@ api_key_env = "CHUANG_AGENT_API_KEY"
 transport = "native"
 provider_timeout_ms = 120000
 
+# 错误恢复级联（蓝本 docs/reference-dig-20260810.md §2.5 withRetry + 看门狗）：
+# - withRetry：base 500ms / max 32s / jitter 0.25；重试 [429,529]（限流/上游不可达）
+#   与 ECONNRESET/ETIMEDOUT 类传输错误；重试耗尽才释放错误（扣留机制）。
+# - 空闲看门狗：单次 provider 调用（含重试序列）45s 告警、90s 中断；
+#   单次 transport 尝试仍受上方 provider_timeout_ms 约束。
+# - 连续 429/529 重试耗尽后自动切下方 fallback（fallback_on_retryable=true 默认开启）。
+
 # Optional explicit fallback. Leave unset if you want hard failure.
 # fallback_provider = "openai_compatible"
 # fallback_provider_id = "backup-openai-compatible"
@@ -96,9 +103,17 @@ context_max_memory_segments = 5
 [metadata]
 # GBrain 外脑增强：情感快照 prompt 追加主人相关记忆摘要；外脑不可用静默降级。
 emotion_brain = "1"
+# GBrain 直连 API 通道（knowledge_context）：1=启用。预检/查询失败返回结构化
+# 状态并标记 knowledge 段 unavailable，不阻断主对话；真实 token 只走 env。
+knowledge_context = "1"
 # 心跳主动联系：仅本地时间 start_hour..=end_hour 窗口内触发（夜间安静），
 # 连接需求≥门槛 且 距上次主动≥最小间隔 才触发，每日最多 max_per_day 次；
 # 投递走 Chuang Feishu 桥轮询发件箱；消息文本由模型自由生成（失败回退模板）。
+# 上下文压缩熔断（Claude Code 5：连续 3 次自动压缩失败后停止重试，防浪费无效调用）。
+# 真值源 RuntimeConfig.context_compaction_config()；默认 3 次 / 60 秒冷却；
+# 引擎侧默认与之一致（SummaryCompressionContextEngine::with_circuit_breaker）。
+# context_compaction_breaker_threshold = "3"      # 连续失败 N 次熔断（默认 3）
+# context_compaction_breaker_cooldown_secs = "60" # 熔断冷却秒数，冷却后自动复位（默认 60）
 heartbeat_enabled = "1"
 heartbeat_threshold = "0.6"
 heartbeat_min_interval_minutes = "120"
@@ -106,3 +121,13 @@ heartbeat_max_per_day = "7"
 heartbeat_start_hour = "9"
 heartbeat_end_hour = "22"
 # heartbeat_outbox_dir = "/path/to/outbox"   # 缺省 root/context/proactive-outbox
+
+# GBrain 直连 API 通道（knowledge_context）端点配置。
+# - endpoint 缺省回退到环境变量 CHUANG_GBRAIN_LIVE_ENDPOINT；
+# - token_env 命名真实 token 所在的环境变量（缺省 CHUANG_GBRAIN_LIVE_TOKEN），
+#   与 scripts/chuang-gbrain-live-receipt.sh 的只读回执口径一致；
+# - 这里只放 env 变量名占位，绝不写入真实密钥。
+[external_knowledge.gbrain]
+endpoint = ""            # 或省略；缺省读 CHUANG_GBRAIN_LIVE_ENDPOINT
+token_env = "CHUANG_GBRAIN_LIVE_TOKEN"
+timeout_ms = 10000

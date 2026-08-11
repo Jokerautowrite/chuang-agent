@@ -373,7 +373,8 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
 
     let runtime: RuntimeConfig = load_runtime_config_file(&config_path)
         .map_err(|e| format!("cannot load config {}: {e:?}", config_path.display()))?;
-    let provider_slot = match provider_override {
+    let store = BenchmarkStore::new(&root);
+    let evaluator = match provider_override {
         Some((base_url, api_key, model_name, provider_id)) => {
             let base = if base_url.is_empty() {
                 provider_base_url(&runtime)
@@ -406,13 +407,13 @@ fn benchmark_evaluate_command(args: &[String]) -> Result<(), String> {
                 request_timeout_ms: None,
                 tls_ca_cert_path: None,
             });
-            build_provider_responder(&config).map_err(|e| e.message)?
+            let provider_slot = build_provider_responder(&config).map_err(|e| e.message)?;
+            BenchmarkEvaluator::new(store.clone(), provider_slot)
         }
-        None => build_provider_responder(&runtime.provider).map_err(|e| e.message)?,
+        // 默认跟随主模型：Evaluator 用 config 里主 provider/model（Fallback 取
+        // primary），Fake provider 直接结构化报错，不做静默回退。
+        None => BenchmarkEvaluator::from_runtime_config(store.clone(), &runtime)?,
     };
-
-    let store = BenchmarkStore::new(&root);
-    let evaluator = BenchmarkEvaluator::new(store.clone(), provider_slot);
     let receipt = evaluator.evaluate(&EvaluateRequest {
         benchmark_id: benchmark_id.clone(),
         answers,

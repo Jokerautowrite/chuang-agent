@@ -3,13 +3,17 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chuang_agent::benchmark::{
+    BenchmarkCase, BenchmarkDef, BenchmarkRunRequest, BenchmarkStore, CaseScore,
+};
 use chuang_agent::skill_evolver::{
-    CanonicalSkillEvolver, DryRunProposalEvolver, EvolutionError, EvolutionScope,
-    FailureDetectorConfig, FailureEvidence, FailurePattern, GovernanceContext, GovernanceDecision,
-    NoopEvolver, NoopRuleChangeGovernance, PolicyRuleChangeGovernance, RepeatedFailureDetector,
-    RuleChangeGovernance, RuleChangeKind, RuleChangeProposal, RuntimeEvent, RuntimeEventKind,
-    SkillApprovalReceipt, SkillApprovalState, SkillEvolver, SkillLifecycleStatus, SkillProposal,
-    SkillProposalProvenance, SkillRetirementRequest, SkillSolidifyTicket, SkillUpsertKind,
+    BenchmarkScoreGate, CanonicalSkillEvolver, DryRunProposalEvolver, EvolutionError,
+    EvolutionScope, FailureDetectorConfig, FailureEvidence, FailurePattern, FixedScoreScorer,
+    GovernanceContext, GovernanceDecision, NoopEvolver, NoopRuleChangeGovernance,
+    PolicyRuleChangeGovernance, RepeatedFailureDetector, RuleChangeGovernance, RuleChangeKind,
+    RuleChangeProposal, RuntimeEvent, RuntimeEventKind, SkillApprovalReceipt, SkillApprovalState,
+    SkillEvolver, SkillLifecycleStatus, SkillProposal, SkillProposalProvenance,
+    SkillRetirementRequest, SkillScoringGateConfig, SkillSolidifyTicket, SkillUpsertKind,
     ValidationReport,
 };
 
@@ -1494,4 +1498,243 @@ fn observed_events_truncate_oldest_over_max_and_skip_corrupt_lines() {
     fs::write(&path, content).expect("append corrupt line");
     let tolerant = CanonicalSkillEvolver::new(&root);
     assert_eq!(tolerant.observed_events().len(), 4096);
+}
+
+// ======================= scoring gate =======================
+
+fn write_gate_benchmark(root: &std::path::Path, id: &str) -> BenchmarkStore {
+    let store = BenchmarkStore::new(root);
+    let def = BenchmarkDef {
+        id: id.to_string(),
+        capability: "skill_evolution".to_string(),
+        version: 1,
+        title: "skill evolution scoring gate eval".to_string(),
+        cases: vec![BenchmarkCase {
+            id: "case-1".to_string(),
+            title: "rule change quality".to_string(),
+            max_score: 10,
+            statement: "评估规则修改提案：触发条件是否清晰、新流程是否可执行。".to_string(),
+            rubric: "满分10分：触发条件明确3分；新流程可执行4分；理由充分3分。".to_string(),
+        }],
+    };
+    store.write_def(&def).expect("benchmark def should be writable");
+    store
+}
+
+fn gate_update_proposal() -> RuleChangeProposal {
+    let mut proposal = base_rule_change_proposal();
+    proposal.change_kind = RuleChangeKind::UpdateRule;
+    proposal.old_procedure = vec!["旧流程步骤".to_string()];
+    proposal
+}
+
+fn gate_for(
+    benchmark_root: &std::path::Path,
+    benchmark_id: &str,
+    after_score: u16,
+    max_score: u16,
+) -> BenchmarkScoreGate {
+    BenchmarkScoreGate::new(
+        SkillScoringGateConfig::new(benchmark_id, benchmark_root),
+        Box::new(FixedScoreScorer::new(benchmark_id, after_score, max_score)),
+    )
+}
+
+#[test]
+fn scoring_gate_no_baseline_create_rule_is_admitted_and_persisted() {
+    let skill_root = temp_skill_root("gate-create-nobaseline");
+    let bench_root = temp_skill_root("gate-create-nobaseline-bench");
+    write_gate_benchmark(&bench_root, "skill-gate");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    let proposal = base_rule_change_proposal();
+    let gate = gate_for(&bench_root, "skill-gate", 8, 10);
+
+    let receipt = evolver
+        .apply_rule_change_gated(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+            &gate,
+        )
+        .expect("no baseline first registration (CreateRule) should be admitted");
+
+    assert_eq!(receipt.change_kind, RuleChangeKind::CreateRule);
+    assert_eq!(receipt.rule_id, "build-for-rule-tool");
+    assert!(skill_root.join("build-for-rule-tool.md").exists());
+    // 首次登记不产生候选池条目。
+    assert!(evolver
+        .candidate_pool_history()
+        .expect("candidate history should load")
+        .is_empty());
+}
+
+#[test]
+fn scoring_gate_no_baseline_update_rule_is_rejected_into_candidate_pool() {
+    let skill_root = temp_skill_root("gate-update-nobaseline");
+    let bench_root = temp_skill_root("gate-update-nobaseline-bench");
+    write_gate_benchmark(&bench_root, "skill-gate");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    let proposal = gate_update_proposal();
+    let gate = gate_for(&bench_root, "skill-gate", 8, 10);
+
+    let err = evolver
+        .apply_rule_change_gated(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+            &gate,
+        )
+        .expect_err("UpdateRule without baseline must be rejected");
+
+    assert!(matches!(err, EvolutionError::ValidationRejected(_)));
+    // 未达标提案记录进候选池（append-only JSONL）。
+    let history = evolver
+        .candidate_pool_history()
+        .expect("candidate history should load");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].proposal.proposal_id, "proposal-rule-1");
+    assert_eq!(history[0].decision.change_kind, RuleChangeKind::UpdateRule);
+    assert!(!history[0].decision.admitted);
+    assert_eq!(history[0].decision.baseline_score, None);
+    // 绝不落盘正式规则。
+    assert!(!skill_root.join("build-for-rule-tool.md").exists());
+    assert!(evolver.candidate_pool_path().exists());
+}
+
+#[test]
+fn scoring_gate_baseline_strict_improvement_upserts_rule() {
+    let skill_root = temp_skill_root("gate-strict-improve");
+    let bench_root = temp_skill_root("gate-strict-improve-bench");
+    let store = write_gate_benchmark(&bench_root, "skill-gate");
+    store
+        .record_run(&BenchmarkRunRequest {
+            benchmark_id: "skill-gate".to_string(),
+            case_scores: vec![CaseScore {
+                case_id: "case-1".to_string(),
+                score: 6,
+                max_score: 10,
+                reason: "baseline run".to_string(),
+            }],
+        })
+        .expect("baseline should be recorded");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    let proposal = base_rule_change_proposal();
+    let gate = gate_for(&bench_root, "skill-gate", 8, 10);
+
+    let receipt = evolver
+        .apply_rule_change_gated(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+            &gate,
+        )
+        .expect("score 8 strictly above baseline 6 should be admitted");
+
+    assert_eq!(receipt.change_kind, RuleChangeKind::CreateRule);
+    assert!(skill_root.join("build-for-rule-tool.md").exists());
+    assert!(evolver
+        .candidate_pool_history()
+        .expect("candidate history should load")
+        .is_empty());
+}
+
+#[test]
+fn scoring_gate_baseline_no_improvement_is_rejected_into_candidate_pool() {
+    let skill_root = temp_skill_root("gate-no-improve");
+    let bench_root = temp_skill_root("gate-no-improve-bench");
+    let store = write_gate_benchmark(&bench_root, "skill-gate");
+    store
+        .record_run(&BenchmarkRunRequest {
+            benchmark_id: "skill-gate".to_string(),
+            case_scores: vec![CaseScore {
+                case_id: "case-1".to_string(),
+                score: 6,
+                max_score: 10,
+                reason: "baseline run".to_string(),
+            }],
+        })
+        .expect("baseline should be recorded");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    let proposal = base_rule_change_proposal();
+    // 与基线持平：不算严格提升。
+    let gate = gate_for(&bench_root, "skill-gate", 6, 10);
+
+    let err = evolver
+        .apply_rule_change_gated(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+            &gate,
+        )
+        .expect_err("score equal to baseline must be rejected");
+
+    assert!(matches!(err, EvolutionError::ValidationRejected(_)));
+    let history = evolver
+        .candidate_pool_history()
+        .expect("candidate history should load");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].decision.baseline_score, Some(6));
+    assert_eq!(history[0].decision.after_score, Some(6));
+    assert!(!history[0].decision.admitted);
+    assert!(!skill_root.join("build-for-rule-tool.md").exists());
+}
+
+#[test]
+fn scoring_gate_proposal_embedding_rubric_fails_closed() {
+    let skill_root = temp_skill_root("gate-isolation");
+    let bench_root = temp_skill_root("gate-isolation-bench");
+    write_gate_benchmark(&bench_root, "skill-gate");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    // 提案 rationale 内嵌 rubric 原文 = 作弊；必须 fail-closed，连候选池都不进。
+    let mut proposal = base_rule_change_proposal();
+    proposal.rationale = "满分10分：触发条件明确3分；新流程可执行4分；理由充分3分。".to_string();
+    let gate = gate_for(&bench_root, "skill-gate", 8, 10);
+
+    let err = evolver
+        .apply_rule_change_gated(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+            &gate,
+        )
+        .expect_err("rubric leak must fail closed");
+
+    assert!(matches!(err, EvolutionError::InvalidRuleChange(_)));
+    assert!(!skill_root.join("build-for-rule-tool.md").exists());
+    // 分数本身已不可信：不记录候选池。
+    assert!(evolver
+        .candidate_pool_history()
+        .expect("candidate history should load")
+        .is_empty());
+}
+
+#[test]
+fn scoring_gate_snapshot_before_change_captures_existing_content() {
+    let skill_root = temp_skill_root("gate-snapshot");
+    let mut evolver = CanonicalSkillEvolver::new(&skill_root);
+    // 先正常落一条规则。
+    let proposal = base_rule_change_proposal();
+    evolver
+        .apply_rule_change(
+            proposal,
+            &ApproveAllGovernance,
+            &governance_context(vec![]),
+        )
+        .expect("create rule should persist");
+
+    let snapshot = evolver
+        .snapshot_before_change("build-for-rule-tool")
+        .expect("snapshot should capture existing rule");
+    assert_eq!(snapshot.rule_id, "build-for-rule-tool");
+    assert!(snapshot.path.is_some());
+    let before = snapshot.before.expect("before content should exist");
+    assert!(before.contains("skill_id: build-for-rule-tool"));
+    assert!(!snapshot.captured_at.is_empty());
+
+    // 不存在的规则：before=None（CreateRule 首次登记语义）。
+    let missing = evolver
+        .snapshot_before_change("no-such-rule")
+        .expect("missing rule snapshot should be benign");
+    assert_eq!(missing.before, None);
+    assert_eq!(missing.path, None);
 }

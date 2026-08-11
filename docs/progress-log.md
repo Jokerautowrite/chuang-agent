@@ -3521,3 +3521,41 @@
 - `external-ai dispatch` 已支持 `opencodex`、`openai-compatible` 及 `:<model>` 覆盖模型，通过 runtime `config.toml` 的 OpenAI-compatible provider 配置和 provider.env 解析密钥，不在代码或输出中硬编码密钥。
 - live dispatch 强制使用 `chat_completions`，复用现有 provider transport/超时/错误元数据，模型回答映射为结构化 `ExternalAiStructuredResult`；dry-run 仍保持不联网的请求描述行为。
 - 增加 live 平台校验、fake provider 执行、请求 prompt 构造和 CLI 不支持平台测试；相关测试与 `cargo check --bins` 已通过。
+
+# 2026-08-12 provider 错误恢复级联（蓝本 §2.5 withRetry + 看门狗 + 扣留）
+
+- withRetry：退避对齐蓝本（base 500ms / max 32s / jitter ±25%），重试类目 [429,529]+ECONNRESET/ETIMEDOUT 类传输错误（保留 408/5xx 网关语义）；重试耗尽才释放错误（扣留机制），meta 记录 provider_retry_attempts/outcome。
+- 空闲看门狗：provider 层单次调用 45s 告警 / 90s 中断（单次 transport 仍受 provider_timeout_ms）；tool 层 shell/subagent 等待 45s 打 idle_watchdog_warned_after_ms 标记，硬中断沿用既有超时配置。
+- 连续 529：经评估现有 fallback（fallback_on_retryable=true）已覆盖 529 自动切备用，无需新配置。
+- 测试：provider_openai_compatible 10 passed、idle_watchdog_tests 4 passed、tool_runtime_tests 56 passed、cargo test --lib 131 passed / 1 ignored、cargo check --bins 通过（隔离 worktree 验证）。
+
+# 2026-08-12 skill_evolver 评分门禁（蓝本 §2.1/§4 P1.4）
+
+- 新增 `src/skill_evolver/scoring_gate.rs`：评分门禁槽位（trait `SkillScoringGate` + `BenchmarkScoreGate` + 评分器 `SkillProposalScorer`/`BenchmarkEvaluatorScorer`/`FixedScoreScorer`）、候选池 `SkillCandidatePool`（`.evolver/candidates.jsonl`，未达标记录不落盘正式规则）、`SkillChangeSnapshot`。
+- 门禁四要点：① statement/rubric 隔离（复用 benchmark 框架 verify + 提案内嵌 rubric 文本即 fail-closed，rubric 0600 私有由 write_def 保证）；② 无基线不优化（`NoBaselinePolicy::RejectOptimization`，无基线只放行 CreateRule 首次登记，UpdateRule 拒绝）；③ 分数严格高于基线才 upsert，未达标进候选池；④ 变更前 `snapshot_before_change` 自动快照，回滚复用 RuleChangeJournal before/after。
+- `CanonicalSkillEvolver::apply_rule_change_gated`：治理门禁 → 评分门禁 → 未达标 record_candidate + ValidationRejected → 达标先快照再走既有写路径；`SkillEvolver` trait 加默认方法（非 canonical 槽位返回 InvalidRuleChange，向后兼容）。
+- CLI：`skill candidates`（只读审计候选池，JSON/text，不写技能文件）。
+- 测试：tests/skill_evolver_tests.rs 新增 6 个门禁测试、tests/cli_skill_tests.rs 新增 candidates 只读测试、scoring_gate 内 3 个单测；cargo check --bins、cargo test --test skill_evolver_tests 49 passed、cli_skill_tests 20 passed、cargo test --lib 137 passed（含并发 provider 默认模型任务补 Debug derive 小改）。
+
+# 2026-08-12 启用 GBrain 直连 API 通道（knowledge_context）+ Evaluator 默认模型跟随主模型
+
+- knowledge_context（GBrain 直连 API 通道）启用：开关 `metadata.knowledge_context=1`；endpoint/token_env/timeout 走 `external_knowledge.gbrain`（endpoint 缺省回退 `CHUANG_GBRAIN_LIVE_ENDPOINT`，token_env 缺省 `CHUANG_GBRAIN_LIVE_TOKEN`，真实 token 只从 env 读取，不写日志/回执）；预检/查询失败返回结构化 reason_code，knowledge 段标记 unavailable、不阻断主对话（无 silent fallback）。
+- Evaluator 默认模型跟随主模型：`BenchmarkEvaluator::from_runtime_config` 取 config 主 provider/model（Fallback 取 primary），Fake provider 结构化报错；CLI 覆盖能力保留。
+- 测试：external_knowledge_context_tests 6 passed、benchmark_evaluator lib 7 passed、runtime_config_file_tests 27 passed、knowledge_read_tests 14 passed、runtime_config_tests 30 passed、kernel_status_tests 12 passed、cargo check --bins 通过。
+
+# 2026-08-12 上下文压缩状态机升级（蓝本 §2.3：熔断器 + strip images + 策略级联 + 递归保护 + 工具集不变）
+
+- 熔断器：SummaryCompressionContextEngine 连续失败 N 次（默认 3）打开熔断，跳过自动压缩并记 CompressionSkipped 事件；支持手动 reset 或按配置冷却自动复位；状态经 circuit_breaker_status() 供 status 面板展示；阈值/冷却可经 metadata 透传键配置（context_compaction_breaker_threshold / _cooldown_secs）。
+- 压缩前 strip images：strip_image_payloads() 将 markdown data image / data:image base64 / 长 image_url JSON 字段替换为 [image] 文本占位，压缩后不回填；chuang_kernel turn summary 压缩路径同样先 strip 再截断。
+- 策略级联最小实现：CompactionStrategy 枚举（Snip→Micro→Collapse→Auto→SessionMemory）含 level/degrade/CASCADE_ORDER；现有压缩管线映射为 Auto 级，Snip=ContextPacker trim_segments、SessionMemory=deduplicate_segments，Collapse 为占位降级点。
+- 递归保护：is_compaction_product() 跳过 compaction_source=true / compacted=true / summary_compressed=true / kind=turn_summary 段；turn summary 记忆写入带 compaction_source=true 标记。
+- 工具集不变：引擎只重写 segment 内容不改工具定义，保 prefix cache（测试 summary_compression_keeps_toolset_segments_untouched 覆盖）。
+- 测试：context_engine_tests 27 passed、chuang_kernel_tests 14 passed、runtime_config_tests 30 passed、cargo test --lib 137 passed / 1 ignored、cargo check --bins 通过。
+
+# 2026-08-12 goal 模式升级 4 点（蓝本 §2.2 penguin goal-loop/goal-file/goal-prompts）
+
+- 收敛控制通道（GOAL.yaml 语义）：新增 `GoalStatus`（Active 系统持有 / Complete|Blocked 模型唯一可写）与 `GoalControlFile`（objective 由系统写，status 只认 complete|blocked，大小写不敏感）；解析失败/缺失/损坏归一化为 blocked（fail-closed：控制通道坏了就停，不空转）。`GoalSpec.status` 默认 Active，新增 `control_file_contents()`；CLI 新增 `goal status [--status complete|blocked]`，经 `GoalRun::apply_model_control_status` 写状态并由 `GoalRunStore::save` 持久化。
+- blocked 审计（连续 3 轮）：既有收敛判定（尾部连续相同 blocker_key/validation_notes 指纹达到 `max_repeated_blockers` 次 → Blocked）已满足「同一阻塞条件连续 3 轮」，用 `DEFAULT_MAX_REPEATED_BLOCKERS = 3` 常量显式化；`may_mark_complete()` 在收敛 Blocked 时禁止标 complete。
+- 预算耗尽 wrap-up：新增 `GoalBudgetState`（WithinBudget/Exhausted，时间戳损坏 fail-closed）与 `budget_state()`/`may_mark_complete()`；预算耗尽时 `goal step` 允许一轮收尾（至多 1 个 run，`wrap_up_consumed` 标记一次性），但不许标 complete（`apply_model_control_status` 拒绝）；wrap-up 消耗后后续 step 拒绝继续。
+- 幻影轮防护：新增防幻影轮账本 `{goal_root}/{goal_id}.rounds.json`（`GoalRoundLedger`：landed/completed/wrap_up_consumed）；`goal step` 先 `mark_goal_rounds_landed`（先落盘后执行）再跑 run_loop，abort 落轮间/截断轮保持 landed 绝不重发；成功后 `settle_goal_rounds` 记 completed、未执行候选取消 landed；输出新增 `goal_step_phantom_skipped_run_ids`/`goal_step_completed_run_ids`/`goal_step_wrap_up_round`/`goal_step_round_ledger_path`。
+- 测试：goal_mode_tests 26、goal_run_tests 12、goal_dispatch_tests 35、cli_goal_tests 31、goal_convergence_tests 20、goal_verifier_tests 30、goal_mode_smoke_tests 2、goal_mode_negative_smoke_tests 2 全绿；cargo check --bins 通过。

@@ -1,4 +1,4 @@
-//! `skill_evolver` 模块。公开接口：trait SkillEvolver；struct RuntimeEvent, EvolutionScope, SkillProposal, SkillProposalProvenance, ValidationReport, SkillApprovalReceipt, SkillSolidifyTicket, SkillId；enum RuntimeEventKind, SkillApprovalState, EvolutionError；fn pending_receipt, approved_receipt, pending, approved, approval_state, is_pending, is_approved, validate_consistency；use canonical, dry_run, failure, noop, rule_change。
+//! `skill_evolver` 模块。公开接口：trait SkillEvolver；struct RuntimeEvent, EvolutionScope, SkillProposal, SkillProposalProvenance, ValidationReport, SkillApprovalReceipt, SkillSolidifyTicket, SkillId；enum RuntimeEventKind, SkillApprovalState, EvolutionError；fn pending_receipt, approved_receipt, pending, approved, approval_state, is_pending, is_approved, validate_consistency；use canonical, dry_run, failure, noop, rule_change, scoring_gate。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ mod dry_run;
 mod failure;
 mod noop;
 mod rule_change;
+mod scoring_gate;
 
 pub use canonical::{
     CanonicalSkillEvolver, DuplicateDecision, SkillLifecycleStatus, SkillRetirementReceipt,
@@ -23,6 +24,12 @@ pub use rule_change::{
     FailureEvidence, GovernanceContext, GovernanceDecision, NoopRuleChangeGovernance,
     PolicyRuleChangeGovernance, RuleChangeGovernance, RuleChangeJournal, RuleChangeJournalEntry,
     RuleChangeKind, RuleChangeProposal, RuleChangeReceipt,
+};
+pub use scoring_gate::{
+    BenchmarkEvaluatorScorer, BenchmarkScoreGate, CandidatePoolEntry, FixedScoreScorer,
+    NoBaselinePolicy, ScoringGateDecision, SkillBenchmarkScore, SkillCandidatePool,
+    SkillChangeSnapshot, SkillProposalScorer, SkillScoringGate, SkillScoringGateConfig,
+    verify_proposal_statement_rubric_isolation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -398,6 +405,23 @@ pub trait SkillEvolver {
     ) -> Result<RuleChangeReceipt, EvolutionError> {
         Err(EvolutionError::InvalidRuleChange(
             "apply_rule_change is not supported by this evolver slot".to_string(),
+        ))
+    }
+
+    /// 带评分门禁的规则修改（外环阶段 3+4 + 评分门禁）：治理批准后，先过
+    /// 评分门禁（statement/rubric 隔离防作弊、无基线不优化、分数严格提升才
+    /// upsert），达标才走既有写路径；未达标记录进候选池，不落盘正式规则。
+    /// 默认实现返回结构化错误；只有 canonical 槽位支持（向后兼容，旧实现
+    /// 无需改动）。
+    fn apply_rule_change_gated(
+        &mut self,
+        _proposal: RuleChangeProposal,
+        _governance: &dyn RuleChangeGovernance,
+        _context: &GovernanceContext,
+        _gate: &dyn SkillScoringGate,
+    ) -> Result<RuleChangeReceipt, EvolutionError> {
+        Err(EvolutionError::InvalidRuleChange(
+            "apply_rule_change_gated is not supported by this evolver slot".to_string(),
         ))
     }
 

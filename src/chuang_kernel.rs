@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::agent_runtime::{AgentRuntime, AgentRuntimeError, RuntimeRequest, RuntimeResult};
 use crate::common::{AgentId, AuditRecord, TaskId, Timestamp};
-use crate::context_engine::{ContextBudget, ContextEngineKind, ContextSegment, SegmentSource};
+use crate::context_engine::{
+    strip_image_payloads, ContextBudget, ContextEngineKind, ContextSegment, SegmentSource,
+};
 use crate::governance::{
     risk_decision_label, risk_decision_parts, ActionKind, Governance, GovernanceError,
     ProposedAction, RiskDecision,
@@ -496,6 +498,8 @@ impl<S: MemoryStore, R: Responder> ChuangKernel<S, R> {
             ("kind".to_string(), "turn_summary".to_string()),
             ("agent_id".to_string(), self.config.agent_id.clone()),
             ("turn_id".to_string(), turn.turn_id.clone()),
+            // 递归保护：总结/压缩路径产物禁止再次触发上下文压缩。
+            ("compaction_source".to_string(), "true".to_string()),
         ]);
         if compacted {
             metadata.insert(
@@ -724,10 +728,14 @@ fn compact_turn_summary_content(
     let summary_limit = available
         .saturating_sub(user_limit + response_limit)
         .min(320);
+    // 压缩前先 strip images：turn 的 user_input / response 可能携带 data URL 等超长图片内容，
+    // 替换为文本占位引用，避免压缩请求超长（不回填——压缩摘要不需要原图）。
+    let user_input = strip_image_payloads(&turn.user_input);
+    let response_body = strip_image_payloads(&turn.result.response.body);
     let compacted = format!(
         "compacted=true\noriginal_chars={original_chars}\nuser={}\nresponse={}\nsummary={}",
-        truncate_chars(&turn.user_input, user_limit),
-        truncate_chars(&turn.result.response.body, response_limit),
+        truncate_chars(&user_input, user_limit),
+        truncate_chars(&response_body, response_limit),
         truncate_chars(&turn.report.summary, summary_limit)
     );
 

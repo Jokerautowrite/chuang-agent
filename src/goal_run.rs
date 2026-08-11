@@ -1,8 +1,8 @@
-//! `goal_run` 模块。公开接口：struct GoalRun, GoalWorkerPlan, GoalWriteScope, GoalValidationPlan, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalCheckpoint, EvidenceVerdict；enum ConvergenceStatus；fn new, assert_time_budget_allows_continue, step_run_cap, record_checkpoint, diagnostics, evidence_diagnostics, convergence_verdict, validate；const ACCEPTANCE_COMMAND_TIMEOUT_SECS。
+//! `goal_run` 模块。公开接口：struct GoalRun, GoalWorkerPlan, GoalWriteScope, GoalValidationPlan, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalCheckpoint, EvidenceVerdict；enum ConvergenceStatus, GoalBudgetState；fn new, assert_time_budget_allows_continue, budget_state, may_mark_complete, apply_model_control_status, step_run_cap, record_checkpoint, diagnostics, evidence_diagnostics, convergence_verdict, validate；const ACCEPTANCE_COMMAND_TIMEOUT_SECS。
 
 use crate::goal_mode::{
     AcceptanceCheck, AcceptanceCheckContract, AcceptanceVerdict, GoalAcceptancePlan,
-    GoalCheckpointPolicy, GoalConvergencePolicy, GoalEvidence, GoalSpec, GoalSpecError,
+    GoalCheckpointPolicy, GoalConvergencePolicy, GoalEvidence, GoalSpec, GoalSpecError, GoalStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -110,6 +110,23 @@ pub enum ConvergenceStatus {
     Spinning,
     /// 同一卡点重复达到上限，判定 blocked，禁止以同策略重试。
     Blocked,
+}
+
+/// 预算状态（升级点 3：预算耗尽 wrap-up）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalBudgetState {
+    WithinBudget,
+    Exhausted,
+}
+
+impl GoalBudgetState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GoalBudgetState::WithinBudget => "within_budget",
+            GoalBudgetState::Exhausted => "exhausted",
+        }
+    }
 }
 
 /// 收敛判定结果（确定性纯函数输出）。
@@ -255,6 +272,63 @@ impl GoalRun {
             Some(cap) if cap > 0 => requested.min(cap),
             _ => requested,
         }
+    }
+
+    /// 预算状态（升级点 3：预算耗尽 wrap-up）。
+    /// 未设预算 / 旧 run 无 `started_at` → `WithinBudget`；
+    /// 时间戳损坏按 fail-closed 处理为 `Exhausted`（允许收尾但不许标 complete）。
+    pub fn budget_state(&self) -> GoalBudgetState {
+        let Some(max_minutes) = self.goal_spec.budget.max_minutes else {
+            return GoalBudgetState::WithinBudget;
+        };
+        let Some(started_at) = self.started_at.as_deref() else {
+            return GoalBudgetState::WithinBudget;
+        };
+        let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_at) else {
+            return GoalBudgetState::Exhausted;
+        };
+        let elapsed = chrono::Utc::now().signed_duration_since(started.with_timezone(&chrono::Utc));
+        if elapsed.num_minutes().max(0) as u64 >= u64::from(max_minutes) {
+            GoalBudgetState::Exhausted
+        } else {
+            GoalBudgetState::WithinBudget
+        }
+    }
+
+    /// 是否允许标 complete：
+    /// - 预算耗尽（wrap-up 模式）→ false（收尾不留悬案，不许标 complete）；
+    /// - 收敛判定 blocked（同一卡点连续 3 轮）→ false（禁止以同策略重试）。
+    pub fn may_mark_complete(&self) -> bool {
+        if self.budget_state() == GoalBudgetState::Exhausted {
+            return false;
+        }
+        if self.convergence_verdict().status == ConvergenceStatus::Blocked {
+            return false;
+        }
+        true
+    }
+
+    /// 模型通过 GOAL.yaml 控制通道写 status（升级点 1 + 3 交汇）：
+    /// - 只接受 `complete|blocked`（Active 是系统持有值，模型不可写）；
+    /// - 预算耗尽 wrap-up 或收敛 blocked 时禁止 complete；
+    /// - 调用方负责持久化（`GoalRunStore::save`）。
+    pub fn apply_model_control_status(&mut self, status: GoalStatus) -> Result<(), GoalRunError> {
+        if status == GoalStatus::Active {
+            return Err(GoalRunError::new(
+                "goal_spec.status",
+                "model may only write status complete|blocked; active is system-owned",
+            ));
+        }
+        if status == GoalStatus::Complete && !self.may_mark_complete() {
+            let reason = if self.budget_state() == GoalBudgetState::Exhausted {
+                "goal time budget exhausted; wrap-up round is allowed but completion is forbidden"
+            } else {
+                "goal convergence is blocked; completion is forbidden; write status=blocked instead"
+            };
+            return Err(GoalRunError::new("goal_spec.status", reason));
+        }
+        self.goal_spec.status = status;
+        Ok(())
     }
 
     pub fn record_checkpoint(&mut self, checkpoint: GoalCheckpoint) -> Result<(), GoalRunError> {
@@ -492,6 +566,12 @@ impl GoalRunStore {
         let mut run = self.load(goal_id)?;
         run.record_checkpoint(checkpoint)?;
         self.write_run(&path, &run)
+    }
+
+    /// 保存更新后的 run（status 变更等）。与 `create` 不同，允许覆盖已存在的 run。
+    pub fn save(&self, run: &GoalRun) -> Result<GoalRunReceipt, GoalRunError> {
+        let path = self.goal_path(&run.goal_spec.goal_id)?;
+        self.write_run(&path, run)
     }
 
     pub fn goal_path(&self, goal_id: &str) -> Result<PathBuf, GoalRunError> {
@@ -986,7 +1066,9 @@ fn format_goal_spec_error(error: GoalSpecError) -> String {
 /// - 无 checkpoint → `Unknown`。
 /// - 尾部连续相同"进度指纹"（blocker_key 优先，否则 validation_notes 全量指纹）的
 ///   checkpoint 数 `n`：
-///   - `n >= max_repeated_blockers`（且 > 0）→ `Blocked`：同一卡点重复到上限，
+///   - `n >= max_repeated_blockers`（且 > 0）→ `Blocked`：同一阻塞条件连续
+///     `max_repeated_blockers` 轮（默认 `DEFAULT_MAX_REPEATED_BLOCKERS = 3`，
+///     升级点 2：同一阻塞条件连续 3 轮才允许 blocked，防过早放弃）才判定 blocked，
 ///     禁止继续以同策略重试；必须换策略或由外部裁决。
 ///   - `n >= 2` → `Spinning`：已出现重复，但尚未到上限。
 ///   - 否则 → `Converging`。

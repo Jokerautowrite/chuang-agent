@@ -7,15 +7,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::benchmark::BenchmarkStore;
 use chuang_agent::goal_dispatch::{
-    collect_goal_dispatch_reports, collect_goal_dispatch_reports_read_only, dispatch_goal_run,
-    load_goal_dispatch_manifest, GoalCheckpointSuggestion, GoalDispatchCollectionReceipt,
-    GoalDispatchDiagnostics, GoalDispatchManifest,
+    already_completed_run_ids, collect_goal_dispatch_reports,
+    collect_goal_dispatch_reports_read_only, consume_goal_wrap_up_round, dispatch_goal_run,
+    goal_round_ledger_path, goal_step_candidates, load_goal_dispatch_manifest,
+    load_goal_round_ledger, mark_goal_rounds_landed, phantom_skipped_run_ids, settle_goal_rounds,
+    GoalCheckpointSuggestion, GoalDispatchCollectionReceipt, GoalDispatchDiagnostics,
+    GoalDispatchManifest,
 };
-use chuang_agent::goal_mode::{AcceptanceCheck, GoalAcceptancePlan, GoalEvidence, GoalSpec};
+use chuang_agent::goal_mode::{
+    AcceptanceCheck, GoalAcceptancePlan, GoalEvidence, GoalSpec, GoalStatus,
+};
 use chuang_agent::goal_run::{
     check_evidence_plan, evaluate_acceptance_plan, ConvergenceStatus, ConvergenceVerdict,
-    GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun, GoalRunDiagnostics,
-    GoalRunReceipt, GoalRunStore, GoalValidationPlan, GoalWorkerPlan, GoalWriteScope,
+    GoalBudgetState, GoalCheckpoint, GoalCheckpointWriteback, GoalIntegrationPolicy, GoalRun,
+    GoalRunDiagnostics, GoalRunReceipt, GoalRunStore, GoalValidationPlan, GoalWorkerPlan,
+    GoalWriteScope,
 };
 use chuang_agent::runtime_config::RuntimeConfig;
 use chuang_agent::skill_evolver::{
@@ -41,6 +47,7 @@ pub(crate) fn goal_command(args: &[String]) -> Result<(), String> {
         Some("dispatch") => goal_dispatch_command(&args[1..]),
         Some("collect") => goal_collect_command(&args[1..]),
         Some("step") => goal_step_command(&args[1..]),
+        Some("status") => goal_status_command(&args[1..]),
         Some("evolve") => goal_evolve_command(&args[1..]),
         Some("verify") => goal_verify_command(&args[1..]),
         _ => Err(usage()),
@@ -1040,14 +1047,53 @@ fn goal_collect_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `goal status`：GOAL.yaml 收敛控制通道（升级点 1 + 3）。
+/// - 不传 `--status` 时为只读查询；
+/// - 传 `--status complete|blocked` 时由模型写状态（active 是系统持有值，拒绝）；
+/// - 预算耗尽 wrap-up / 收敛 blocked 时禁止标 complete（`may_mark_complete` 为 false）。
+fn goal_status_command(args: &[String]) -> Result<(), String> {
+    let request = parse_goal_status(args)?;
+    let store = GoalRunStore::new(&request.root);
+    let mut run = store
+        .load(&request.goal_id)
+        .map_err(format_goal_run_error)?;
+    if let Some(status) = request.status {
+        run.apply_model_control_status(status)
+            .map_err(format_goal_run_error)?;
+        store.save(&run).map_err(format_goal_run_error)?;
+    }
+    let output = GoalStatusCliOutput {
+        goal_id: run.goal_spec.goal_id.clone(),
+        goal_status: run.goal_spec.status,
+        goal_budget_state: run.budget_state(),
+        goal_may_mark_complete: run.may_mark_complete(),
+        goal_control_file: run.goal_spec.control_file_contents(),
+    };
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("goal_status_goal_id: {}", output.goal_id);
+            println!("goal_status: {}", output.goal_status.as_str());
+            println!(
+                "goal_status_budget_state: {}",
+                output.goal_budget_state.as_str()
+            );
+            println!(
+                "goal_status_may_mark_complete: {}",
+                output.goal_may_mark_complete
+            );
+            println!("goal_status_control_file:");
+            println!("{}", output.goal_control_file);
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+    Ok(())
+}
+
 fn goal_step_command(args: &[String]) -> Result<(), String> {
     let request = parse_goal_step(args)?;
     let store = GoalRunStore::new(&request.root);
     let goal_run = store
         .load(&request.goal_id)
-        .map_err(format_goal_run_error)?;
-    goal_run
-        .assert_time_budget_allows_continue()
         .map_err(format_goal_run_error)?;
     let manifest = load_goal_dispatch_manifest(&request.root, &request.goal_id)
         .map_err(format_goal_dispatch_error)?;
@@ -1056,8 +1102,43 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|dispatch| dispatch.run_id.clone())
         .collect::<BTreeSet<_>>();
+
+    // 升级点 4：防幻影轮账本。候选 = 允许集 - 已 landed；
+    // 已 landed（abort 落轮间 / 截断轮）或已 completed 的 run_id 绝不重发。
+    let ledger = load_goal_round_ledger(&request.root, &request.goal_id)
+        .map_err(format_goal_dispatch_error)?;
+    let candidates = goal_step_candidates(&ledger, &allowed_run_ids);
+    let candidate_run_ids = candidates.iter().cloned().collect::<BTreeSet<_>>();
+    let phantom_skipped_run_ids = phantom_skipped_run_ids(&ledger, &allowed_run_ids);
+    let completed_run_ids = already_completed_run_ids(&ledger, &allowed_run_ids);
+
+    // 升级点 3：预算耗尽 wrap-up——允许一轮收尾，但不许标 complete。
+    let budget_state = goal_run.budget_state();
+    let wrap_up_round = budget_state == GoalBudgetState::Exhausted && !ledger.wrap_up_consumed;
+    if budget_state == GoalBudgetState::Exhausted && ledger.wrap_up_consumed {
+        return Err(
+            "goal_budget_exhausted: wrap-up round already consumed; further steps forbidden"
+                .to_string(),
+        );
+    }
+    if budget_state == GoalBudgetState::WithinBudget {
+        goal_run
+            .assert_time_budget_allows_continue()
+            .map_err(format_goal_run_error)?;
+    }
+
     let requested_max_runs = request.max_runs.unwrap_or(allowed_run_ids.len().max(1));
-    let max_runs = goal_run.step_run_cap(requested_max_runs);
+    // 收尾轮只允许一轮、至多 1 个 run（预算耗尽后最小化继续烧钱）。
+    let max_runs = if wrap_up_round {
+        goal_run.step_run_cap(requested_max_runs).min(1)
+    } else {
+        goal_run.step_run_cap(requested_max_runs)
+    };
+
+    // 先落盘后执行（升级点 4：mark landed 先于 run_loop，abort/截断后不重发）。
+    mark_goal_rounds_landed(&request.root, &request.goal_id, &candidates, "goal-step")
+        .map_err(format_goal_dispatch_error)?;
+
     let queue = FileSubagentQueue::open(FileSubagentQueueConfig::new(&request.queue_root))
         .map_err(dispatch_error_from_queue)?;
     let run_once_request = request.run_once_request();
@@ -1066,18 +1147,39 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
         &run_once_request,
         max_runs,
         request.max_concurrency,
-        Some(&allowed_run_ids),
+        Some(&candidate_run_ids),
     )?;
+
+    // 收尾：实际执行的记 completed；候选未执行的取消 landed（可后续 step 再跑）。
+    settle_goal_rounds(
+        &request.root,
+        &request.goal_id,
+        &candidates,
+        &run_loop.run_ids,
+    )
+    .map_err(format_goal_dispatch_error)?;
+
+    if wrap_up_round {
+        consume_goal_wrap_up_round(&request.root, &request.goal_id)
+            .map_err(format_goal_dispatch_error)?;
+    }
+
     let collection =
         collect_goal_dispatch_reports(&request.root, &request.queue_root, &request.goal_id)
             .map_err(format_goal_dispatch_error)?;
     let receipt = GoalStepReceipt {
+        round_ledger_path: goal_round_ledger_path(&request.root, &request.goal_id)
+            .display()
+            .to_string(),
         goal_id: request.goal_id,
         goal_root: request.root.display().to_string(),
         queue_root: request.queue_root.display().to_string(),
         manifest,
         run_loop,
         collection,
+        phantom_skipped_run_ids,
+        completed_run_ids,
+        wrap_up_round,
         checkpoint_recorded: false,
         writes_progress_log: false,
         writes_handoff: false,
@@ -1114,6 +1216,16 @@ fn goal_step_command(args: &[String]) -> Result<(), String> {
                 "goal_step_missing_run_ids: {}",
                 format_text_list(&receipt.collection.missing_run_ids)
             );
+            println!(
+                "goal_step_phantom_skipped_run_ids: {}",
+                format_text_list(&receipt.phantom_skipped_run_ids)
+            );
+            println!(
+                "goal_step_completed_run_ids: {}",
+                format_text_list(&receipt.completed_run_ids)
+            );
+            println!("goal_step_wrap_up_round: {}", receipt.wrap_up_round);
+            println!("goal_step_round_ledger_path: {}", receipt.round_ledger_path);
             println!(
                 "goal_step_handoff_query_parent_context_handoff_count: {}",
                 receipt
@@ -1251,6 +1363,13 @@ struct GoalStepCliRequest {
     max_concurrency: usize,
 }
 
+struct GoalStatusCliRequest {
+    goal_id: String,
+    root: PathBuf,
+    status: Option<GoalStatus>,
+    output: ControlOutputFormat,
+}
+
 impl GoalStepCliRequest {
     fn run_once_request(&self) -> SubagentRunOnceCliRequest {
         let mut runtime = RuntimeConfig::new(self.queue_root.join("goal-step-memory.db"));
@@ -1275,9 +1394,22 @@ struct GoalStepReceipt {
     manifest: GoalDispatchManifest,
     run_loop: SubagentRunLoopCliOutput,
     collection: GoalDispatchCollectionReceipt,
+    round_ledger_path: String,
+    phantom_skipped_run_ids: Vec<String>,
+    completed_run_ids: Vec<String>,
+    wrap_up_round: bool,
     checkpoint_recorded: bool,
     writes_progress_log: bool,
     writes_handoff: bool,
+}
+
+#[derive(Serialize)]
+struct GoalStatusCliOutput {
+    goal_id: String,
+    goal_status: GoalStatus,
+    goal_budget_state: GoalBudgetState,
+    goal_may_mark_complete: bool,
+    goal_control_file: String,
 }
 
 fn build_goal_operability_status(
@@ -2244,6 +2376,46 @@ fn parse_goal_step(args: &[String]) -> Result<GoalStepCliRequest, String> {
         approve_exec,
         max_runs,
         max_concurrency,
+    })
+}
+
+fn parse_goal_status(args: &[String]) -> Result<GoalStatusCliRequest, String> {
+    let mut goal_id = "mainline-mvp".to_string();
+    let mut root = default_goal_root();
+    let mut status: Option<GoalStatus> = None;
+    let mut output = ControlOutputFormat::Text;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--goal-id" => goal_id = take_value(args, &mut index, "--goal-id")?,
+            "--root" => root = PathBuf::from(take_value(args, &mut index, "--root")?),
+            "--status" => {
+                let value = take_value(args, &mut index, "--status")?;
+                status = Some(match value.to_ascii_lowercase().as_str() {
+                    "complete" => GoalStatus::Complete,
+                    "blocked" => GoalStatus::Blocked,
+                    _ => {
+                        return Err(
+                            "goal status only accepts complete|blocked; active is system-owned"
+                                .to_string(),
+                        )
+                    }
+                });
+            }
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            _ => return Err(usage()),
+        }
+    }
+
+    Ok(GoalStatusCliRequest {
+        goal_id,
+        root,
+        status,
+        output,
     })
 }
 

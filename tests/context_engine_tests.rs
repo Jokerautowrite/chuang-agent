@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use chuang_agent::context_engine::{
     ContextBudget, ContextCompactionEventKind, ContextEngine, ContextPackError, ContextPacker,
-    ContextSegment, DeterministicContextEngine, SegmentSource, SummaryCompressionContextEngine,
-    WorkingReservationReason,
+    ContextSegment, CompactionStrategy, DeterministicContextEngine, SegmentSource,
+    SummaryCompressionContextEngine, WorkingReservationReason, strip_image_payloads,
 };
 
 fn ts(value: &str) -> DateTime<Utc> {
@@ -956,4 +956,509 @@ fn compaction_summary_is_queryable_without_segment_content() {
     assert!(!rendered.contains("should-not-appear"));
     assert!(!rendered.contains("Authorization"));
     assert!(!rendered.contains("secret="));
+}
+
+#[test]
+fn compaction_strategy_cascade_enum_orders_and_degrades() {
+    use CompactionStrategy::*;
+    assert_eq!(
+        CompactionStrategy::CASCADE_ORDER,
+        [Snip, Micro, Collapse, Auto, SessionMemory]
+    );
+    assert_eq!(Snip.level(), 1);
+    assert_eq!(Micro.level(), 2);
+    assert_eq!(Collapse.level(), 3);
+    assert_eq!(Auto.level(), 4);
+    assert_eq!(SessionMemory.level(), 5);
+
+    assert_eq!(Auto.degrade(), Some(Collapse));
+    assert_eq!(Collapse.degrade(), Some(Micro));
+    assert_eq!(Micro.degrade(), Some(Snip));
+    assert_eq!(Snip.degrade(), None);
+    assert_eq!(SessionMemory.degrade(), Some(Auto));
+
+    for strategy in CompactionStrategy::CASCADE_ORDER {
+        assert_eq!(
+            CompactionStrategy::from_str(strategy.as_str()),
+            Some(strategy),
+            "as_str/from_str should round-trip for {strategy:?}"
+        );
+    }
+    assert_eq!(CompactionStrategy::from_str("bogus"), None);
+}
+
+#[test]
+fn summary_compression_breaker_opens_after_three_consecutive_failures() {
+    // 系统段超出 reserve 预算 → pack 失败，连续 3 次后熔断打开。
+    let engine = SummaryCompressionContextEngine::new(budget(20, 30, 0))
+        .with_circuit_breaker(3, 60);
+    let failing = vec![segment(
+        "system-1",
+        SegmentSource::System,
+        "system instruction",
+        Some(30),
+        255,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    )];
+
+    for _ in 0..2 {
+        let error = engine
+            .pack(failing.clone())
+            .expect_err("oversized system should fail pack");
+        assert_eq!(
+            error,
+            ContextPackError::BudgetExceeded {
+                required_system_tokens: 30,
+                max_tokens: 20,
+            }
+        );
+    }
+    let status = engine.circuit_breaker_status();
+    assert!(!status.open, "breaker should stay closed after 2 failures");
+    assert_eq!(status.consecutive_failures, 2);
+
+    let _ = engine
+        .pack(failing)
+        .expect_err("third failure should still fail pack");
+    let status = engine.circuit_breaker_status();
+    assert!(status.open, "breaker should open after 3 consecutive failures");
+    assert_eq!(status.consecutive_failures, 3);
+    assert_eq!(status.threshold, 3);
+    assert!(status.opened_at.is_some());
+    assert!(status.last_failure_at.is_some());
+}
+
+#[test]
+fn summary_compression_breaker_skips_compression_while_open() {
+    // 阈值 1：一次失败即熔断；随后可成功的 pack 跳过自动压缩（不截断、不标记压缩）。
+    let engine =
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
+            .with_circuit_breaker(1, 60);
+    let failing = vec![segment(
+        "system-1",
+        SegmentSource::System,
+        "system instruction",
+        Some(30),
+        255,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    )];
+    let _ = engine.pack(failing).expect_err("failure opens breaker");
+    assert!(engine.circuit_breaker_status().open);
+
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-ok",
+                SegmentSource::System,
+                "system",
+                Some(5),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &"memory-".repeat(20),
+                Some(140),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("pack should succeed without compression");
+
+    let memory = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "memory-1")
+        .expect("memory segment should exist");
+    assert!(
+        !memory.content.ends_with("..."),
+        "breaker open should skip compression so long memory stays raw"
+    );
+    assert!(memory
+        .metadata
+        .get("summary_compressed")
+        .is_none(),);
+    assert!(packed
+        .compaction_events
+        .iter()
+        .any(|event| event.kind == ContextCompactionEventKind::CompressionSkipped
+            && event.reason.as_deref() == Some("circuit_breaker_open")));
+
+    let summary = packed.compaction_summary();
+    assert_eq!(summary.compression_skipped_count, 1);
+    assert_eq!(
+        summary.compression_skipped_reasons,
+        vec!["circuit_breaker_open".to_string()]
+    );
+    assert!(engine.circuit_breaker_status().skipped_compactions >= 1);
+}
+
+#[test]
+fn summary_compression_breaker_success_resets_consecutive_failures() {
+    let engine =
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
+            .with_circuit_breaker(3, 60);
+    let failing = vec![segment(
+        "system-1",
+        SegmentSource::System,
+        "system instruction",
+        Some(30),
+        255,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    )];
+    for _ in 0..2 {
+        let _ = engine.pack(failing.clone()).expect_err("fail pack");
+    }
+    assert_eq!(engine.circuit_breaker_status().consecutive_failures, 2);
+
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-ok",
+                SegmentSource::System,
+                "system",
+                Some(5),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &"memory-".repeat(20),
+                Some(140),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let memory = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "memory-1")
+        .expect("memory segment should exist");
+    assert!(
+        memory.content.ends_with("..."),
+        "success should reset breaker so compression runs again"
+    );
+    let status = engine.circuit_breaker_status();
+    assert!(!status.open);
+    assert_eq!(status.consecutive_failures, 0);
+}
+
+#[test]
+fn summary_compression_breaker_manual_reset_and_cooldown_auto_reset() {
+    // 手动重置：熔断打开后 reset 关闭并清零。
+    let engine =
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
+            .with_circuit_breaker(1, 60);
+    let failing = vec![segment(
+        "system-1",
+        SegmentSource::System,
+        "system instruction",
+        Some(30),
+        255,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    )];
+    let _ = engine.pack(failing).expect_err("fail pack");
+    assert!(engine.circuit_breaker_status().open);
+    engine.reset_circuit_breaker();
+    let status = engine.circuit_breaker_status();
+    assert!(!status.open);
+    assert_eq!(status.consecutive_failures, 0);
+    assert!(status.opened_at.is_none());
+
+    // 按配置冷却：cooldown=0 时熔断自动复位，下一次 pack 恢复压缩。
+    let engine =
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
+            .with_circuit_breaker(1, 0);
+    let failing = vec![segment(
+        "system-1",
+        SegmentSource::System,
+        "system instruction",
+        Some(30),
+        255,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    )];
+    let _ = engine.pack(failing).expect_err("fail pack");
+    assert!(engine.circuit_breaker_status().open);
+
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-ok",
+                SegmentSource::System,
+                "system",
+                Some(5),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &"memory-".repeat(20),
+                Some(140),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("pack should succeed");
+    let memory = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "memory-1")
+        .expect("memory segment should exist");
+    assert!(
+        memory.content.ends_with("..."),
+        "cooldown elapsed should auto-reset breaker and resume compression"
+    );
+    assert!(packed
+        .compaction_events
+        .iter()
+        .all(|event| event.kind != ContextCompactionEventKind::CompressionSkipped));
+    let status = engine.circuit_breaker_status();
+    assert!(!status.open);
+    assert_eq!(status.consecutive_failures, 0);
+}
+
+#[test]
+fn summary_compression_strips_image_payloads_before_truncation() {
+    let engine = SummaryCompressionContextEngine::new(budget(1000, 10, 0));
+    let image = format!("data:image/png;base64,{}", "A".repeat(400));
+    let content = format!("说明开头 {image} 说明结尾");
+    let packed = engine
+        .pack(vec![segment(
+            "memory-1",
+            SegmentSource::Memory,
+            &content,
+            None,
+            100,
+            "2026-04-30T18:00:00Z",
+            "2026-04-30T18:00:00Z",
+        )])
+        .expect("pack should succeed");
+
+    let memory = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "memory-1")
+        .expect("memory segment should exist");
+    assert!(
+        memory.content.contains("[image]"),
+        "base64 payload should become a text placeholder, got: {}",
+        memory.content
+    );
+    assert!(
+        !memory.content.contains("base64"),
+        "no base64 payload should survive compression"
+    );
+    assert_eq!(
+        memory.metadata.get("image_stripped").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(packed.compaction_summary().image_stripped_count, 1);
+
+    // markdown 图片与 image_url JSON 字段同样被 strip。
+    let markdown = format!("![alt](data:image/png;base64,{})", "B".repeat(200));
+    assert_eq!(strip_image_payloads(&markdown), "![alt]([image])");
+    let json = format!("{{\"image_url\": \"data:image/png;base64,{}\"}}", "C".repeat(300));
+    let stripped_json = strip_image_payloads(&json);
+    assert!(stripped_json.contains("[image]"));
+    assert!(!stripped_json.contains("base64"));
+}
+
+#[test]
+fn summary_compression_recursion_guard_skips_already_summarized_segments() {
+    let engine = SummaryCompressionContextEngine::new(budget(5000, 10, 0));
+    let long_content = &"already-summarized-".repeat(30);
+
+    let mut turn_summary = segment(
+        "mem-turn-summary",
+        SegmentSource::Memory,
+        &format!("{long_content}-turn-summary"),
+        None,
+        100,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    );
+    turn_summary
+        .metadata
+        .insert("kind".to_string(), "turn_summary".to_string());
+
+    let mut compaction_source = segment(
+        "mem-compaction-source",
+        SegmentSource::Memory,
+        &format!("{long_content}-compaction-source"),
+        None,
+        100,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    );
+    compaction_source
+        .metadata
+        .insert("compaction_source".to_string(), "true".to_string());
+
+    let mut compacted = segment(
+        "mem-compacted",
+        SegmentSource::Memory,
+        &format!("{long_content}-compacted"),
+        None,
+        100,
+        "2026-04-30T18:00:00Z",
+        "2026-04-30T18:00:00Z",
+    );
+    compacted
+        .metadata
+        .insert("compacted".to_string(), "true".to_string());
+
+    let packed = engine
+        .pack(vec![turn_summary, compaction_source, compacted])
+        .expect("pack should succeed");
+    for id in [
+        "mem-turn-summary",
+        "mem-compaction-source",
+        "mem-compacted",
+    ] {
+        let item = packed
+            .segments
+            .iter()
+            .find(|segment| segment.id == id)
+            .unwrap_or_else(|| panic!("{id} should be kept"));
+        let expected = match id {
+            "mem-turn-summary" => format!("{long_content}-turn-summary"),
+            "mem-compaction-source" => format!("{long_content}-compaction-source"),
+            "mem-compacted" => format!("{long_content}-compacted"),
+            other => panic!("unexpected id {other}"),
+        };
+        assert_eq!(item.content.as_str(), expected.as_str(), "{id} must not be re-compressed");
+        assert!(
+            item.metadata.get("summary_compressed").is_none(),
+            "{id} must not be marked as re-compressed"
+        );
+    }
+}
+
+#[test]
+fn summary_compression_keeps_toolset_segments_untouched() {
+    // 压缩 trigger 保持工具集不变：工具说明/系统段内容原样保留（保 prefix cache）。
+    let engine = SummaryCompressionContextEngine::new(budget(1000, 10, 0));
+    let tool_protocol = "tool instructions: exec_command runs bash, output is truncated by rtk";
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system instruction",
+                Some(5),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "tool-instructions",
+                SegmentSource::Identity,
+                tool_protocol,
+                Some(80),
+                252,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &"memory-".repeat(20),
+                Some(140),
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let tool = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "tool-instructions")
+        .expect("tool instructions should be kept");
+    assert_eq!(tool.content, tool_protocol, "toolset content must not change");
+    assert!(tool.metadata.get("summary_compressed").is_none());
+    let system = packed
+        .segments
+        .iter()
+        .find(|segment| segment.id == "system-1")
+        .expect("system segment should be kept");
+    assert_eq!(system.content, "system instruction");
+}
+
+#[test]
+fn compaction_summary_reports_strategy_and_strip_metadata() {
+    let engine = SummaryCompressionContextEngine::new(budget(1000, 10, 0));
+    let image = format!("data:image/jpeg;base64,{}", "D".repeat(300));
+    let packed = engine
+        .pack(vec![
+            segment(
+                "system-1",
+                SegmentSource::System,
+                "system instruction",
+                Some(5),
+                255,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+            segment(
+                "memory-1",
+                SegmentSource::Memory,
+                &format!("before {image} after"),
+                None,
+                100,
+                "2026-04-30T18:00:00Z",
+                "2026-04-30T18:00:00Z",
+            ),
+        ])
+        .expect("pack should succeed");
+
+    let summary = packed.compaction_summary();
+    assert_eq!(summary.strategy, "auto");
+    assert_eq!(summary.image_stripped_count, 1);
+    assert_eq!(summary.compression_skipped_count, 0);
+    assert!(summary.compression_skipped_reasons.is_empty());
+
+    // 确定性引擎无压缩 → strategy=none。
+    let deterministic = DeterministicContextEngine::new(budget(1000, 10, 0));
+    let packed = deterministic
+        .pack(vec![segment(
+            "memory-1",
+            SegmentSource::Memory,
+            "short memory",
+            Some(12),
+            100,
+            "2026-04-30T18:00:00Z",
+            "2026-04-30T18:00:00Z",
+        )])
+        .expect("pack should succeed");
+    assert_eq!(packed.compaction_summary().strategy, "none");
+}
+
+#[test]
+fn summary_compression_engine_exposes_strategy_and_breaker_config() {
+    let engine = SummaryCompressionContextEngine::with_recent_turns(budget(1000, 10, 0), 3)
+        .with_compaction_strategy(CompactionStrategy::Micro)
+        .with_circuit_breaker(5, 120);
+    assert_eq!(engine.compaction_strategy(), CompactionStrategy::Micro);
+    let status = engine.circuit_breaker_status();
+    assert_eq!(status.threshold, 5);
+    assert_eq!(status.cooldown_secs, 120);
+    assert!(!status.open);
 }

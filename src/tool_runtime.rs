@@ -419,6 +419,11 @@ pub const DEFAULT_SUBAGENT_WORKER_MODEL: &str = "deepseek-v4-flash";
 /// Default capability advertised to the subagent dispatch/run-loop chain.
 pub const DEFAULT_SUBAGENT_WORKER_CAPABILITY: &str = "workspace";
 
+/// 工具执行层空闲看门狗告警阈值（蓝本 docs/reference-dig-20260810.md §2.5）：
+/// 45s 未完成即给执行记录打告警标记。硬中断沿用各工具现有超时配置
+/// （shell_timeout_ms / subagent timeout_ms / provider request_timeout_ms）。
+const TOOL_IDLE_WATCHDOG_WARN_MS: u64 = 45_000;
+
 const SUBAGENT_RUNNER_REL: &str = "scripts/chuang-codex-runner.py";
 const RUNTIME_CONFIG_PATH_META: &str = "config_path";
 
@@ -2014,14 +2019,20 @@ fn execute_shell_exec(
         }
     };
 
-    let output = match wait_with_timeout(child, timeout_ms) {
+    let wait_outcome = wait_with_timeout_with_watchdog(
+        child,
+        timeout_ms,
+        Some(TOOL_IDLE_WATCHDOG_WARN_MS),
+    );
+    let watchdog_note = idle_watchdog_note(wait_outcome.warn_elapsed_ms);
+    let output = match wait_outcome.output {
         Ok(output) => output,
         Err(error) => {
             return failed_record(
                 registry,
                 call,
                 format!(
-                    "shell_exec_wait_failed cwd={} error={e}",
+                    "shell_exec_wait_failed cwd={} error={e}{watchdog_note}",
                     cwd_path.display(),
                     e = error
                 ),
@@ -2046,7 +2057,7 @@ fn execute_shell_exec(
         registry,
         call,
         format!(
-            "cwd={} status={:?}{rtk_note} stdout=\n{}\nstderr=\n{}",
+            "cwd={} status={:?}{rtk_note}{watchdog_note} stdout=\n{}\nstderr=\n{}",
             cwd_path.display(),
             output.status.code(),
             stdout.text,
@@ -2764,8 +2775,15 @@ fn run_subagent_cli_json(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("subagent_cli_spawn_failed: {error}"))?;
-    let output = wait_with_timeout(child, timeout_ms)
-        .map_err(|error| format!("subagent_cli_wait_failed: {error}"))?;
+    let wait_outcome = wait_with_timeout_with_watchdog(
+        child,
+        timeout_ms,
+        Some(TOOL_IDLE_WATCHDOG_WARN_MS),
+    );
+    let watchdog_note = idle_watchdog_note(wait_outcome.warn_elapsed_ms);
+    let output = wait_outcome
+        .output
+        .map_err(|error| format!("subagent_cli_wait_failed: {error}{watchdog_note}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
@@ -3933,23 +3951,87 @@ fn wait_with_timeout(
     mut child: std::process::Child,
     timeout_ms: u64,
 ) -> std::io::Result<std::process::Output> {
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    wait_with_timeout_with_watchdog(child, timeout_ms, None).output
+}
+
+/// 空闲看门狗等待结果：`warn_elapsed_ms` 在跨过告警阈值时记录实际耗时，
+/// 硬中断仍由 `timeout_ms`（各工具现有超时配置）决定。
+struct WatchdogWaitOutcome {
+    output: std::io::Result<std::process::Output>,
+    warn_elapsed_ms: Option<u64>,
+}
+
+/// `wait_with_timeout` 的看门狗变体：`warn_ms` 阈值到达时打告警标记
+/// （蓝本 §2.5 空闲看门狗 45s 告警；kill 沿用既有 timeout）。
+fn wait_with_timeout_with_watchdog(
+    mut child: std::process::Child,
+    timeout_ms: u64,
+    warn_ms: Option<u64>,
+) -> WatchdogWaitOutcome {
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(timeout_ms);
+    let mut warn_elapsed_ms = None;
     loop {
-        if child.try_wait()?.is_some() {
-            return child.wait_with_output();
+        match child.try_wait() {
+            Err(error) => {
+                return WatchdogWaitOutcome {
+                    output: Err(error),
+                    warn_elapsed_ms,
+                };
+            }
+            Ok(Some(_)) => {
+                let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                if warn_elapsed_ms.is_none() {
+                    warn_elapsed_ms = check_watchdog_warn(elapsed_ms, warn_ms);
+                }
+                return WatchdogWaitOutcome {
+                    output: child.wait_with_output(),
+                    warn_elapsed_ms,
+                };
+            }
+            Ok(None) => {}
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let output = child.wait_with_output()?;
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!(
-                    "shell_exec timed out after {timeout_ms}ms status={:?}",
-                    output.status.code()
-                ),
-            ));
+            let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            if warn_elapsed_ms.is_none() {
+                warn_elapsed_ms = check_watchdog_warn(elapsed_ms, warn_ms);
+            }
+            let output = match child.wait_with_output() {
+                Ok(output) => output,
+                Err(error) => {
+                    return WatchdogWaitOutcome {
+                        output: Err(error),
+                        warn_elapsed_ms,
+                    };
+                }
+            };
+            return WatchdogWaitOutcome {
+                output: Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "shell_exec timed out after {timeout_ms}ms status={:?}",
+                        output.status.code()
+                    ),
+                )),
+                warn_elapsed_ms,
+            };
         }
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn check_watchdog_warn(elapsed_ms: u64, warn_ms: Option<u64>) -> Option<u64> {
+    match warn_ms {
+        Some(threshold) if elapsed_ms >= threshold => Some(elapsed_ms),
+        _ => None,
+    }
+}
+
+fn idle_watchdog_note(warn_elapsed_ms: Option<u64>) -> String {
+    match warn_elapsed_ms {
+        Some(elapsed) => format!(" idle_watchdog_warned_after_ms={elapsed}"),
+        None => String::new(),
     }
 }
 
@@ -4277,4 +4359,59 @@ ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","co
         reparsed.contains("\"tool\":\"code_execute\""),
         "reparsed={reparsed}"
     );
+}
+
+#[cfg(test)]
+mod idle_watchdog_tests {
+    use super::{
+        check_watchdog_warn, idle_watchdog_note, wait_with_timeout_with_watchdog,
+        TOOL_IDLE_WATCHDOG_WARN_MS,
+    };
+
+    #[test]
+    fn warn_threshold_follows_blueprint_45s() {
+        assert_eq!(TOOL_IDLE_WATCHDOG_WARN_MS, 45_000);
+    }
+
+    #[test]
+    fn check_watchdog_warn_marks_only_after_threshold() {
+        assert_eq!(check_watchdog_warn(44_999, Some(45_000)), None);
+        assert_eq!(check_watchdog_warn(45_000, Some(45_000)), Some(45_000));
+        assert_eq!(check_watchdog_warn(90_000, Some(45_000)), Some(90_000));
+        // 未配置告警阈值时永不告警。
+        assert_eq!(check_watchdog_warn(120_000, None), None);
+    }
+
+    #[test]
+    fn idle_watchdog_note_renders_only_when_warned() {
+        assert!(idle_watchdog_note(None).is_empty());
+        let note = idle_watchdog_note(Some(45_123));
+        assert!(note.contains("idle_watchdog_warned_after_ms=45123"), "note={note}");
+    }
+
+    #[test]
+    fn wait_with_watchdog_marks_real_elapsed_for_slow_child_only() {
+        // 快速命令：不告警。
+        let child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("true")
+            .spawn()
+            .expect("spawn true");
+        let fast = wait_with_timeout_with_watchdog(child, 10_000, Some(45_000));
+        assert!(fast.output.is_ok());
+        assert_eq!(fast.warn_elapsed_ms, None, "fast child must not warn");
+
+        // 慢命令（2s）vs 告警阈值 1s：按实际耗时（>=1000ms）告警，而非 0/差值。
+        let child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("sleep 2")
+            .spawn()
+            .expect("spawn sleep");
+        let slow = wait_with_timeout_with_watchdog(child, 10_000, Some(1_000));
+        assert!(slow.output.is_ok());
+        let warned = slow
+            .warn_elapsed_ms
+            .expect("slow child must warn with 1s threshold");
+        assert!(warned >= 1_000, "warned={warned} must be real elapsed");
+    }
 }

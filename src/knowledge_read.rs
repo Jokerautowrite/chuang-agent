@@ -1,4 +1,4 @@
-//! `knowledge_read` 模块。公开接口：trait KnowledgeReadAdapter；struct KnowledgeReadSourceConfig, KnowledgeReadConfig, KnowledgeReadStatus, KnowledgeReadQuery, KnowledgeReadHit, KnowledgeReadResult, KnowledgeReadError, ReadonlyHttpKnowledgeReadAdapter；fn disabled, new_wiki, new_gbrain, preflight_knowledge_read_status, new, unavailable_knowledge_read_status；const KNOWLEDGE_READ_CONTRACT_VERSION, KNOWLEDGE_READ_SOURCES。
+//! `knowledge_read` 模块。公开接口：trait KnowledgeReadAdapter；struct KnowledgeReadSourceConfig, KnowledgeReadConfig, KnowledgeReadStatus, KnowledgeReadQuery, KnowledgeReadHit, KnowledgeReadResult, KnowledgeReadError, ReadonlyHttpKnowledgeReadAdapter；fn disabled, new_wiki, new_gbrain, new_wiki_from_config, new_gbrain_from_config, preflight_knowledge_read_status, new, unavailable_knowledge_read_status；const KNOWLEDGE_READ_CONTRACT_VERSION, KNOWLEDGE_READ_SOURCES。
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -127,6 +127,26 @@ impl ReadonlyHttpKnowledgeReadAdapter {
         Self::new_for_source("gbrain", endpoint, token, timeout_ms)
     }
 
+    /// Build a live wiki adapter from a runtime source config (`endpoint` +
+    /// `token_env` + `timeout_ms`). The token is read from the environment
+    /// variable named by `token_env` at build time and is never stored in
+    /// logs, status surfaces, or receipts.
+    pub fn new_wiki_from_config(
+        config: &KnowledgeReadSourceConfig,
+    ) -> Result<Self, KnowledgeReadError> {
+        new_readonly_from_config("wiki", config)
+    }
+
+    /// Build a live GBrain adapter from a runtime source config (`endpoint` +
+    /// `token_env` + `timeout_ms`). The token is read from the environment
+    /// variable named by `token_env` at build time and is never stored in
+    /// logs, status surfaces, or receipts.
+    pub fn new_gbrain_from_config(
+        config: &KnowledgeReadSourceConfig,
+    ) -> Result<Self, KnowledgeReadError> {
+        new_readonly_from_config("gbrain", config)
+    }
+
     fn new_for_source(
         source: &str,
         endpoint: impl Into<String>,
@@ -246,6 +266,63 @@ impl ReadonlyHttpKnowledgeReadAdapter {
             Ok((status_code, String::from_utf8_lossy(&body).to_string()))
         })
     }
+}
+
+fn new_readonly_from_config(
+    source: &str,
+    config: &KnowledgeReadSourceConfig,
+) -> Result<ReadonlyHttpKnowledgeReadAdapter, KnowledgeReadError> {
+    let endpoint = config
+        .endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            knowledge_read_error(
+                "knowledge_read_endpoint_missing",
+                format!(
+                    "{source} knowledge_read endpoint is missing; cannot build live adapter"
+                ),
+                false,
+                "readonly_http",
+            )
+        })?;
+    let token_env = config
+        .token_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            knowledge_read_error(
+                "knowledge_read_token_env_missing",
+                format!(
+                    "{source} knowledge_read token_env is missing; cannot build live adapter"
+                ),
+                false,
+                "readonly_http",
+            )
+        })?;
+    let token = std::env::var(token_env)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            knowledge_read_error(
+                "knowledge_read_token_missing",
+                format!(
+                    "{source} knowledge_read token env {token_env} is unset; cannot build live adapter"
+                ),
+                false,
+                "readonly_http",
+            )
+        })?;
+    let timeout_ms = config.timeout_ms.unwrap_or(30_000);
+    Ok(ReadonlyHttpKnowledgeReadAdapter::new_for_source(
+        source,
+        endpoint,
+        token,
+        timeout_ms,
+    ))
 }
 
 impl KnowledgeReadAdapter for ReadonlyHttpKnowledgeReadAdapter {

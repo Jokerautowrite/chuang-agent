@@ -843,9 +843,37 @@ fn parse_external_knowledge_source(
     let endpoint_key = format!("external_knowledge.{source}.endpoint");
     let token_env_key = format!("external_knowledge.{source}.token_env");
     let timeout_key = format!("external_knowledge.{source}.timeout_ms");
+    let mut endpoint = get_any(values, &[&endpoint_key]).cloned();
+    let mut token_env = get_any(values, &[&token_env_key]).cloned();
+    // GBrain 直连 API 通道（knowledge_context）：endpoint/token_env 缺省时回退到
+    // 既有只读回执脚本约定的环境变量（CHUANG_GBRAIN_LIVE_ENDPOINT /
+    // CHUANG_GBRAIN_LIVE_TOKEN），真实 token 只从 env 读取，不进入 config 文件
+    // 或代码；config 文件只保留开关与 env 变量名占位。
+    if source == "gbrain" {
+        if endpoint
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            endpoint = std::env::var("CHUANG_GBRAIN_LIVE_ENDPOINT")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .or(endpoint);
+        }
+        if token_env
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            token_env = Some("CHUANG_GBRAIN_LIVE_TOKEN".to_string());
+        }
+    }
     Ok(KnowledgeReadSourceConfig {
-        endpoint: get_any(values, &[&endpoint_key]).cloned(),
-        token_env: get_any(values, &[&token_env_key]).cloned(),
+        endpoint,
+        token_env,
         timeout_ms: get_any(values, &[&timeout_key])
             .map(|value| parse_u64(&timeout_key, value))
             .transpose()?,

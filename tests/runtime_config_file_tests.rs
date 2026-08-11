@@ -224,6 +224,62 @@ timeout_ms = 7000
     assert_eq!(summary.external_knowledge_gbrain_timeout_ms, Some(7000));
 }
 
+struct EnvVarGuard {
+    names: Vec<String>,
+}
+
+impl EnvVarGuard {
+    fn set(name: &str, value: &str) -> Self {
+        std::env::set_var(name, value);
+        Self {
+            names: vec![name.to_string()],
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        for name in &self.names {
+            std::env::remove_var(name);
+        }
+    }
+}
+
+#[test]
+fn config_file_parses_knowledge_context_switch_and_gbrain_env_fallback() {
+    // GBrain 直连 API 通道（knowledge_context）开关走 [metadata]；
+    // endpoint 缺省回退 CHUANG_GBRAIN_LIVE_ENDPOINT（与 live 回执脚本同口径），
+    // token_env 缺省默认 CHUANG_GBRAIN_LIVE_TOKEN；真实 token 只从 env 读取。
+    let _guard = EnvVarGuard::set(
+        "CHUANG_GBRAIN_LIVE_ENDPOINT",
+        "https://gbrain-live.example.invalid/query",
+    );
+    let config = parse_runtime_config_file(
+        r#"
+db_path = "./tmp/chuang.db"
+identity_memory_root = "./tmp/identity"
+
+[metadata]
+knowledge_context = "1"
+
+[external_knowledge.gbrain]
+timeout_ms = 9000
+"#,
+    )
+    .expect("config should parse");
+
+    assert!(config.knowledge_context_enabled());
+    assert_eq!(
+        config.external_knowledge.gbrain.endpoint.as_deref(),
+        Some("https://gbrain-live.example.invalid/query")
+    );
+    assert_eq!(
+        config.external_knowledge.gbrain.token_env.as_deref(),
+        Some("CHUANG_GBRAIN_LIVE_TOKEN")
+    );
+    assert_eq!(config.external_knowledge.gbrain.timeout_ms, Some(9000));
+}
+
 #[test]
 fn config_file_parses_section_subagent_live_worker_status_only_shape() {
     let config = parse_runtime_config_file(
