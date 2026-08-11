@@ -65,3 +65,6 @@ __pycache__/
 Thumbs.db
 /server-assets/
 .chuang/
+
+# Runtime diary (generated per-day by remember pipeline)
+/identity/diary/
