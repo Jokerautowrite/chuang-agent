@@ -78,8 +78,58 @@ fn diary_memory_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("show") => diary_show_command(&args[1..]),
         Some("distill") => diary_distill_command(&args[1..]),
+        Some("append") => diary_append_command(&args[1..]),
         _ => Err(usage()),
     }
+}
+
+/// 手动追加一条日记（节点总结）。seq 缺省时取当天最大 seq+1。
+fn diary_append_command(args: &[String]) -> Result<(), String> {
+    let request = parse_diary_append(args)?;
+    let mut store = open_diary_store(&request.runtime_args)?;
+
+    let seq = match request.seq {
+        Some(seq) => seq,
+        None => {
+            let entries = store
+                .read_date(&request.date)
+                .map_err(|e| format!("diary_read_failed: {e:?}"))?;
+            entries.iter().map(|entry| entry.seq).max().unwrap_or(0) + 1
+        }
+    };
+
+    let entry = chuang_agent::diary::DiaryEntry {
+        date: request.date.clone(),
+        seq,
+        created_at: chuang_agent::diary::now_local_hm(),
+        session_id: request.session_id.clone(),
+        trigger: request.trigger.clone(),
+        completed: request.completed.clone(),
+        in_progress: request.in_progress.clone(),
+        pending: request.pending.clone(),
+        constraints: request.constraints.clone(),
+    };
+    store
+        .append(entry.clone())
+        .map_err(|e| format!("diary_append_failed: {e:?}"))?;
+
+    let output = DiaryAppendOutput {
+        date: request.date,
+        seq,
+        session_id: request.session_id,
+        trigger: request.trigger,
+        written: true,
+    };
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "diary_appended date={} seq={} session={} trigger={}",
+                output.date, output.seq, output.session_id, output.trigger
+            );
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+    Ok(())
 }
 
 fn diary_show_command(args: &[String]) -> Result<(), String> {
@@ -324,6 +374,77 @@ fn parse_diary_distill(args: &[String]) -> Result<DiaryDistillRequest, String> {
         output,
         date,
         dry_run,
+    })
+}
+
+fn parse_diary_append(args: &[String]) -> Result<DiaryAppendRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut date = today_local();
+    let mut session_id = "manual".to_string();
+    let mut trigger = "manual".to_string();
+    let mut seq = None;
+    let mut completed = String::new();
+    let mut in_progress = String::new();
+    let mut pending = String::new();
+    let mut constraints = String::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--date" => {
+                date = take_local_value(args, &mut index, "--date")?;
+            }
+            "--seq" => {
+                let raw = take_local_value(args, &mut index, "--seq")?;
+                seq = Some(raw.parse::<u64>().map_err(|_| {
+                    format!("memory diary append requires numeric --seq, got: {raw}")
+                })?);
+            }
+            "--session-id" => {
+                session_id = take_local_value(args, &mut index, "--session-id")?;
+            }
+            "--trigger" => {
+                trigger = take_local_value(args, &mut index, "--trigger")?;
+            }
+            "--completed" => {
+                completed = take_local_value(args, &mut index, "--completed")?;
+            }
+            "--in-progress" => {
+                in_progress = take_local_value(args, &mut index, "--in-progress")?;
+            }
+            "--pending" => {
+                pending = take_local_value(args, &mut index, "--pending")?;
+            }
+            "--constraints" => {
+                constraints = take_local_value(args, &mut index, "--constraints")?;
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            _ => return Err(usage()),
+        }
+    }
+    if completed.trim().is_empty() && in_progress.trim().is_empty() {
+        return Err(
+            "memory diary append requires --completed or --in-progress (both empty is useless)"
+                .to_string(),
+        );
+    }
+    Ok(DiaryAppendRequest {
+        runtime_args,
+        output,
+        date,
+        seq,
+        session_id,
+        trigger,
+        completed,
+        in_progress,
+        pending,
+        constraints,
     })
 }
 
@@ -2432,6 +2553,20 @@ struct DiaryDistillRequest {
     dry_run: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiaryAppendRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    date: String,
+    seq: Option<u64>,
+    session_id: String,
+    trigger: String,
+    completed: String,
+    in_progress: String,
+    pending: String,
+    constraints: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct DiaryShowOutput {
     date: String,
@@ -2461,6 +2596,15 @@ struct DiaryDistillOutput {
     rejected_count: usize,
     written_count: usize,
     rejected: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct DiaryAppendOutput {
+    date: String,
+    seq: u64,
+    session_id: String,
+    trigger: String,
+    written: bool,
 }
 
 #[cfg(test)]
