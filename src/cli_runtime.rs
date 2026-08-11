@@ -14,6 +14,9 @@ use chuang_agent::chuang_kernel::{
     IdentityBootstrapSnapshot, DEFAULT_MEMORY_WRITE_MAX_CHARS,
 };
 use chuang_agent::context_engine::{ContextSegment, SegmentSource};
+use chuang_agent::diary::{
+    now_local_hm, today_local, DiaryConfig, DiaryEntry, FileDiaryStore, DIARY_TURN_THRESHOLD,
+};
 use chuang_agent::emotion_delta::{EmotionDeltaExtractor, RuleEmotionDeltaExtractor};
 use chuang_agent::emotion_slot::EmotionTrigger;
 use chuang_agent::emotion_store::{
@@ -3467,6 +3470,24 @@ where
     if let Some(pending) = pending_session_archive {
         records.session_record_id = pending.commit(options, &mut turn)?;
         remember_commit.mark_applied(RememberWorkflowStep::Archive);
+        // 节点总结写日记（非每轮）：收尾信号 或 距上次日记 ≥ N 轮才追加。
+        // 日记是附带记忆沉淀，失败只降级，不阻断用户回复。
+        if let Some(session_id) = request.session_id.as_deref() {
+            match maybe_write_diary_entry(options, &turn, session_id) {
+                Ok(Some(seq)) => {
+                    records.diary_seq = Some(seq);
+                    remember_commit.mark_applied(RememberWorkflowStep::Diary);
+                }
+                Ok(None) => {
+                    remember_commit.mark_skipped(RememberWorkflowStep::Diary);
+                }
+                Err(error) => {
+                    remember_commit.mark_failed(RememberWorkflowStep::Diary, error);
+                }
+            }
+        } else {
+            remember_commit.mark_skipped(RememberWorkflowStep::Diary);
+        }
     }
 
     // 身份记忆失败只降级（附带的记忆沉淀），不阻断用户回复。
@@ -3579,6 +3600,7 @@ impl PendingSessionArchive {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RememberWorkflowStep {
     Archive,
+    Diary,
     Identity,
     Experience,
     QueuedDispatch,
@@ -3588,6 +3610,7 @@ impl RememberWorkflowStep {
     fn as_str(self) -> &'static str {
         match self {
             Self::Archive => "archive",
+            Self::Diary => "diary",
             Self::Identity => "identity",
             Self::Experience => "experience",
             Self::QueuedDispatch => "queued_dispatch",
@@ -3597,6 +3620,7 @@ impl RememberWorkflowStep {
     fn status_key(self) -> &'static str {
         match self {
             Self::Archive => "remember_archive_status",
+            Self::Diary => "remember_diary_status",
             Self::Identity => "remember_identity_status",
             Self::Experience => "remember_experience_status",
             Self::QueuedDispatch => "remember_queued_dispatch_status",
@@ -3618,6 +3642,7 @@ impl RememberCommitTracker {
         let mut step_statuses = BTreeMap::new();
         for (requested, step) in [
             (request.remember_session, RememberWorkflowStep::Archive),
+            (request.remember_session, RememberWorkflowStep::Diary),
             (request.remember_identity, RememberWorkflowStep::Identity),
             (remember_experience, RememberWorkflowStep::Experience),
             (
@@ -3654,11 +3679,23 @@ impl RememberCommitTracker {
         self.failure_message = Some(error);
     }
 
+    fn mark_skipped(&mut self, step: RememberWorkflowStep) {
+        self.step_statuses.insert(step.status_key(), "skipped");
+    }
+
     fn pending_steps(&self) -> Vec<RememberWorkflowStep> {
         self.requested_steps
             .iter()
             .copied()
-            .filter(|step| !self.applied_steps.contains(step) && self.failed_step != Some(*step))
+            .filter(|step| {
+                // 只把状态仍为 pending 的步骤算作待办；
+                // applied/failed/skipped 一律排除（failed_step 是单槽位，
+                // 多步失败时会被覆盖，不能依赖它判断单个步骤的最终状态）。
+                self.step_statuses
+                    .get(step.status_key())
+                    .map(|status| *status == "pending")
+                    .unwrap_or(false)
+            })
             .collect()
     }
 
@@ -3883,6 +3920,141 @@ fn archive_session_turn(
         "written".to_string(),
     );
     Ok(())
+}
+
+/// 节点触发写日记（非每轮）：命中收尾信号，或距上次日记 ≥ DIARY_TURN_THRESHOLD 轮时，
+/// 追加一条「已完成/进行中/待办/约束」总结到 `identity/diary/YYYY-MM-DD.md`。
+/// 返回 Some(seq) 表示写入；None 表示未触发；Err 表示写入失败（调用方降级处理）。
+fn maybe_write_diary_entry(
+    options: &CliOptions,
+    turn: &ChuangKernelTurn,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    let Some(seq) = turn
+        .result
+        .response
+        .meta
+        .extra
+        .get("session_archive_sequence")
+        .and_then(|raw| raw.parse::<u64>().ok())
+    else {
+        return Ok(None);
+    };
+
+    let dual_file_config = options
+        .runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
+    let diary_config = DiaryConfig::new(dual_file_config.root);
+    let mut store =
+        FileDiaryStore::open(diary_config).map_err(|e| format!("diary_open_failed: {e:?}"))?;
+    let date = today_local();
+    let last_seq = store
+        .last_seq_for_session(&date, session_id)
+        .map_err(|e| format!("diary_read_failed: {e:?}"))?;
+    let since_last = seq.saturating_sub(last_seq.unwrap_or(0));
+
+    let trigger = if is_diary_completion_signal(&turn.user_input) {
+        Some("completion_signal")
+    } else if since_last >= DIARY_TURN_THRESHOLD {
+        Some("turn_threshold")
+    } else {
+        None
+    };
+    let Some(trigger) = trigger else {
+        return Ok(None);
+    };
+
+    let entry = build_diary_entry(options, turn, session_id, seq, trigger)?;
+    store
+        .append(entry)
+        .map_err(|e| format!("diary_append_failed: {e:?}"))?;
+    Ok(Some(seq.to_string()))
+}
+
+fn build_diary_entry(
+    options: &CliOptions,
+    turn: &ChuangKernelTurn,
+    session_id: &str,
+    seq: u64,
+    trigger: &str,
+) -> Result<DiaryEntry, String> {
+    let completed = diary_completed_snippet(options, session_id)?;
+    let in_progress = truncate_diary_text(&turn.report.summary, 160);
+    let pending = "由后续用户指令或最新响应中的待办决定".to_string();
+    let constraints =
+        "对话全量保留在 SQLite session_turn_archive；压缩上下文时保留最近 10 轮原文；经验由每日提炼产生"
+            .to_string();
+    Ok(DiaryEntry {
+        date: today_local(),
+        seq,
+        created_at: now_local_hm(),
+        session_id: session_id.to_string(),
+        trigger: trigger.to_string(),
+        completed,
+        in_progress,
+        pending,
+        constraints,
+    })
+}
+
+/// 从会话归档重放最近 3 轮作为「已完成」片段（截断单条，避免日记膨胀）。
+fn diary_completed_snippet(options: &CliOptions, session_id: &str) -> Result<String, String> {
+    let archive = SqliteSessionArchive::open(&options.runtime.db_path)
+        .map_err(|error| format!("session_archive_open_failed: {error}"))?;
+    let turns = archive
+        .replay(session_id)
+        .map_err(|error| format!("session_archive_replay_failed: {error}"))?;
+    let recent = turns.iter().rev().take(3).collect::<Vec<_>>();
+    if recent.is_empty() {
+        return Ok("暂无完成记录".to_string());
+    }
+    let lines = recent
+        .iter()
+        .rev()
+        .map(|turn| {
+            format!(
+                "第{}轮：{} → {}",
+                turn.sequence,
+                truncate_diary_text(&turn.raw_user_input, 40),
+                truncate_diary_text(&turn.raw_response, 40)
+            )
+        })
+        .collect::<Vec<_>>();
+    Ok(lines.join("\n"))
+}
+
+fn truncate_diary_text(text: &str, max_chars: usize) -> String {
+    let compact = text.trim();
+    if compact.chars().count() <= max_chars {
+        return compact.to_string();
+    }
+    let mut out: String = compact.chars().take(max_chars).collect();
+    out.push('…');
+    out
+}
+
+/// 收尾信号：用户输入出现这些词时，认为当前任务告一段落，值得写一条日记总结。
+fn is_diary_completion_signal(user_input: &str) -> bool {
+    const SIGNALS: &[&str] = &[
+        "好了",
+        "搞定",
+        "可以了",
+        "就这样",
+        "先这样",
+        "收工",
+        "没问题了",
+        "结束了",
+        "谢谢",
+        "辛苦",
+        "done",
+        "all done",
+        "that's it",
+        "wrap up",
+    ];
+    let text = user_input.trim().to_lowercase();
+    SIGNALS.iter().any(|signal| text.contains(signal))
 }
 
 fn insert_runtime_report_metadata(turn: &mut chuang_agent::chuang_kernel::ChuangKernelTurn) {
@@ -4170,16 +4342,11 @@ fn extract_experience_lesson(turn: &chuang_agent::chuang_kernel::ChuangKernelTur
 fn experience_policy_for_request(request: &RunCliRequest) -> ExperienceWritePolicy {
     if request.remember_experience {
         ExperienceWritePolicy::Always
-    } else if request
-        .options
-        .runtime
-        .metadata
-        .get("channel")
-        .map(String::as_str)
-        == Some("app-server")
-    {
-        ExperienceWritePolicy::Deterministic
     } else {
+        // 每轮直接沉淀经验已废弃（占容量、噪音大）。改为：
+        // 对话全量落 SQLite（session_turn_archive），节点总结写日记（diary），
+        // 经验每日从日记提炼（memory diary distill → experiences.md）。
+        // 只有显式 --remember-experience 才直写经验。
         ExperienceWritePolicy::Disabled
     }
 }
@@ -5070,7 +5237,7 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
-    fn experience_policy_defaults_to_app_server_quality_gate() {
+    fn experience_policy_defaults_to_disabled_except_explicit_request() {
         let mut request = test_run_request_for_unit_tests("长期约束：以后不要自动删除文件。");
         assert_eq!(
             experience_policy_for_request(&request),
@@ -5083,7 +5250,8 @@ allowed_channels = ["app-server"]
             .insert("channel".to_string(), "app-server".to_string());
         assert_eq!(
             experience_policy_for_request(&request),
-            ExperienceWritePolicy::Deterministic
+            // app-server 通道也不再每轮直接沉淀经验：经验改为每日从日记提炼。
+            ExperienceWritePolicy::Disabled
         );
         request.remember_experience = true;
         assert_eq!(
@@ -5093,9 +5261,9 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
-    fn app_server_quality_gate_writes_durable_experience_and_rejects_noise() {
+    fn app_server_no_longer_writes_experience_every_turn() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "chuang-agent-app-server-experience-policy-test-{}",
+            "chuang-agent-app-server-no-experience-every-turn-test-{}",
             unique_record_suffix_for_test()
         ));
         fs::create_dir_all(&temp_dir).expect("temp dir should be created");
@@ -5111,7 +5279,8 @@ allowed_channels = ["app-server"]
 
         let (durable_result, durable_records) =
             run_with_options(&durable).expect("durable app-server turn should succeed");
-        assert!(durable_records.experience_record_id.is_some());
+        // 即使命中长期约束，app-server 也不再每轮直写 experiences.md。
+        assert!(durable_records.experience_record_id.is_none());
         assert_eq!(
             durable_result
                 .response
@@ -5119,35 +5288,11 @@ allowed_channels = ["app-server"]
                 .extra
                 .get("experience_write_reason")
                 .map(String::as_str),
-            Some("durable_constraint")
+            Some("policy_disabled")
         );
-
-        let noise_identity_root = temp_dir.join("noise-identity");
-        let mut noise = test_run_request_for_unit_tests("git log 显示本轮提交历史。");
-        noise.options.runtime =
-            test_runtime(temp_dir.join("noise.db"), noise_identity_root.clone());
-        noise
-            .options
-            .runtime
-            .metadata
-            .insert("channel".to_string(), "app-server".to_string());
-        noise.workspace_root = Some(temp_dir.clone());
-
-        let (noise_result, noise_records) =
-            run_with_options(&noise).expect("noise app-server turn should succeed");
-        assert!(noise_records.experience_record_id.is_none());
-        assert_eq!(
-            noise_result
-                .response
-                .meta
-                .extra
-                .get("experience_write_reason")
-                .map(String::as_str),
-            Some("git_history")
-        );
-        let noise_experiences =
-            fs::read_to_string(noise_identity_root.join("experiences.md")).unwrap_or_default();
-        assert!(!noise_experiences.contains("source=runtime_turn"));
+        let experiences =
+            fs::read_to_string(identity_root.join("experiences.md")).unwrap_or_default();
+        assert!(!experiences.contains("source=runtime_turn"));
     }
 
     #[test]
@@ -5373,6 +5518,110 @@ allowed_channels = ["app-server"]
                 .map(String::as_str),
             Some("memory_scope=session,session_id=alpha")
         );
+    }
+
+    #[test]
+    fn run_with_options_writes_diary_on_completion_signal_and_skips_otherwise() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "chuang-agent-cli-diary-trigger-test-{}",
+            unique_record_suffix_for_test()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let identity_root = temp_dir.join("identity");
+        let runtime = test_runtime(temp_dir.join("memory.db"), identity_root.clone());
+
+        let first = RunCliRequest {
+            options: CliOptions {
+                runtime: runtime.clone(),
+            },
+            user_input: "继续推进下一步".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("diary-alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+        let (first_result, first_records) =
+            run_with_options(&first).expect("first run should succeed");
+        // 非收尾信号 + 距上次日记 < 阈值：不写日记。
+        assert!(first_records.diary_seq.is_none());
+        assert_eq!(
+            first_result
+                .response
+                .meta
+                .extra
+                .get("remember_diary_status")
+                .map(String::as_str),
+            Some("skipped")
+        );
+
+        let second = RunCliRequest {
+            options: CliOptions {
+                runtime: runtime.clone(),
+            },
+            user_input: "好了，这个任务做完了，先这样".to_string(),
+            workspace_root: Some(temp_dir.clone()),
+            remember: false,
+            session_id: Some("diary-alpha".to_string()),
+            remember_session: true,
+            conversation_history: Vec::new(),
+            remember_identity: false,
+            remember_experience: false,
+            dispatch_subagent: false,
+            goal_spec: None,
+            knowledge_context: None,
+            live_guidance_path: None,
+            progress_path: None,
+        };
+        let (second_result, second_records) =
+            run_with_options(&second).expect("second run should succeed");
+        // 收尾信号命中：写日记。
+        assert!(second_records.diary_seq.is_some());
+        assert_eq!(
+            second_result
+                .response
+                .meta
+                .extra
+                .get("remember_diary_status")
+                .map(String::as_str),
+            Some("applied")
+        );
+
+        let date = today_local();
+        let diary_path = identity_root.join("diary").join(format!("{date}.md"));
+        let content = fs::read_to_string(&diary_path).expect("diary should be written");
+        assert!(content.contains("[seq=2 trigger=completion_signal]"));
+        assert!(content.contains("session=diary-alpha"));
+        assert!(content.contains("completed="));
+    }
+
+    #[test]
+    fn diary_completion_signal_matches_wrap_up_phrases() {
+        for input in [
+            "好了，搞定",
+            "可以了，先这样",
+            "收工，谢谢",
+            "这个没问题了",
+            "done, wrap up",
+        ] {
+            assert!(
+                is_diary_completion_signal(input),
+                "expected completion signal for: {input}"
+            );
+        }
+        for input in ["继续做", "然后呢", "再改一下", "帮我完成这个任务"] {
+            assert!(
+                !is_diary_completion_signal(input),
+                "expected no completion signal for: {input}"
+            );
+        }
     }
 
     #[test]

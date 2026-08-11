@@ -264,7 +264,15 @@ fn is_pure_greeting(text: &str) -> bool {
     ];
     let compact = text
         .chars()
-        .filter(|c| !c.is_whitespace() && *c != '？' && *c != '?' && *c != '！' && *c != '!' && *c != '，' && *c != ',')
+        .filter(|c| {
+            !c.is_whitespace()
+                && *c != '？'
+                && *c != '?'
+                && *c != '！'
+                && *c != '!'
+                && *c != '，'
+                && *c != ','
+        })
         .collect::<String>();
     // 去掉问候词后剩余内容极少，视为纯寒暄。
     let mut remainder = compact.clone();

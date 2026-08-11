@@ -3,6 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
+use chuang_agent::diary::{today_local, DiaryConfig, FileDiaryStore};
+use chuang_agent::experience_policy::{ExperienceCandidate, ExperienceWritePolicy};
 use chuang_agent::hermes_memory::{
     DualFileMemoryError, DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry,
 };
@@ -20,6 +22,7 @@ pub(crate) fn memory_command(args: &[String]) -> Result<(), String> {
         Some("lim") => lim_memory_command(&args[1..]),
         Some("maintenance") => maintenance_memory_command(&args[1..]),
         Some("knowledge") => knowledge_memory_command(&args[1..]),
+        Some("diary") => diary_memory_command(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -69,6 +72,259 @@ fn knowledge_memory_command(args: &[String]) -> Result<(), String> {
         Some("source-contract") => memory_knowledge_source_contract_command(&args[1..]),
         _ => Err(usage()),
     }
+}
+
+fn diary_memory_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("show") => diary_show_command(&args[1..]),
+        Some("distill") => diary_distill_command(&args[1..]),
+        _ => Err(usage()),
+    }
+}
+
+fn diary_show_command(args: &[String]) -> Result<(), String> {
+    let request = parse_diary_show(args)?;
+    let store = open_diary_store(&request.runtime_args)?;
+    let root = store.config().diary_root().display().to_string();
+    let entries = store
+        .read_date(&request.date)
+        .map_err(|e| format!("diary_read_failed: {e:?}"))?;
+    let output = DiaryShowOutput {
+        date: request.date.clone(),
+        root,
+        entry_count: entries.len(),
+        entries: entries
+            .iter()
+            .map(|entry| DiaryEntryOutput {
+                created_at: entry.created_at.clone(),
+                seq: entry.seq,
+                session_id: entry.session_id.clone(),
+                trigger: entry.trigger.clone(),
+                completed: entry.completed.clone(),
+                in_progress: entry.in_progress.clone(),
+                pending: entry.pending.clone(),
+                constraints: entry.constraints.clone(),
+            })
+            .collect(),
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!("diary_date: {}", output.date);
+            println!("diary_root: {}", output.root);
+            println!("diary_entry_count: {}", output.entry_count);
+            for entry in &output.entries {
+                println!(
+                    "--- {} [seq={} trigger={}] session={} ---",
+                    entry.created_at, entry.seq, entry.trigger, entry.session_id
+                );
+                println!("completed: {}", entry.completed);
+                println!("in_progress: {}", entry.in_progress);
+                println!("pending: {}", entry.pending);
+                println!("constraints: {}", entry.constraints);
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+/// 每日提炼：读取某天日记，用确定性经验策略过滤，把「值得沉淀」的条目
+/// 追加进 experiences.md（每日从日记提炼经验，不再每轮直写）。
+fn diary_distill_command(args: &[String]) -> Result<(), String> {
+    let request = parse_diary_distill(args)?;
+    let store = open_diary_store(&request.runtime_args)?;
+    let entries = store
+        .read_date(&request.date)
+        .map_err(|e| format!("diary_read_failed: {e:?}"))?;
+
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+    for entry in &entries {
+        let candidate = ExperienceCandidate {
+            user_input: "",
+            summary: &entry.as_candidate_text(),
+            lesson: "",
+        };
+        let decision = ExperienceWritePolicy::Deterministic.evaluate(&candidate);
+        if decision.should_write() {
+            accepted.push(entry.clone());
+        } else {
+            rejected.push(format!(
+                "seq={} reason={}",
+                entry.seq,
+                decision.reason().as_str()
+            ));
+        }
+    }
+
+    let mut written_count = 0usize;
+    if !request.dry_run {
+        let dual_file_config = options_dual_file_config(&request.runtime_args)?;
+        let mut memory_store = FileDualFileMemoryStore::open(dual_file_config.clone())
+            .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
+        // 已提炼过的条目跳过（幂等：每日重复跑不产生重复 id）。
+        let existing = memory_store
+            .read_experiences()
+            .map_err(|e| format!("identity_memory_read_failed: {e:?}"))?;
+        let existing_ids = parse_experience_ids(&existing);
+        for entry in &accepted {
+            let id = format!("diary-{}-{}", entry.date, entry.seq);
+            if existing_ids.contains(&id) {
+                continue;
+            }
+            memory_store
+                .append_experience(HotMemoryEntry {
+                    id: id.clone(),
+                    content: format!(
+                        "source=diary_distill\ndate={}\nseq={}\nsession={}\ntrigger={}\n{}",
+                        entry.date,
+                        entry.seq,
+                        entry.session_id,
+                        entry.trigger,
+                        entry.as_candidate_text()
+                    ),
+                })
+                .map_err(format_identity_memory_error)?;
+            written_count += 1;
+        }
+    }
+
+    let output = DiaryDistillOutput {
+        date: request.date.clone(),
+        dry_run: request.dry_run,
+        read_count: entries.len(),
+        accepted_count: accepted.len(),
+        rejected_count: rejected.len(),
+        written_count,
+        rejected,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "diary_distill date={} dry_run={} read={} accepted={} rejected={} written={}",
+                output.date,
+                output.dry_run,
+                output.read_count,
+                output.accepted_count,
+                output.rejected_count,
+                output.written_count
+            );
+            for reason in &output.rejected {
+                println!("rejected {reason}");
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+/// 从 experiences.md 文本里提取已存在的条目 id（`**<id>**` 或 `id=<id>` 两种格式）。
+fn parse_experience_ids(content: &str) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(id) = line.strip_prefix("## ") {
+            let id = id.trim().to_string();
+            if !id.is_empty() {
+                ids.insert(id);
+            }
+        }
+        if let Some(rest) = line.strip_prefix("**") {
+            if let Some(id) = rest.split("**").next() {
+                if !id.is_empty() {
+                    ids.insert(id.to_string());
+                }
+            }
+        }
+        if let Some(id) = line.strip_prefix("id=") {
+            let id = id.trim().to_string();
+            if !id.is_empty() {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
+}
+
+fn open_diary_store(runtime_args: &[String]) -> Result<FileDiaryStore, String> {
+    let dual_file_config = options_dual_file_config(runtime_args)?;
+    let diary_config = DiaryConfig::new(dual_file_config.root);
+    FileDiaryStore::open(diary_config).map_err(|e| format!("diary_open_failed: {e:?}"))
+}
+
+fn options_dual_file_config(
+    runtime_args: &[String],
+) -> Result<chuang_agent::hermes_memory::DualFileMemoryConfig, String> {
+    let options = parse_cli_options(runtime_args)?;
+    options
+        .runtime
+        .identity_memory
+        .build_dual_file_config()
+        .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))
+}
+
+fn parse_diary_show(args: &[String]) -> Result<DiaryShowRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut date = today_local();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--date" => {
+                date = take_local_value(args, &mut index, "--date")?;
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            _ => return Err(usage()),
+        }
+    }
+    Ok(DiaryShowRequest {
+        runtime_args,
+        output,
+        date,
+    })
+}
+
+fn parse_diary_distill(args: &[String]) -> Result<DiaryDistillRequest, String> {
+    let mut runtime_args = Vec::new();
+    let mut output = ControlOutputFormat::Text;
+    let mut date = today_local();
+    let mut dry_run = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                output = ControlOutputFormat::Json;
+                index += 1;
+            }
+            "--date" => {
+                date = take_local_value(args, &mut index, "--date")?;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            "--config" | "--identity-memory-root" | "--db" => {
+                push_value_arg(args, &mut index, &mut runtime_args)?
+            }
+            _ => return Err(usage()),
+        }
+    }
+    Ok(DiaryDistillRequest {
+        runtime_args,
+        output,
+        date,
+        dry_run,
+    })
 }
 
 fn memory_knowledge_search_command(args: &[String]) -> Result<(), String> {
@@ -2159,4 +2415,146 @@ struct IdentityMemoryMutationOutput {
     id: Option<String>,
     written: bool,
     replaced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiaryShowRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiaryDistillRequest {
+    runtime_args: Vec<String>,
+    output: ControlOutputFormat,
+    date: String,
+    dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct DiaryShowOutput {
+    date: String,
+    root: String,
+    entry_count: usize,
+    entries: Vec<DiaryEntryOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct DiaryEntryOutput {
+    created_at: String,
+    seq: u64,
+    session_id: String,
+    trigger: String,
+    completed: String,
+    in_progress: String,
+    pending: String,
+    constraints: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct DiaryDistillOutput {
+    date: String,
+    dry_run: bool,
+    read_count: usize,
+    accepted_count: usize,
+    rejected_count: usize,
+    written_count: usize,
+    rejected: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chuang_agent::diary::DiaryEntry;
+
+    fn temp_identity_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "chuang-cli-diary-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&root).expect("identity root should be created");
+        root
+    }
+
+    fn write_sample_diary(root: &std::path::Path, date: &str) {
+        let config = DiaryConfig::new(root.to_path_buf());
+        let mut store = FileDiaryStore::open(config).expect("diary store should open");
+        // 一条「可沉淀」：跨会话约束/偏好
+        store
+            .append(DiaryEntry {
+                date: date.to_string(),
+                seq: 3,
+                created_at: "10:00".to_string(),
+                session_id: "s1".to_string(),
+                trigger: "completion_signal".to_string(),
+                completed: "完成了跨会话记忆链路的调整，经验从日记每日提炼".to_string(),
+                in_progress: "验证每日提炼命令".to_string(),
+                pending: "后续由用户指令决定".to_string(),
+                constraints: "经验只从日记提炼，不每轮直写；禁止删除任何文件".to_string(),
+            })
+            .expect("append should succeed");
+        // 一条「噪音」：一次性调试信息（应被过滤）
+        store
+            .append(DiaryEntry {
+                date: date.to_string(),
+                seq: 5,
+                created_at: "10:30".to_string(),
+                session_id: "s1".to_string(),
+                trigger: "turn_threshold".to_string(),
+                completed: "临时修复了一次端口占用，debug 堆栈如下".to_string(),
+                in_progress: "继续观察".to_string(),
+                pending: "临时方案".to_string(),
+                constraints: "本次报错是一次性调试，无跨会话价值".to_string(),
+            })
+            .expect("append should succeed");
+    }
+
+    #[test]
+    fn diary_distill_writes_only_durable_entries_to_experiences() {
+        // parse_cli_options 会加载 config.toml 并校验 provider env（测试用桩值）
+        unsafe {
+            std::env::set_var("CHUANG_PROXY_API_KEY", "test-key");
+            std::env::set_var("CHUANG_PROXY_STATIC_KEY", "test-static-key");
+        }
+        let root = temp_identity_root("distill");
+        let date = "2026-08-11";
+        write_sample_diary(&root, date);
+
+        let mut args = vec![
+            "--identity-memory-root".to_string(),
+            root.display().to_string(),
+            "--date".to_string(),
+            date.to_string(),
+        ];
+        diary_distill_command(&args).expect("distill should succeed");
+
+        let store = FileDualFileMemoryStore::open(
+            chuang_agent::hermes_memory::DualFileMemoryConfig::new(root.clone()),
+        )
+        .expect("memory store should open");
+        let experiences = store
+            .read_experiences()
+            .expect("experiences should be readable");
+        assert!(
+            experiences.contains("diary-2026-08-11-3"),
+            "durable diary entry should be distilled into experiences"
+        );
+        assert!(
+            !experiences.contains("diary-2026-08-11-5"),
+            "noisy diary entry should be filtered out"
+        );
+
+        // 幂等：重复 distill 不产生重复 id
+        diary_distill_command(&args).expect("second distill should succeed");
+        let experiences2 = store.read_experiences().expect("experiences readable");
+        assert_eq!(experiences, experiences2, "distill should be idempotent");
+
+        // dry-run 不写盘
+        args.push("--dry-run".to_string());
+        diary_distill_command(&args).expect("dry-run distill should succeed");
+        let experiences3 = store.read_experiences().expect("experiences readable");
+        assert_eq!(experiences, experiences3, "dry-run must not write");
+    }
 }

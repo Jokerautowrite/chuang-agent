@@ -56,6 +56,7 @@ pub(crate) struct KnowledgeContextCliRequest {
 pub(crate) struct RememberedRecords {
     pub(crate) sqlite_record_id: Option<String>,
     pub(crate) session_record_id: Option<String>,
+    pub(crate) diary_seq: Option<String>,
     pub(crate) identity_record_id: Option<String>,
     pub(crate) experience_record_id: Option<String>,
     pub(crate) runtime_report_id: Option<String>,

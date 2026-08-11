@@ -21,6 +21,7 @@ pub mod control_intent;
 pub mod control_plane;
 pub mod control_surface;
 pub mod control_workflow;
+pub mod diary;
 pub mod display_projector;
 pub mod emotion_brain;
 pub mod emotion_delta;
