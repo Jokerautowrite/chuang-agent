@@ -97,7 +97,10 @@ pub fn derive_tool_protocol_correction_context(extra: &BTreeMap<String, String>)
     let last = errors.last()?;
     let hint = match last.code.as_str() {
         "invalid_action_json" => {
-            if last.message.contains("trailing text") {
+            if last.message.contains("EOF") || last.message.contains("eof") {
+                "上轮 ACTION JSON 在传输中被截断（EOF），工具未执行。下一轮请重新输出完整的 ACTION JSON；\
+                 命令太长/转义太多时请拆成多条短 ACTION 分步执行，避免单条超长 JSON 被截断。"
+            } else if last.message.contains("trailing text") {
                 "上轮输出含 ACTION 后 trailing 文本。下一轮只输出一个结构：ACTION JSON 或 FINAL。"
             } else {
                 "上轮 ACTION JSON 非法。下一轮只输出合法 ACTION JSON，或直接 FINAL。"

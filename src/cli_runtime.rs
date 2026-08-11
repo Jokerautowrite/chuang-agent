@@ -68,6 +68,35 @@ use crate::cli_types::{CliOptions, ConversationHistoryItem, RememberedRecords, R
 /// pre-tool phase.
 const MAX_MODEL_AUTO_RETRIES: usize = 2;
 
+/// Detect a truncated ACTION JSON envelope: the model began emitting
+/// `ACTION: { ... }` but the JSON object was cut off mid-stream (EOF while
+/// parsing an object). This happens when the upstream model/transport drops
+/// the tail of a long, heavily-escaped command payload. The truncated body is
+/// never executed, so it is safe to auto-retry before any tool has run.
+fn action_json_truncated(body: &str) -> bool {
+    let trimmed = body.trim();
+    let Some(json_text) = trimmed.strip_prefix("ACTION:").map(str::trim) else {
+        return false;
+    };
+    if !json_text.starts_with('{') {
+        return false;
+    }
+    match serde_json::from_str::<serde_json::Value>(json_text) {
+        Ok(_) => false,
+        Err(error) => error.is_eof(),
+    }
+}
+
+/// Hint injected into turn context when a truncated ACTION JSON is retried,
+/// steering the model to emit a shorter, simpler command payload.
+fn truncated_action_retry_hint(attempt: usize) -> String {
+    format!(
+        "【系统】你上一条 ACTION JSON 在传输中被截断（EOF while parsing），运行时没有执行任何工具。\
+         第 {attempt} 次重试：请重新输出完整的 ACTION JSON。\
+         如果命令太长/嵌套转义太多，请把命令拆短、拆成多条 ACTION 分步执行，避免单条超长 JSON 再次被截断。"
+    )
+}
+
 /// Transient provider failures that are safe to auto-retry: gateway/limit HTTP
 /// statuses and transport-level failures. Auth (401/403) and quota (402) are
 /// deliberately excluded — retrying them cannot succeed.
@@ -839,10 +868,33 @@ where
             let candidate_body = candidate.result.response.body.trim().to_string();
             if tool_calls.is_empty()
                 && model_retry_count < MAX_MODEL_AUTO_RETRIES
-                && provider_failure_is_retryable(&candidate_body)
+                && (provider_failure_is_retryable(&candidate_body)
+                    || action_json_truncated(&candidate_body))
             {
                 model_retry_count += 1;
-                let reason = provider_failure_retry_reason(&candidate_body);
+                let truncated_action = action_json_truncated(&candidate_body);
+                if truncated_action {
+                    // 注入提示，引导模型拆短命令后再重试；正文未被执行，重试安全。
+                    let now = default_cli_context_timestamp();
+                    turn_context.push(ContextSegment {
+                        id: "truncated-action-retry-hint".to_string(),
+                        source: chuang_agent::context_engine::SegmentSource::System,
+                        tokens: None,
+                        content: truncated_action_retry_hint(model_retry_count),
+                        priority: 250,
+                        created_at: now,
+                        last_accessed: now,
+                        metadata: std::collections::HashMap::from([(
+                            "kind".to_string(),
+                            "truncated_action_retry_hint".to_string(),
+                        )]),
+                    });
+                }
+                let reason = if truncated_action {
+                    format!("truncated_action_json:{}", model_retry_count)
+                } else {
+                    provider_failure_retry_reason(&candidate_body)
+                };
                 model_retry_reason = Some(reason.clone());
                 write_terminal_event(
                     progress_path,
@@ -8515,6 +8567,34 @@ allowed_channels = ["app-server"]
         assert!(!provider_failure_is_retryable(
             "PROVIDER_HTTP_ERROR: status_code=400"
         ));
+    }
+
+    #[test]
+    fn action_json_truncated_detects_eof_only() {
+        // 完整 JSON：不视为截断
+        assert!(!action_json_truncated(
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"pwd"}}"#
+        ));
+        // 截断：JSON 对象未闭合（EOF）
+        assert!(action_json_truncated(
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"echo aaa && echo bbb && echo ccc"#
+        ));
+        // 截断：超长命令中间断开
+        assert!(action_json_truncated(
+            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls -la /tmp && "#
+        ));
+        // 非 ACTION 前缀：不视为截断
+        assert!(!action_json_truncated("FINAL: 完成。"));
+        assert!(!action_json_truncated("普通文本"));
+        // ACTION 前缀但正文不是对象：不视为截断
+        assert!(!action_json_truncated("ACTION: hello"));
+    }
+
+    #[test]
+    fn truncated_action_retry_hint_mentions_splitting() {
+        let hint = truncated_action_retry_hint(1);
+        assert!(hint.contains("第 1 次重试"));
+        assert!(hint.contains("拆短") || hint.contains("拆成多条"));
     }
 
     #[test]
