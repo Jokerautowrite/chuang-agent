@@ -56,7 +56,10 @@ use chuang_agent::tool_runtime::{
 };
 use chuang_agent::{common::AgentId, common::TaskId};
 
-use crate::cli_memory::{preview_local_knowledge_context, MemoryKnowledgePreviewContextOutput};
+use crate::cli_memory::{
+    distill_date_to_experiences, preview_local_knowledge_context,
+    MemoryKnowledgePreviewContextOutput,
+};
 use crate::cli_types::{CliOptions, ConversationHistoryItem, RememberedRecords, RunCliRequest};
 
 /// Maximum number of automatic retries for a model call when the provider
@@ -3474,9 +3477,34 @@ where
         // 日记是附带记忆沉淀，失败只降级，不阻断用户回复。
         if let Some(session_id) = request.session_id.as_deref() {
             match maybe_write_diary_entry(options, &turn, session_id) {
-                Ok(Some(seq)) => {
-                    records.diary_seq = Some(seq);
+                Ok(Some(written)) => {
+                    records.diary_seq = Some(written.seq.clone());
                     remember_commit.mark_applied(RememberWorkflowStep::Diary);
+                    // 收尾信号后自动提炼当日经验：日记→确定性过滤→experiences.md。
+                    // 蒸馏失败只降级（锦上添花），不阻断用户回复。
+                    if written.trigger == "completion_signal" {
+                        match distill_date_to_experiences(
+                            options
+                                .runtime
+                                .identity_memory
+                                .build_dual_file_config()
+                                .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?
+                                .root,
+                            &today_local(),
+                            false,
+                        ) {
+                            Ok(outcome) => {
+                                records.diary_distill_status = Some("applied".to_string());
+                                records.diary_distill_accepted = Some(outcome.accepted_count);
+                                records.diary_distill_written = Some(outcome.written_count);
+                            }
+                            Err(error) => {
+                                records.diary_distill_status = Some(format!("failed: {error}"));
+                            }
+                        }
+                    } else {
+                        records.diary_distill_status = Some("skipped".to_string());
+                    }
                 }
                 Ok(None) => {
                     remember_commit.mark_skipped(RememberWorkflowStep::Diary);
@@ -3929,7 +3957,7 @@ fn maybe_write_diary_entry(
     options: &CliOptions,
     turn: &ChuangKernelTurn,
     session_id: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<DiaryWrittenInfo>, String> {
     let Some(seq) = turn
         .result
         .response
@@ -3970,7 +3998,16 @@ fn maybe_write_diary_entry(
     store
         .append(entry)
         .map_err(|e| format!("diary_append_failed: {e:?}"))?;
-    Ok(Some(seq.to_string()))
+    Ok(Some(DiaryWrittenInfo {
+        seq: seq.to_string(),
+        trigger: trigger.to_string(),
+    }))
+}
+
+/// 日记写入结果（seq + 触发原因），供 remember 链路决定是否自动蒸馏。
+struct DiaryWrittenInfo {
+    seq: String,
+    trigger: String,
 }
 
 fn build_diary_entry(
@@ -4136,6 +4173,21 @@ fn insert_session_memory_metadata(
         });
     if let Some(record_id) = &records.session_record_id {
         extra.insert("session_memory_record_id".to_string(), record_id.clone());
+    }
+    if let Some(status) = &records.diary_distill_status {
+        extra.insert("remember_diary_distill_status".to_string(), status.clone());
+    }
+    if let Some(accepted) = records.diary_distill_accepted {
+        extra.insert(
+            "remember_diary_distill_accepted".to_string(),
+            accepted.to_string(),
+        );
+    }
+    if let Some(written) = records.diary_distill_written {
+        extra.insert(
+            "remember_diary_distill_written".to_string(),
+            written.to_string(),
+        );
     }
 }
 

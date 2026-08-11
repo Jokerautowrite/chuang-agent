@@ -184,9 +184,56 @@ fn diary_show_command(args: &[String]) -> Result<(), String> {
 /// 追加进 experiences.md（每日从日记提炼经验，不再每轮直写）。
 fn diary_distill_command(args: &[String]) -> Result<(), String> {
     let request = parse_diary_distill(args)?;
-    let store = open_diary_store(&request.runtime_args)?;
+    let dual_file_config = options_dual_file_config(&request.runtime_args)?;
+    let outcome = distill_date_to_experiences(
+        dual_file_config.root.clone(),
+        &request.date,
+        request.dry_run,
+    )?;
+    let output = DiaryDistillOutput {
+        date: request.date.clone(),
+        dry_run: request.dry_run,
+        read_count: outcome.read_count,
+        accepted_count: outcome.accepted_count,
+        rejected_count: outcome.rejected_count,
+        written_count: outcome.written_count,
+        rejected: outcome.rejected,
+    };
+
+    match request.output {
+        ControlOutputFormat::Text => {
+            println!(
+                "diary_distill date={} dry_run={} read={} accepted={} rejected={} written={}",
+                output.date,
+                output.dry_run,
+                output.read_count,
+                output.accepted_count,
+                output.rejected_count,
+                output.written_count
+            );
+            for reason in &output.rejected {
+                println!("rejected {reason}");
+            }
+        }
+        ControlOutputFormat::Json => print_json(&output)?,
+    }
+
+    Ok(())
+}
+
+/// 日记→经验蒸馏核心（CLI 与 remember 收尾自动触发共用）。
+/// 读指定日期日记，用确定性策略过滤，把可复用条目追加进 experiences.md。
+/// dry_run 只统计不写盘；重复提炼自动跳过已存在的 id（幂等）。
+pub(crate) fn distill_date_to_experiences(
+    identity_root: std::path::PathBuf,
+    date: &str,
+    dry_run: bool,
+) -> Result<DiaryDistillOutcome, String> {
+    let diary_config = DiaryConfig::new(identity_root.clone());
+    let store =
+        FileDiaryStore::open(diary_config).map_err(|e| format!("diary_open_failed: {e:?}"))?;
     let entries = store
-        .read_date(&request.date)
+        .read_date(date)
         .map_err(|e| format!("diary_read_failed: {e:?}"))?;
 
     let mut accepted = Vec::new();
@@ -210,8 +257,9 @@ fn diary_distill_command(args: &[String]) -> Result<(), String> {
     }
 
     let mut written_count = 0usize;
-    if !request.dry_run {
-        let dual_file_config = options_dual_file_config(&request.runtime_args)?;
+    if !dry_run {
+        let dual_file_config =
+            chuang_agent::hermes_memory::DualFileMemoryConfig::new(identity_root);
         let mut memory_store = FileDualFileMemoryStore::open(dual_file_config.clone())
             .map_err(|e| format!("identity_memory_open_failed: {e:?}"))?;
         // 已提炼过的条目跳过（幂等：每日重复跑不产生重复 id）。
@@ -241,35 +289,13 @@ fn diary_distill_command(args: &[String]) -> Result<(), String> {
         }
     }
 
-    let output = DiaryDistillOutput {
-        date: request.date.clone(),
-        dry_run: request.dry_run,
+    Ok(DiaryDistillOutcome {
         read_count: entries.len(),
         accepted_count: accepted.len(),
         rejected_count: rejected.len(),
         written_count,
         rejected,
-    };
-
-    match request.output {
-        ControlOutputFormat::Text => {
-            println!(
-                "diary_distill date={} dry_run={} read={} accepted={} rejected={} written={}",
-                output.date,
-                output.dry_run,
-                output.read_count,
-                output.accepted_count,
-                output.rejected_count,
-                output.written_count
-            );
-            for reason in &output.rejected {
-                println!("rejected {reason}");
-            }
-        }
-        ControlOutputFormat::Json => print_json(&output)?,
-    }
-
-    Ok(())
+    })
 }
 
 /// 从 experiences.md 文本里提取已存在的条目 id（`**<id>**` 或 `id=<id>` 两种格式）。
@@ -2596,6 +2622,15 @@ struct DiaryDistillOutput {
     rejected_count: usize,
     written_count: usize,
     rejected: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiaryDistillOutcome {
+    pub(crate) read_count: usize,
+    pub(crate) accepted_count: usize,
+    pub(crate) rejected_count: usize,
+    pub(crate) written_count: usize,
+    pub(crate) rejected: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
