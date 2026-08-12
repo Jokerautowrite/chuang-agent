@@ -3947,8 +3947,9 @@ fn resolve_workspace_path(workspace_root: &Path, raw_path: &str) -> Result<PathB
     Ok(normalized_candidate)
 }
 
+#[allow(dead_code)] // 已被 wait_with_timeout_with_watchdog 取代；保留旧签名供回滚对照。
 fn wait_with_timeout(
-    mut child: std::process::Child,
+    child: std::process::Child,
     timeout_ms: u64,
 ) -> std::io::Result<std::process::Output> {
     wait_with_timeout_with_watchdog(child, timeout_ms, None).output

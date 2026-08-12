@@ -120,7 +120,7 @@ fn scripted_responder_keeps_runtime_trace_intact() {
             .get("context_compaction_summary_json")
             .map(String::as_str),
         Some(
-            "{\"event_count\":2,\"started_count\":1,\"completed_count\":1,\"dropped_count\":0,\"dropped_segment_ids\":[],\"drop_reason_counts\":{},\"trace_steps\":[\"merge_under_budget\"]}"
+            "{\"event_count\":2,\"started_count\":1,\"completed_count\":1,\"dropped_count\":0,\"dropped_segment_ids\":[],\"drop_reason_counts\":{},\"trace_steps\":[\"merge_under_budget\"],\"strategy\":\"none\",\"image_stripped_count\":0,\"compression_skipped_count\":0,\"compression_skipped_reasons\":[]}"
         )
     );
 }

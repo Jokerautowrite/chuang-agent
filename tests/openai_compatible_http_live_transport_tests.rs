@@ -287,13 +287,29 @@ fn openai_compatible_http_transport_times_out_when_server_stalls() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
 
+    // withRetry 会在超时后重试，mock 需接受所有连接并每次 hang 1000ms，
+    // 保证每次都触发 http_timeout。非阻塞 accept，2s 无新连接即退出。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
-        thread::sleep(Duration::from_millis(120));
+        listener.set_nonblocking(true).ok();
+        let mut idle_polls = 0u32;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    idle_polls = 0;
+                    let mut buffer = [0u8; 4096];
+                    let _ = stream.read(&mut buffer);
+                    thread::sleep(Duration::from_millis(1000));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    idle_polls += 1;
+                    if idle_polls > 20 {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(_) => break,
+            }
+        }
     });
 
     let adapter = OpenAICompatibleProviderAdapter::new(
@@ -371,13 +387,29 @@ fn openai_compatible_native_transport_times_out_when_server_stalls() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
 
+    // withRetry 会在超时后重试，mock 需接受所有连接并每次 hang 1000ms，
+    // 保证每次都触发 native_http_timeout。非阻塞 accept，2s 无新连接即退出。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
-        thread::sleep(Duration::from_millis(120));
+        listener.set_nonblocking(true).ok();
+        let mut idle_polls = 0u32;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    idle_polls = 0;
+                    let mut buffer = [0u8; 4096];
+                    let _ = stream.read(&mut buffer);
+                    thread::sleep(Duration::from_millis(1000));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    idle_polls += 1;
+                    if idle_polls > 20 {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(_) => break,
+            }
+        }
     });
 
     let adapter = OpenAICompatibleProviderAdapter::new(
@@ -455,13 +487,29 @@ fn openai_compatible_curl_transport_times_out_when_server_stalls() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
 
+    // withRetry 会在超时后重试，mock 需接受所有连接并每次 hang 1000ms，
+    // 保证每次都触发 curl_wait。非阻塞 accept，2s 无新连接即退出。
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let _ = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
-        thread::sleep(Duration::from_millis(120));
+        listener.set_nonblocking(true).ok();
+        let mut idle_polls = 0u32;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    idle_polls = 0;
+                    let mut buffer = [0u8; 4096];
+                    let _ = stream.read(&mut buffer);
+                    thread::sleep(Duration::from_millis(1000));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    idle_polls += 1;
+                    if idle_polls > 20 {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(_) => break,
+            }
+        }
     });
 
     let adapter = OpenAICompatibleProviderAdapter::new(

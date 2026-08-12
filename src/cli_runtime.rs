@@ -26,6 +26,7 @@ use chuang_agent::evolution_loop::{
     EvolutionEventBridge, OuterLoopDriveInput, OuterLoopDriver, OuterLoopReport,
 };
 use chuang_agent::experience_policy::{ExperienceCandidate, ExperienceWritePolicy};
+use chuang_agent::external_knowledge::ExternalKnowledgeRead;
 use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::governance::{risk_decision_label, Governance};
 use chuang_agent::hermes_memory::{DualFileMemoryStore, FileDualFileMemoryStore, HotMemoryEntry};
@@ -237,6 +238,8 @@ pub(crate) fn run_with_options(
     if let Some(preview) = &knowledge_preview {
         runtime_context.extend(knowledge_preview_context_segments(preview));
     }
+    // GBrain 直连知识检索：preflight 可用才注入，失败静默跳过（不阻断对话）。
+    runtime_context.extend(gbrain_knowledge_context_segments(&runtime, &request.user_input));
     // 情感状态注入：快照作为高优先级 context segment（可拔插；失败静默跳过）。
     if let Some(segment) = emotion_context_segment(
         &emotion_slot,
@@ -338,6 +341,53 @@ fn emotion_context_segment(
             ("trigger_count".to_string(), triggers.len().to_string()),
         ]),
     })
+}
+
+/// GBrain 直连 knowledge_context 注入：`metadata.knowledge_context=1` 且
+/// preflight 可用时，用当前用户输入做一次只读检索，命中结果作为知识段注入
+/// 上下文；不可用/无命中/查询失败一律静默跳过，绝不阻断主对话。
+fn gbrain_knowledge_context_segments(
+    runtime: &RuntimeConfig,
+    user_input: &str,
+) -> Vec<ContextSegment> {
+    if !runtime.knowledge_context_enabled() {
+        return Vec::new();
+    }
+    let reader =
+        chuang_agent::external_knowledge::LiveExternalKnowledgeReader::from_runtime(runtime);
+    if !reader.preflight().available {
+        return Vec::new();
+    }
+    let status = reader.read(chuang_agent::external_knowledge::ExternalKnowledgeReadRequest {
+        source: chuang_agent::external_knowledge::ExternalKnowledgeSource::GBrain,
+        query: user_input.to_string(),
+        limit: 3,
+    });
+    if !status.available || status.hits.is_empty() {
+        return Vec::new();
+    }
+    let mut content = String::from(
+        "【外部知识库·GBrain】以下为与当前问题相关的只读检索条目（来源路径见括号）：",
+    );
+    for hit in &status.hits {
+        content.push_str(&format!("\n- ({}) {}", hit.path, hit.preview));
+    }
+    let now = default_cli_context_timestamp();
+    vec![ContextSegment {
+        id: "knowledge-context-gbrain".to_string(),
+        source: chuang_agent::context_engine::SegmentSource::System,
+        tokens: None,
+        content,
+        priority: 200,
+        created_at: now,
+        last_accessed: now,
+        metadata: std::collections::HashMap::from([
+            ("kind".to_string(), "external_knowledge".to_string()),
+            ("source".to_string(), "gbrain".to_string()),
+            ("hit_count".to_string(), status.hit_count.to_string()),
+            ("adapter".to_string(), status.adapter_kind.clone()),
+        ]),
+    }]
 }
 
 /// 把阈值触发的动作渲染成给模型看的一句话（jiwen 语义人话化）。
@@ -9708,6 +9758,48 @@ allowed_channels = ["cli", "app-server"]
             triggered.metadata.get("trigger_count").map(String::as_str),
             Some("1")
         );
+    }
+
+    #[test]
+    fn gbrain_knowledge_context_disabled_returns_empty() {
+        let runtime = test_runtime(
+            std::env::temp_dir().join(format!(
+                "chuang-agent-gbrain-disabled-test-{}",
+                unique_record_suffix_for_test()
+            )),
+            std::env::temp_dir().join(format!(
+                "chuang-agent-gbrain-disabled-identity-{}",
+                unique_record_suffix_for_test()
+            )),
+        );
+        assert!(!runtime.knowledge_context_enabled());
+        let segments = gbrain_knowledge_context_segments(&runtime, "Agent Hub 是什么");
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn gbrain_knowledge_context_unavailable_silently_skips() {
+        let mut runtime = test_runtime(
+            std::env::temp_dir().join(format!(
+                "chuang-agent-gbrain-unavailable-test-{}",
+                unique_record_suffix_for_test()
+            )),
+            std::env::temp_dir().join(format!(
+                "chuang-agent-gbrain-unavailable-identity-{}",
+                unique_record_suffix_for_test()
+            )),
+        );
+        runtime
+            .metadata
+            .insert("knowledge_context".to_string(), "1".to_string());
+        assert!(runtime.knowledge_context_enabled());
+        // 故意清掉直连 env，确保 preflight 不可用；此时必须静默跳过、不 panic。
+        unsafe {
+            std::env::remove_var("CHUANG_GBRAIN_LIVE_ENDPOINT");
+            std::env::remove_var("CHUANG_GBRAIN_LIVE_TOKEN");
+        }
+        let segments = gbrain_knowledge_context_segments(&runtime, "Agent Hub 是什么");
+        assert!(segments.is_empty());
     }
 
     #[test]
