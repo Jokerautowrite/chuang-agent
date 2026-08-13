@@ -477,8 +477,16 @@ fn provider_from_runtime(runtime: &RuntimeConfig) -> Result<OpenAICompatibleConf
         ProviderConfig::Fake { provider_id, .. } => Err(format!(
             "provider={provider_id} is fake; benchmark evaluate needs a real openai_compatible provider (config.toml)"
         )),
+        ProviderConfig::AnthropicCompatible(_) => Err(
+            "provider is anthropic_compatible; benchmark evaluate needs an openai_compatible provider (config.toml)"
+                .to_string(),
+        ),
         ProviderConfig::Fallback { primary, .. } => match primary.as_ref() {
             ProviderConfig::OpenAICompatible(config) => Ok(config.clone()),
+            ProviderConfig::AnthropicCompatible(_) => Err(
+                "fallback primary provider is anthropic_compatible; benchmark evaluate needs an openai_compatible provider"
+                    .to_string(),
+            ),
             _ => Err("fallback primary provider is not openai_compatible".to_string()),
         },
     }

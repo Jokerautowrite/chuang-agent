@@ -1,4 +1,4 @@
-//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig, ContextCompactionConfig；enum ProviderConfig, ProviderApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind, context_compaction_config；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
+//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, AnthropicCompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig, ContextCompactionConfig；enum ProviderConfig, ProviderApiEndpoint, AnthropicApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind, context_compaction_config；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -56,6 +56,7 @@ pub enum ProviderConfig {
         model_name: String,
     },
     OpenAICompatible(OpenAICompatibleConfig),
+    AnthropicCompatible(AnthropicCompatibleConfig),
     Fallback {
         primary: Box<ProviderConfig>,
         fallback: Box<ProviderConfig>,
@@ -79,6 +80,66 @@ pub struct OpenAICompatibleConfig {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub request_timeout_ms: Option<u64>,
     pub tls_ca_cert_path: Option<PathBuf>,
+}
+
+/// Anthropic Messages API（/v1/messages）兼容 provider 配置。
+/// 与 `OpenAICompatibleConfig` 平行：认证走 `x-api-key` +
+/// `anthropic-version: 2023-06-01`，system prompt 是顶层 `system` 字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnthropicCompatibleConfig {
+    pub provider_id: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model_name: String,
+    pub transport: ProviderTransport,
+    /// Anthropic API endpoint shape. `Messages` matches `/v1/messages`
+    /// (the only Messages API endpoint today); kept as an enum so future
+    /// Anthropic endpoint shapes (e.g. `/v1/messages/count_tokens`) can be
+    /// added without changing the config schema.
+    pub endpoint: AnthropicApiEndpoint,
+    /// Accepted for config parity with openai_compatible. Anthropic 原生扩展
+    /// 思考走 `thinking` 字段（需模型支持），默认不据此生成请求体字段。
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub request_timeout_ms: Option<u64>,
+    pub tls_ca_cert_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnthropicApiEndpoint {
+    Messages,
+}
+
+impl AnthropicApiEndpoint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+        }
+    }
+}
+
+impl Default for AnthropicApiEndpoint {
+    fn default() -> Self {
+        Self::Messages
+    }
+}
+
+impl std::str::FromStr for AnthropicApiEndpoint {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "messages" | "v1_messages" | "anthropic_messages" => Ok(Self::Messages),
+            other => Err(format!(
+                "unsupported anthropic endpoint: {other} (supported: messages)"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for AnthropicApiEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -609,16 +670,10 @@ impl RuntimeConfig {
                     .to_string(),
             );
         }
-        if let ProviderConfig::OpenAICompatible(config) = &self.provider {
-            if let Some(name) = config
-                .api_key
-                .strip_prefix("__MISSING_ENV:")
-                .and_then(|value| value.strip_suffix("__"))
-            {
-                warnings.push(format!(
-                    "provider api_key_env missing for {name}; status/config show are running in diagnostic mode"
-                ));
-            }
+        if let Some(name) = missing_provider_api_key_env(&self.provider) {
+            warnings.push(format!(
+                "provider api_key_env missing for {name}; status/config show are running in diagnostic mode"
+            ));
         }
         if matches!(self.actuator, ActuatorConfig::Fake) {
             warnings.push(
@@ -811,6 +866,7 @@ impl ProviderConfig {
         match self {
             Self::Fake { .. } => "fake",
             Self::OpenAICompatible(_) => "openai_compatible",
+            Self::AnthropicCompatible(_) => "anthropic_compatible",
             Self::Fallback { .. } => "fallback",
         }
     }
@@ -825,6 +881,7 @@ impl ProviderConfig {
                 require_non_empty("provider.model_name", model_name)
             }
             Self::OpenAICompatible(config) => config.validate(),
+            Self::AnthropicCompatible(config) => config.validate(),
             Self::Fallback {
                 primary,
                 fallback,
@@ -853,6 +910,19 @@ impl ProviderConfig {
                 fallback_policy: None,
             },
             Self::OpenAICompatible(config) => ProviderSummaryParts {
+                kind: self.kind().to_string(),
+                provider_id: config.provider_id.clone(),
+                model_name: config.model_name.clone(),
+                tls_ca_cert_path: config
+                    .tls_ca_cert_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                api_key_state: Some(mask_key_state(&config.api_key)),
+                request_timeout_ms: config.request_timeout_ms,
+                reasoning_effort: config.reasoning_effort.map(|effort| effort.to_string()),
+                fallback_policy: None,
+            },
+            Self::AnthropicCompatible(config) => ProviderSummaryParts {
                 kind: self.kind().to_string(),
                 provider_id: config.provider_id.clone(),
                 model_name: config.model_name.clone(),
@@ -898,6 +968,11 @@ impl ProviderConfig {
                 ..
             }) => true,
             Self::OpenAICompatible(_) => false,
+            Self::AnthropicCompatible(AnthropicCompatibleConfig {
+                transport: ProviderTransport::Stub,
+                ..
+            }) => true,
+            Self::AnthropicCompatible(_) => false,
             Self::Fallback {
                 primary, fallback, ..
             } => primary.uses_stub_transport() || fallback.uses_stub_transport(),
@@ -908,6 +983,7 @@ impl ProviderConfig {
         match self {
             Self::Fake { .. } => true,
             Self::OpenAICompatible(_) => false,
+            Self::AnthropicCompatible(_) => false,
             Self::Fallback {
                 primary, fallback, ..
             } => primary.uses_fake_responder() || fallback.uses_fake_responder(),
@@ -1249,6 +1325,29 @@ impl OpenAICompatibleConfig {
     }
 }
 
+impl AnthropicCompatibleConfig {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        require_non_empty("provider.provider_id", &self.provider_id)?;
+        require_non_empty("provider.base_url", &self.base_url)?;
+        require_non_empty("provider.api_key", &self.api_key)?;
+        require_non_empty("provider.model_name", &self.model_name)?;
+        if let Some(path) = &self.tls_ca_cert_path {
+            require_non_empty("provider.tls_ca_path", &path.display().to_string())?;
+            if !path.exists() {
+                return Err(ConfigError {
+                    field: "provider.tls_ca_path".to_string(),
+                    message: format!("provider.tls_ca_path does not exist: {}", path.display()),
+                });
+            }
+        }
+        if let Some(timeout_ms) = self.request_timeout_ms {
+            require_positive_u64("provider.request_timeout_ms", timeout_ms)?;
+        }
+
+        Ok(())
+    }
+}
+
 struct ProviderSummaryParts {
     kind: String,
     provider_id: String,
@@ -1313,6 +1412,26 @@ fn mask_key_state(api_key: &str) -> String {
     } else {
         "<set>".to_string()
     }
+}
+
+/// 沿 provider 链（嵌套 Fallback）找第一个未解析的 api_key_env 占位符名。
+fn missing_provider_api_key_env(provider: &ProviderConfig) -> Option<String> {
+    match provider {
+        ProviderConfig::Fake { .. } => None,
+        ProviderConfig::OpenAICompatible(config) => missing_env_name(&config.api_key),
+        ProviderConfig::AnthropicCompatible(config) => missing_env_name(&config.api_key),
+        ProviderConfig::Fallback {
+            primary, fallback, ..
+        } => missing_provider_api_key_env(primary)
+            .or_else(|| missing_provider_api_key_env(fallback)),
+    }
+}
+
+fn missing_env_name(api_key: &str) -> Option<String> {
+    api_key
+        .strip_prefix("__MISSING_ENV:")
+        .and_then(|value| value.strip_suffix("__"))
+        .map(str::to_string)
 }
 
 pub fn default_context_budget() -> ContextBudget {

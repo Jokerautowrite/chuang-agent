@@ -23,6 +23,7 @@ use crate::governance::{
     RiskDecision, StaticRuleGovernance,
 };
 use crate::permission_profile_slot::unrestricted_profile;
+use crate::provider_anthropic_compatible::AnthropicCompatibleProviderAdapter;
 use crate::provider_openai_compatible::OpenAICompatibleProviderAdapter;
 use crate::responder::{
     FakeResponder, ProviderAdapterResponder, Responder, ResponderOutput, ResponderProvider,
@@ -64,6 +65,7 @@ pub struct RuntimeSlots {
 pub enum ProviderSlot {
     Fake(FakeResponder),
     OpenAICompatible(OpenAICompatibleProviderAdapter),
+    AnthropicCompatible(AnthropicCompatibleProviderAdapter),
     Fallback {
         primary: Box<ProviderSlot>,
         fallback: Box<ProviderSlot>,
@@ -76,6 +78,7 @@ impl ProviderSlot {
         match self {
             Self::Fake(responder) => responder.provider().provider_id,
             Self::OpenAICompatible(responder) => responder.identity().provider_id,
+            Self::AnthropicCompatible(responder) => responder.identity().provider_id,
             Self::Fallback { primary, .. } => primary.provider_name(),
         }
     }
@@ -84,6 +87,7 @@ impl ProviderSlot {
         match self {
             Self::Fake(responder) => responder.provider().model_name,
             Self::OpenAICompatible(responder) => responder.identity().model_name,
+            Self::AnthropicCompatible(responder) => responder.identity().model_name,
             Self::Fallback { primary, .. } => primary.model_name(),
         }
     }
@@ -351,6 +355,19 @@ pub fn build_provider_responder(config: &ProviderConfig) -> Result<ProviderSlot,
             .with_request_timeout_ms(config.request_timeout_ms.unwrap_or(60_000))
             .with_tls_ca_cert_path(config.tls_ca_cert_path.clone()),
         )),
+        ProviderConfig::AnthropicCompatible(config) => Ok(ProviderSlot::AnthropicCompatible(
+            AnthropicCompatibleProviderAdapter::new(
+                config.provider_id.clone(),
+                config.base_url.clone(),
+                config.api_key.clone(),
+                config.model_name.clone(),
+            )
+            .with_transport(config.transport.clone())
+            .with_endpoint(config.endpoint)
+            .with_reasoning_effort(config.reasoning_effort)
+            .with_request_timeout_ms(config.request_timeout_ms.unwrap_or(60_000))
+            .with_tls_ca_cert_path(config.tls_ca_cert_path.clone()),
+        )),
         ProviderConfig::Fallback {
             primary,
             fallback,
@@ -575,6 +592,11 @@ impl Responder for ProviderSlot {
                 mark_provider_fallback_unconfigured(&mut output);
                 output
             }
+            Self::AnthropicCompatible(responder) => {
+                let mut output = responder.generate(request);
+                mark_provider_fallback_unconfigured(&mut output);
+                output
+            }
             Self::Fallback {
                 primary,
                 fallback,
@@ -646,6 +668,7 @@ impl Responder for ProviderSlot {
         match self {
             Self::Fake(responder) => responder.provider(),
             Self::OpenAICompatible(responder) => responder.provider(),
+            Self::AnthropicCompatible(responder) => responder.provider(),
             Self::Fallback {
                 primary, fallback, ..
             } => {

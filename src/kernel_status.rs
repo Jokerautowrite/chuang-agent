@@ -1754,6 +1754,7 @@ fn provider_transport_label(provider: &ProviderConfig) -> String {
     match provider {
         ProviderConfig::Fake { .. } => "fake".to_string(),
         ProviderConfig::OpenAICompatible(config) => config.transport.as_str().to_string(),
+        ProviderConfig::AnthropicCompatible(config) => config.transport.as_str().to_string(),
         ProviderConfig::Fallback {
             primary, fallback, ..
         } => format!(

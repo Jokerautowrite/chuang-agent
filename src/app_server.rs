@@ -35,8 +35,9 @@ use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
-    ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
-    ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig, DEFAULT_WORKSPACE_ROOT,
+    AnthropicCompatibleConfig, ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig,
+    OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
+    DEFAULT_WORKSPACE_ROOT,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -3139,6 +3140,7 @@ fn first_openai_compatible_provider(provider: &ProviderConfig) -> Option<&OpenAI
         ProviderConfig::OpenAICompatible(cfg) => Some(cfg),
         ProviderConfig::Fallback { primary, .. } => first_openai_compatible_provider(primary),
         ProviderConfig::Fake { .. } => None,
+        ProviderConfig::AnthropicCompatible(_) => None,
     }
 }
 
@@ -3231,6 +3233,12 @@ fn override_runtime_model(mut runtime: RuntimeConfig, params: &Value) -> Runtime
                 ..config
             })
         }
+        ProviderConfig::AnthropicCompatible(config) => {
+            ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig {
+                model_name: requested_model,
+                ..config
+            })
+        }
         ProviderConfig::Fallback {
             primary,
             fallback,
@@ -3298,6 +3306,12 @@ fn override_provider_model(provider: ProviderConfig, model_name: String) -> Prov
                 ..config
             })
         }
+        ProviderConfig::AnthropicCompatible(config) => {
+            ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig {
+                model_name,
+                ..config
+            })
+        }
         ProviderConfig::Fallback {
             primary,
             fallback,
@@ -3314,6 +3328,11 @@ fn normalize_provider_paths(provider: &mut ProviderConfig, base_dir: &Path) {
     match provider {
         ProviderConfig::Fake { .. } => {}
         ProviderConfig::OpenAICompatible(config) => {
+            if let Some(path) = &config.tls_ca_cert_path {
+                config.tls_ca_cert_path = Some(resolve_path_if_relative(base_dir, path.clone()));
+            }
+        }
+        ProviderConfig::AnthropicCompatible(config) => {
             if let Some(path) = &config.tls_ca_cert_path {
                 config.tls_ca_cert_path = Some(resolve_path_if_relative(base_dir, path.clone()));
             }
@@ -3452,6 +3471,9 @@ fn provider_summary_model_name(runtime: &RuntimeConfig) -> String {
         ProviderConfig::OpenAICompatible(OpenAICompatibleConfig { model_name, .. }) => {
             model_name.clone()
         }
+        ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig { model_name, .. }) => {
+            model_name.clone()
+        }
         ProviderConfig::Fallback {
             primary, fallback, ..
         } => format!(
@@ -3470,6 +3492,9 @@ fn provider_primary_model_name(runtime: &RuntimeConfig) -> String {
         match provider {
             ProviderConfig::Fake { model_name, .. } => return model_name.clone(),
             ProviderConfig::OpenAICompatible(OpenAICompatibleConfig { model_name, .. }) => {
+                return model_name.clone();
+            }
+            ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig { model_name, .. }) => {
                 return model_name.clone();
             }
             ProviderConfig::Fallback { primary, .. } => {
@@ -3601,6 +3626,9 @@ fn provider_config_model_name(provider: &ProviderConfig) -> String {
     match provider {
         ProviderConfig::Fake { model_name, .. } => model_name.clone(),
         ProviderConfig::OpenAICompatible(OpenAICompatibleConfig { model_name, .. }) => {
+            model_name.clone()
+        }
+        ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig { model_name, .. }) => {
             model_name.clone()
         }
         ProviderConfig::Fallback {

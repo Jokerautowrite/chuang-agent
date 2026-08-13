@@ -1,4 +1,8 @@
 //! `provider_openai_compatible` 模块。公开接口：struct ProviderConfigError, OpenAICompatibleRequestEnvelope, HttpRequestPreview, StubHttpCallResult, HttpCallResult, OpenAICompatibleProviderAdapter；enum ProviderTransport, ReasoningEffort；fn as_str, new, with_transport, with_endpoint, with_reasoning_effort, with_max_output_tokens, with_request_timeout_ms, with_tls_ca_cert_path。
+//!
+//! Transport 层（stub/http/native/curl）与响应/重试核心（`run_provider_respond`）
+//! 以 `pub(crate)` 共享给 `provider_anthropic_compatible`，保证 Anthropic 与
+//! OpenAI 走同一套传输、退避、看门狗与错误语义。
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -27,7 +31,7 @@ use crate::responder::{
 };
 use crate::runtime_config::ProviderApiEndpoint;
 
-const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
+pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
 // 错误恢复级联（蓝本 docs/reference-dig-20260810.md §2.5 withRetry）：
 // - 退避：base 500ms，指数 ×2，上限 32s，jitter ±25%。
@@ -41,6 +45,30 @@ const RETRY_BACKOFF_JITTER_RATIO: f64 = 0.25;
 // 单次 transport 尝试仍受 request_timeout_ms（provider_timeout_ms 配置）约束。
 const PROVIDER_IDLE_WATCHDOG_WARN_MS: u64 = 45_000;
 const PROVIDER_IDLE_WATCHDOG_KILL_MS: u64 = 90_000;
+
+const RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504, 529];
+const MAX_PROVIDER_ATTEMPTS: usize = 3;
+
+fn backoff_ms(attempt: usize) -> u64 {
+    // withRetry（蓝本 §2.5）：base 500ms，指数 ×2，上限 32s，jitter ±25%。
+    let exponent = attempt.min(6) as u32; // 500 * 2^6 = 32000 = 上限
+    let base = RETRY_BACKOFF_BASE_MS
+        .saturating_mul(1u64 << exponent)
+        .min(RETRY_BACKOFF_MAX_MS);
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    // jitter 在 cap 之后施加：最终值不得超过 32s 上限。
+    jittered_backoff(base, seed).min(RETRY_BACKOFF_MAX_MS)
+}
+
+/// ±RETRY_BACKOFF_JITTER_RATIO 抖动；确定性：同 seed 同结果（便于测试）。
+fn jittered_backoff(base_ms: u64, seed: u64) -> u64 {
+    let span = ((base_ms as f64) * RETRY_BACKOFF_JITTER_RATIO) as u64;
+    let offset = (seed % (span * 2 + 1)) as i64 - span as i64;
+    (base_ms as i64 + offset).max(1) as u64
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfigError {
@@ -339,55 +367,11 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<StubHttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        let response_body_json = json!({
-            "id": "resp-stub-001",
-            "object": "response",
-            "status": "completed",
-            "completed_at": 0,
-            "provider_id": self.identity.provider_id,
-            "model": self.identity.model_name,
-            "stubbed": true,
-            "instructions": request.prompt,
-            "output": [
-                {
-                    "id": "msg-stub-001",
-                    "type": "message",
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": format!(
-                                "stubbed_post_ok: provider={} model={} user_input=《{}》",
-                                self.identity.provider_id,
-                                self.identity.model_name,
-                                request.user_input
-                            ),
-                            "annotations": []
-                        }
-                    ]
-                }
-            ],
-            "output_text": format!(
-                "stubbed_post_ok: provider={} model={} user_input=《{}》",
-                self.identity.provider_id,
-                self.identity.model_name,
-                request.user_input
-            ),
-            "store": false,
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0
-            }
-        })
-        .to_string();
-
         Ok(StubHttpCallResult {
             status_code: 200,
             url: preview.url,
             request_body_json: preview.body_json,
-            response_body_json,
+            response_body_json: build_openai_stub_response_body(&self.identity, request),
         })
     }
 
@@ -396,100 +380,7 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        let (host, port, path) = parse_http_target(&preview.url)?;
-        let timeout_duration = Duration::from_millis(self.request_timeout_ms);
-        let target_addr = (host.as_str(), port)
-            .to_socket_addrs()
-            .map_err(|error| ProviderConfigError {
-                field: "http_connect".to_string(),
-                message: format!("target={} error={error}", preview.url),
-            })?
-            .next()
-            .ok_or_else(|| ProviderConfigError {
-                field: "http_connect".to_string(),
-                message: format!("target={} error=no_resolved_address", preview.url),
-            })?;
-        let mut stream =
-            TcpStream::connect_timeout(&target_addr, timeout_duration).map_err(|error| {
-                ProviderConfigError {
-                    field: "http_connect".to_string(),
-                    message: format!("target={} error={error}", preview.url),
-                }
-            })?;
-        stream
-            .set_read_timeout(Some(timeout_duration))
-            .map_err(|error| ProviderConfigError {
-                field: "http_timeout".to_string(),
-                message: format!("set_read_timeout failed: {error}"),
-            })?;
-        stream
-            .set_write_timeout(Some(timeout_duration))
-            .map_err(|error| ProviderConfigError {
-                field: "http_timeout".to_string(),
-                message: format!("set_write_timeout failed: {error}"),
-            })?;
-
-        let request_text = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            path,
-            host,
-            preview
-                .headers
-                .get("authorization")
-                .map(String::as_str)
-                .unwrap_or(""),
-            preview
-                .headers
-                .get("content-type")
-                .map(String::as_str)
-                .unwrap_or("application/json"),
-            preview.body_json.len(),
-            preview.body_json,
-        );
-        stream
-            .write_all(request_text.as_bytes())
-            .map_err(|error| ProviderConfigError {
-                field: "http_write".to_string(),
-                message: error.to_string(),
-            })?;
-        stream.flush().map_err(|error| ProviderConfigError {
-            field: "http_flush".to_string(),
-            message: error.to_string(),
-        })?;
-
-        let mut raw_response = String::new();
-        stream
-            .read_to_string(&mut raw_response)
-            .map_err(|error| ProviderConfigError {
-                field: if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) {
-                    "http_timeout".to_string()
-                } else {
-                    "http_read".to_string()
-                },
-                message: if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) {
-                    format!(
-                        "request timed out after {}ms: {error}",
-                        self.request_timeout_ms
-                    )
-                } else {
-                    error.to_string()
-                },
-            })?;
-
-        let (status_code, response_body_json) = parse_http_response(&raw_response)?;
-
-        Ok(HttpCallResult {
-            status_code,
-            url: preview.url,
-            request_body_json: preview.body_json,
-            response_body_json,
-        })
+        execute_http_transport(&preview, self.request_timeout_ms)
     }
 
     pub fn execute_native_post_call(
@@ -497,79 +388,7 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        let url = preview.url.clone();
-        let request_body_json = preview.body_json.clone();
-        let runtime = TokioRuntimeBuilder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| ProviderConfigError {
-                field: "native_http_runtime".to_string(),
-                message: error.to_string(),
-            })?;
-
-        runtime.block_on(async move {
-            let connector = self.build_native_https_connector()?;
-            let client: Client<_, Full<Bytes>> =
-                Client::builder(TokioExecutor::new()).build(connector);
-            let authorization = preview
-                .headers
-                .get("authorization")
-                .cloned()
-                .unwrap_or_else(|| "Bearer".to_string());
-            let content_type = preview
-                .headers
-                .get("content-type")
-                .cloned()
-                .unwrap_or_else(|| "application/json".to_string());
-            let req = Request::builder()
-                .method(Method::POST)
-                .uri(&url)
-                .header("Authorization", authorization)
-                .header("Content-Type", content_type)
-                .body(Full::new(Bytes::from(request_body_json.clone())))
-                .map_err(|error| ProviderConfigError {
-                    field: "native_http_request".to_string(),
-                    message: error.to_string(),
-                })?;
-            let response = timeout(
-                Duration::from_millis(self.request_timeout_ms),
-                client.request(req),
-            )
-            .await
-            .map_err(|_| ProviderConfigError {
-                field: "native_http_timeout".to_string(),
-                message: format!("request timed out after {}ms", self.request_timeout_ms),
-            })?
-            .map_err(|error| ProviderConfigError {
-                field: "native_http_send".to_string(),
-                message: error.to_string(),
-            })?;
-            let status_code = response.status().as_u16();
-            let response_body_json = timeout(
-                Duration::from_millis(self.request_timeout_ms),
-                response.into_body().collect(),
-            )
-            .await
-            .map_err(|_| ProviderConfigError {
-                field: "native_http_timeout".to_string(),
-                message: format!(
-                    "response body timed out after {}ms",
-                    self.request_timeout_ms
-                ),
-            })?
-            .map_err(|error| ProviderConfigError {
-                field: "native_http_response_body".to_string(),
-                message: error.to_string(),
-            })?
-            .to_bytes();
-
-            Ok(HttpCallResult {
-                status_code,
-                url,
-                request_body_json,
-                response_body_json: String::from_utf8_lossy(&response_body_json).to_string(),
-            })
-        })
+        execute_native_transport(&preview, self.request_timeout_ms, self.tls_ca_cert_path.as_ref())
     }
 
     pub fn execute_curl_post_call(
@@ -577,144 +396,346 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        let authorization_header = preview
+        execute_curl_transport(&preview, self.request_timeout_ms)
+    }
+}
+
+/// OpenAI Responses 风格的 stub 响应体（保持既有测试断言不变）。
+fn build_openai_stub_response_body(identity: &ProviderIdentity, request: &ResponderRequest) -> String {
+    json!({
+        "id": "resp-stub-001",
+        "object": "response",
+        "status": "completed",
+        "completed_at": 0,
+        "provider_id": identity.provider_id,
+        "model": identity.model_name,
+        "stubbed": true,
+        "instructions": request.prompt,
+        "output": [
+            {
+                "id": "msg-stub-001",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": format!(
+                            "stubbed_post_ok: provider={} model={} user_input=《{}》",
+                            identity.provider_id,
+                            identity.model_name,
+                            request.user_input
+                        ),
+                        "annotations": []
+                    }
+                ]
+            }
+        ],
+        "output_text": format!(
+            "stubbed_post_ok: provider={} model={} user_input=《{}》",
+            identity.provider_id,
+            identity.model_name,
+            request.user_input
+        ),
+        "store": false,
+        "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+        }
+    })
+    .to_string()
+}
+
+/// 纯 HTTP/1.1 transport（provider_openai_compatible 与 anthropic 共享）。
+pub(crate) fn execute_http_transport(
+    preview: &HttpRequestPreview,
+    timeout_ms: u64,
+) -> Result<HttpCallResult, ProviderConfigError> {
+    let (host, port, path) = parse_http_target(&preview.url)?;
+    let timeout_duration = Duration::from_millis(timeout_ms);
+    let target_addr = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|error| ProviderConfigError {
+            field: "http_connect".to_string(),
+            message: format!("target={} error={error}", preview.url),
+        })?
+        .next()
+        .ok_or_else(|| ProviderConfigError {
+            field: "http_connect".to_string(),
+            message: format!("target={} error=no_resolved_address", preview.url),
+        })?;
+    let mut stream = TcpStream::connect_timeout(&target_addr, timeout_duration).map_err(|error| {
+        ProviderConfigError {
+            field: "http_connect".to_string(),
+            message: format!("target={} error={error}", preview.url),
+        }
+    })?;
+    stream
+        .set_read_timeout(Some(timeout_duration))
+        .map_err(|error| ProviderConfigError {
+            field: "http_timeout".to_string(),
+            message: format!("set_read_timeout failed: {error}"),
+        })?;
+    stream
+        .set_write_timeout(Some(timeout_duration))
+        .map_err(|error| ProviderConfigError {
+            field: "http_timeout".to_string(),
+            message: format!("set_write_timeout failed: {error}"),
+        })?;
+
+    let request_text = format!(
+        "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        host,
+        preview
             .headers
             .get("authorization")
-            .map(|value| format!("Authorization: {value}"))
-            .unwrap_or_else(|| "Authorization:".to_string());
-        let content_type_header = preview
+            .map(String::as_str)
+            .unwrap_or(""),
+        preview
             .headers
             .get("content-type")
-            .map(|value| format!("Content-Type: {value}"))
-            .unwrap_or_else(|| "Content-Type: application/json".to_string());
-        let args = vec![
-            "--silent".to_string(),
-            "--show-error".to_string(),
-            "--location".to_string(),
-            "--max-time".to_string(),
-            curl_max_time_seconds(self.request_timeout_ms).to_string(),
-            "--request".to_string(),
-            "POST".to_string(),
-            "--header".to_string(),
-            authorization_header,
-            "--header".to_string(),
-            content_type_header,
-            "--data-binary".to_string(),
-            "@-".to_string(),
-            "--write-out".to_string(),
-            "\n__CHUANG_CURL_STATUS__:%{http_code}".to_string(),
-            preview.url.clone(),
-        ];
-        let mut child = Command::new("curl")
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| ProviderConfigError {
-                field: "curl_spawn".to_string(),
-                message: error.to_string(),
-            })?;
-
-        let mut stdin = child.stdin.take().ok_or_else(|| ProviderConfigError {
-            field: "curl_stdin".to_string(),
-            message: "stdin_unavailable".to_string(),
-        })?;
-        stdin
-            .write_all(preview.body_json.as_bytes())
-            .map_err(|error| ProviderConfigError {
-                field: "curl_write".to_string(),
-                message: error.to_string(),
-            })?;
-        stdin.flush().map_err(|error| ProviderConfigError {
-            field: "curl_write".to_string(),
+            .map(String::as_str)
+            .unwrap_or("application/json"),
+        preview.body_json.len(),
+        preview.body_json,
+    );
+    stream
+        .write_all(request_text.as_bytes())
+        .map_err(|error| ProviderConfigError {
+            field: "http_write".to_string(),
             message: error.to_string(),
         })?;
-        drop(stdin);
+    stream.flush().map_err(|error| ProviderConfigError {
+        field: "http_flush".to_string(),
+        message: error.to_string(),
+    })?;
 
-        let output = wait_with_timeout(child, self.request_timeout_ms).map_err(|error| {
-            ProviderConfigError {
-                field: "curl_wait".to_string(),
-                message: error.to_string(),
-            }
+    let mut raw_response = String::new();
+    stream
+        .read_to_string(&mut raw_response)
+        .map_err(|error| ProviderConfigError {
+            field: if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) {
+                "http_timeout".to_string()
+            } else {
+                "http_read".to_string()
+            },
+            message: if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) {
+                format!("request timed out after {}ms: {error}", timeout_ms)
+            } else {
+                error.to_string()
+            },
         })?;
-        if !output.status.success() {
-            return Err(ProviderConfigError {
-                field: "curl_exit".to_string(),
-                message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            });
-        }
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let (response_body_json, status_raw) = stdout
-            .rsplit_once("\n__CHUANG_CURL_STATUS__:")
-            .ok_or_else(|| ProviderConfigError {
-                field: "curl_response".to_string(),
-                message: "missing_status_marker".to_string(),
+    let (status_code, response_body_json) = parse_http_response(&raw_response)?;
+
+    Ok(HttpCallResult {
+        status_code,
+        url: preview.url.clone(),
+        request_body_json: preview.body_json.clone(),
+        response_body_json,
+    })
+}
+
+/// hyper-native transport（provider_openai_compatible 与 anthropic 共享）。
+pub(crate) fn execute_native_transport(
+    preview: &HttpRequestPreview,
+    timeout_ms: u64,
+    tls_ca_cert_path: Option<&PathBuf>,
+) -> Result<HttpCallResult, ProviderConfigError> {
+    let url = preview.url.clone();
+    let request_body_json = preview.body_json.clone();
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| ProviderConfigError {
+            field: "native_http_runtime".to_string(),
+            message: error.to_string(),
+        })?;
+
+    runtime.block_on(async move {
+        let connector = build_native_https_connector(tls_ca_cert_path)?;
+        let client: Client<_, Full<Bytes>> =
+            Client::builder(TokioExecutor::new()).build(connector);
+        let authorization = preview
+            .headers
+            .get("authorization")
+            .cloned()
+            .unwrap_or_else(|| "Bearer".to_string());
+        let content_type = preview
+            .headers
+            .get("content-type")
+            .cloned()
+            .unwrap_or_else(|| "application/json".to_string());
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(&url)
+            .header("Authorization", authorization)
+            .header("Content-Type", content_type)
+            .body(Full::new(Bytes::from(request_body_json.clone())))
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_request".to_string(),
+                message: error.to_string(),
             })?;
-        let status_code = status_raw
-            .trim()
-            .parse::<u16>()
+        let response = timeout(Duration::from_millis(timeout_ms), client.request(req))
+            .await
             .map_err(|_| ProviderConfigError {
-                field: "curl_response".to_string(),
-                message: format!("invalid_status_code:{status_raw}"),
+                field: "native_http_timeout".to_string(),
+                message: format!("request timed out after {}ms", timeout_ms),
+            })?
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_send".to_string(),
+                message: error.to_string(),
             })?;
+        let status_code = response.status().as_u16();
+        let response_body_json = timeout(Duration::from_millis(timeout_ms), response.into_body().collect())
+            .await
+            .map_err(|_| ProviderConfigError {
+                field: "native_http_timeout".to_string(),
+                message: format!("response body timed out after {}ms", timeout_ms),
+            })?
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_response_body".to_string(),
+                message: error.to_string(),
+            })?
+            .to_bytes();
 
         Ok(HttpCallResult {
             status_code,
-            url: preview.url,
-            request_body_json: preview.body_json,
-            response_body_json: response_body_json.to_string(),
+            url,
+            request_body_json,
+            response_body_json: String::from_utf8_lossy(&response_body_json).to_string(),
         })
+    })
+}
+
+/// curl transport（provider_openai_compatible 与 anthropic 共享）。
+pub(crate) fn execute_curl_transport(
+    preview: &HttpRequestPreview,
+    timeout_ms: u64,
+) -> Result<HttpCallResult, ProviderConfigError> {
+    let authorization_header = preview
+        .headers
+        .get("authorization")
+        .map(|value| format!("Authorization: {value}"))
+        .unwrap_or_else(|| "Authorization:".to_string());
+    let content_type_header = preview
+        .headers
+        .get("content-type")
+        .map(|value| format!("Content-Type: {value}"))
+        .unwrap_or_else(|| "Content-Type: application/json".to_string());
+    let args = vec![
+        "--silent".to_string(),
+        "--show-error".to_string(),
+        "--location".to_string(),
+        "--max-time".to_string(),
+        curl_max_time_seconds(timeout_ms).to_string(),
+        "--request".to_string(),
+        "POST".to_string(),
+        "--header".to_string(),
+        authorization_header,
+        "--header".to_string(),
+        content_type_header,
+        "--data-binary".to_string(),
+        "@-".to_string(),
+        "--write-out".to_string(),
+        "\n__CHUANG_CURL_STATUS__:%{http_code}".to_string(),
+        preview.url.clone(),
+    ];
+    let mut child = Command::new("curl")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| ProviderConfigError {
+            field: "curl_spawn".to_string(),
+            message: error.to_string(),
+        })?;
+
+    let mut stdin = child.stdin.take().ok_or_else(|| ProviderConfigError {
+        field: "curl_stdin".to_string(),
+        message: "stdin_unavailable".to_string(),
+    })?;
+    stdin
+        .write_all(preview.body_json.as_bytes())
+        .map_err(|error| ProviderConfigError {
+            field: "curl_write".to_string(),
+            message: error.to_string(),
+        })?;
+    stdin.flush().map_err(|error| ProviderConfigError {
+        field: "curl_write".to_string(),
+        message: error.to_string(),
+    })?;
+    drop(stdin);
+
+    let output = wait_with_timeout(child, timeout_ms).map_err(|error| ProviderConfigError {
+        field: "curl_wait".to_string(),
+        message: error.to_string(),
+    })?;
+    if !output.status.success() {
+        return Err(ProviderConfigError {
+            field: "curl_exit".to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
     }
 
-    fn execute_transport(
-        &self,
-        request: &ResponderRequest,
-    ) -> Result<TransportCallResult, ProviderConfigError> {
-        match self.transport {
-            ProviderTransport::Stub => Ok(TransportCallResult::Stub(
-                self.execute_stub_post_call(request)?,
-            )),
-            ProviderTransport::Http => self
-                .execute_http_post_call(request)
-                .map(TransportCallResult::Http),
-            ProviderTransport::Native => self
-                .execute_native_post_call(request)
-                .map(TransportCallResult::Native),
-            ProviderTransport::Curl => self
-                .execute_curl_post_call(request)
-                .map(TransportCallResult::Curl),
-        }
-    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let (response_body_json, status_raw) = stdout
+        .rsplit_once("\n__CHUANG_CURL_STATUS__:")
+        .ok_or_else(|| ProviderConfigError {
+            field: "curl_response".to_string(),
+            message: "missing_status_marker".to_string(),
+        })?;
+    let status_code = status_raw
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| ProviderConfigError {
+            field: "curl_response".to_string(),
+            message: format!("invalid_status_code:{status_raw}"),
+        })?;
 
-    fn build_native_https_connector(
-        &self,
-    ) -> Result<
-        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
-        ProviderConfigError,
-    > {
-        if let Some(path) = &self.tls_ca_cert_path {
-            let roots = load_root_store_from_pem(path)?;
-            let client_config = ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            Ok(HttpsConnectorBuilder::new()
-                .with_tls_config(client_config)
-                .https_or_http()
-                .enable_http1()
-                .build())
-        } else {
-            Ok(HttpsConnectorBuilder::new()
-                .with_native_roots()
-                .map_err(|error| ProviderConfigError {
-                    field: "native_http_tls".to_string(),
-                    message: error.to_string(),
-                })?
-                .https_or_http()
-                .enable_http1()
-                .build())
-        }
+    Ok(HttpCallResult {
+        status_code,
+        url: preview.url.clone(),
+        request_body_json: preview.body_json.clone(),
+        response_body_json: response_body_json.to_string(),
+    })
+}
+
+fn build_native_https_connector(
+    tls_ca_cert_path: Option<&PathBuf>,
+) -> Result<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    ProviderConfigError,
+> {
+    if let Some(path) = tls_ca_cert_path {
+        let roots = load_root_store_from_pem(path)?;
+        let client_config = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Ok(HttpsConnectorBuilder::new()
+            .with_tls_config(client_config)
+            .https_or_http()
+            .enable_http1()
+            .build())
+    } else {
+        Ok(HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .map_err(|error| ProviderConfigError {
+                field: "native_http_tls".to_string(),
+                message: error.to_string(),
+            })?
+            .https_or_http()
+            .enable_http1()
+            .build())
     }
 }
 
@@ -724,335 +745,378 @@ impl ProviderAdapterResponder for OpenAICompatibleProviderAdapter {
     }
 
     fn respond(&self, request: &ResponderRequest) -> ProviderAdapterResponse {
-        let masked_key = if self.api_key.is_empty() {
-            "missing".to_string()
-        } else {
-            format!("len:{}", self.api_key.len())
+        let ctx = ProviderRespondContext {
+            identity: &self.identity,
+            base_url: &self.base_url,
+            api_key: &self.api_key,
+            transport: self.transport.clone(),
+            request_timeout_ms: self.request_timeout_ms,
+            tls_ca_cert_path: self.tls_ca_cert_path.as_ref(),
+            transport_label: "openai-compatible",
+            default_finish_reason: default_finish_reason_for_transport,
         };
-        let started = Instant::now();
-        let mut retry_attempts = 0usize;
+        run_provider_respond(
+            &ctx,
+            request,
+            |req| self.build_http_request_preview(req),
+            |identity, req, _preview| build_openai_stub_response_body(identity, req),
+        )
+    }
+}
 
-        for attempt in 0..MAX_PROVIDER_ATTEMPTS {
-            // 空闲看门狗：单次调用（含重试序列）总时长超过 90s 即中断，不再发起新尝试。
-            // 单次 transport 尝试本身仍受 request_timeout_ms（provider_timeout_ms 配置）约束。
-            if started.elapsed() >= Duration::from_millis(PROVIDER_IDLE_WATCHDOG_KILL_MS) {
-                return self.build_watchdog_kill_response(request, &masked_key, started.elapsed());
-            }
-            match self.execute_transport(request) {
-                Ok(call) => {
-                    let status_code = call.status_code();
-                    if !http_status_is_success(status_code) {
-                        // 扣留机制：可恢复错误先扣留（重试），全部恢复失败才释放冒泡。
-                        // Transient gateway/limit errors are retried with
-                        // backoff; auth and other hard errors are not.
-                        if attempt + 1 < MAX_PROVIDER_ATTEMPTS
-                            && RETRYABLE_STATUS_CODES.contains(&status_code)
-                        {
-                            retry_attempts += 1;
-                            std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
-                            continue;
-                        }
-                        let mut response =
-                            self.build_http_error_response(request, call, &masked_key);
-                        self.annotate_retry_and_watchdog(
-                            &mut response,
-                            started,
-                            retry_attempts,
-                            "released",
-                        );
-                        return response;
-                    }
-                    let mut response = self.build_success_response(request, call, &masked_key);
-                    self.annotate_retry_and_watchdog(
-                        &mut response,
-                        started,
-                        retry_attempts,
-                        "recovered",
-                    );
-                    return response;
-                }
-                Err(error) => {
-                    let preview = self.build_http_request_preview(request).ok();
-                    let error_class = provider_error_class(&error);
-                    // ECONNRESET / ETIMEDOUT 类传输错误与 429/529 一样先扣留重试，
-                    // 重试耗尽才释放；配置/协议等硬错误不重试直接释放。
+/// 通用 provider 响应核心（OpenAI / Anthropic 共享）：重试、扣留、看门狗、
+/// success/http-error/config-error 响应构造。`build_preview` 按 provider 方言
+/// 构造请求；`stub_response_body` 负责 stub transport 的响应体。
+pub(crate) struct ProviderRespondContext<'a> {
+    pub identity: &'a ProviderIdentity,
+    pub base_url: &'a str,
+    pub api_key: &'a str,
+    pub transport: ProviderTransport,
+    pub request_timeout_ms: u64,
+    pub tls_ca_cert_path: Option<&'a PathBuf>,
+    /// 日志/元数据里的 transport 标签，如 "openai-compatible" / "anthropic-compatible"。
+    pub transport_label: &'static str,
+    /// 成功响应缺失 finish_reason 时的默认值（按 transport 区分）。
+    pub default_finish_reason: fn(ProviderTransport) -> &'static str,
+}
+
+pub(crate) fn run_provider_respond(
+    ctx: &ProviderRespondContext,
+    request: &ResponderRequest,
+    build_preview: impl Fn(&ResponderRequest) -> Result<HttpRequestPreview, ProviderConfigError>,
+    stub_response_body: impl Fn(
+        &ProviderIdentity,
+        &ResponderRequest,
+        &HttpRequestPreview,
+    ) -> String,
+) -> ProviderAdapterResponse {
+    let masked_key = if ctx.api_key.is_empty() {
+        "missing".to_string()
+    } else {
+        format!("len:{}", ctx.api_key.len())
+    };
+    let started = Instant::now();
+    let mut retry_attempts = 0usize;
+
+    for attempt in 0..MAX_PROVIDER_ATTEMPTS {
+        // 空闲看门狗：单次调用（含重试序列）总时长超过 90s 即中断，不再发起新尝试。
+        // 单次 transport 尝试本身仍受 request_timeout_ms（provider_timeout_ms 配置）约束。
+        if started.elapsed() >= Duration::from_millis(PROVIDER_IDLE_WATCHDOG_KILL_MS) {
+            return build_watchdog_kill_response(
+                ctx,
+                request,
+                &masked_key,
+                started.elapsed(),
+                &build_preview,
+            );
+        }
+        match execute_transport_for(ctx, request, &build_preview, &stub_response_body) {
+            Ok(call) => {
+                let status_code = call.status_code();
+                if !http_status_is_success(status_code) {
+                    // 扣留机制：可恢复错误先扣留（重试），全部恢复失败才释放冒泡。
+                    // Transient gateway/limit errors are retried with
+                    // backoff; auth and other hard errors are not.
                     if attempt + 1 < MAX_PROVIDER_ATTEMPTS
-                        && transport_retryable(&error, error_class)
+                        && RETRYABLE_STATUS_CODES.contains(&status_code)
                     {
                         retry_attempts += 1;
                         std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
                         continue;
                     }
-                    let mut response = ProviderAdapterResponse {
-                        body: format!(
-                            "CONFIG_ERROR: openai-compatible provider invalid field={} reason={}",
-                            error.field, error.message
-                        ),
-                        trace: format!(
-                            "transport=openai-compatible provider={} model={} config_error_field={} reason={}",
-                            self.identity.provider_id,
-                            self.identity.model_name,
-                            error.field,
-                            error.message
-                        ),
-                        finish_reason: Some("invalid-config".to_string()),
-                        extra_meta: build_config_error_meta(
-                            &error,
-                            preview.as_ref(),
-                            self.transport.as_str(),
-                            self.request_timeout_ms,
-                        ),
-                    };
-                    self.annotate_retry_and_watchdog(
-                        &mut response,
-                        started,
-                        retry_attempts,
-                        "released",
-                    );
+                    let mut response = build_http_error_response(ctx, request, call, &masked_key);
+                    annotate_retry_and_watchdog(&mut response, started, retry_attempts, "released");
                     return response;
                 }
+                let mut response = build_success_response(ctx, request, call, &masked_key);
+                annotate_retry_and_watchdog(&mut response, started, retry_attempts, "recovered");
+                return response;
+            }
+            Err(error) => {
+                let preview = build_preview(request).ok();
+                let error_class = provider_error_class(&error);
+                // ECONNRESET / ETIMEDOUT 类传输错误与 429/529 一样先扣留重试，
+                // 重试耗尽才释放；配置/协议等硬错误不重试直接释放。
+                if attempt + 1 < MAX_PROVIDER_ATTEMPTS && transport_retryable(&error, error_class)
+                {
+                    retry_attempts += 1;
+                    std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
+                    continue;
+                }
+                let mut response = ProviderAdapterResponse {
+                    body: format!(
+                        "CONFIG_ERROR: {} provider invalid field={} reason={}",
+                        ctx.transport_label, error.field, error.message
+                    ),
+                    trace: format!(
+                        "transport={} provider={} model={} config_error_field={} reason={}",
+                        ctx.transport_label,
+                        ctx.identity.provider_id,
+                        ctx.identity.model_name,
+                        error.field,
+                        error.message
+                    ),
+                    finish_reason: Some("invalid-config".to_string()),
+                    extra_meta: build_config_error_meta(
+                        &error,
+                        preview.as_ref(),
+                        ctx.transport.as_str(),
+                        ctx.request_timeout_ms,
+                        ctx.transport_label,
+                    ),
+                };
+                annotate_retry_and_watchdog(&mut response, started, retry_attempts, "released");
+                return response;
             }
         }
-        unreachable!("provider respond loop always returns")
+    }
+    unreachable!("provider respond loop always returns")
+}
+
+fn execute_transport_for(
+    ctx: &ProviderRespondContext,
+    request: &ResponderRequest,
+    build_preview: &impl Fn(&ResponderRequest) -> Result<HttpRequestPreview, ProviderConfigError>,
+    stub_response_body: &impl Fn(
+        &ProviderIdentity,
+        &ResponderRequest,
+        &HttpRequestPreview,
+    ) -> String,
+) -> Result<TransportCallResult, ProviderConfigError> {
+    let preview = build_preview(request)?;
+    match ctx.transport {
+        ProviderTransport::Stub => Ok(TransportCallResult::Stub(StubHttpCallResult {
+            status_code: 200,
+            url: preview.url.clone(),
+            request_body_json: preview.body_json.clone(),
+            response_body_json: stub_response_body(ctx.identity, request, &preview),
+        })),
+        ProviderTransport::Http => execute_http_transport(&preview, ctx.request_timeout_ms)
+            .map(TransportCallResult::Http),
+        ProviderTransport::Native => execute_native_transport(
+            &preview,
+            ctx.request_timeout_ms,
+            ctx.tls_ca_cert_path,
+        )
+        .map(TransportCallResult::Native),
+        ProviderTransport::Curl => execute_curl_transport(&preview, ctx.request_timeout_ms)
+            .map(TransportCallResult::Curl),
     }
 }
 
-const RETRYABLE_STATUS_CODES: &[u16] = &[408, 429, 500, 502, 503, 504, 529];
-const MAX_PROVIDER_ATTEMPTS: usize = 3;
-
-fn backoff_ms(attempt: usize) -> u64 {
-    // withRetry（蓝本 §2.5）：base 500ms，指数 ×2，上限 32s，jitter ±25%。
-    let exponent = attempt.min(6) as u32; // 500 * 2^6 = 32000 = 上限
-    let base = RETRY_BACKOFF_BASE_MS
-        .saturating_mul(1u64 << exponent)
-        .min(RETRY_BACKOFF_MAX_MS);
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos() as u64)
-        .unwrap_or(0);
-    // jitter 在 cap 之后施加：最终值不得超过 32s 上限。
-    jittered_backoff(base, seed).min(RETRY_BACKOFF_MAX_MS)
-}
-
-/// ±RETRY_BACKOFF_JITTER_RATIO 抖动；确定性：同 seed 同结果（便于测试）。
-fn jittered_backoff(base_ms: u64, seed: u64) -> u64 {
-    let span = ((base_ms as f64) * RETRY_BACKOFF_JITTER_RATIO) as u64;
-    let offset = (seed % (span * 2 + 1)) as i64 - span as i64;
-    (base_ms as i64 + offset).max(1) as u64
-}
-
-impl OpenAICompatibleProviderAdapter {
-    fn annotate_retry_and_watchdog(
-        &self,
-        response: &mut ProviderAdapterResponse,
-        started: Instant,
-        retry_attempts: usize,
-        retry_outcome: &str,
-    ) {
-        if retry_attempts > 0 {
-            response
-                .extra_meta
-                .insert("provider_retry_attempts".to_string(), retry_attempts.to_string());
-            response.extra_meta.insert(
-                "provider_retry_outcome".to_string(),
-                retry_outcome.to_string(),
-            );
-        }
-        let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        if elapsed_ms >= PROVIDER_IDLE_WATCHDOG_WARN_MS {
-            response
-                .extra_meta
-                .insert("provider_watchdog_warned".to_string(), "true".to_string());
-            response.extra_meta.insert(
-                "provider_watchdog_elapsed_ms".to_string(),
-                elapsed_ms.to_string(),
-            );
-        }
-    }
-
-    fn build_watchdog_kill_response(
-        &self,
-        request: &ResponderRequest,
-        masked_key: &str,
-        elapsed: Duration,
-    ) -> ProviderAdapterResponse {
-        let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
-        let message = format!(
-            "request timed out after {elapsed_ms}ms (idle watchdog kill, limit {PROVIDER_IDLE_WATCHDOG_KILL_MS}ms)"
+fn annotate_retry_and_watchdog(
+    response: &mut ProviderAdapterResponse,
+    started: Instant,
+    retry_attempts: usize,
+    retry_outcome: &str,
+) {
+    if retry_attempts > 0 {
+        response
+            .extra_meta
+            .insert("provider_retry_attempts".to_string(), retry_attempts.to_string());
+        response.extra_meta.insert(
+            "provider_retry_outcome".to_string(),
+            retry_outcome.to_string(),
         );
-        let preview = self.build_http_request_preview(request).ok();
-        let mut extra_meta = BTreeMap::from([
-            ("transport".to_string(), "openai-compatible".to_string()),
-            ("provider_response_ok".to_string(), "false".to_string()),
-            ("provider_error_class".to_string(), "transport".to_string()),
-            ("provider_error_message".to_string(), message.clone()),
-            // 看门狗中断即扣留释放：本调用已耗尽恢复预算，交给上层（fallback/循环层）。
-            ("provider_retryable".to_string(), "false".to_string()),
-            ("provider_watchdog_killed".to_string(), "true".to_string()),
-            (
-                "provider_watchdog_elapsed_ms".to_string(),
-                elapsed_ms.to_string(),
-            ),
-        ]);
-        if let Some(preview) = preview {
-            extra_meta.insert("request_url".to_string(), preview.url.clone());
-            extra_meta.insert("request_method".to_string(), preview.method.clone());
-            extra_meta.insert(
-                "request_message_count".to_string(),
-                request_message_count(&preview.body_json).to_string(),
-            );
-        }
-        insert_provider_failure_meta(&mut extra_meta, None, "transport", Some(&message));
-        insert_provider_timeout_meta(&mut extra_meta, None, "transport", Some(&message));
-        ProviderAdapterResponse {
-            body: format!(
-                "PROVIDER_IDLE_TIMEOUT: provider={} model={} transport={} elapsed_ms={elapsed_ms}",
-                self.identity.provider_id,
-                self.identity.model_name,
-                self.transport.as_str(),
-            ),
-            trace: format!(
-                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} transport_mode={} provider_idle_timeout_elapsed_ms={elapsed_ms}",
-                self.identity.provider_id,
-                self.identity.model_name,
-                self.base_url,
-                masked_key,
-                request.recall_hit_count,
-                self.transport.as_str(),
-            ),
-            finish_reason: Some("provider-idle-timeout".to_string()),
-            extra_meta,
-        }
     }
+    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    if elapsed_ms >= PROVIDER_IDLE_WATCHDOG_WARN_MS {
+        response
+            .extra_meta
+            .insert("provider_watchdog_warned".to_string(), "true".to_string());
+        response.extra_meta.insert(
+            "provider_watchdog_elapsed_ms".to_string(),
+            elapsed_ms.to_string(),
+        );
+    }
+}
 
-    fn build_success_response(
-        &self,
-        request: &ResponderRequest,
-        call: TransportCallResult,
-        masked_key: &str,
-    ) -> ProviderAdapterResponse {
-        let response_body = call.response_body_json();
-        let assistant_content = extract_assistant_content(response_body);
-        let mut extra_meta = build_success_meta(&call);
-        let (body, finish_reason) = if let Some(content) = assistant_content {
-            extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
-            (
-                content,
-                extract_finish_reason(response_body).or_else(|| {
-                    Some(default_finish_reason_for_transport(call.transport()).to_string())
-                }),
-            )
-        } else {
-            extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
-            extra_meta.insert(
-                "provider_error_class".to_string(),
-                "missing_content".to_string(),
-            );
-            extra_meta.insert(
-                "provider_error_message".to_string(),
-                "missing assistant content in successful provider response".to_string(),
-            );
-            // deepseek 等推理模型偶发 200+空 content，重试一次通常即恢复，
-            // 循环层按 provider_retryable=true 走自动重试。
-            extra_meta.insert("provider_retryable".to_string(), "true".to_string());
-            insert_provider_failure_meta(
-                &mut extra_meta,
-                Some(call.status_code()),
-                "missing_content",
-                Some("missing assistant content in successful provider response"),
-            );
-            (
-                format!(
-                    "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
-                    self.identity.provider_id,
-                    self.identity.model_name,
-                    call.transport().as_str(),
-                    call.status_code(),
-                    extra_meta
-                        .get("response_kind")
-                        .map(String::as_str)
-                        .unwrap_or("unknown")
-                ),
-                Some("provider-error-missing-content".to_string()),
-            )
-        };
-        ProviderAdapterResponse {
-            body,
-            trace: format!(
-                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={}",
-                self.identity.provider_id,
-                self.identity.model_name,
-                self.base_url,
-                masked_key,
-                request.recall_hit_count,
-                request_message_count(call.request_body_json()),
-                call.url(),
+fn build_watchdog_kill_response(
+    ctx: &ProviderRespondContext,
+    request: &ResponderRequest,
+    masked_key: &str,
+    elapsed: Duration,
+    build_preview: &impl Fn(&ResponderRequest) -> Result<HttpRequestPreview, ProviderConfigError>,
+) -> ProviderAdapterResponse {
+    let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+    let message = format!(
+        "request timed out after {elapsed_ms}ms (idle watchdog kill, limit {PROVIDER_IDLE_WATCHDOG_KILL_MS}ms)"
+    );
+    let preview = build_preview(request).ok();
+    let mut extra_meta = BTreeMap::from([
+        ("transport".to_string(), ctx.transport_label.to_string()),
+        ("provider_response_ok".to_string(), "false".to_string()),
+        ("provider_error_class".to_string(), "transport".to_string()),
+        ("provider_error_message".to_string(), message.clone()),
+        // 看门狗中断即扣留释放：本调用已耗尽恢复预算，交给上层（fallback/循环层）。
+        ("provider_retryable".to_string(), "false".to_string()),
+        ("provider_watchdog_killed".to_string(), "true".to_string()),
+        (
+            "provider_watchdog_elapsed_ms".to_string(),
+            elapsed_ms.to_string(),
+        ),
+    ]);
+    if let Some(preview) = preview {
+        extra_meta.insert("request_url".to_string(), preview.url.clone());
+        extra_meta.insert("request_method".to_string(), preview.method.clone());
+        extra_meta.insert(
+            "request_message_count".to_string(),
+            request_message_count(&preview.body_json).to_string(),
+        );
+    }
+    insert_provider_failure_meta(&mut extra_meta, None, "transport", Some(&message));
+    insert_provider_timeout_meta(&mut extra_meta, None, "transport", Some(&message));
+    ProviderAdapterResponse {
+        body: format!(
+            "PROVIDER_IDLE_TIMEOUT: provider={} model={} transport={} elapsed_ms={elapsed_ms}",
+            ctx.identity.provider_id,
+            ctx.identity.model_name,
+            ctx.transport.as_str(),
+        ),
+        trace: format!(
+            "transport={} provider={} model={} base_url={} api_key={} recall_hits={} transport_mode={} provider_idle_timeout_elapsed_ms={elapsed_ms}",
+            ctx.transport_label,
+            ctx.identity.provider_id,
+            ctx.identity.model_name,
+            ctx.base_url,
+            masked_key,
+            request.recall_hit_count,
+            ctx.transport.as_str(),
+        ),
+        finish_reason: Some("provider-idle-timeout".to_string()),
+        extra_meta,
+    }
+}
+
+fn build_success_response(
+    ctx: &ProviderRespondContext,
+    request: &ResponderRequest,
+    call: TransportCallResult,
+    masked_key: &str,
+) -> ProviderAdapterResponse {
+    let response_body = call.response_body_json();
+    let assistant_content = extract_assistant_content(response_body);
+    let mut extra_meta = build_success_meta(&call, ctx.transport_label);
+    let (body, finish_reason) = if let Some(content) = assistant_content {
+        extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
+        (
+            content,
+            extract_finish_reason(response_body).or_else(|| {
+                Some((ctx.default_finish_reason)(call.transport()).to_string())
+            }),
+        )
+    } else {
+        extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
+        extra_meta.insert(
+            "provider_error_class".to_string(),
+            "missing_content".to_string(),
+        );
+        extra_meta.insert(
+            "provider_error_message".to_string(),
+            "missing assistant content in successful provider response".to_string(),
+        );
+        // deepseek 等推理模型偶发 200+空 content，重试一次通常即恢复，
+        // 循环层按 provider_retryable=true 走自动重试。
+        extra_meta.insert("provider_retryable".to_string(), "true".to_string());
+        insert_provider_failure_meta(
+            &mut extra_meta,
+            Some(call.status_code()),
+            "missing_content",
+            Some("missing assistant content in successful provider response"),
+        );
+        (
+            format!(
+                "PROVIDER_MISSING_CONTENT: provider={} model={} transport={} status_code={} response_kind={}",
+                ctx.identity.provider_id,
+                ctx.identity.model_name,
+                call.transport().as_str(),
                 call.status_code(),
-                call.transport().as_str(),
+                extra_meta
+                    .get("response_kind")
+                    .map(String::as_str)
+                    .unwrap_or("unknown")
             ),
-            finish_reason,
-            extra_meta,
-        }
+            Some("provider-error-missing-content".to_string()),
+        )
+    };
+    ProviderAdapterResponse {
+        body,
+        trace: format!(
+            "transport={} provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={}",
+            ctx.transport_label,
+            ctx.identity.provider_id,
+            ctx.identity.model_name,
+            ctx.base_url,
+            masked_key,
+            request.recall_hit_count,
+            request_message_count(call.request_body_json()),
+            call.url(),
+            call.status_code(),
+            call.transport().as_str(),
+        ),
+        finish_reason,
+        extra_meta,
     }
+}
 
-    fn build_http_error_response(
-        &self,
-        request: &ResponderRequest,
-        call: TransportCallResult,
-        masked_key: &str,
-    ) -> ProviderAdapterResponse {
-        let response_body = call.response_body_json();
-        let status_code = call.status_code();
-        let error_message = extract_provider_error_message(response_body)
-            .unwrap_or_else(|| format!("status_code={status_code}"));
-        ProviderAdapterResponse {
-            body: format!(
-                "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",
-                self.identity.provider_id,
-                self.identity.model_name,
-                call.transport().as_str(),
-                status_code,
-                error_message
-            ),
-            trace: format!(
-                "transport=openai-compatible provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={} provider_http_error={}",
-                self.identity.provider_id,
-                self.identity.model_name,
-                self.base_url,
-                masked_key,
-                request.recall_hit_count,
-                request_message_count(call.request_body_json()),
-                call.url(),
-                status_code,
-                call.transport().as_str(),
-                error_message,
-            ),
-            finish_reason: Some(format!("http-error-{status_code}")),
-            extra_meta: {
-                let mut meta = build_success_meta(&call);
-                meta.insert("provider_response_ok".to_string(), "false".to_string());
-                meta.insert("provider_error_class".to_string(), "http_status".to_string());
-                meta.insert("provider_error_message".to_string(), error_message.clone());
-                insert_provider_failure_meta(
-                    &mut meta,
-                    Some(status_code),
-                    "http_status",
-                    Some(&error_message),
-                );
-                insert_provider_timeout_meta(
-                    &mut meta,
-                    Some(status_code),
-                    "http_status",
-                    Some(&error_message),
-                );
-                meta
-            },
-        }
+fn build_http_error_response(
+    ctx: &ProviderRespondContext,
+    request: &ResponderRequest,
+    call: TransportCallResult,
+    masked_key: &str,
+) -> ProviderAdapterResponse {
+    let response_body = call.response_body_json();
+    let status_code = call.status_code();
+    let error_message = extract_provider_error_message(response_body)
+        .unwrap_or_else(|| format!("status_code={status_code}"));
+    ProviderAdapterResponse {
+        body: format!(
+            "PROVIDER_HTTP_ERROR: provider={} model={} transport={} status_code={} error={}",
+            ctx.identity.provider_id,
+            ctx.identity.model_name,
+            call.transport().as_str(),
+            status_code,
+            error_message
+        ),
+        trace: format!(
+            "transport={} provider={} model={} base_url={} api_key={} recall_hits={} message_count={} request_url={} status_code={} transport_mode={} provider_http_error={}",
+            ctx.transport_label,
+            ctx.identity.provider_id,
+            ctx.identity.model_name,
+            ctx.base_url,
+            masked_key,
+            request.recall_hit_count,
+            request_message_count(call.request_body_json()),
+            call.url(),
+            status_code,
+            call.transport().as_str(),
+            error_message,
+        ),
+        finish_reason: Some(format!("http-error-{status_code}")),
+        extra_meta: {
+            let mut meta = build_success_meta(&call, ctx.transport_label);
+            meta.insert("provider_response_ok".to_string(), "false".to_string());
+            meta.insert("provider_error_class".to_string(), "http_status".to_string());
+            meta.insert("provider_error_message".to_string(), error_message.clone());
+            insert_provider_failure_meta(
+                &mut meta,
+                Some(status_code),
+                "http_status",
+                Some(&error_message),
+            );
+            insert_provider_timeout_meta(
+                &mut meta,
+                Some(status_code),
+                "http_status",
+                Some(&error_message),
+            );
+            meta
+        },
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TransportCallResult {
+pub(crate) enum TransportCallResult {
     Stub(StubHttpCallResult),
     Http(HttpCallResult),
     Native(HttpCallResult),
@@ -1060,7 +1124,7 @@ enum TransportCallResult {
 }
 
 impl TransportCallResult {
-    fn transport(&self) -> ProviderTransport {
+    pub(crate) fn transport(&self) -> ProviderTransport {
         match self {
             Self::Stub(_) => ProviderTransport::Stub,
             Self::Http(_) => ProviderTransport::Http,
@@ -1069,7 +1133,7 @@ impl TransportCallResult {
         }
     }
 
-    fn status_code(&self) -> u16 {
+    pub(crate) fn status_code(&self) -> u16 {
         match self {
             Self::Stub(result) => result.status_code,
             Self::Http(result) => result.status_code,
@@ -1078,7 +1142,7 @@ impl TransportCallResult {
         }
     }
 
-    fn url(&self) -> &str {
+    pub(crate) fn url(&self) -> &str {
         match self {
             Self::Stub(result) => &result.url,
             Self::Http(result) => &result.url,
@@ -1087,7 +1151,7 @@ impl TransportCallResult {
         }
     }
 
-    fn request_body_json(&self) -> &str {
+    pub(crate) fn request_body_json(&self) -> &str {
         match self {
             Self::Stub(result) => &result.request_body_json,
             Self::Http(result) => &result.request_body_json,
@@ -1096,7 +1160,7 @@ impl TransportCallResult {
         }
     }
 
-    fn response_body_json(&self) -> &str {
+    pub(crate) fn response_body_json(&self) -> &str {
         match self {
             Self::Stub(result) => &result.response_body_json,
             Self::Http(result) => &result.response_body_json,
@@ -1106,7 +1170,10 @@ impl TransportCallResult {
     }
 }
 
-fn build_success_meta(call: &TransportCallResult) -> BTreeMap<String, String> {
+fn build_success_meta(
+    call: &TransportCallResult,
+    transport_label: &'static str,
+) -> BTreeMap<String, String> {
     let usage_meta = extract_usage_meta(call.response_body_json());
     let response_kind_value =
         response_kind(call.response_body_json()).unwrap_or_else(|| "unknown".to_string());
@@ -1114,7 +1181,7 @@ fn build_success_meta(call: &TransportCallResult) -> BTreeMap<String, String> {
         .unwrap_or_else(|| default_finish_reason_for_transport(call.transport()).to_string());
 
     let mut meta = BTreeMap::from([
-        ("transport".to_string(), "openai-compatible".to_string()),
+        ("transport".to_string(), transport_label.to_string()),
         (
             "transport_mode".to_string(),
             call.transport().as_str().to_string(),
@@ -1234,10 +1301,11 @@ fn build_config_error_meta(
     preview: Option<&HttpRequestPreview>,
     transport_mode: &str,
     timeout_ms: u64,
+    transport_label: &'static str,
 ) -> BTreeMap<String, String> {
     let error_class = provider_error_class(error);
     let mut meta = BTreeMap::from([
-        ("transport".to_string(), "openai-compatible".to_string()),
+        ("transport".to_string(), transport_label.to_string()),
         ("transport_mode".to_string(), transport_mode.to_string()),
         ("config_error_field".to_string(), error.field.clone()),
         ("provider_error_class".to_string(), error_class.to_string()),
@@ -1643,6 +1711,11 @@ fn extract_finish_reason(response_body_json: &str) -> Option<String> {
         return None;
     };
 
+    // Anthropic Messages API：顶层 `stop_reason`（如 end_turn / max_tokens / stop_sequence）。
+    if let Some(reason) = value.get("stop_reason").and_then(|reason| reason.as_str()) {
+        return Some(reason.to_string());
+    }
+
     if let Some(reason) = value
         .get("choices")
         .and_then(|choices| choices.as_array())
@@ -1727,7 +1800,17 @@ fn extract_provider_error_message(response_body_json: &str) -> Option<String> {
 fn response_kind(response_body_json: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(response_body_json)
         .ok()
-        .and_then(|value| value.get("object")?.as_str().map(str::to_string))
+        .and_then(|value| {
+            // OpenAI 系：`object` 字段（如 "response" / "chat.completion"）。
+            if let Some(kind) = value.get("object").and_then(|value| value.as_str()) {
+                return Some(kind.to_string());
+            }
+            // Anthropic Messages API：`type` 字段（如 "message"）。
+            value
+                .get("type")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
 }
 
 fn default_finish_reason_for_transport(transport: ProviderTransport) -> &'static str {

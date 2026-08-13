@@ -140,6 +140,7 @@ fn first_openai_compatible_provider(provider: &ProviderConfig) -> Option<&OpenAI
         ProviderConfig::OpenAICompatible(config) => Some(config),
         ProviderConfig::Fallback { primary, .. } => first_openai_compatible_provider(primary),
         ProviderConfig::Fake { .. } => None,
+        ProviderConfig::AnthropicCompatible(_) => None,
     }
 }
 
@@ -209,6 +210,17 @@ fn materialize_provider_keys(
 ) -> Result<(), String> {
     match provider {
         ProviderConfig::OpenAICompatible(config) => {
+            if let Some(name) = config
+                .api_key
+                .strip_prefix("__MISSING_ENV:")
+                .and_then(|value| value.strip_suffix("__"))
+            {
+                config.api_key = env_values.get(name).filter(|value| !value.is_empty()).cloned().ok_or_else(|| {
+                    format!("external_ai_dispatch_invalid: provider_env: required variable {name} is not set")
+                })?;
+            }
+        }
+        ProviderConfig::AnthropicCompatible(config) => {
             if let Some(name) = config
                 .api_key
                 .strip_prefix("__MISSING_ENV:")

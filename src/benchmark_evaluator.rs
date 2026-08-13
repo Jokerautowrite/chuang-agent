@@ -74,6 +74,7 @@ impl BenchmarkEvaluator {
                 ))
             }
             ProviderConfig::OpenAICompatible(_) => &runtime.provider,
+            ProviderConfig::AnthropicCompatible(_) => &runtime.provider,
             ProviderConfig::Fallback { primary, .. } => primary.as_ref(),
         };
         let slot = build_provider_responder(main_provider)

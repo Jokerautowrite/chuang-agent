@@ -46,6 +46,16 @@ api_key_env = "CHUANG_AGENT_API_KEY"
 transport = "native"
 provider_timeout_ms = 120000
 
+# Anthropic Messages API provider（可直接配 Claude / Opus 系列模型）：
+# provider = "anthropic_compatible"
+# provider_id = "anthropic-main"
+# base_url = "https://api.anthropic.com"
+# model = "claude-opus-4-1"
+# api_key_env = "ANTHROPIC_API_KEY"
+# transport = "native"            # stub | http | native | curl
+# endpoint = "messages"           # Anthropic 仅支持 messages（/v1/messages）
+# provider_timeout_ms = 60000
+
 # 错误恢复级联（蓝本 docs/reference-dig-20260810.md §2.5 withRetry + 看门狗）：
 # - withRetry：base 500ms / max 32s / jitter 0.25；重试 [429,529]（限流/上游不可达）
 #   与 ECONNRESET/ETIMEDOUT 类传输错误；重试耗尽才释放错误（扣留机制）。
@@ -92,7 +102,7 @@ control_timeout_ms = 30000
 # actuator_args = "--json --allowlist ./config/actuator-allowlist.json"
 
 context_engine = "deterministic_budget"
-context_max_tokens = 272000
+context_max_tokens = 100000
 context_reserve_system_tokens = 32
 context_min_working_tokens = 1
 context_max_tool_results = 5

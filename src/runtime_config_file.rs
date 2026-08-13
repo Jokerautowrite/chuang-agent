@@ -8,10 +8,11 @@ use crate::hermes_memory::{DEFAULT_HOT_MEMORY_MAX_CHARS, DEFAULT_USER_MEMORY_MAX
 use crate::knowledge_read::{KnowledgeReadConfig, KnowledgeReadSourceConfig};
 use crate::provider_openai_compatible::{ProviderTransport, ReasoningEffort};
 use crate::runtime_config::{
-    ActuatorCommandConfig, ActuatorConfig, ContextEngineConfig, ControlPlaneCommandConfig,
-    ControlPlaneConfig, IdentityBootstrapConfig, IdentityMemoryConfig, OpenAICompatibleConfig,
-    ProviderApiEndpoint, ProviderConfig, ProviderFallbackPolicy, RulesConfig, RuntimeConfig,
-    SubagentConfig, SubagentLiveWorkerConfig, SubagentQueueConfig,
+    ActuatorCommandConfig, ActuatorConfig, AnthropicApiEndpoint, AnthropicCompatibleConfig,
+    ContextEngineConfig, ControlPlaneCommandConfig, ControlPlaneConfig, IdentityBootstrapConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderApiEndpoint, ProviderConfig,
+    ProviderFallbackPolicy, RulesConfig, RuntimeConfig, SubagentConfig,
+    SubagentLiveWorkerConfig, SubagentQueueConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -481,6 +482,58 @@ fn parse_primary_provider(
                     .map(PathBuf::from),
             }))
         }
+        "anthropic_compatible" => {
+            let api_key_env = required_any(values, &["provider.api_key_env", "api_key_env"])?;
+            let api_key = resolve_api_key_env(&api_key_env, options)?;
+            Ok(ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig {
+                provider_id: get_any(values, &["provider.id", "provider_id"])
+                    .cloned()
+                    .unwrap_or_else(|| "anthropic-compatible-config".to_string()),
+                base_url: required_any(values, &["provider.base_url", "base_url"])?,
+                api_key,
+                model_name: required_any(values, &["provider.model", "model"])?,
+                transport: get_any(values, &["provider.transport", "transport"])
+                    .map(|value| value.parse::<ProviderTransport>())
+                    .transpose()
+                    .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                        key: "provider.transport".to_string(),
+                        value: get_any(values, &["provider.transport", "transport"])
+                            .cloned()
+                            .unwrap_or_default(),
+                    })?
+                    .unwrap_or(ProviderTransport::Stub),
+                endpoint: get_any(values, &["provider.endpoint", "endpoint"])
+                    .map(|value| value.parse::<AnthropicApiEndpoint>())
+                    .transpose()
+                    .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                        key: "provider.endpoint".to_string(),
+                        value: get_any(values, &["provider.endpoint", "endpoint"])
+                            .cloned()
+                            .unwrap_or_default(),
+                    })?
+                    .unwrap_or_default(),
+                reasoning_effort: get_any(
+                    values,
+                    &["provider.reasoning_effort", "reasoning_effort"],
+                )
+                .map(|value| value.parse::<ReasoningEffort>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: "provider.reasoning_effort".to_string(),
+                    value: get_any(values, &["provider.reasoning_effort", "reasoning_effort"])
+                        .cloned()
+                        .unwrap_or_default(),
+                })?,
+                request_timeout_ms: get_any(
+                    values,
+                    &["provider.request_timeout_ms", "provider_timeout_ms"],
+                )
+                .map(|value| parse_u64("provider.request_timeout_ms", value))
+                .transpose()?,
+                tls_ca_cert_path: get_any(values, &["provider.tls_ca_path", "tls_ca_path"])
+                    .map(PathBuf::from),
+            }))
+        }
         other => Err(RuntimeConfigFileError::InvalidValue {
             key: "provider.kind".to_string(),
             value: other.to_string(),
@@ -587,6 +640,124 @@ fn parse_prefixed_fallback_provider(
                     ],
                 )
                 .map(|value| value.parse::<ProviderApiEndpoint>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: format!("{prefix}.provider.endpoint"),
+                    value: get_any(
+                        values,
+                        &[
+                            &format!("{prefix}.provider.endpoint"),
+                            &format!("{prefix}_endpoint"),
+                        ],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?
+                .unwrap_or_default(),
+                reasoning_effort: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.reasoning_effort"),
+                        &format!("{prefix}_reasoning_effort"),
+                    ],
+                )
+                .map(|value| value.parse::<ReasoningEffort>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: format!("{prefix}.provider.reasoning_effort"),
+                    value: get_any(
+                        values,
+                        &[
+                            &format!("{prefix}.provider.reasoning_effort"),
+                            &format!("{prefix}_reasoning_effort"),
+                        ],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?,
+                request_timeout_ms: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.request_timeout_ms"),
+                        &format!("{prefix}_provider_timeout_ms"),
+                    ],
+                )
+                .map(|value| parse_u64(&format!("{prefix}.provider.request_timeout_ms"), value))
+                .transpose()?,
+                tls_ca_cert_path: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.tls_ca_path"),
+                        &format!("{prefix}_tls_ca_path"),
+                    ],
+                )
+                .map(PathBuf::from),
+            }))
+        }
+        "anthropic_compatible" => {
+            let api_key_env = required_any(
+                values,
+                &[
+                    &format!("{prefix}.provider.api_key_env"),
+                    &format!("{prefix}_api_key_env"),
+                ],
+            )?;
+            let api_key = resolve_api_key_env(&api_key_env, options)?;
+            Ok(ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig {
+                provider_id: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.id"),
+                        &format!("{prefix}_provider_id"),
+                    ],
+                )
+                .cloned()
+                .unwrap_or_else(|| format!("{prefix}-anthropic-compatible")),
+                base_url: required_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.base_url"),
+                        &format!("{prefix}_base_url"),
+                    ],
+                )?,
+                api_key,
+                model_name: required_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.model"),
+                        &format!("{prefix}_model"),
+                    ],
+                )?,
+                transport: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.transport"),
+                        &format!("{prefix}_transport"),
+                    ],
+                )
+                .map(|value| value.parse::<ProviderTransport>())
+                .transpose()
+                .map_err(|_| RuntimeConfigFileError::InvalidValue {
+                    key: format!("{prefix}.provider.transport"),
+                    value: get_any(
+                        values,
+                        &[
+                            &format!("{prefix}.provider.transport"),
+                            &format!("{prefix}_transport"),
+                        ],
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                })?
+                .unwrap_or(ProviderTransport::Stub),
+                endpoint: get_any(
+                    values,
+                    &[
+                        &format!("{prefix}.provider.endpoint"),
+                        &format!("{prefix}_endpoint"),
+                    ],
+                )
+                .map(|value| value.parse::<AnthropicApiEndpoint>())
                 .transpose()
                 .map_err(|_| RuntimeConfigFileError::InvalidValue {
                     key: format!("{prefix}.provider.endpoint"),

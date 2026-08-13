@@ -55,6 +55,7 @@ pub mod operator_approval;
 pub mod path_utils;
 pub mod permission_profile_slot;
 pub mod plugin_registry;
+pub mod provider_anthropic_compatible;
 pub mod provider_openai_compatible;
 pub mod responder;
 pub mod runtime_config;
