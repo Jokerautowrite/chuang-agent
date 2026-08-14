@@ -18,6 +18,22 @@ $providerKeyPath = Join-Path $credentialRoot 'provider-key.dpapi'
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     Copy-Item -LiteralPath $configExample -Destination $configPath
 }
+$configText = [System.IO.File]::ReadAllText($configPath)
+if ($configText -match '(?m)^actuator\s*=\s*"fake"\s*$') {
+    $actuatorBlock = @'
+actuator = "command"
+actuator_program = "powershell.exe"
+actuator_args = "-NoProfile -ExecutionPolicy Bypass -File scripts/chuang-real-actuator-adapter.ps1"
+actuator_timeout_ms = 30000
+'@
+    $configText = [regex]::Replace(
+        $configText,
+        '(?m)^actuator\s*=\s*"fake"\s*$',
+        $actuatorBlock.Trim(),
+        1
+    )
+    [System.IO.File]::WriteAllText($configPath, $configText, [System.Text.UTF8Encoding]::new($false))
+}
 
 if ($ChuangArgs.Count -gt 0 -and $ChuangArgs[0] -eq 'login') {
     $providerKey = Read-Host 'Paste API Key (input hidden)' -AsSecureString
@@ -36,14 +52,19 @@ if ($ChuangArgs.Count -gt 0 -and $ChuangArgs[0] -eq 'login') {
 }
 
 if (-not $env:CHUANG_AGENT_API_KEY -and (Test-Path -LiteralPath $providerKeyPath -PathType Leaf)) {
-    $encrypted = [System.IO.File]::ReadAllText($providerKeyPath).Trim()
-    $providerKey = ConvertTo-SecureString $encrypted
-    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($providerKey)
     try {
-        $env:CHUANG_AGENT_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        $encrypted = [System.IO.File]::ReadAllText($providerKeyPath).Trim()
+        $providerKey = ConvertTo-SecureString $encrypted
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($providerKey)
+        try {
+            $env:CHUANG_AGENT_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+        }
+        finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+        }
     }
-    finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    catch {
+        Write-Warning 'Saved API Key cannot be decrypted for this Windows user/session. Run: chuang login'
     }
 }
 
@@ -51,7 +72,7 @@ $env:CHUANG_AGENT_ROOT = $repoRoot
 $env:CHUANG_AGENT_WORKSPACE_ROOT = $callerRoot
 $env:CHUANG_REPL_WORKSPACE_ROOT = $callerRoot
 if (-not $env:CHUANG_APP_SERVER_MODE) { $env:CHUANG_APP_SERVER_MODE = 'local' }
-if (-not $env:CHUANG_REAL_ACTUATOR_ENABLE) { $env:CHUANG_REAL_ACTUATOR_ENABLE = '0' }
+if (-not $env:CHUANG_REAL_ACTUATOR_ENABLE) { $env:CHUANG_REAL_ACTUATOR_ENABLE = '1' }
 if (-not $env:CHUANG_REAL_CONTROL_ENABLE) { $env:CHUANG_REAL_CONTROL_ENABLE = '0' }
 if (-not $env:CHUANG_CODEX_RUNNER_ENABLE) { $env:CHUANG_CODEX_RUNNER_ENABLE = '0' }
 

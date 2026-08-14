@@ -56,6 +56,10 @@ jobs:
             (Resolve-Path .\scripts\install-windows.ps1), [ref]$null, [ref]$errors
           ) | Out-Null
           if ($errors.Count -ne 0) { throw ($errors | Out-String) }
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\scripts\chuang-real-actuator-adapter.ps1), [ref]$null, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) { throw ($errors | Out-String) }
 
   macos:
     runs-on: macos-latest
@@ -74,3 +78,5 @@ jobs:
           cp config.example.toml config.toml
           ./target/release/chuang-agent doctor --config config.toml
           bash -n scripts/chuang
+          python3 -m py_compile scripts/chuang-configure-platform-actuator.py
+          osacompile -l JavaScript -o /tmp/chuang-actuator.scpt scripts/chuang-real-actuator-adapter-macos.js
