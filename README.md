@@ -168,6 +168,10 @@ chuang ask "你好"
 chuang status --json
 ```
 
+Windows 安装器会自动启用系统自带 PowerShell 桌面适配器：`screenshot` 会保存真实桌面 PNG，`locate` 会读取前台窗口，常用应用打开、鼠标和键盘操作受 `config/actuator-allowlist.windows.json` 约束。无需另装 Python。锁屏、断开的远程桌面或公司安全策略禁止截屏时会返回明确错误，不再返回占位截图。
+
+macOS 的 `scripts/chuang` 首次启动会自动把默认 `actuator=fake` 迁移到系统 `osascript` 适配器。第一次截图或桌面操作时，请按系统提示给 Terminal（或实际启动 `chuang` 的终端）授予“屏幕录制”和“辅助功能”权限；允许范围在 `config/actuator-allowlist.macos.json`。
+
 默认安装到 `%LOCALAPPDATA%\Programs\chuang-agent`。安装后的 `chuang` 不依赖仓库路径或 Rust 工具链；再次安装会更新程序和示例文件，但保留安装目录中现有的 `config.toml` 与人格文件。
 
 不想写入用户 PATH 时使用 `-NoPathUpdate`；也可以不安装，直接运行：

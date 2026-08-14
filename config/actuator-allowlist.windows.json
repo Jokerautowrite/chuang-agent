@@ -1,0 +1,13 @@
+{
+  "apps": [
+    { "app_name": "Notepad", "open_command": ["notepad.exe"] },
+    { "app_name": "Calculator", "open_command": ["calc.exe"] },
+    { "app_name": "Chrome", "open_command": ["chrome.exe"] },
+    { "app_name": "Edge", "open_command": ["msedge.exe"] },
+    { "app_name": "PowerShell", "open_command": ["powershell.exe"] }
+  ],
+  "focus_allowed": true,
+  "input_allowed": true,
+  "click_allowed": true,
+  "screenshot_allowed": true
+}

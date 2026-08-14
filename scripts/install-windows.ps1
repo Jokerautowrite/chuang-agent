@@ -33,6 +33,7 @@ finally {
 
 $binDir = Join-Path $InstallRoot 'bin'
 $installedScriptsDir = Join-Path $InstallRoot 'scripts'
+$configDir = Join-Path $InstallRoot 'config'
 $identityDir = Join-Path $InstallRoot 'identity'
 $rulesDir = Join-Path $InstallRoot 'rules'
 $serviceDir = Join-Path $InstallRoot 'ops\systemd'
@@ -41,6 +42,7 @@ $assetsDir = Join-Path $InstallRoot 'assets'
 $pluginsDir = Join-Path $InstallRoot 'plugins'
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installedScriptsDir -Force | Out-Null
+New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 New-Item -ItemType Directory -Path $identityDir -Force | Out-Null
 New-Item -ItemType Directory -Path $rulesDir -Force | Out-Null
 New-Item -ItemType Directory -Path $serviceDir -Force | Out-Null
@@ -61,10 +63,28 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'assets\capability_primer.txt') -Des
 Copy-Item -LiteralPath (Join-Path $repoRoot 'plugins\registry.example.json') -Destination (Join-Path $pluginsDir 'registry.example.json') -Force
 Get-ChildItem -LiteralPath (Join-Path $repoRoot 'ops\systemd') -File | Copy-Item -Destination $serviceDir -Force
 Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts') -File -Filter 'chuang-feishu-*' | Copy-Item -Destination $installedScriptsDir -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\chuang-real-actuator-adapter.ps1') -Destination $installedScriptsDir -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'config\actuator-allowlist.windows.json') -Destination $configDir -Force
 
 $installedConfig = Join-Path $InstallRoot 'config.toml'
 if (-not (Test-Path -LiteralPath $installedConfig -PathType Leaf)) {
     Copy-Item -LiteralPath (Join-Path $InstallRoot 'config.example.toml') -Destination $installedConfig
+}
+$configText = [System.IO.File]::ReadAllText($installedConfig)
+if ($configText -match '(?m)^actuator\s*=\s*"fake"\s*$') {
+    $actuatorBlock = @'
+actuator = "command"
+actuator_program = "powershell.exe"
+actuator_args = "-NoProfile -ExecutionPolicy Bypass -File scripts/chuang-real-actuator-adapter.ps1"
+actuator_timeout_ms = 30000
+'@
+    $configText = [regex]::Replace(
+        $configText,
+        '(?m)^actuator\s*=\s*"fake"\s*$',
+        $actuatorBlock.Trim(),
+        1
+    )
+    [System.IO.File]::WriteAllText($installedConfig, $configText, [System.Text.UTF8Encoding]::new($false))
 }
 
 foreach ($name in @('SOUL', 'STORY', 'FIRST_WAKE')) {

@@ -19,9 +19,18 @@ APP_SERVER_SOCKET="${CHUANG_APP_SERVER_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/chuang-a
 export CHUANG_REPL_WORKSPACE_ROOT="${CHUANG_REPL_WORKSPACE_ROOT:-$CALLER_CWD}"
 cd "$ROOT"
 
-# Real control and external workers are opt-in. Keep a fresh installation
-# fail-closed until the operator explicitly enables and allowlists them.
-export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-0}"
+# macOS ships a platform allowlist and uses native screen/Accessibility APIs.
+# Linux behavior stays unchanged.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ ! -f "$ROOT/config.toml" ]]; then
+    cp "$ROOT/config.example.toml" "$ROOT/config.toml"
+  fi
+  python3 "$ROOT/scripts/chuang-configure-platform-actuator.py" \
+    --config "$ROOT/config.toml" --platform macos
+  export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-1}"
+else
+  export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-0}"
+fi
 export CHUANG_REAL_CONTROL_ENABLE="${CHUANG_REAL_CONTROL_ENABLE:-0}"
 export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-0}"
 

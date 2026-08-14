@@ -58,6 +58,8 @@ Rules:
 - Malformed quoting or trailing escapes in `actuator_args` are rejected before spawn instead of being normalized.
 - Non-zero exit, timeout, malformed JSON, or missing required response fields are treated as actuator errors.
 - The checked-in example script is a safe fixture. It does not operate the real desktop.
+- Windows installations use `scripts/chuang-real-actuator-adapter.ps1` and the Windows allowlist by default; screenshots and foreground-window reads use native Windows APIs and do not require Python.
+- macOS launcher installations use `scripts/chuang-real-actuator-adapter-macos.js` through the system `osascript`; Screen Recording and Accessibility permissions remain enforced by macOS.
 
 ## Checked-In Allowlist Scaffold
 

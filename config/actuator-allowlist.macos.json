@@ -1,0 +1,13 @@
+{
+  "apps": [
+    { "app_name": "Safari", "open_command": ["open", "-a", "Safari"] },
+    { "app_name": "Chrome", "open_command": ["open", "-a", "Google Chrome"] },
+    { "app_name": "TextEdit", "open_command": ["open", "-a", "TextEdit"] },
+    { "app_name": "Terminal", "open_command": ["open", "-a", "Terminal"] },
+    { "app_name": "Finder", "open_command": ["open", "-a", "Finder"] }
+  ],
+  "focus_allowed": true,
+  "input_allowed": true,
+  "click_allowed": true,
+  "screenshot_allowed": true
+}
