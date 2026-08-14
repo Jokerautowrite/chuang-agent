@@ -414,8 +414,7 @@ fn compress_segments(
                     .insert("image_stripped".to_string(), "true".to_string());
             }
             if original_chars > SUMMARY_COMPRESSION_PREVIEW_CHARS {
-                let compressed =
-                    truncate_chars(&stripped, SUMMARY_COMPRESSION_PREVIEW_CHARS);
+                let compressed = truncate_chars(&stripped, SUMMARY_COMPRESSION_PREVIEW_CHARS);
                 segment.content = format!("{compressed}...");
                 segment.tokens = Some(segment.content.chars().count() as u32);
                 segment
@@ -450,8 +449,7 @@ fn compress_segments(
             continue;
         }
 
-        let compressed_content =
-            truncate_chars(&stripped, SUMMARY_COMPRESSION_PREVIEW_CHARS);
+        let compressed_content = truncate_chars(&stripped, SUMMARY_COMPRESSION_PREVIEW_CHARS);
         segment.content = format!("{compressed_content}...");
         segment.tokens = Some(segment.content.chars().count().min(u32::MAX as usize) as u32);
         segment

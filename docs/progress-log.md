@@ -3559,3 +3559,13 @@
 - 预算耗尽 wrap-up：新增 `GoalBudgetState`（WithinBudget/Exhausted，时间戳损坏 fail-closed）与 `budget_state()`/`may_mark_complete()`；预算耗尽时 `goal step` 允许一轮收尾（至多 1 个 run，`wrap_up_consumed` 标记一次性），但不许标 complete（`apply_model_control_status` 拒绝）；wrap-up 消耗后后续 step 拒绝继续。
 - 幻影轮防护：新增防幻影轮账本 `{goal_root}/{goal_id}.rounds.json`（`GoalRoundLedger`：landed/completed/wrap_up_consumed）；`goal step` 先 `mark_goal_rounds_landed`（先落盘后执行）再跑 run_loop，abort 落轮间/截断轮保持 landed 绝不重发；成功后 `settle_goal_rounds` 记 completed、未执行候选取消 landed；输出新增 `goal_step_phantom_skipped_run_ids`/`goal_step_completed_run_ids`/`goal_step_wrap_up_round`/`goal_step_round_ledger_path`。
 - 测试：goal_mode_tests 26、goal_run_tests 12、goal_dispatch_tests 35、cli_goal_tests 31、goal_convergence_tests 20、goal_verifier_tests 30、goal_mode_smoke_tests 2、goal_mode_negative_smoke_tests 2 全绿；cargo check --bins 通过。
+
+# 2026-08-14 公开准备修复
+
+- 对外定位明确为 Linux-first；Windows 原生不列入当前发布支持面，推荐 WSL2。
+- README 将 DeepSeek Harness 调整为公开时机与事实性对照，不包含复制暗示；新增 architecture 与 provenance 文档。
+- 保留自定义非商业许可证，README 明确个人/研究非商业免费、商业使用需书面付费授权，并明确其不是 OSI 批准许可证。
+- 公开示例默认改为 fake provider/subagent/actuator/control、dry-run evolution，并关闭真实控制、外部 worker、知识通道和主动心跳。
+- TLS 依赖升级到 rustls 0.23 / rustls-webpki 0.103，移除 rustls-pemfile，lru 升级到安全版本；RustSec 本地数据库复审无漏洞。
+- 补齐身份模板、SECURITY、CONTRIBUTING、Linux CI 与 Gitleaks 误报窄范围 allowlist。
+- 当前 Windows 编译检查只在 Unix socket 平台边界处失败；Linux CI 是发布通过的最终证据来源。

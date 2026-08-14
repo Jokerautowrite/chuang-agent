@@ -1154,7 +1154,10 @@ fn cli_skill_candidates_lists_pool_read_only_without_writing_skills() {
     });
     fs::write(
         pool_dir.join("candidates.jsonl"),
-        format!("{}\n", serde_json::to_string(&entry).expect("candidate json")),
+        format!(
+            "{}\n",
+            serde_json::to_string(&entry).expect("candidate json")
+        ),
     )
     .expect("candidate pool should be seeded");
 

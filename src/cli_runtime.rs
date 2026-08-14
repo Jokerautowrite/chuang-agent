@@ -239,7 +239,10 @@ pub(crate) fn run_with_options(
         runtime_context.extend(knowledge_preview_context_segments(preview));
     }
     // GBrain 直连知识检索：preflight 可用才注入，失败静默跳过（不阻断对话）。
-    runtime_context.extend(gbrain_knowledge_context_segments(&runtime, &request.user_input));
+    runtime_context.extend(gbrain_knowledge_context_segments(
+        &runtime,
+        &request.user_input,
+    ));
     // 情感状态注入：快照作为高优先级 context segment（可拔插；失败静默跳过）。
     if let Some(segment) = emotion_context_segment(
         &emotion_slot,
@@ -358,17 +361,18 @@ fn gbrain_knowledge_context_segments(
     if !reader.preflight().available {
         return Vec::new();
     }
-    let status = reader.read(chuang_agent::external_knowledge::ExternalKnowledgeReadRequest {
-        source: chuang_agent::external_knowledge::ExternalKnowledgeSource::GBrain,
-        query: user_input.to_string(),
-        limit: 3,
-    });
+    let status = reader.read(
+        chuang_agent::external_knowledge::ExternalKnowledgeReadRequest {
+            source: chuang_agent::external_knowledge::ExternalKnowledgeSource::GBrain,
+            query: user_input.to_string(),
+            limit: 3,
+        },
+    );
     if !status.available || status.hits.is_empty() {
         return Vec::new();
     }
-    let mut content = String::from(
-        "【外部知识库·GBrain】以下为与当前问题相关的只读检索条目（来源路径见括号）：",
-    );
+    let mut content =
+        String::from("【外部知识库·GBrain】以下为与当前问题相关的只读检索条目（来源路径见括号）：");
     for hit in &status.hits {
         content.push_str(&format!("\n- ({}) {}", hit.path, hit.preview));
     }

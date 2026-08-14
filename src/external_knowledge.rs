@@ -51,10 +51,7 @@ impl ExternalKnowledgeSourceConfig {
     /// From a `KnowledgeReadSourceConfig` (runtime storage shape) plus the
     /// channel enable switch. The switch comes from the caller so this module
     /// stays decoupled from metadata key conventions.
-    pub fn from_runtime_source(
-        enabled: bool,
-        source: &KnowledgeReadSourceConfig,
-    ) -> Self {
+    pub fn from_runtime_source(enabled: bool, source: &KnowledgeReadSourceConfig) -> Self {
         Self {
             enabled,
             endpoint: source.endpoint.clone(),

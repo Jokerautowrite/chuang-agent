@@ -280,9 +280,7 @@ fn new_readonly_from_config(
         .ok_or_else(|| {
             knowledge_read_error(
                 "knowledge_read_endpoint_missing",
-                format!(
-                    "{source} knowledge_read endpoint is missing; cannot build live adapter"
-                ),
+                format!("{source} knowledge_read endpoint is missing; cannot build live adapter"),
                 false,
                 "readonly_http",
             )
@@ -295,9 +293,7 @@ fn new_readonly_from_config(
         .ok_or_else(|| {
             knowledge_read_error(
                 "knowledge_read_token_env_missing",
-                format!(
-                    "{source} knowledge_read token_env is missing; cannot build live adapter"
-                ),
+                format!("{source} knowledge_read token_env is missing; cannot build live adapter"),
                 false,
                 "readonly_http",
             )
@@ -318,10 +314,7 @@ fn new_readonly_from_config(
         })?;
     let timeout_ms = config.timeout_ms.unwrap_or(30_000);
     Ok(ReadonlyHttpKnowledgeReadAdapter::new_for_source(
-        source,
-        endpoint,
-        token,
-        timeout_ms,
+        source, endpoint, token, timeout_ms,
     ))
 }
 

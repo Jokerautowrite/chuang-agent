@@ -26,10 +26,10 @@ pub use rule_change::{
     RuleChangeKind, RuleChangeProposal, RuleChangeReceipt,
 };
 pub use scoring_gate::{
-    BenchmarkEvaluatorScorer, BenchmarkScoreGate, CandidatePoolEntry, FixedScoreScorer,
-    NoBaselinePolicy, ScoringGateDecision, SkillBenchmarkScore, SkillCandidatePool,
-    SkillChangeSnapshot, SkillProposalScorer, SkillScoringGate, SkillScoringGateConfig,
-    verify_proposal_statement_rubric_isolation,
+    verify_proposal_statement_rubric_isolation, BenchmarkEvaluatorScorer, BenchmarkScoreGate,
+    CandidatePoolEntry, FixedScoreScorer, NoBaselinePolicy, ScoringGateDecision,
+    SkillBenchmarkScore, SkillCandidatePool, SkillChangeSnapshot, SkillProposalScorer,
+    SkillScoringGate, SkillScoringGateConfig,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

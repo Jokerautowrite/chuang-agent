@@ -2,6 +2,12 @@
 name = "chuang-agent"
 version = "0.1.0"
 edition = "2021"
+description = "Linux-first local agent operating system with durable memory, governance, and replaceable runtimes"
+license-file = "LICENSE"
+repository = "https://github.com/Jokerautowrite/chuang-agent"
+readme = "README.md"
+keywords = ["agent", "memory", "orchestration", "governance", "local-first"]
+categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,11 +20,11 @@ bytes = "1"
 fs2 = "0.4"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
-hyper-rustls = "0.26"
+hyper-rustls = { version = "0.27", default-features = false, features = ["native-tokio", "http1", "tls12", "logging", "ring"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 ed25519-dalek = "2"
-rustls = "0.22"
-rustls-pemfile = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }

@@ -35,9 +35,9 @@ use chuang_agent::goal_mode::GoalSpec;
 use chuang_agent::kernel_status::build_chuang_mvp_status;
 use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
-    AnthropicCompatibleConfig, ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig,
-    OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
-    default_workspace_root,
+    default_workspace_root, AnthropicCompatibleConfig, ConfigSummary, IdentityBootstrapConfig,
+    IdentityMemoryConfig, OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig,
+    SubagentQueueConfig,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -3203,9 +3203,7 @@ fn build_runtime_for_workspace_with_options(
     };
 
     normalize_runtime_paths(&mut runtime, &base_dir);
-    if !config_path.exists()
-        || runtime.permission.workspace_root == default_workspace_root()
-    {
+    if !config_path.exists() || runtime.permission.workspace_root == default_workspace_root() {
         runtime.permission.workspace_root = base_dir.clone();
     }
     Ok(runtime)
@@ -3494,7 +3492,9 @@ fn provider_primary_model_name(runtime: &RuntimeConfig) -> String {
             ProviderConfig::OpenAICompatible(OpenAICompatibleConfig { model_name, .. }) => {
                 return model_name.clone();
             }
-            ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig { model_name, .. }) => {
+            ProviderConfig::AnthropicCompatible(AnthropicCompatibleConfig {
+                model_name, ..
+            }) => {
                 return model_name.clone();
             }
             ProviderConfig::Fallback { primary, .. } => {

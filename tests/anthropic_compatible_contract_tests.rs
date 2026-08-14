@@ -125,7 +125,10 @@ fn stub_transport_respond_extracts_anthropic_message_content() {
         Some("message")
     );
     assert_eq!(
-        response.extra_meta.get("response_finish_reason").map(String::as_str),
+        response
+            .extra_meta
+            .get("response_finish_reason")
+            .map(String::as_str),
         Some("end_turn")
     );
     assert_eq!(
@@ -147,7 +150,11 @@ fn slot_registry_builds_anthropic_slot_and_generates() {
     assert_eq!(output.meta.provider.as_deref(), Some("anthropic-main"));
     assert_eq!(output.model_name, "claude-opus-4-1");
     assert_eq!(
-        output.meta.extra.get("provider_fallback_configured").map(String::as_str),
+        output
+            .meta
+            .extra
+            .get("provider_fallback_configured")
+            .map(String::as_str),
         Some("false")
     );
 }
@@ -175,11 +182,19 @@ fn anthropic_primary_with_fake_fallback_generates_via_fallback_chain() {
     let output = slot.generate(&request());
     assert!(output.body.contains("stubbed_post_ok"));
     assert_eq!(
-        output.meta.extra.get("provider_fallback_configured").map(String::as_str),
+        output
+            .meta
+            .extra
+            .get("provider_fallback_configured")
+            .map(String::as_str),
         Some("true")
     );
     assert_eq!(
-        output.meta.extra.get("provider_fallback_used").map(String::as_str),
+        output
+            .meta
+            .extra
+            .get("provider_fallback_used")
+            .map(String::as_str),
         Some("false")
     );
 }
@@ -223,7 +238,10 @@ fallback_status_codes = "401,402,529"
         config.summary().model_name,
         "claude-opus-4-1->claude-sonnet-4-5"
     );
-    assert_eq!(config.summary().provider_reasoning_effort.as_deref(), Some("medium"));
+    assert_eq!(
+        config.summary().provider_reasoning_effort.as_deref(),
+        Some("medium")
+    );
     assert_eq!(
         config.summary().provider_fallback_policy.as_deref(),
         Some("retryable=false status_codes=401,402,529 error_classes=none")

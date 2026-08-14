@@ -314,7 +314,10 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
     assert!(turn.result.prompt.contains("identity-soul"));
     assert!(turn.result.prompt.contains("identity-active-agent"));
     assert!(turn.result.prompt.contains("\"agent_id\":\"chuang\""));
-    assert!(!turn.result.prompt.contains("\"agent_id\":\"example-agent\""));
+    assert!(!turn
+        .result
+        .prompt
+        .contains("\"agent_id\":\"example-agent\""));
     assert!(!turn.result.prompt.contains("must-not-leak"));
     assert_eq!(
         snapshot.identity_first_wake_chars,
@@ -418,7 +421,10 @@ fn chuang_kernel_compaction_strips_image_payloads_before_truncation() {
     let prepared = kernel
         .prepare_session_turn_memory(&turn, "img")
         .expect("session memory should compact and prepare");
-    assert!(prepared.receipt.compacted, "image-heavy turn should need compaction");
+    assert!(
+        prepared.receipt.compacted,
+        "image-heavy turn should need compaction"
+    );
 
     let stored = &prepared.record;
     assert!(

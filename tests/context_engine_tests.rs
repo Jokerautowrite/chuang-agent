@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use chuang_agent::context_engine::{
-    ContextBudget, ContextCompactionEventKind, ContextEngine, ContextPackError, ContextPacker,
-    ContextSegment, CompactionStrategy, DeterministicContextEngine, SegmentSource,
-    SummaryCompressionContextEngine, WorkingReservationReason, strip_image_payloads,
+    strip_image_payloads, CompactionStrategy, ContextBudget, ContextCompactionEventKind,
+    ContextEngine, ContextPackError, ContextPacker, ContextSegment, DeterministicContextEngine,
+    SegmentSource, SummaryCompressionContextEngine, WorkingReservationReason,
 };
 
 fn ts(value: &str) -> DateTime<Utc> {
@@ -990,8 +990,8 @@ fn compaction_strategy_cascade_enum_orders_and_degrades() {
 #[test]
 fn summary_compression_breaker_opens_after_three_consecutive_failures() {
     // 系统段超出 reserve 预算 → pack 失败，连续 3 次后熔断打开。
-    let engine = SummaryCompressionContextEngine::new(budget(20, 30, 0))
-        .with_circuit_breaker(3, 60);
+    let engine =
+        SummaryCompressionContextEngine::new(budget(20, 30, 0)).with_circuit_breaker(3, 60);
     let failing = vec![segment(
         "system-1",
         SegmentSource::System,
@@ -1022,7 +1022,10 @@ fn summary_compression_breaker_opens_after_three_consecutive_failures() {
         .pack(failing)
         .expect_err("third failure should still fail pack");
     let status = engine.circuit_breaker_status();
-    assert!(status.open, "breaker should open after 3 consecutive failures");
+    assert!(
+        status.open,
+        "breaker should open after 3 consecutive failures"
+    );
     assert_eq!(status.consecutive_failures, 3);
     assert_eq!(status.threshold, 3);
     assert!(status.opened_at.is_some());
@@ -1033,8 +1036,7 @@ fn summary_compression_breaker_opens_after_three_consecutive_failures() {
 fn summary_compression_breaker_skips_compression_while_open() {
     // 阈值 1：一次失败即熔断；随后可成功的 pack 跳过自动压缩（不截断、不标记压缩）。
     let engine =
-        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
-            .with_circuit_breaker(1, 60);
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0)).with_circuit_breaker(1, 60);
     let failing = vec![segment(
         "system-1",
         SegmentSource::System,
@@ -1079,15 +1081,10 @@ fn summary_compression_breaker_skips_compression_while_open() {
         !memory.content.ends_with("..."),
         "breaker open should skip compression so long memory stays raw"
     );
-    assert!(memory
-        .metadata
-        .get("summary_compressed")
-        .is_none(),);
-    assert!(packed
-        .compaction_events
-        .iter()
-        .any(|event| event.kind == ContextCompactionEventKind::CompressionSkipped
-            && event.reason.as_deref() == Some("circuit_breaker_open")));
+    assert!(memory.metadata.get("summary_compressed").is_none(),);
+    assert!(packed.compaction_events.iter().any(|event| event.kind
+        == ContextCompactionEventKind::CompressionSkipped
+        && event.reason.as_deref() == Some("circuit_breaker_open")));
 
     let summary = packed.compaction_summary();
     assert_eq!(summary.compression_skipped_count, 1);
@@ -1101,8 +1098,7 @@ fn summary_compression_breaker_skips_compression_while_open() {
 #[test]
 fn summary_compression_breaker_success_resets_consecutive_failures() {
     let engine =
-        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
-            .with_circuit_breaker(3, 60);
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0)).with_circuit_breaker(3, 60);
     let failing = vec![segment(
         "system-1",
         SegmentSource::System,
@@ -1158,8 +1154,7 @@ fn summary_compression_breaker_success_resets_consecutive_failures() {
 fn summary_compression_breaker_manual_reset_and_cooldown_auto_reset() {
     // 手动重置：熔断打开后 reset 关闭并清零。
     let engine =
-        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
-            .with_circuit_breaker(1, 60);
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0)).with_circuit_breaker(1, 60);
     let failing = vec![segment(
         "system-1",
         SegmentSource::System,
@@ -1179,8 +1174,7 @@ fn summary_compression_breaker_manual_reset_and_cooldown_auto_reset() {
 
     // 按配置冷却：cooldown=0 时熔断自动复位，下一次 pack 恢复压缩。
     let engine =
-        SummaryCompressionContextEngine::new(budget(1000, 10, 0))
-            .with_circuit_breaker(1, 0);
+        SummaryCompressionContextEngine::new(budget(1000, 10, 0)).with_circuit_breaker(1, 0);
     let failing = vec![segment(
         "system-1",
         SegmentSource::System,
@@ -1273,7 +1267,10 @@ fn summary_compression_strips_image_payloads_before_truncation() {
     // markdown 图片与 image_url JSON 字段同样被 strip。
     let markdown = format!("![alt](data:image/png;base64,{})", "B".repeat(200));
     assert_eq!(strip_image_payloads(&markdown), "![alt]([image])");
-    let json = format!("{{\"image_url\": \"data:image/png;base64,{}\"}}", "C".repeat(300));
+    let json = format!(
+        "{{\"image_url\": \"data:image/png;base64,{}\"}}",
+        "C".repeat(300)
+    );
     let stripped_json = strip_image_payloads(&json);
     assert!(stripped_json.contains("[image]"));
     assert!(!stripped_json.contains("base64"));
@@ -1326,11 +1323,7 @@ fn summary_compression_recursion_guard_skips_already_summarized_segments() {
     let packed = engine
         .pack(vec![turn_summary, compaction_source, compacted])
         .expect("pack should succeed");
-    for id in [
-        "mem-turn-summary",
-        "mem-compaction-source",
-        "mem-compacted",
-    ] {
+    for id in ["mem-turn-summary", "mem-compaction-source", "mem-compacted"] {
         let item = packed
             .segments
             .iter()
@@ -1342,7 +1335,11 @@ fn summary_compression_recursion_guard_skips_already_summarized_segments() {
             "mem-compacted" => format!("{long_content}-compacted"),
             other => panic!("unexpected id {other}"),
         };
-        assert_eq!(item.content.as_str(), expected.as_str(), "{id} must not be re-compressed");
+        assert_eq!(
+            item.content.as_str(),
+            expected.as_str(),
+            "{id} must not be re-compressed"
+        );
         assert!(
             item.metadata.get("summary_compressed").is_none(),
             "{id} must not be marked as re-compressed"
@@ -1392,7 +1389,10 @@ fn summary_compression_keeps_toolset_segments_untouched() {
         .iter()
         .find(|segment| segment.id == "tool-instructions")
         .expect("tool instructions should be kept");
-    assert_eq!(tool.content, tool_protocol, "toolset content must not change");
+    assert_eq!(
+        tool.content, tool_protocol,
+        "toolset content must not change"
+    );
     assert!(tool.metadata.get("summary_compressed").is_none());
     let system = packed
         .segments

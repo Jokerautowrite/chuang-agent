@@ -601,7 +601,9 @@ impl CanonicalSkillEvolver {
         if !gate_decision.admitted {
             // 未达标：记录候选池，不落盘正式规则。
             self.record_candidate(&proposal, &gate_decision)?;
-            return Err(EvolutionError::ValidationRejected(gate_decision.reasons.clone()));
+            return Err(EvolutionError::ValidationRejected(
+                gate_decision.reasons.clone(),
+            ));
         }
 
         // 变更前自动快照（回滚走 RuleChangeJournal 的 before/after）。
@@ -640,7 +642,10 @@ impl CanonicalSkillEvolver {
     /// 变更前自动快照：读取目标规则当前内容（CreateRule 无既有内容，before=None）。
     /// 回滚复用 RuleChangeJournal 的 before/after 语义；本方法在写路径之前显式
     /// 捕获，快照读取失败返回 Err（调用方应 fail-closed 拒绝继续）。
-    pub fn snapshot_before_change(&self, rule_id: &str) -> Result<SkillChangeSnapshot, EvolutionError> {
+    pub fn snapshot_before_change(
+        &self,
+        rule_id: &str,
+    ) -> Result<SkillChangeSnapshot, EvolutionError> {
         if rule_id.trim().is_empty() {
             return Err(EvolutionError::InvalidRuleChange(
                 "rule_id must not be empty".to_string(),

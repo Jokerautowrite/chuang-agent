@@ -4,14 +4,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
-use std::{fs, io::Cursor, sync::Arc};
+use std::{fs, sync::Arc};
 
 use chuang_agent::provider_openai_compatible::{
     OpenAICompatibleProviderAdapter, ProviderTransport,
 };
 use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
-use rustls_pemfile::{certs, private_key};
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
 fn generate_tls_materials() -> (PathBuf, PathBuf, PathBuf) {
     let root = std::env::temp_dir().join(format!(
@@ -951,16 +951,13 @@ fn openai_compatible_native_transport_accepts_https_scheme_and_attempts_tls() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");
     let (ca_path, server_cert_path, server_key_path) = generate_tls_materials();
-    let cert_chain = certs(&mut Cursor::new(
-        fs::read(&server_cert_path).expect("server cert should read"),
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .expect("certificate chain should parse");
-    let private_key = private_key(&mut Cursor::new(
-        fs::read(&server_key_path).expect("server key should read"),
-    ))
-    .expect("private key parser should read")
-    .expect("private key should exist");
+    let cert_pem = fs::read(&server_cert_path).expect("server cert should read");
+    let cert_chain = CertificateDer::pem_slice_iter(&cert_pem)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("certificate chain should parse");
+    let private_key_pem = fs::read(&server_key_path).expect("server key should read");
+    let private_key =
+        PrivateKeyDer::from_pem_slice(&private_key_pem).expect("private key parser should read");
     let server_config = Arc::new(
         ServerConfig::builder()
             .with_no_client_auth()
