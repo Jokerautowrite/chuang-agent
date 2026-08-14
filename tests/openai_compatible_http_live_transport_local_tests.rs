@@ -75,6 +75,7 @@ fn openai_compatible_http_transport_executes_real_post_against_local_server() {
 }
 
 #[test]
+#[cfg(unix)]
 fn openai_compatible_native_transport_executes_real_post_against_local_server() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");

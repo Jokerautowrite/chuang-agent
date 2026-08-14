@@ -3569,3 +3569,10 @@
 - TLS 依赖升级到 rustls 0.23 / rustls-webpki 0.103，移除 rustls-pemfile，lru 升级到安全版本；RustSec 本地数据库复审无漏洞。
 - 补齐身份模板、SECURITY、CONTRIBUTING、Linux CI 与 Gitleaks 误报窄范围 allowlist。
 - 当前 Windows 编译检查只在 Unix socket 平台边界处失败；Linux CI 是发布通过的最终证据来源。
+
+# 2026-08-14 cross-platform terminal readiness
+
+- Added native Windows launcher/install support, portable macOS/Linux launcher behavior, and Windows/macOS CI coverage while preserving the Linux path.
+- Kept Unix-domain app-server transport on Unix and made Windows local terminal mode explicit; unsupported Windows socket operations return structured errors.
+- Changed CLI dispatch ids to `queued-cli-<nanos>-<pid>` so lexical queue ordering remains FIFO across separate processes on Windows.
+- Verified the installed Windows terminal with offline `doctor`, `status --json`, and `ask`; external channels and real providers remain out of scope pending credentials.

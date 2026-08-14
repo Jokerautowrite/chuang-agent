@@ -102,7 +102,7 @@ control = "fake_local"
 
 context_engine = "deterministic_budget"
 context_max_tokens = 100000
-context_reserve_system_tokens = 32
+context_reserve_system_tokens = 4096
 context_min_working_tokens = 1
 context_max_tool_results = 5
 context_max_memory_segments = 5

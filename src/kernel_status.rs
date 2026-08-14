@@ -1860,19 +1860,23 @@ fn build_external_ai_readiness() -> ExternalAiReadinessStatus {
     let layers = vec![
         external_ai_layer(
             "genesis_actuator",
-            if genesis_path.exists() { "ready" } else { "blocked" },
-            "GenesisActuator trait plus AutoCli fallback runner exist behind a slot wrapper",
+            "ready",
+            "GenesisActuator is compiled into this binary behind a slot wrapper",
             "keep search/query ability behind adapter and audit before expanding channels",
             "adapter",
-            Some(genesis_path.display().to_string()),
+            genesis_path
+                .exists()
+                .then(|| genesis_path.display().to_string()),
         ),
         external_ai_layer(
             "browser_worker_frozen",
-            if browser_worker_path.exists() { "ready" } else { "blocked" },
-            "BrowserWorker remains frozen and is not part of the mainline execution path",
+            "ready",
+            "the compiled BrowserWorker boundary remains frozen and outside the mainline execution path",
             "do not revive the old browser-worker path; keep web AI on Genesis instead",
             "frozen_boundary",
-            Some(browser_worker_path.display().to_string()),
+            browser_worker_path
+                .exists()
+                .then(|| browser_worker_path.display().to_string()),
         ),
         external_ai_layer(
             "agent_slot_boundary",
@@ -2745,6 +2749,13 @@ fn build_channel_readiness() -> ChannelReadinessStatus {
                 && checklist.exists()
             {
                 "ready"
+            } else if bridge_script.exists()
+                && bridge_js.exists()
+                && client_adapter.exists()
+                && env_example.exists()
+                && checklist.exists()
+            {
+                "partial"
             } else {
                 "blocked"
             },

@@ -108,8 +108,8 @@ fn browser_navigate_rejects_empty_and_bad_scheme() {
 }
 
 #[test]
+#[ignore = "live CDP integration; set CHUANG_CDP_PORT and run explicitly"]
 fn live_cdp_navigate_and_read_when_endpoint_available() {
-    std::env::set_var("CHUANG_CDP_PORT", "9222");
     let Ok(adapter) = chuang_agent::browser_read::resolve_cdp_browser_read_adapter() else {
         return; // no browser in this environment
     };

@@ -28,14 +28,13 @@ fn external_ai_dispatch_command(args: &[String]) -> Result<(), String> {
     let output = if parsed.request.dry_run {
         build_external_ai_dispatch(parsed.request).map_err(format_external_ai_error)?
     } else {
+        let live_platform =
+            parse_live_platform(&parsed.request.platform).map_err(format_external_ai_error)?;
         let runtime = load_external_ai_runtime(&parsed.config_path)?;
         let mut provider_config = first_openai_compatible_provider(&runtime.provider)
             .ok_or_else(|| "external_ai_dispatch_invalid: provider: configured primary provider is not openai_compatible".to_string())?
             .clone();
-        if let Some(model) = parse_live_platform(&parsed.request.platform)
-            .map_err(format_external_ai_error)?
-            .model
-        {
+        if let Some(model) = live_platform.model {
             provider_config.model_name = model;
         }
         provider_config.endpoint = ProviderApiEndpoint::ChatCompletions;

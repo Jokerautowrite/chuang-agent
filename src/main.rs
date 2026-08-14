@@ -277,6 +277,10 @@ fn fit_display_ansi(s: &str, max_cols: usize) -> String {
     format!("{}{ANSI_RESET}", fit_display(s, max_cols))
 }
 
+#[cfg(unix)]
+mod app_server;
+#[cfg(windows)]
+#[path = "app_server_windows.rs"]
 mod app_server;
 mod brand_theme;
 mod cli_approval;
@@ -394,35 +398,46 @@ fn run_cli() -> Result<(), String> {
 }
 
 fn field_accept_command(args: &[String]) -> Result<(), String> {
-    use std::process::Command;
-    let root = std::env::var("CHUANG_AGENT_ROOT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-    let script = root.join("scripts/chuang-field-accept-10.sh");
-    if !script.is_file() {
-        return Err(format!("field-accept script missing: {}", script.display()));
+    #[cfg(windows)]
+    {
+        let _ = args;
+        return Err(
+            "field_accept_unavailable_on_windows: use `cargo test --locked --all-targets` and `chuang doctor`"
+                .to_string(),
+        );
     }
-    let status = Command::new("bash")
-        .arg(&script)
-        .args(args)
-        .env(
-            "CHUANG_BIN",
-            std::env::current_exe().unwrap_or_else(|_| root.join("target/debug/chuang-agent")),
-        )
-        .env(
-            "CHUANG_FIELD_CONFIG",
-            std::env::var("CHUANG_FIELD_CONFIG")
-                .unwrap_or_else(|_| root.join("config.toml").display().to_string()),
-        )
-        .status()
-        .map_err(|e| format!("field-accept spawn failed: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "field-accept failed exit={}",
-            status.code().unwrap_or(-1)
-        ))
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        let root = std::env::var("CHUANG_AGENT_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        let script = root.join("scripts/chuang-field-accept-10.sh");
+        if !script.is_file() {
+            return Err(format!("field-accept script missing: {}", script.display()));
+        }
+        let status = Command::new("bash")
+            .arg(&script)
+            .args(args)
+            .env(
+                "CHUANG_BIN",
+                std::env::current_exe().unwrap_or_else(|_| root.join("target/debug/chuang-agent")),
+            )
+            .env(
+                "CHUANG_FIELD_CONFIG",
+                std::env::var("CHUANG_FIELD_CONFIG")
+                    .unwrap_or_else(|_| root.join("config.toml").display().to_string()),
+            )
+            .status()
+            .map_err(|e| format!("field-accept spawn failed: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "field-accept failed exit={}",
+                status.code().unwrap_or(-1)
+            ))
+        }
     }
 }
 

@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # 创 · 本机首选终端入口（仓库内源；可安装到 ~/.local/bin/chuang）
 set -euo pipefail
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
-SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -h "$SCRIPT_PATH" ]]; do
+  SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+  LINK_TARGET="$(readlink "$SCRIPT_PATH")"
+  if [[ "$LINK_TARGET" = /* ]]; then
+    SCRIPT_PATH="$LINK_TARGET"
+  else
+    SCRIPT_PATH="$SCRIPT_DIR/$LINK_TARGET"
+  fi
+done
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
 ROOT="${CHUANG_AGENT_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
+export CHUANG_AGENT_ROOT="$ROOT"
 CALLER_CWD="$(pwd)"
 APP_SERVER_SOCKET="${CHUANG_APP_SERVER_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/chuang-agent/app-server.sock}"
 export CHUANG_REPL_WORKSPACE_ROOT="${CHUANG_REPL_WORKSPACE_ROOT:-$CALLER_CWD}"

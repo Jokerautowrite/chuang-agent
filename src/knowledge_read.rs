@@ -192,19 +192,11 @@ impl ReadonlyHttpKnowledgeReadAdapter {
             })?;
 
         runtime.block_on(async move {
-            let connector = HttpsConnectorBuilder::new()
-                .with_native_roots()
-                .map_err(|_| {
-                    knowledge_read_error(
-                        "knowledge_read_http_tls",
-                        "cannot initialize knowledge_read TLS roots",
-                        true,
-                        "readonly_http",
-                    )
-                })?
-                .https_or_http()
-                .enable_http1()
-                .build();
+            let tls_builder = match HttpsConnectorBuilder::new().with_native_roots() {
+                Ok(builder) => builder,
+                Err(_) => HttpsConnectorBuilder::new().with_webpki_roots(),
+            };
+            let connector = tls_builder.https_or_http().enable_http1().build();
             let client: Client<_, Full<Bytes>> =
                 Client::builder(TokioExecutor::new()).build(connector);
             let req = Request::builder()

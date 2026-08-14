@@ -1,7 +1,10 @@
 use std::fs;
+#[cfg(unix)]
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -129,6 +132,7 @@ fn cli_control_apply_runs_after_explicit_approval() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_apply_can_use_command_control_plane_from_config() {
     let config_path = temp_config_path("command");
     fs::write(
@@ -180,6 +184,7 @@ apply_args = "{"unit_id":"command-agent","action":"change_model","previous_statu
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_can_use_checked_in_example_adapter() {
     let config_path = temp_config_path("example-adapter");
     let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -264,6 +269,7 @@ control_timeout_ms = 30000
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_can_use_allowlisted_real_adapter_in_dry_run() {
     let root = temp_config_path("real-adapter-dry-run-root");
     let config_path = root.with_extension("toml");
@@ -357,6 +363,7 @@ control_timeout_ms = 30000
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_real_adapter_rejects_unallowlisted_unit() {
     let root = temp_config_path("real-adapter-reject-root");
     let config_path = root.with_extension("toml");
@@ -406,6 +413,7 @@ apply_args = "apply --json --allowlist {}"
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_real_adapter_direct_receipt_keeps_live_gate_closed_by_default() {
     let root = temp_config_path("real-adapter-direct-dry-run-root");
     let allowlist_path = root.with_extension("json");
@@ -514,6 +522,7 @@ fn cli_control_real_adapter_direct_receipt_keeps_live_gate_closed_by_default() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_real_adapter_directly_rejects_unallowlisted_action() {
     let root = temp_config_path("real-adapter-direct-reject-root");
     let allowlist_path = root.with_extension("json");
@@ -570,6 +579,7 @@ fn cli_control_real_adapter_directly_rejects_unallowlisted_action() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_apply_uses_fallible_list_once_before_workflow() {
     let root = temp_config_path("command-apply-single-list-root");
     let script_path = root.with_extension("sh");
@@ -648,6 +658,7 @@ apply_args = "{} apply"
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_list_can_use_command_control_plane_from_config() {
     let config_path = temp_config_path("command-list");
     fs::write(
@@ -696,6 +707,7 @@ apply_args = "{}"
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_list_reports_command_control_failure() {
     let config_path = temp_config_path("command-list-fails");
     fs::write(
@@ -733,6 +745,7 @@ apply_args = "{}"
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_control_list_reports_malformed_command_control_json() {
     let config_path = temp_config_path("command-list-malformed");
     fs::write(

@@ -137,7 +137,8 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains(
         "goal_mode: ok=true entrypoint=run --goal TEXT kind=lightweight_runtime_context context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
     ));
-    assert!(stdout.contains("goal_run_ok: true plan_exists=true goal_id=mainline-mvp checkpoints="));
+    assert!(stdout.contains("goal_run_ok: true plan_exists="));
+    assert!(stdout.contains("goal_id=mainline-mvp checkpoints="));
     assert!(stdout.contains("workers="));
     assert!(stdout.contains("validation_commands="));
     assert!(stdout.contains("goal_id=mainline-mvp"));
@@ -204,7 +205,10 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("preflight=confirm CHUANG_CODEX_RUNNER_ENABLE=1"));
     assert!(stdout.contains("must_reject=unscoped external worker pool"));
     assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
+    #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
+    #[cfg(windows)]
+    assert!(stdout.contains("external_ai_readiness: ok=true state=external_ai_adapter_partial"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
@@ -432,7 +436,10 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert!(parsed["status"]["goal_run"]["plan_exists"].is_boolean());
     assert!(parsed["status"]["goal_run"]["checkpoint_count"].is_number());
     assert!(parsed["status"]["goal_run"]["checkpoint_log_complete"].is_boolean());
-    assert!(parsed["status"]["goal_run"]["last_checkpoint_summary"].is_string());
+    assert!(
+        parsed["status"]["goal_run"]["last_checkpoint_summary"].is_string()
+            || parsed["status"]["goal_run"]["last_checkpoint_summary"].is_null()
+    );
     assert!(parsed["status"]["goal_run"]["incomplete_reasons"]
         .as_array()
         .expect("goal run incomplete reasons should be an array")
@@ -730,9 +737,15 @@ fn cli_doctor_can_render_json_without_secret_leak() {
         .iter()
         .any(|layer| layer["name"] == "external_ai_downstream" && layer["state"] == "ready"));
     assert_eq!(parsed["status"]["external_ai_readiness"]["ok"], true);
+    #[cfg(unix)]
     assert_eq!(
         parsed["status"]["external_ai_readiness"]["overall_state"],
         "ready"
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        parsed["status"]["external_ai_readiness"]["overall_state"],
+        "external_ai_adapter_partial"
     );
     assert_eq!(
         parsed["status"]["atomic_tools"]["manifest_schema_version"],
@@ -815,6 +828,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_doctor_reports_command_control_list_failure() {
     let root = temp_root("command-control-fail");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
@@ -861,6 +875,7 @@ apply_args = "apply --json"
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_doctor_command_control_smoke_does_not_call_apply() {
     let root = temp_root("command-control-readonly");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");

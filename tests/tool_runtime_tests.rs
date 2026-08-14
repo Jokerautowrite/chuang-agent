@@ -24,6 +24,10 @@ fn temp_workspace(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-tool-{name}-{nanos}"))
 }
 
+fn normalized_path_text(value: &str) -> String {
+    value.trim_start_matches(r"\\?\").replace('\\', "/")
+}
+
 fn register_operator_approval(
     governance: &mut StaticRuleGovernance,
     pending: &PendingApproval,
@@ -435,8 +439,14 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(write.failure_class, None);
     assert!(!write.retryable);
     assert_eq!(
-        write.changed_files,
-        vec![root.join("nested/output.txt").display().to_string()]
+        write
+            .changed_files
+            .iter()
+            .map(|path| normalized_path_text(path))
+            .collect::<Vec<_>>(),
+        vec![normalized_path_text(
+            &root.join("nested/output.txt").display().to_string()
+        )]
     );
     assert_eq!(write.write_before_bytes, None);
     assert_eq!(write.write_after_bytes, Some(5));
@@ -444,13 +454,8 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(write.write_operation, Some(WriteOperation::Created));
     assert_eq!(write.target_path.as_deref(), Some("nested/output.txt"));
     assert_eq!(
-        write.resolved_path.as_deref(),
-        Some(
-            root.join("nested/output.txt")
-                .display()
-                .to_string()
-                .as_str()
-        )
+        normalized_path_text(write.resolved_path.as_deref().expect("resolved path")),
+        normalized_path_text(&root.join("nested/output.txt").display().to_string())
     );
     assert!(write
         .write_diff_preview
@@ -528,10 +533,14 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(read.output_lines, Some(1));
     assert!(!read.output_truncated);
 
+    #[cfg(unix)]
+    let shell_command = "printf test-shell";
+    #[cfg(windows)]
+    let shell_command = "[Console]::Out.Write('test-shell')";
     let shell = execute_tool_call(
         &root,
         &ToolCall::ShellExec {
-            command: "printf test-shell".to_string(),
+            command: shell_command.to_string(),
             cwd: Some(".".to_string()),
         },
     );
@@ -544,7 +553,7 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
         shell.cwd.as_deref(),
         Some(root.display().to_string().as_str())
     );
-    assert_eq!(shell.command.as_deref(), Some("printf test-shell"));
+    assert_eq!(shell.command.as_deref(), Some(shell_command));
     assert_eq!(shell.output_bytes, Some(10));
     assert_eq!(shell.output_lines, Some(1));
     assert_eq!(shell.stderr_bytes, Some(0));
@@ -557,6 +566,7 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
 }
 
 #[test]
+#[cfg(unix)]
 fn shell_exec_supports_bash_pipefail_commands() {
     let root = temp_workspace("bash-pipefail");
     fs::create_dir_all(&root).expect("workspace root should be created");
@@ -586,8 +596,14 @@ fn workspace_file_adapter_can_apply_patch_and_enforce_workspace_bounds() {
         .expect("patch should apply");
     assert_eq!(result.operation_count, 1);
     assert_eq!(
-        result.changed_files,
-        vec![root.join("keep.txt").display().to_string()]
+        result
+            .changed_files
+            .iter()
+            .map(|path| normalized_path_text(path))
+            .collect::<Vec<_>>(),
+        vec![normalized_path_text(
+            &root.join("keep.txt").display().to_string()
+        )]
     );
     assert!(result.diff_preview.contains("keep.txt"));
     assert!(!result.backup_paths.is_empty());
@@ -1088,10 +1104,15 @@ fn shell_exec_redacts_secret_like_stdout_and_stderr() {
     let root = temp_workspace("shell-redact");
     fs::create_dir_all(&root).expect("workspace root should be created");
 
+    #[cfg(unix)]
+    let command = "printf 'API_KEY=secret-value'; printf 'password=hidden' >&2";
+    #[cfg(windows)]
+    let command =
+        "[Console]::Out.Write('API_KEY=secret-value'); [Console]::Error.Write('password=hidden')";
     let record = execute_tool_call(
         &root,
         &ToolCall::ShellExec {
-            command: "printf 'API_KEY=secret-value'; printf 'password=hidden' >&2".to_string(),
+            command: command.to_string(),
             cwd: Some(".".to_string()),
         },
     );
@@ -1111,10 +1132,14 @@ fn tool_runtime_marks_shell_nonzero_as_structured_failure() {
     let root = temp_workspace("shell-nonzero");
     fs::create_dir_all(&root).expect("workspace root should be created");
 
+    #[cfg(unix)]
+    let command = "printf nope >&2; exit 7";
+    #[cfg(windows)]
+    let command = "[Console]::Error.Write('nope'); exit 7";
     let shell = execute_tool_call(
         &root,
         &ToolCall::ShellExec {
-            command: "printf nope >&2; exit 7".to_string(),
+            command: command.to_string(),
             cwd: Some(".".to_string()),
         },
     );
@@ -1528,6 +1553,7 @@ fn execution_slot_uses_configured_shell_risk_rules() {
 }
 
 #[test]
+#[cfg(unix)]
 fn spawn_subagent_tool_runs_existing_dispatch_runner_collect_chain() {
     let root = temp_workspace("spawn-subagent");
     fs::create_dir_all(root.join("scripts")).expect("scripts dir should be created");
@@ -1754,8 +1780,12 @@ fn execution_slot_resumes_exact_pending_call_with_matching_operator_receipt() {
     let mut governance = StaticRuleGovernance::new();
     let mut ledger = InMemoryRuntimeEventLedger::new();
     let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    #[cfg(unix)]
+    let command = "printf 'marker\\n' >> approved.txt; # rm -rf notes";
+    #[cfg(windows)]
+    let command = "Add-Content -LiteralPath approved.txt -Value 'marker'; # rm -rf notes";
     let call = ToolCall::ShellExec {
-        command: "printf 'marker\\n' >> approved.txt; # rm -rf notes".to_string(),
+        command: command.to_string(),
         cwd: Some(".".to_string()),
     };
     let outcome = slot
@@ -1781,6 +1811,7 @@ fn execution_slot_resumes_exact_pending_call_with_matching_operator_receipt() {
     );
     let receipt = register_operator_approval(&mut governance, &pending);
     let duplicate_pending = pending.clone();
+    #[cfg(unix)]
     let approval_id = pending.approval_id.clone();
 
     let resumed = slot
@@ -1804,7 +1835,9 @@ fn execution_slot_resumes_exact_pending_call_with_matching_operator_receipt() {
         .starts_with("sha256:"));
     assert!(duplicate_pending.policy_marker.starts_with("sha256:"));
     assert_eq!(
-        fs::read_to_string(root.join("approved.txt")).expect("approved call should execute"),
+        fs::read_to_string(root.join("approved.txt"))
+            .expect("approved call should execute")
+            .replace("\r\n", "\n"),
         "marker\n"
     );
     let restarted_slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
@@ -1821,7 +1854,9 @@ fn execution_slot_resumes_exact_pending_call_with_matching_operator_receipt() {
         .expect_err("the same approval must execute only once across slot restarts");
     assert_eq!(duplicate_error, "approval_already_consumed");
     assert_eq!(
-        fs::read_to_string(root.join("approved.txt")).expect("approved output should remain"),
+        fs::read_to_string(root.join("approved.txt"))
+            .expect("approved output should remain")
+            .replace("\r\n", "\n"),
         "marker\n"
     );
     #[cfg(unix)]
@@ -2111,8 +2146,12 @@ fn failed_approved_call_is_consumed_before_partial_side_effect_can_be_replayed()
     let mut governance = StaticRuleGovernance::new();
     let mut ledger = InMemoryRuntimeEventLedger::new();
     let slot = ExecutionSlot::generic_agent_mvp(ToolExecutionConfig::default());
+    #[cfg(unix)]
+    let command = "printf 'partial\\n' >> partial.txt; exit 7; # rm -rf notes";
+    #[cfg(windows)]
+    let command = "Add-Content -LiteralPath partial.txt -Value 'partial'; exit 7; # rm -rf notes";
     let call = ToolCall::ShellExec {
-        command: "printf 'partial\\n' >> partial.txt; exit 7; # rm -rf notes".to_string(),
+        command: command.to_string(),
         cwd: Some(".".to_string()),
     };
     let pending = slot
@@ -2146,7 +2185,9 @@ fn failed_approved_call_is_consumed_before_partial_side_effect_can_be_replayed()
         .expect("failed command should return its tool record");
     assert!(!first.record.ok);
     assert_eq!(
-        fs::read_to_string(root.join("partial.txt")).expect("partial effect should exist"),
+        fs::read_to_string(root.join("partial.txt"))
+            .expect("partial effect should exist")
+            .replace("\r\n", "\n"),
         "partial\n"
     );
 
@@ -2164,7 +2205,9 @@ fn failed_approved_call_is_consumed_before_partial_side_effect_can_be_replayed()
         .expect_err("failed approved execution must not replay after restart");
     assert_eq!(retry_error, "approval_already_consumed");
     assert_eq!(
-        fs::read_to_string(root.join("partial.txt")).expect("partial effect should not repeat"),
+        fs::read_to_string(root.join("partial.txt"))
+            .expect("partial effect should not repeat")
+            .replace("\r\n", "\n"),
         "partial\n"
     );
     let events = ledger

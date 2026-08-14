@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn write_fake_config(root: &std::path::Path) -> PathBuf {
@@ -278,6 +279,7 @@ fn feishu_bridge_script_discovers_desktop_env_without_host_specific_display() {
 }
 
 #[test]
+#[cfg(unix)]
 fn feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nanos = SystemTime::now()
@@ -761,6 +763,7 @@ fn third_test_smoke_wrapper_sequences_local_gates_and_readonly_summaries() {
 }
 
 #[test]
+#[cfg(unix)]
 fn goal_watchdog_once_writes_readonly_status_report() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let nanos = SystemTime::now()
@@ -842,6 +845,7 @@ fn overnight_runner_writes_structured_status_without_restart_or_cleanup() {
 }
 
 #[test]
+#[cfg(unix)]
 fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-goal-run-status.sh");
@@ -1050,6 +1054,7 @@ fn goal_run_status_script_reads_watchdog_and_overnight_status_without_actions() 
 }
 
 #[test]
+#[cfg(unix)]
 fn live_operator_checklist_reports_redacted_manual_live_steps() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
@@ -1334,6 +1339,7 @@ fn live_operator_checklist_reports_redacted_manual_live_steps() {
 }
 
 #[test]
+#[cfg(unix)]
 fn live_operator_checklist_uses_default_provider_env_when_missing() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");
@@ -1439,6 +1445,7 @@ fn live_operator_checklist_uses_default_provider_env_when_missing() {
 }
 
 #[test]
+#[cfg(unix)]
 fn live_operator_checklist_still_blocks_when_default_provider_env_is_missing() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = manifest_dir.join("scripts/chuang-live-operator-checklist.sh");

@@ -17,6 +17,17 @@ use chuang_agent::skill_evolver::{
     ValidationReport,
 };
 
+const EXTERNAL_AGENT_DISPATCH_SKILL_SEED: &str = r#"---
+skill_id: external_agent_dispatch_sop
+title: "External Agent Dispatch SOP"
+version: 1
+status: active
+---
+# External Agent Dispatch SOP
+
+Keep one canonical workflow and apply the duplicate policy: update the canonical skill instead of creating copies.
+"#;
+
 fn event() -> RuntimeEvent {
     RuntimeEvent {
         event_id: "event-1".to_string(),
@@ -485,8 +496,7 @@ fn canonical_evolver_uses_heading_fallback_for_existing_repo_skill_without_front
     let root = temp_skill_root("repo-skill-fallback");
     fs::create_dir_all(&root).expect("test skill root should be creatable");
     let existing_path = root.join("external_agent_dispatch_sop.md");
-    let existing = fs::read_to_string("data/skills/external_agent_dispatch_sop.md")
-        .expect("repo skill fixture should be readable");
+    let existing = EXTERNAL_AGENT_DISPATCH_SKILL_SEED.to_string();
     let markdown_only = if let Some(rest) = existing.strip_prefix("---\n") {
         let end = rest
             .find("\n---\n")
@@ -634,8 +644,8 @@ fn canonical_evolver_upserts_repo_skill_seed_using_frontmatter_metadata() {
     let root = temp_skill_root("repo-skill-seed");
     fs::create_dir_all(&root).expect("test skill root should be creatable");
     let seed_path = root.join("external_agent_dispatch_sop.md");
-    fs::copy("data/skills/external_agent_dispatch_sop.md", &seed_path)
-        .expect("repo skill seed should be copyable");
+    fs::write(&seed_path, EXTERNAL_AGENT_DISPATCH_SKILL_SEED)
+        .expect("repo skill seed fixture should be writable");
 
     let mut evolver = CanonicalSkillEvolver::new(&root);
     let receipt = evolver

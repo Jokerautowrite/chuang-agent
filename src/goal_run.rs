@@ -1267,15 +1267,31 @@ pub fn evaluate_acceptance_plan_read_only(
         .collect()
 }
 
-/// 命令类验收检查：`sh -c` 执行并等待退出码（带超时兜底）。
+/// 命令类验收检查：通过平台 shell 执行并等待退出码（带超时兜底）。
 /// 输出不进入 verdict（避免命令输出中的敏感内容泄漏到日志/回执）。
 fn evaluate_command_check(command: &str, check_index: usize) -> AcceptanceVerdict {
     let description = command.to_string();
     let started = Instant::now();
     let timeout = Duration::from_secs(ACCEPTANCE_COMMAND_TIMEOUT_SECS);
-    let mut child = match Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    #[cfg(unix)]
+    let mut platform_command = {
+        let mut process = Command::new("sh");
+        process.arg("-c").arg(command);
+        process
+    };
+    #[cfg(windows)]
+    let mut platform_command = {
+        let mut process = Command::new("powershell.exe");
+        process
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-Command")
+            .arg(command);
+        process
+    };
+    let mut child = match platform_command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

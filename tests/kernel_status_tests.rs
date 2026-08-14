@@ -114,7 +114,13 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.governance.ok);
     assert_eq!(status.governance.kind, "static_rule");
     assert!(status.governance.rules_loaded);
-    assert!(status.governance.rules_core_path.ends_with("rules/core.md"));
+    assert!(
+        status.governance.rules_core_path.ends_with("rules/core.md")
+            || status
+                .governance
+                .rules_core_path
+                .ends_with("rules\\core.md")
+    );
     assert!(status.governance.rule_count > 0);
     assert!(status.governance.tool_surface_governed);
     assert_eq!(status.governance.read_only_decision, "allowed");
@@ -839,22 +845,42 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
             && gate.next_action.contains("preflight evidence")
     }));
     assert!(status.external_ai_readiness.ok);
+    #[cfg(unix)]
     assert_eq!(status.external_ai_readiness.overall_state, "ready");
+    #[cfg(windows)]
+    assert_eq!(
+        status.external_ai_readiness.overall_state,
+        "external_ai_adapter_partial"
+    );
     assert!(status
         .external_ai_readiness
         .layers
         .iter()
         .any(|layer| layer.name == "genesis_actuator" && layer.state == "ready"));
+    #[cfg(unix)]
     assert!(status
         .external_ai_readiness
         .layers
         .iter()
         .any(|layer| layer.name == "dispatch_sop" && layer.state == "ready"));
+    #[cfg(windows)]
+    assert!(status
+        .external_ai_readiness
+        .layers
+        .iter()
+        .any(|layer| layer.name == "dispatch_sop" && layer.state == "deferred"));
+    #[cfg(unix)]
     assert!(status
         .external_ai_readiness
         .layers
         .iter()
         .any(|layer| layer.name == "unified_identity_engine" && layer.state == "ready"));
+    #[cfg(windows)]
+    assert!(status
+        .external_ai_readiness
+        .layers
+        .iter()
+        .any(|layer| layer.name == "unified_identity_engine" && layer.state == "deferred"));
     assert!(status.live_readiness.ok);
     assert_eq!(
         status.live_readiness.overall_state,

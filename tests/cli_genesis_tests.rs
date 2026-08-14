@@ -67,6 +67,7 @@ fn cli_genesis_ask_dry_run_renders_primary_and_fallback_without_approval() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_genesis_ask_can_run_approved_program_and_render_json() {
     let output = Command::new("cargo")
         .args([

@@ -746,9 +746,15 @@ fn goal_collect_blocks_checkpoint_when_acceptance_command_fails() {
     let queue_root = temp_goal_root("command-gate-queue");
     let done_path = store_root.join("done.md");
     let mut goal = sample_goal_run();
-    goal.goal_spec.acceptance_plan = GoalAcceptancePlan::new(vec![AcceptanceCheck::Command(
-        format!("test -f {}", done_path.display()),
-    )]);
+    #[cfg(unix)]
+    let acceptance_command = format!("test -f {}", done_path.display());
+    #[cfg(windows)]
+    let acceptance_command = format!(
+        "if (Test-Path -LiteralPath '{}') {{ exit 0 }} else {{ exit 1 }}",
+        done_path.display()
+    );
+    goal.goal_spec.acceptance_plan =
+        GoalAcceptancePlan::new(vec![AcceptanceCheck::Command(acceptance_command)]);
     let store = GoalRunStore::new(&store_root);
     store.create(&goal).expect("goal should store");
     let loaded = store.load("goal-dispatch").expect("goal should load");
@@ -808,8 +814,12 @@ fn goal_collect_passes_when_acceptance_command_succeeds() {
     let store_root = temp_goal_root("command-pass-store");
     let queue_root = temp_goal_root("command-pass-queue");
     let mut goal = sample_goal_run();
+    #[cfg(unix)]
+    let acceptance_command = "true".to_string();
+    #[cfg(windows)]
+    let acceptance_command = "exit 0".to_string();
     goal.goal_spec.acceptance_plan =
-        GoalAcceptancePlan::new(vec![AcceptanceCheck::Command("true".to_string())]);
+        GoalAcceptancePlan::new(vec![AcceptanceCheck::Command(acceptance_command)]);
     let store = GoalRunStore::new(&store_root);
     store.create(&goal).expect("goal should store");
     let loaded = store.load("goal-dispatch").expect("goal should load");

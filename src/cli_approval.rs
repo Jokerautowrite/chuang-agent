@@ -380,6 +380,17 @@ mod tests {
     use chuang_agent::runtime_event_ledger::InMemoryRuntimeEventLedger;
     use chuang_agent::tool_runtime::ToolCall;
     use ed25519_dalek::{Signer, SigningKey};
+
+    fn approval_write_command(path: &str, text: &str) -> String {
+        #[cfg(unix)]
+        {
+            format!("printf '{text}\\n' > {path}; # rm -rf notes")
+        }
+        #[cfg(windows)]
+        {
+            format!("[System.IO.File]::WriteAllText('{path}', \"{text}`n\"); # rm -rf notes")
+        }
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn signed_ticket(
@@ -441,7 +452,7 @@ mod tests {
                 &workspace,
                 &mut slots.governance,
                 &ToolCall::ShellExec {
-                    command: "printf 'approved\\n' > approved.txt; # rm -rf notes".to_string(),
+                    command: approval_write_command("approved.txt", "approved"),
                     cwd: Some(".".to_string()),
                 },
                 active_agent_id,
@@ -502,8 +513,7 @@ mod tests {
                 &workspace,
                 &mut slots.governance,
                 &ToolCall::ShellExec {
-                    command: "printf 'tty-approved\\n' > tty-approved.txt; # rm -rf notes"
-                        .to_string(),
+                    command: approval_write_command("tty-approved.txt", "tty-approved"),
                     cwd: Some(".".to_string()),
                 },
                 active_agent_id,

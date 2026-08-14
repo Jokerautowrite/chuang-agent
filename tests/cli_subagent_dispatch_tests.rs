@@ -1323,6 +1323,7 @@ fn cli_subagent_run_once_releases_claim_immediately_when_command_spawn_fails() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
     let queue_root = temp_queue_root("command-runner");
     let config_path = write_noop_evolution_config(&queue_root);
@@ -1399,6 +1400,7 @@ fn cli_subagent_run_once_command_runner_writes_report_from_process_output() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_accepts_protocol_report_json() {
     let queue_root = temp_queue_root("command-runner-protocol-report");
     let dispatch = dispatch_task(&queue_root, "task-cli-protocol", "命令 runner 协议报告");
@@ -1468,6 +1470,7 @@ fn cli_subagent_run_once_command_runner_accepts_protocol_report_json() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatch() {
     let queue_root = temp_queue_root("command-runner-protocol-mismatch");
     let dispatch = dispatch_task(
@@ -1546,6 +1549,7 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_identity_mismatc
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_rejects_incomplete_protocol_report() {
     let queue_root = temp_queue_root("command-runner-protocol-incomplete");
     let dispatch = dispatch_task(
@@ -1645,6 +1649,7 @@ fn cli_subagent_run_once_command_runner_rejects_incomplete_protocol_report() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_rejects_protocol_report_missing_status() {
     let queue_root = temp_queue_root("command-runner-protocol-missing-status");
     let dispatch = dispatch_task(
@@ -1718,6 +1723,7 @@ fn cli_subagent_run_once_command_runner_rejects_protocol_report_missing_status()
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_bounds_large_output_preview() {
     let queue_root = temp_queue_root("command-runner-large-output");
     let dispatch = dispatch_task(
@@ -1772,6 +1778,7 @@ fn cli_subagent_run_once_command_runner_bounds_large_output_preview() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_command_runner_times_out_and_writes_failed_report() {
     let queue_root = temp_queue_root("command-runner-timeout");
     let dispatch = dispatch_task_with_args(
@@ -1834,6 +1841,7 @@ fn cli_subagent_run_once_command_runner_times_out_and_writes_failed_report() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_subagent_run_once_accepts_checked_in_codex_runner_disabled_report() {
     let queue_root = temp_queue_root("codex-runner-disabled");
     let dispatch = dispatch_task_with_capabilities(
@@ -2311,6 +2319,7 @@ fn report_json_with_parent(
     )
 }
 
+#[cfg(unix)]
 fn report_json_without_truncated(task_id: &str, agent_id: &str, summary: &str) -> String {
     format!(
         r#"{{

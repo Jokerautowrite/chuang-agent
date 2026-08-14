@@ -5,10 +5,27 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+
+#[cfg(unix)]
+type AppServerStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type AppServerStream = std::net::TcpStream;
+
+#[cfg(unix)]
+fn connect_app_server(socket: &Path) -> std::io::Result<AppServerStream> {
+    AppServerStream::connect(socket)
+}
+
+#[cfg(windows)]
+fn connect_app_server(_socket: &Path) -> std::io::Result<AppServerStream> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "app-server socket transport is unavailable on Windows; use local mode",
+    ))
+}
 
 pub const APP_SERVER_SERVICE_NAME: &str = "chuang-agent-app-server.service";
 const SELECTED_GATE_NAMES: [&str; 4] = [
@@ -162,16 +179,23 @@ fn app_server_service_runtime_snapshot_from_evidence_and_persistence(
 }
 
 pub fn canonical_app_server_socket() -> Option<PathBuf> {
-    env::var_os("XDG_RUNTIME_DIR")
-        .filter(|value| !value.is_empty())
-        .map(|runtime_dir| PathBuf::from(runtime_dir).join("chuang-agent/app-server.sock"))
+    #[cfg(unix)]
+    {
+        env::var_os("XDG_RUNTIME_DIR")
+            .filter(|value| !value.is_empty())
+            .map(|runtime_dir| PathBuf::from(runtime_dir).join("chuang-agent/app-server.sock"))
+    }
+    #[cfg(windows)]
+    {
+        None
+    }
 }
 
 pub fn app_server_persistence_runtime_snapshot_from_socket(
     socket: &Path,
 ) -> AppServerPersistenceRuntimeSnapshot {
     let result = (|| {
-        let mut stream = UnixStream::connect(socket)
+        let mut stream = connect_app_server(socket)
             .map_err(|error| format!("socket_connect_failed: {error}"))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))

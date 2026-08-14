@@ -1865,11 +1865,8 @@ fn search_local_knowledge_root(
         for (line_index, line) in content.lines().enumerate() {
             let line_lower = line.to_lowercase();
             if line_lower.contains(&needle) {
-                let relative = file
-                    .strip_prefix(&root)
-                    .unwrap_or(file.as_path())
-                    .display()
-                    .to_string();
+                let relative = file.strip_prefix(&root).unwrap_or(file.as_path());
+                let relative = portable_relative_path(relative);
                 let score = score_knowledge_line(&line_lower, &needle);
                 let line_number = line_index + 1;
                 let preview: String = line.trim().chars().take(240).collect();
@@ -1913,6 +1910,13 @@ fn search_local_knowledge_root(
     });
     hits.truncate(limit);
     Ok(hits)
+}
+
+fn portable_relative_path(path: &std::path::Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn collect_knowledge_files(

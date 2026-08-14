@@ -1,10 +1,13 @@
 use std::collections::VecDeque;
+#[cfg(unix)]
 use std::time::Instant;
 
+#[cfg(unix)]
+use chuang_agent::genesis_actuator::SystemGenesisCommandRunner;
 use chuang_agent::genesis_actuator::{
     AutoCliGenesisActuator, FakeGenesisActuator, GenesisActuator, GenesisAskRequest,
     GenesisChannel, GenesisCommandOutput, GenesisCommandRunner, GenesisCommandSpec, GenesisConfig,
-    GenesisError, SystemGenesisCommandRunner,
+    GenesisError,
 };
 
 #[derive(Debug, Default)]
@@ -89,6 +92,7 @@ fn autocli_genesis_builds_primary_and_fallback_command_shapes() {
 }
 
 #[test]
+#[cfg(unix)]
 fn system_genesis_runner_times_out_stuck_command() {
     let mut runner = SystemGenesisCommandRunner;
     let spec = GenesisCommandSpec {

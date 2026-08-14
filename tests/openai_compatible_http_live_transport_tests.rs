@@ -1,18 +1,24 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+#[cfg(unix)]
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+#[cfg(unix)]
 use std::{fs, sync::Arc};
 
 use chuang_agent::provider_openai_compatible::{
     OpenAICompatibleProviderAdapter, ProviderTransport,
 };
 use chuang_agent::responder::{ProviderAdapterResponder, ResponderRequest};
+#[cfg(unix)]
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
+#[cfg(unix)]
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
+#[cfg(unix)]
 fn generate_tls_materials() -> (PathBuf, PathBuf, PathBuf) {
     let root = std::env::temp_dir().join(format!(
         "chuang-agent-native-tls-{}-{}",
@@ -101,6 +107,7 @@ fn generate_tls_materials() -> (PathBuf, PathBuf, PathBuf) {
     (ca_crt, server_crt, server_key)
 }
 
+#[cfg(unix)]
 fn run_openssl(args: &[&str]) {
     let output = Command::new("openssl")
         .args(args)
@@ -947,6 +954,7 @@ fn openai_compatible_http_transport_marks_200_missing_content_as_structured_prov
 }
 
 #[test]
+#[cfg(unix)]
 fn openai_compatible_native_transport_accepts_https_scheme_and_attempts_tls() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let address = listener.local_addr().expect("local addr should exist");

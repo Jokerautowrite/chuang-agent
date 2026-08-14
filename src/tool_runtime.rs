@@ -1,5 +1,6 @@
 //! `tool_runtime` 模块。公开接口：struct ToolProtocolError, ToolLoopEvent, ToolExecutionRecord, ToolDirectoryEntry, GovernedToolExecutionRecord, PendingApproval, PendingRiskDecision, OperatorApprovalReceipt；enum ToolCall, ToolModelOutput, ToolActionEnvelope, WriteOperation；fn build_subagent_tool_context, generic_agent_mvp, registry, tool_catalog_block, tool_detail_block, tool_instruction_block, execute_with_governance, execute_or_reject_with_governance；const TOOL_EXECUTION_RECORD_SCHEMA_FIELDS, TOOL_LOOP_REPORT_SCHEMA_VERSION, TOOL_ACTION_SCHEMA_VERSION, TOOL_LOOP_REPORT_SCHEMA_FIELDS, TOOL_ACTION_SCHEMA_FIELDS, TOOL_ACTION_CALL_FIELDS, PENDING_APPROVAL_MAX_CALL_BYTES, DEFAULT_SUBAGENT_WORKER_MODEL。
 
+use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -22,7 +23,7 @@ use crate::governance::{
 };
 use crate::memory_recall::{MemoryRecallPipeline, RecallRequest};
 use crate::memory_store_sqlite::SqliteMemoryStore;
-use crate::path_utils::resolve_candidate_preserving_existing_symlinks;
+use crate::path_utils::{path_to_display_string, resolve_candidate_preserving_existing_symlinks};
 use crate::runtime_config::ActuatorConfig;
 use crate::runtime_event_ledger::{
     RuntimeEvent, RuntimeEventKind, RuntimeEventLedger, RuntimeRiskDecision,
@@ -1957,7 +1958,7 @@ fn execute_write_file(
         false,
     );
     record.target_path = Some(path.to_string());
-    record.resolved_path = Some(file.display().to_string());
+    record.resolved_path = Some(path_to_display_string(&file));
     record.changed_files.push(file.display().to_string());
     record.write_before_bytes = previous_content.as_ref().map(|value| value.len());
     record.write_after_bytes = Some(content.len());
@@ -1992,9 +1993,28 @@ fn execute_shell_exec(
         }
         _ => workspace_root.to_path_buf(),
     };
-    let (run_command, rtk_applied) = apply_rtk_shell_rewrite(command, rtk_rewrite);
-    let mut bash = Command::new("bash");
-    bash.arg("-lc")
+    // RTK emits POSIX shell rewrites. Keep it enabled on Unix, but execute the
+    // operator's original command through Windows PowerShell on Windows.
+    let (run_command, rtk_applied) = apply_rtk_shell_rewrite(command, rtk_rewrite && cfg!(unix));
+    #[cfg(unix)]
+    let mut shell = {
+        let mut command = Command::new("bash");
+        command.arg("-lc");
+        command
+    };
+    #[cfg(windows)]
+    let mut shell = {
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+        ]);
+        command
+    };
+    shell
         .arg(&run_command)
         .current_dir(&cwd_path)
         .env("CHUANG_GOVERNED_TOOL_PROCESS", "1")
@@ -2002,9 +2022,9 @@ fn execute_shell_exec(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(path) = path_env_with_rtk() {
-        bash.env("PATH", path);
+        shell.env("PATH", path);
     }
-    let child = match bash.spawn() {
+    let child = match shell.spawn() {
         Ok(child) => child,
         Err(error) => {
             return failed_record(
@@ -2063,7 +2083,7 @@ fn execute_shell_exec(
         None,
         false,
     );
-    record.cwd = Some(cwd_path.display().to_string());
+    record.cwd = Some(path_to_display_string(&cwd_path));
     record.command = Some(redact_sensitive_text("command", &run_command).text);
     record.ok = output.status.success();
     record.stdout = Some(stdout.text);
@@ -2092,24 +2112,25 @@ pub fn discover_rtk_bin() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    if let Ok(output) = Command::new("sh")
-        .args(["-c", "command -v rtk"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-    {
-        if output.status.success() {
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !text.is_empty() {
-                let path = PathBuf::from(&text);
-                if path.is_file() {
-                    return Some(path);
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for name in ["rtk", "rtk.exe"] {
+                let candidate = directory.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
                 }
             }
         }
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    for rel in [".cargo/bin/rtk", ".local/bin/rtk"] {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)?;
+    for rel in [
+        ".cargo/bin/rtk",
+        ".cargo/bin/rtk.exe",
+        ".local/bin/rtk",
+        ".local/bin/rtk.exe",
+    ] {
         let cand = home.join(rel);
         if cand.is_file() {
             return Some(cand);
@@ -2118,15 +2139,15 @@ pub fn discover_rtk_bin() -> Option<PathBuf> {
     None
 }
 
-fn path_env_with_rtk() -> Option<String> {
+fn path_env_with_rtk() -> Option<OsString> {
     let rtk = discover_rtk_bin()?;
-    let dir = rtk.parent()?.display().to_string();
-    let current = std::env::var("PATH").unwrap_or_default();
-    if current.split(':').any(|p| p == dir) {
-        Some(current)
-    } else {
-        Some(format!("{dir}:{current}"))
+    let dir = rtk.parent()?.to_path_buf();
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = std::env::split_paths(&current).collect::<Vec<_>>();
+    if !paths.iter().any(|path| path == &dir) {
+        paths.insert(0, dir);
     }
+    std::env::join_paths(paths).ok()
 }
 
 fn rtk_rewrite_env_disabled() -> bool {
@@ -3013,7 +3034,7 @@ impl ToolExecutionRecord {
 
     fn with_paths(mut self, target_path: &str, resolved_path: &Path) -> Self {
         self.target_path = Some(target_path.to_string());
-        self.resolved_path = Some(resolved_path.display().to_string());
+        self.resolved_path = Some(path_to_display_string(resolved_path));
         self
     }
 }
@@ -4390,9 +4411,15 @@ mod idle_watchdog_tests {
     #[test]
     fn wait_with_watchdog_marks_real_elapsed_for_slow_child_only() {
         // 快速命令：不告警。
+        #[cfg(unix)]
         let child = std::process::Command::new("sh")
             .arg("-c")
             .arg("true")
+            .spawn()
+            .expect("spawn true");
+        #[cfg(windows)]
+        let child = std::process::Command::new("cmd")
+            .args(["/C", "exit", "0"])
             .spawn()
             .expect("spawn true");
         let fast = wait_with_timeout_with_watchdog(child, 10_000, Some(45_000));
@@ -4400,9 +4427,15 @@ mod idle_watchdog_tests {
         assert_eq!(fast.warn_elapsed_ms, None, "fast child must not warn");
 
         // 慢命令（2s）vs 告警阈值 1s：按实际耗时（>=1000ms）告警，而非 0/差值。
+        #[cfg(unix)]
         let child = std::process::Command::new("sh")
             .arg("-c")
             .arg("sleep 2")
+            .spawn()
+            .expect("spawn sleep");
+        #[cfg(windows)]
+        let child = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 2"])
             .spawn()
             .expect("spawn sleep");
         let slow = wait_with_timeout_with_watchdog(child, 10_000, Some(1_000));

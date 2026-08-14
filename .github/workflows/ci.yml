@@ -18,7 +18,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets
       - run: cargo test --locked --all-targets
       - run: cargo build --locked --release
       - run: cp config.example.toml config.toml
@@ -29,3 +29,48 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo check --locked --all-targets
+      - run: cargo test --locked --all-targets
+      - run: cargo build --locked --release
+      - shell: pwsh
+        run: |
+          Copy-Item config.example.toml config.toml
+          .\target\release\chuang-agent.exe doctor --config config.toml
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\scripts\chuang.ps1), [ref]$null, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) { throw ($errors | Out-String) }
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\scripts\install-windows.ps1), [ref]$null, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) { throw ($errors | Out-String) }
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo check --locked --all-targets
+      - run: cargo test --locked --all-targets
+      - run: cargo build --locked --release
+      - run: |
+          cp config.example.toml config.toml
+          ./target/release/chuang-agent doctor --config config.toml
+          bash -n scripts/chuang

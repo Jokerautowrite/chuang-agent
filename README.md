@@ -110,9 +110,14 @@ provider、memory store、context engine、subagent spawner、actuator、governa
 
 ## 快速开始
 
-正式支持环境：**Linux**。需要当前稳定版 Rust 工具链、Git、Bash 与 Python 3。Windows 原生环境尚未纳入发布门禁，建议使用 WSL2。
+正式支持环境：**Linux、Windows 10/11、macOS**，均纳入持续集成门禁。需要当前稳定版 Rust 工具链与 Git；Linux/macOS 辅助脚本需要 Bash 与 Python 3，Windows 原生入口需要 PowerShell 5.1 或更高版本。
+
+- Linux/macOS：支持本地 REPL、运行时和 Unix socket app-server。
+- Windows：支持原生本地 REPL、运行时、治理与 PowerShell 工具执行；默认 `CHUANG_APP_SERVER_MODE=local`。Unix socket app-server、systemd 服务和 Bash 验收脚本不在 Windows 范围内。
 
 首次使用先复制安全配置模板；它默认使用离线 fake provider，不会调用模型、外部 worker 或真实控制器：
+
+### Linux / macOS
 
 ```bash
 cp config.example.toml config.toml
@@ -131,7 +136,7 @@ cargo build --release
 # 直接运行二进制并做安全健康检查
 ./target/release/chuang-agent doctor --config config.toml
 
-# 安装仓库内 Linux 入口（使用符号链接，便于脚本定位仓库）
+# 安装仓库内 Linux/macOS 入口（使用符号链接，便于脚本定位仓库）
 mkdir -p "$HOME/.local/bin"
 ln -sfn "$(pwd)/scripts/chuang" "$HOME/.local/bin/chuang"
 export PATH="$HOME/.local/bin:$PATH"
@@ -147,6 +152,28 @@ chuang status --config config.toml --json
 
 # 全量回归
 cargo test --locked --all-targets
+```
+
+### Windows（原生 PowerShell）
+
+```powershell
+# 在仓库根目录运行；安装器会构建并复制独立的 release 二进制、安全配置和人格模板。
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+
+# 重新打开 PowerShell 后：
+chuang doctor
+chuang login   # 首次粘贴 API Key；隐藏输入并用当前 Windows 账户的 DPAPI 加密保存
+chuang
+chuang ask "你好"
+chuang status --json
+```
+
+默认安装到 `%LOCALAPPDATA%\Programs\chuang-agent`。安装后的 `chuang` 不依赖仓库路径或 Rust 工具链；再次安装会更新程序和示例文件，但保留安装目录中现有的 `config.toml` 与人格文件。
+
+不想写入用户 PATH 时使用 `-NoPathUpdate`；也可以不安装，直接运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\chuang.ps1 doctor
 ```
 
 更完整的命令清单见 `docs/`。

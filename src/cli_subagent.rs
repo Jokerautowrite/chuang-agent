@@ -926,7 +926,10 @@ fn unique_cli_subagent_ids(agent_name: &str) -> Result<CliSubagentIds, String> {
     };
 
     Ok(CliSubagentIds {
-        run_id: RunId(format!("queued-cli-{pid}-{nanos}")),
+        // FileSubagentQueue uses lexical run-id order for deterministic claims.
+        // Put the timestamp before the process id so dispatches created by
+        // separate CLI processes are still claimed in creation order.
+        run_id: RunId(format!("queued-cli-{nanos}-{pid}")),
         agent_id: AgentId(format!("{safe_agent_name}-{pid}-{nanos}")),
     })
 }
