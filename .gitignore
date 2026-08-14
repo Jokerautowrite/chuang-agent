@@ -45,6 +45,11 @@ __pycache__/
 **/*.rs.bak*
 **/*.bak-*
 
+# Release packaging / local archives (do not commit)
+/chuang-agent-src-*.zip
+/docs/larkcli/
+/OPENSOURCE-PREP-CHECKLIST.md
+
 # Local external reference worktrees / downloaded helper repos
 /ai-sdk-codex-oauth/
 /gbrain-http-wrapper/
