@@ -68,3 +68,9 @@ Thumbs.db
 
 # Runtime diary (generated per-day by remember pipeline)
 /identity/diary/
+
+# local runtime env (real values, do not commit)
+ops/systemd/*.env
+
+# Local env files (real secrets stay untracked; keep *.env.example)
+/ops/systemd/*.env

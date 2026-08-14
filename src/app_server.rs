@@ -37,7 +37,7 @@ use chuang_agent::path_utils::normalize_path_lexically;
 use chuang_agent::runtime_config::{
     AnthropicCompatibleConfig, ConfigSummary, IdentityBootstrapConfig, IdentityMemoryConfig,
     OpenAICompatibleConfig, ProviderConfig, RulesConfig, RuntimeConfig, SubagentQueueConfig,
-    DEFAULT_WORKSPACE_ROOT,
+    default_workspace_root,
 };
 use chuang_agent::runtime_config_file::{
     load_runtime_config_file, load_runtime_config_file_with_options, RuntimeConfigFileError,
@@ -3015,7 +3015,7 @@ fn extract_turn_input_text(params: &Value) -> String {
 }
 
 /// 用视觉模型把本地图片描述成文字（识图兜底）。
-/// 走与主 provider 相同的 opencodex 路由（base_url/api_key），模型用 runtime.vision_model。
+/// 走与主 provider 相同的路由（base_url/api_key），模型用 runtime.vision_model。
 fn describe_images_with_vision(
     runtime: &RuntimeConfig,
     image_paths: &[String],
@@ -3204,7 +3204,7 @@ fn build_runtime_for_workspace_with_options(
 
     normalize_runtime_paths(&mut runtime, &base_dir);
     if !config_path.exists()
-        || runtime.permission.workspace_root == PathBuf::from(DEFAULT_WORKSPACE_ROOT)
+        || runtime.permission.workspace_root == default_workspace_root()
     {
         runtime.permission.workspace_root = base_dir.clone();
     }

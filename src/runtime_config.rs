@@ -1,4 +1,4 @@
-//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, AnthropicCompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig, ContextCompactionConfig；enum ProviderConfig, ProviderApiEndpoint, AnthropicApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind, context_compaction_config；const DEFAULT_WORKSPACE_ROOT, TOOL_LOOP_MAX_ROUNDS_CAP。
+//! `runtime_config` 模块。公开接口：struct RuntimeConfig, OpenAICompatibleConfig, AnthropicCompatibleConfig, ProviderFallbackPolicy, IdentityBootstrapConfig, RulesConfig, PermissionRuntimeConfig, ToolLoopConfig, ActuatorCommandConfig, ContextCompactionConfig；enum ProviderConfig, ProviderApiEndpoint, AnthropicApiEndpoint, IdentityMemoryConfig, ContextEngineConfig, GovernanceConfig, ActuatorConfig, SubagentConfig, CanonicalEvolutionGovernance；fn as_str, new, validate, summary, shell_risk_rule_counts, kind, build_dual_file_config, to_context_engine_kind, context_compaction_config；fn default_workspace_root, TOOL_LOOP_MAX_ROUNDS_CAP。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,7 +16,16 @@ use serde::{Deserialize, Serialize};
 
 /// 默认工作区根（仅作为 RuntimeConfig::new 的初始哨兵值；
 /// 实际生效值由 app_server 按 base_dir / 环境变量归一化）。
-pub const DEFAULT_WORKSPACE_ROOT: &str = "/home/user/projects/chuang-agent";
+pub fn default_workspace_root() -> PathBuf {
+    // 优先环境变量（ops/systemd/chuang-agent-app-server.env 注入），否则当前目录。
+    if let Ok(root) = std::env::var("CHUANG_AGENT_WORKSPACE_ROOT") {
+        let root = root.trim();
+        if !root.is_empty() {
+            return PathBuf::from(root);
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+}
 /// 工具循环最大轮数上限（防失控保护）。
 /// 32 轮跑长任务不够，放宽到 256；config 中 max_rounds 超过此值仍会被拒绝。
 pub const TOOL_LOOP_MAX_ROUNDS_CAP: usize = 256;
@@ -32,7 +41,7 @@ pub struct RuntimeConfig {
     pub context_recent_turns: usize,
     pub provider: ProviderConfig,
     /// 视觉模型（用于识图兜底：主模型不支持视觉时，用它把图片描述成文字）。
-    /// 形如 "sub2/mimo-v2.5"，走 opencodex 路由。
+    /// 形如 "vendor/model"，走与主 provider 相同的本地路由。
     pub vision_model: Option<String>,
     pub identity_memory: IdentityMemoryConfig,
     pub identity_bootstrap: IdentityBootstrapConfig,
@@ -74,8 +83,8 @@ pub struct OpenAICompatibleConfig {
     /// API endpoint shape used for this provider. `Responses` matches the
     /// OpenAI Responses API (`/responses`); `ChatCompletions` matches the
     /// classic chat-completions API (`/chat/completions`) used by most
-    /// OpenAI-compatible gateways (e.g. example-provider / ccswitch for
-    /// deepseek-v4-flash). Defaults to Responses for backwards compatibility.
+    /// OpenAI-compatible gateways (e.g. local model router).
+    /// Defaults to Responses for backwards compatibility.
     pub endpoint: ProviderApiEndpoint,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub request_timeout_ms: Option<u64>,
@@ -476,7 +485,7 @@ impl RuntimeConfig {
             permission: PermissionRuntimeConfig {
                 profile: "full_local_workspace".to_string(),
                 approval_policy: "auto_for_workspace".to_string(),
-                workspace_root: PathBuf::from(DEFAULT_WORKSPACE_ROOT),
+                workspace_root: default_workspace_root(),
             },
             tool_loop: ToolLoopConfig {
                 max_rounds: 4,

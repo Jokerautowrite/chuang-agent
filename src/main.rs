@@ -2008,7 +2008,7 @@ mod readable_runtime_error_tests {
     #[test]
     fn provider_401_names_api_key() {
         let msg = readable_runtime_error(
-            "PROVIDER_HTTP_ERROR: provider=example-provider model=gpt-5.6-terra transport=native status_code=401 error=Invalid API key",
+            "PROVIDER_HTTP_ERROR: provider=example model=gpt-5.6-terra transport=native status_code=401 error=Invalid API key",
         );
         assert!(msg.contains("API key"), "got: {msg}");
         assert!(msg.contains("401"), "got: {msg}");
@@ -3209,7 +3209,7 @@ mod tests {
             governance_kind: "rules".to_string(),
             permission_profile: "full_local_workspace".to_string(),
             approval_policy: "auto_for_workspace".to_string(),
-            permission_workspace_root: "/home/user/projects/chuang-agent".to_string(),
+            permission_workspace_root: chuang_agent::runtime_config::default_workspace_root().display().to_string(),
             actuator_kind: "none".to_string(),
             subagent_kind: "none".to_string(),
             subagent_live_worker: chuang_agent::runtime_config::SubagentLiveWorkerSummary {

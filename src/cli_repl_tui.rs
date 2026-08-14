@@ -1324,6 +1324,21 @@ fn letter_glyphs() -> [&'static [&'static str]; 6] {
     ]
 }
 
+/// 品牌标记 · ∞（无限符号）：寓意无限进化、无限扩展。
+///
+/// 5 行 × 12 列细线条点阵（lemniscate 曲线二值化）：与 CHUANG 同高、
+/// 约 1/3 宽，两端圆环镂空 + 中间交叉自然（环壁 2 像素细线），
+/// 形状标准、辨识度高，不喧宾夺主。
+fn infinity_mark() -> Vec<String> {
+    vec![
+        " ████  ████ ".to_string(),
+        "██  ████  ██".to_string(),
+        "█    ██    █".to_string(),
+        "██  ████  ██".to_string(),
+        " ████  ████ ".to_string(),
+    ]
+}
+
 fn compose_chuang_banner() -> Vec<String> {
     let glyphs = letter_glyphs();
     let rows = glyphs[0].len();
@@ -1345,7 +1360,11 @@ fn compose_chuang_banner() -> Vec<String> {
         }
         out.push(line);
     }
-    out
+    // 品牌标记 ∞ 置顶：无限进化、无限扩展（中间留 1 空行呼吸）。
+    let mut banner = infinity_mark();
+    banner.push(String::new());
+    banner.extend(out);
+    banner
 }
 
 /// `thinking` + 三位宽动态点（· / ·· / ··· 循环），宽度固定避免布局抖动。

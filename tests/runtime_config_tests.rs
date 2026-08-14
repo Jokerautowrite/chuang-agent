@@ -53,7 +53,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.approval_policy, "auto_for_workspace");
     assert_eq!(
         summary.permission_workspace_root,
-        "/home/user/projects/chuang-agent"
+        chuang_agent::runtime_config::default_workspace_root().display().to_string()
     );
     assert_eq!(summary.api_key_state, None);
 }
