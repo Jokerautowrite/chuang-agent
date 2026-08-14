@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Jokerautowrite/chuang-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Jokerautowrite/chuang-agent/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Jokerautowrite/chuang-agent?color=44d62c&label=release)](https://github.com/Jokerautowrite/chuang-agent/releases)
+[![Stars](https://img.shields.io/github/stars/Jokerautowrite/chuang-agent?color=44d62c&label=stars)](https://github.com/Jokerautowrite/chuang-agent/stargazers)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-44d62c)](https://github.com/Jokerautowrite/chuang-agent/actions)
 [![License](https://img.shields.io/badge/License-Source--Available--Non--Commercial-44d62c)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?color=44d62c)](CONTRIBUTING.md)
@@ -10,6 +11,8 @@
 
 > 记忆是本体，Agent 只是壳。
 > 创不追求在每个赛道都最强，它负责：记住该记住的、守住该守的规矩、派最强的人干最合适的活。
+
+> ⭐ 如果这个项目让你觉得"记忆本该如此"，欢迎点个 Star 支持我们——每颗星都是这个家的一块砖。
 
 ---
 
