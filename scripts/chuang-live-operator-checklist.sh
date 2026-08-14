@@ -13,6 +13,7 @@ Environment overrides:
   CHUANG_FEISHU_ENV_FILE          Chuang Feishu env file
   CHUANG_LIVE_OPERATOR_ENV_FILE   Same as CHUANG_FEISHU_ENV_FILE, takes priority
   CHUANG_AGENT_ROOT               Chuang repo root
+  CHUANG_AGENT_CONFIG             Chuang config.toml path (default: $CHUANG_AGENT_ROOT/config.toml)
 
 Readonly boundaries:
   connects_real_feishu=false
@@ -147,6 +148,9 @@ workspace_root = Path(
     or os.environ.get("CHUANG_AGENT_WORKSPACE_ROOT")
     or ROOT
 ).expanduser()
+config_path = Path(
+    os.environ.get("CHUANG_AGENT_CONFIG") or (workspace_root / "config.toml")
+).expanduser()
 default_provider_env_file = Path("~/.config/chuang-agent/provider.env").expanduser()
 provider_env_file = env_values.get("CHUANG_PROVIDER_ENV_FILE") or os.environ.get("CHUANG_PROVIDER_ENV_FILE", "")
 suggested_provider_env_file = None
@@ -182,7 +186,7 @@ if forbidden_in_file:
     blockers.append("forbidden_codex_or_hermes_feishu_names_in_env_file")
 if not workspace_root.is_dir():
     blockers.append("workspace_root_missing")
-if not (workspace_root / "config.toml").is_file():
+if not config_path.is_file():
     blockers.append("workspace_config_missing")
 if provider_error:
     blockers.append(f"provider_env_file_{provider_error}")
@@ -201,7 +205,7 @@ commands = {
     ),
     "local_readiness_gate": "sh scripts/chuang-live-readonly-preflight.sh",
     "provider_readiness_check": (
-        f"bash scripts/chuang-provider-readiness-check.sh --config {workspace_root / 'config.toml'}"
+        f"bash scripts/chuang-provider-readiness-check.sh --config {config_path}"
     ),
     "operator_receipt_template": "scripts/chuang-live-operator-receipt.sh --json",
     "final_verify": "sh scripts/chuang-final-verify.sh",
@@ -211,9 +215,9 @@ commands = {
     "new_thread_command": "send /new to the Chuang Feishu bot",
     "bridge_tools_command": "send /tools to the Chuang Feishu bot",
     "bridge_capabilities_command": "send /capabilities to the Chuang Feishu bot",
-    "status_surface": f"cargo run --quiet -- status --config {workspace_root / 'config.toml'} --json",
-    "doctor_surface": f"cargo run --quiet -- doctor --config {workspace_root / 'config.toml'} --json",
-    "console_snapshot_surface": f"cargo run --quiet -- console snapshot --config {workspace_root / 'config.toml'} --json",
+    "status_surface": f"cargo run --quiet -- status --config {config_path} --json",
+    "doctor_surface": f"cargo run --quiet -- doctor --config {config_path} --json",
+    "console_snapshot_surface": f"cargo run --quiet -- console snapshot --config {config_path} --json",
     "knowledge_status": "cargo run --quiet -- memory knowledge status --json",
     "wiki_source_contract": "cargo run --quiet -- memory knowledge source-contract --source wiki --json",
     "gbrain_source_contract": "cargo run --quiet -- memory knowledge source-contract --source gbrain --json",
@@ -499,7 +503,7 @@ result = {
         "agent_root": str(ROOT),
         "env_file": str(ENV_FILE),
         "workspace_root": str(workspace_root),
-        "workspace_config": str(workspace_root / "config.toml"),
+        "workspace_config": str(config_path),
         "provider_env_file": str(provider_env_path),
     },
     "checks": {
@@ -514,7 +518,7 @@ result = {
         },
         "workspace": {
             "root_exists": workspace_root.is_dir(),
-            "config_exists": (workspace_root / "config.toml").is_file(),
+            "config_exists": config_path.is_file(),
         },
         "provider_env_file": {
             "exists": provider_env_path.is_file(),

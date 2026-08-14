@@ -908,10 +908,13 @@ fn live_operator_checklist_exposes_external_live_acceptance_matrix_without_claim
     )
     .expect("operator env should write");
 
+    let (_root, config_path) = write_live_readiness_config_with_transport(&manifest_dir, "native");
+
     let output = Command::new("bash")
         .arg(&script_path)
         .arg("--json")
         .env("CHUANG_AGENT_ROOT", &manifest_dir)
+        .env("CHUANG_AGENT_CONFIG", &config_path)
         .env("CHUANG_LIVE_OPERATOR_ENV_FILE", &env_file)
         .current_dir(&manifest_dir)
         .output()
