@@ -50,6 +50,22 @@ __pycache__/
 /docs/larkcli/
 /OPENSOURCE-PREP-CHECKLIST.md
 
+# Internal ops docs (local-only, never publish)
+/docs/*handoff*
+/docs/*runbook*
+/docs/*receipt*
+/docs/*inventory*
+/docs/*migration*
+/docs/*upgrade*
+/docs/dirty-tree*
+/docs/local-*
+/docs/pi-*
+/docs/sub2-*
+/docs/vultr-*
+/docs/global-real-live*
+/docs/live-*
+/docs/receipts/
+
 # Local external reference worktrees / downloaded helper repos
 /ai-sdk-codex-oauth/
 /gbrain-http-wrapper/
