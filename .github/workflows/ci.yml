@@ -48,6 +48,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install ripgrep (used by mainchain terminal task matrix fixture)
+        run: choco install ripgrep --no-progress -y
       - name: Provide mock codex binary (subagent status asserts it on PATH)
         shell: pwsh
         run: |

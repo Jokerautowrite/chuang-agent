@@ -424,6 +424,11 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
 fn tool_runtime_can_read_write_list_and_shell_exec() {
     let root = temp_workspace("basic");
     fs::create_dir_all(&root).expect("workspace root should be created");
+    // Windows may expose the temp dir under its 8.3 short name (e.g. RUNNER~1);
+    // canonicalize so both sides of the assertion agree on the long form.
+    let root = root
+        .canonicalize()
+        .expect("workspace root should canonicalize");
     fs::write(root.join("input.txt"), "hello").expect("seed file should write");
 
     let write = execute_tool_call(
@@ -588,6 +593,11 @@ fn shell_exec_supports_bash_pipefail_commands() {
 fn workspace_file_adapter_can_apply_patch_and_enforce_workspace_bounds() {
     let root = temp_workspace("patch");
     fs::create_dir_all(&root).expect("workspace root should be created");
+    // Windows may expose the temp dir under its 8.3 short name (e.g. RUNNER~1);
+    // canonicalize so both sides of the assertion agree on the long form.
+    let root = root
+        .canonicalize()
+        .expect("workspace root should canonicalize");
     fs::write(root.join("keep.txt"), "old\nvalue\n").expect("seed file should write");
 
     let adapter = WorkspaceFileAdapter::new(&root);

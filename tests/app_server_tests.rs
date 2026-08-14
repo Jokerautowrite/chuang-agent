@@ -135,7 +135,11 @@ transport = "stub"
 }
 
 fn app_server_socket(name: &str) -> PathBuf {
-    temp_workspace(name).join("app-server.sock")
+    // Unix domain sockets have a hard sun_path limit (~104 bytes on macOS/Linux).
+    // CI temp prefixes alone can be ~50 chars, so keep the dir and filename short.
+    std::env::temp_dir()
+        .join(format!("cgs-{name}"))
+        .join("s.sock")
 }
 
 fn spawn_app_server_daemon(socket: &PathBuf, workspace: Option<&PathBuf>) -> std::process::Child {
