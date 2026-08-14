@@ -137,8 +137,14 @@ transport = "stub"
 fn app_server_socket(name: &str) -> PathBuf {
     // Unix domain sockets have a hard sun_path limit (~104 bytes on macOS/Linux).
     // CI temp prefixes alone can be ~50 chars, so keep the dir and filename short.
+    // A short unique suffix keeps concurrent/rerun tests from reusing the same
+    // socket path (which would fail with AddrInUse on the second bind).
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
     std::env::temp_dir()
-        .join(format!("cgs-{name}"))
+        .join(format!("cgs-{name}-{:x}", nanos & 0xFFFF_FFFF))
         .join("s.sock")
 }
 
@@ -2977,6 +2983,11 @@ transport = "curl"
 fn app_server_health_reports_workspace_runtime() {
     let workspace = temp_workspace("health");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    // The health report canonicalizes the workspace root (macOS /var -> /private/var);
+    // canonicalize the expected side so the assertion matches on every platform.
+    let workspace = workspace
+        .canonicalize()
+        .expect("workspace root should canonicalize");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
     fs::write(workspace.join("identity/SOUL.md"), "Chuang health soul\n")
         .expect("soul should write");
@@ -3573,6 +3584,15 @@ fn app_server_health_reports_workspace_config_mismatch() {
     let workspace = temp_workspace("health-workspace-mismatch");
     let configured_workspace = temp_workspace("health-configured-workspace");
     write_basic_stub_workspace(&workspace);
+    fs::create_dir_all(&configured_workspace).expect("configured workspace should create");
+    // The health report canonicalizes workspace roots (macOS /var -> /private/var);
+    // canonicalize the expected side so the assertion matches on every platform.
+    let workspace = workspace
+        .canonicalize()
+        .expect("workspace root should canonicalize");
+    let configured_workspace = configured_workspace
+        .canonicalize()
+        .expect("configured workspace should canonicalize");
 
     let output = app_server_command()
         .args([
@@ -3817,6 +3837,11 @@ transport = "stub"
 fn app_server_health_text_reports_diagnostic_summary_and_next_actions() {
     let workspace = temp_workspace("health-text");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
+    // The health report canonicalizes the workspace root (macOS /var -> /private/var);
+    // canonicalize the expected side so the assertion matches on every platform.
+    let workspace = workspace
+        .canonicalize()
+        .expect("workspace root should canonicalize");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
     // health 的 goal_run 就绪度按进程 CWD 的 ./context/goal-runs 读取；
     // 干净 clone 没有运行期 goal-run 数据，因此测试自建最小合法 fixture，

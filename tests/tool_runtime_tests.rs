@@ -25,6 +25,19 @@ fn temp_workspace(name: &str) -> PathBuf {
 }
 
 fn normalized_path_text(value: &str) -> String {
+    // Canonicalize existing paths so assertions agree with the file adapter's
+    // canonical output on every platform:
+    //   - macOS resolves /var -> /private/var
+    //   - Windows resolves 8.3 short names (RUNNER~1) to long names and may
+    //     prefix the verbatim \\?\ marker, which we strip here.
+    let path = std::path::Path::new(value);
+    let value = if path.exists() {
+        path.canonicalize()
+            .map(|canonical| canonical.display().to_string())
+            .unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    };
     value.trim_start_matches(r"\\?\").replace('\\', "/")
 }
 
@@ -424,11 +437,6 @@ fn tool_action_envelope_exposes_schema_contract_fields() {
 fn tool_runtime_can_read_write_list_and_shell_exec() {
     let root = temp_workspace("basic");
     fs::create_dir_all(&root).expect("workspace root should be created");
-    // Windows may expose the temp dir under its 8.3 short name (e.g. RUNNER~1);
-    // canonicalize so both sides of the assertion agree on the long form.
-    let root = root
-        .canonicalize()
-        .expect("workspace root should canonicalize");
     fs::write(root.join("input.txt"), "hello").expect("seed file should write");
 
     let write = execute_tool_call(
@@ -509,8 +517,11 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(list.atomic_tool_name, None);
     assert_eq!(list.target_path.as_deref(), Some("."));
     assert_eq!(
-        list.resolved_path.as_deref(),
-        Some(root.display().to_string().as_str())
+        list.resolved_path
+            .as_deref()
+            .map(normalized_path_text)
+            .as_deref(),
+        Some(normalized_path_text(&root.display().to_string())).as_deref()
     );
     assert!(list
         .entries
@@ -555,8 +566,8 @@ fn tool_runtime_can_read_write_list_and_shell_exec() {
     assert_eq!(shell.stderr.as_deref(), Some(""));
     assert_eq!(shell.exit_code, Some(0));
     assert_eq!(
-        shell.cwd.as_deref(),
-        Some(root.display().to_string().as_str())
+        shell.cwd.as_deref().map(normalized_path_text).as_deref(),
+        Some(normalized_path_text(&root.display().to_string())).as_deref()
     );
     assert_eq!(shell.command.as_deref(), Some(shell_command));
     assert_eq!(shell.output_bytes, Some(10));
@@ -593,11 +604,6 @@ fn shell_exec_supports_bash_pipefail_commands() {
 fn workspace_file_adapter_can_apply_patch_and_enforce_workspace_bounds() {
     let root = temp_workspace("patch");
     fs::create_dir_all(&root).expect("workspace root should be created");
-    // Windows may expose the temp dir under its 8.3 short name (e.g. RUNNER~1);
-    // canonicalize so both sides of the assertion agree on the long form.
-    let root = root
-        .canonicalize()
-        .expect("workspace root should canonicalize");
     fs::write(root.join("keep.txt"), "old\nvalue\n").expect("seed file should write");
 
     let adapter = WorkspaceFileAdapter::new(&root);
