@@ -13,6 +13,14 @@ fn script_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/chuang-gbrain-live-receipt.sh")
 }
 
+fn mock_root(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-{name}-{nanos}"))
+}
+
 fn spawn_post_mock_server() -> (String, Arc<Mutex<Option<String>>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let port = listener
@@ -86,13 +94,27 @@ fn gbrain_live_receipt_script_static_safety_guards() {
 
 #[test]
 fn gbrain_live_receipt_script_falls_back_to_local_when_http_missing() {
-    // http 未配置时脚本 fallback 本机只读 local gbrain（Unix socket），
-    // 本机 /run/agent-hub/gbrain/read.sock 存在时正确 verified。
+    // http 未配置时脚本 fallback 本机只读 local gbrain（Unix socket）。
+    // 用自包含 mock CLI，避免依赖本机 agent-hub 部署（干净 clone / CI 均可跑）。
+    let mock_root = mock_root("gbrain-mock-cli");
+    std::fs::create_dir_all(&mock_root).expect("mock root should be created");
+    let mock_cli = mock_root.join("agent-hub-brain-query");
+    std::fs::write(
+        &mock_cli,
+        "#!/usr/bin/env bash\nprintf '%s' '{\"ok\":true,\"results\":[{\"slug\":\"ci-mock\",\"score\":1}],\"mode\":\"local_unix_socket\"}'\n",
+    )
+    .expect("mock cli should be written");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&mock_cli, std::fs::Permissions::from_mode(0o755))
+        .expect("mock cli should be executable");
+
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
         .env_remove("CHUANG_GBRAIN_LIVE_ENDPOINT")
         .env_remove("CHUANG_GBRAIN_LIVE_TOKEN")
+        .env("CHUANG_GBRAIN_LOCAL_QUERY_CLI", &mock_cli)
+        .env("CHUANG_GBRAIN_READ_SOCKET", mock_root.join("read.sock"))
         .output()
         .expect("gbrain receipt script should execute");
 
