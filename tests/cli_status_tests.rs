@@ -13,8 +13,57 @@ fn temp_identity_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-agent-cli-{name}-{nanos}"))
 }
 
+/// status 的 goal_run 就绪度按进程 CWD 的 ./context/goal-runs 读取；
+/// 干净 clone 没有运行期 goal-run 数据，因此测试自建最小合法 fixture，
+/// 并把子进程 CWD 指到临时 root，保证断言不依赖仓库内未提交文件。
+fn write_goal_run_fixture(root: &std::path::Path) {
+    let mut goal_run = chuang_agent::goal_run::GoalRun::new(
+        chuang_agent::goal_mode::GoalSpec::mainline_mvp("status fixture"),
+        vec![chuang_agent::goal_run::GoalWorkerPlan {
+            worker_id: "w1".to_string(),
+            objective: "fixture worker".to_string(),
+            write_scope_ids: vec!["scope1".to_string()],
+            validation_checks: vec!["true".to_string()],
+        }],
+        vec![chuang_agent::goal_run::GoalWriteScope {
+            scope_id: "scope1".to_string(),
+            paths: vec!["evidence.txt".to_string()],
+        }],
+        chuang_agent::goal_run::GoalValidationPlan {
+            commands: vec!["true".to_string()],
+        },
+        chuang_agent::goal_run::GoalIntegrationPolicy {
+            main_process_owns_integration: true,
+            workers_may_commit: false,
+            workers_may_touch_secrets: false,
+            require_worker_reports: false,
+        },
+    )
+    .expect("goal run fixture should build");
+    goal_run
+        .record_checkpoint(chuang_agent::goal_run::GoalCheckpoint::new(
+            "ck-1",
+            "fixture checkpoint summary",
+            vec!["w1".to_string()],
+            vec!["fixture validation note".to_string()],
+        ))
+        .expect("goal run checkpoint should record");
+    fs::create_dir_all(root.join("context/goal-runs")).expect("goal-runs dir should create");
+    fs::write(
+        root.join("context/goal-runs/mainline-mvp.json"),
+        serde_json::to_string_pretty(&goal_run).expect("goal run fixture should serialize"),
+    )
+    .expect("goal run fixture should write");
+}
+
 fn write_fake_status_config(root: &std::path::Path) -> PathBuf {
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    fs::create_dir_all(root.join("rules")).expect("rules root should be created");
+    fs::write(
+        root.join("rules/core.md"),
+        "- Keep responses minimal and testable.\n",
+    )
+    .expect("core rule should write");
     let config_path = root.join("config.toml");
     fs::write(
         &config_path,
@@ -317,12 +366,11 @@ fn cli_status_prints_mvp_health_summary() {
 fn cli_status_can_render_json_without_secret_leak() {
     let config_root = temp_identity_root("status-provider-json");
     let config_path = write_fake_status_config(&config_root);
+    write_goal_run_fixture(&config_root);
     let headless_empty = temp_identity_root("status-provider-json-no-headless");
-    let output = Command::new("cargo")
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .current_dir(&config_root)
         .args([
-            "run",
-            "--quiet",
-            "--",
             "status",
             "--config",
             config_path.to_str().expect("config path should be utf8"),
@@ -339,7 +387,7 @@ fn cli_status_can_render_json_without_secret_leak() {
         .env_remove("CHUANG_CDP_PORT")
         .env("CHUANG_HEADLESS_STATE_DIR", &headless_empty)
         .output()
-        .expect("cargo run should execute");
+        .expect("status should execute");
 
     assert!(
         output.status.success(),
