@@ -20,6 +20,10 @@
 /.chuang-file-audit/
 /context/
 /data/
+# Public skill contract docs referenced by kernel_status readiness checks stay
+# tracked even though the rest of data/ is local runtime state.
+!/data/skills/external_agent_dispatch_sop.md
+!/data/skills/unified_identity_engine_adapter.md
 /tmp/
 /$tmp/
 /$work_dir/
