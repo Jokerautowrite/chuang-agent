@@ -1070,6 +1070,7 @@ fn rpc_request(socket: &Path, request: Value) -> Result<Value, String> {
 
 fn app_server_health_command(args: &[String]) -> Result<(), String> {
     let mut workspace_root = String::new();
+    let mut config_path = String::new();
     let mut output_json = false;
     let mut diagnostic = false;
     let mut index = 0;
@@ -1084,6 +1085,15 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
                     .clone();
                 index += 2;
             }
+            "--config" => {
+                config_path = args
+                    .get(index + 1)
+                    .ok_or_else(|| {
+                        "app-server health requires value after --config".to_string()
+                    })?
+                    .clone();
+                index += 2;
+            }
             "--json" => {
                 output_json = true;
                 index += 1;
@@ -1094,7 +1104,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
             }
             _ => {
                 return Err(
-                    "usage: cargo run -- app-server health [--workspace-root PATH] [--diagnostic] [--json]"
+                    "usage: cargo run -- app-server health [--workspace-root PATH] [--config PATH] [--diagnostic] [--json]"
                         .to_string(),
                 )
             }
@@ -1103,14 +1113,7 @@ fn app_server_health_command(args: &[String]) -> Result<(), String> {
 
     let normalized_workspace_root = normalize_workspace_root(&workspace_root);
     let workspace_status = workspace_status_for_root(&normalized_workspace_root);
-    let runtime = if diagnostic {
-        build_runtime_for_workspace_with_options(
-            &normalized_workspace_root,
-            RuntimeConfigFileOptions::allow_missing_env(),
-        )?
-    } else {
-        build_runtime_for_workspace(&normalized_workspace_root)?
-    };
+    let runtime = build_runtime_for_health(&normalized_workspace_root, &config_path, diagnostic)?;
     runtime
         .validate()
         .map_err(|e| format!("config_invalid: {}: {}", e.field, e.message))?;
@@ -3181,6 +3184,59 @@ fn extract_turn_goal(params: &Value) -> Result<Option<GoalSpec>, String> {
 
 pub(crate) fn build_runtime_for_workspace(workspace_root: &str) -> Result<RuntimeConfig, String> {
     build_runtime_for_workspace_with_options(workspace_root, RuntimeConfigFileOptions::strict())
+}
+
+// app-server health 专用：允许显式 --config PATH，干净 clone 无 config.toml 时
+// 聚合视图仍能按同一配置构建 subagent_readiness（mode=queued_external 等）。
+fn build_runtime_for_health(
+    workspace_root: &str,
+    config_path: &str,
+    diagnostic: bool,
+) -> Result<RuntimeConfig, String> {
+    let options = if diagnostic {
+        RuntimeConfigFileOptions::allow_missing_env()
+    } else {
+        RuntimeConfigFileOptions::strict()
+    };
+    let requested_base = workspace_base_dir(workspace_root);
+    let config_path = config_path.trim();
+    let mut runtime = if config_path.is_empty() {
+        let default_path = requested_base.join("config.toml");
+        if default_path.exists() {
+            if options == RuntimeConfigFileOptions::strict() {
+                load_runtime_config_file(&default_path)
+                    .map_err(|error| runtime_config_file_error(&error))?
+            } else {
+                load_runtime_config_file_with_options(&default_path, options)
+                    .map_err(|error| runtime_config_file_error(&error))?
+            }
+        } else {
+            RuntimeConfig::new(requested_base.join("data/chuang-agent.db"))
+        }
+    } else {
+        let explicit_path = PathBuf::from(config_path);
+        if options == RuntimeConfigFileOptions::strict() {
+            load_runtime_config_file(&explicit_path)
+                .map_err(|error| runtime_config_file_error(&error))?
+        } else {
+            load_runtime_config_file_with_options(&explicit_path, options)
+                .map_err(|error| runtime_config_file_error(&error))?
+        }
+    };
+
+    let base_dir = if config_path.is_empty() {
+        requested_base
+    } else {
+        PathBuf::from(config_path)
+            .parent()
+            .map(|parent| parent.to_path_buf())
+            .unwrap_or_else(|| requested_base.clone())
+    };
+    normalize_runtime_paths(&mut runtime, &base_dir);
+    if runtime.permission.workspace_root == default_workspace_root() {
+        runtime.permission.workspace_root = base_dir;
+    }
+    Ok(runtime)
 }
 
 fn build_runtime_for_workspace_with_options(

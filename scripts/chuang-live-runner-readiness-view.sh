@@ -196,6 +196,9 @@ if CONFIG_PATH:
         STATUS_COMMAND[2:2] = ["--config", CONFIG_PATH]
     if DOCTOR_COMMAND:
         DOCTOR_COMMAND[2:2] = ["--config", CONFIG_PATH]
+    if APP_SERVER_HEALTH_COMMAND:
+        # [binary, app-server, health, ...] → 插到 health 之后
+        APP_SERVER_HEALTH_COMMAND[3:3] = ["--config", CONFIG_PATH]
 
 
 def command_ref(command):

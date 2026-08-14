@@ -25,6 +25,12 @@ fn temp_root(name: &str) -> PathBuf {
 
 fn write_fake_status_config(root: &Path) -> PathBuf {
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    fs::create_dir_all(root.join("rules")).expect("rules root should be created");
+    fs::write(
+        root.join("rules").join("core.md"),
+        "# Test Rules\n\n- no execution, no memory\n",
+    )
+    .expect("rules core should be written");
     let config_path = root.join("config.toml");
     fs::write(
         &config_path,
