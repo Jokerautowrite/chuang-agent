@@ -114,6 +114,11 @@ provider、memory store、context engine、subagent spawner、actuator、governa
 cp config.example.toml config.toml
 # 编辑 config.toml：provider 支持 openai_compatible / anthropic_compatible，
 # 填入 base_url + model + api_key_env 即可（示例见 config.example.toml）
+
+# 初始化人格模板（可选，不复制则使用内置默认人格）
+cp identity/SOUL.example.md identity/SOUL.md
+cp identity/STORY.example.md identity/STORY.md
+cp identity/FIRST_WAKE.example.md identity/FIRST_WAKE.md
 ```
 
 ```bash

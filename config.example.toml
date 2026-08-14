@@ -28,7 +28,9 @@ evolution.detector.min_repeats = 2
 evolution.auto_outer_loop = true
 permission_profile = "full_local_workspace"
 approval_policy = "auto_for_workspace"
-permission_workspace_root = "/home/user/projects/chuang-agent"
+# 权限工作区根：缺省走 CHUANG_AGENT_WORKSPACE_ROOT 环境变量，未设置则取当前目录。
+# 不要硬编码本机路径，避免配置模板泄露机器信息。
+# permission_workspace_root = "."
 
 # Optional shell risk overrides. Leave unset to use built-in safe defaults.
 # [tool_loop.risk]
