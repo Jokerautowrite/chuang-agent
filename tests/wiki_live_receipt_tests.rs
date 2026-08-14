@@ -13,6 +13,14 @@ fn script_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/chuang-wiki-live-receipt.sh")
 }
 
+fn mock_root(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    std::env::temp_dir().join(format!("chuang-agent-{name}-{nanos}"))
+}
+
 fn spawn_post_mock_server() -> (String, Arc<Mutex<Option<String>>>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
     let port = listener
@@ -86,13 +94,23 @@ fn wiki_live_receipt_script_static_safety_guards() {
 
 #[test]
 fn wiki_live_receipt_script_falls_back_to_local_when_http_missing() {
-    // http 未配置时脚本 fallback 本机只读 local wiki（filesystem index），
-    // /opt/agent-hub/data/brain/wiki 存在时正确 verified。
+    // http 未配置时脚本 fallback 只读 local wiki（filesystem index）。
+    // 用自包含的临时 wiki root + index.md，避免依赖本机 /opt/agent-hub
+    // 部署（干净 clone / CI 均可跑）。
+    let wiki_root = mock_root("wiki-mock-root");
+    std::fs::create_dir_all(&wiki_root).expect("wiki root should be created");
+    std::fs::write(
+        wiki_root.join("index.md"),
+        "title: \"CI Mock Wiki\"\n\n# CI Mock Wiki\n\nlive receipt probe line\n",
+    )
+    .expect("wiki index should be written");
+
     let output = Command::new("bash")
         .arg(script_path())
         .arg("--json")
         .env_remove("CHUANG_WIKI_LIVE_ENDPOINT")
         .env_remove("CHUANG_WIKI_LIVE_TOKEN")
+        .env("CHUANG_WIKI_LOCAL_ROOT", &wiki_root)
         .output()
         .expect("wiki receipt script should execute");
 
