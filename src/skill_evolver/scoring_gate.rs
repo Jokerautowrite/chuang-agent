@@ -81,10 +81,7 @@ pub struct SkillBenchmarkScore {
 /// 评分器槽位：给一个规则修改提案跑分。实现可以是现有 BenchmarkEvaluator
 /// （真实模型评审，rubric 只给评审员看）或确定性评分器（离线/测试）。
 pub trait SkillProposalScorer {
-    fn score(
-        &self,
-        proposal: &RuleChangeProposal,
-    ) -> Result<SkillBenchmarkScore, EvolutionError>;
+    fn score(&self, proposal: &RuleChangeProposal) -> Result<SkillBenchmarkScore, EvolutionError>;
 }
 
 /// 复用现有 BenchmarkEvaluator 的评分器：把提案渲染成每个 case 的 Target
@@ -115,14 +112,10 @@ impl BenchmarkEvaluatorScorer {
 }
 
 impl SkillProposalScorer for BenchmarkEvaluatorScorer {
-    fn score(
-        &self,
-        proposal: &RuleChangeProposal,
-    ) -> Result<SkillBenchmarkScore, EvolutionError> {
-        let def = self
-            .store
-            .load_def(&self.benchmark_id)
-            .map_err(|e| EvolutionError::StorageError(format!("scorer load def failed: {}", e.0)))?;
+    fn score(&self, proposal: &RuleChangeProposal) -> Result<SkillBenchmarkScore, EvolutionError> {
+        let def = self.store.load_def(&self.benchmark_id).map_err(|e| {
+            EvolutionError::StorageError(format!("scorer load def failed: {}", e.0))
+        })?;
         let answers = def
             .cases
             .iter()
@@ -159,11 +152,7 @@ pub struct FixedScoreScorer {
 }
 
 impl FixedScoreScorer {
-    pub fn new(
-        benchmark_id: impl Into<String>,
-        total_score: u16,
-        max_score: u16,
-    ) -> Self {
+    pub fn new(benchmark_id: impl Into<String>, total_score: u16, max_score: u16) -> Self {
         Self {
             benchmark_id: benchmark_id.into(),
             total_score,
@@ -174,10 +163,7 @@ impl FixedScoreScorer {
 }
 
 impl SkillProposalScorer for FixedScoreScorer {
-    fn score(
-        &self,
-        _proposal: &RuleChangeProposal,
-    ) -> Result<SkillBenchmarkScore, EvolutionError> {
+    fn score(&self, _proposal: &RuleChangeProposal) -> Result<SkillBenchmarkScore, EvolutionError> {
         Ok(SkillBenchmarkScore {
             benchmark_id: self.benchmark_id.clone(),
             total_score: self.total_score,
@@ -219,10 +205,7 @@ pub struct BenchmarkScoreGate {
 }
 
 impl BenchmarkScoreGate {
-    pub fn new(
-        config: SkillScoringGateConfig,
-        scorer: Box<dyn SkillProposalScorer>,
-    ) -> Self {
+    pub fn new(config: SkillScoringGateConfig, scorer: Box<dyn SkillProposalScorer>) -> Self {
         let store = BenchmarkStore::new(&config.benchmark_root);
         Self {
             config,
@@ -354,18 +337,15 @@ pub fn verify_proposal_statement_rubric_isolation(
     let def = store.load_def(benchmark_id).map_err(|e| {
         EvolutionError::StorageError(format!("scoring gate load def failed: {}", e.0))
     })?;
-    let mut issues = store
-        .verify(benchmark_id)
-        .map_err(|e| EvolutionError::StorageError(format!("scoring gate verify failed: {}", e.0)))?;
+    let mut issues = store.verify(benchmark_id).map_err(|e| {
+        EvolutionError::StorageError(format!("scoring gate verify failed: {}", e.0))
+    })?;
     let proposal_text = render_proposal_answer(proposal);
     for case in &def.cases {
         if let Ok(rubric) = store.read_rubric(benchmark_id, &case.id) {
             let rubric_text = rubric.trim();
             if !rubric_text.is_empty() && proposal_text.contains(rubric_text) {
-                issues.push(format!(
-                    "proposal embeds rubric text for case {}",
-                    case.id
-                ));
+                issues.push(format!("proposal embeds rubric text for case {}", case.id));
             }
         }
     }
@@ -374,7 +354,10 @@ pub fn verify_proposal_statement_rubric_isolation(
 
 /// 把规则修改提案渲染成 Target 侧回答文本（只含题面可见信息，不含 rubric）。
 fn render_proposal_answer(proposal: &RuleChangeProposal) -> String {
-    let mut out = format!("规则修改提案：{}\n触发条件：{}\n新流程：\n", proposal.title, proposal.trigger);
+    let mut out = format!(
+        "规则修改提案：{}\n触发条件：{}\n新流程：\n",
+        proposal.title, proposal.trigger
+    );
     for (index, step) in proposal.new_procedure.iter().enumerate() {
         out.push_str(&format!("{}. {}\n", index + 1, step));
     }
@@ -443,14 +426,13 @@ impl SkillCandidatePool {
             if line.is_empty() {
                 continue;
             }
-            let entry: CandidatePoolEntry =
-                serde_json::from_str(line).map_err(|err| {
-                    EvolutionError::StorageError(format!(
-                        "corrupt candidate pool line {}: {}",
-                        index + 1,
-                        err
-                    ))
-                })?;
+            let entry: CandidatePoolEntry = serde_json::from_str(line).map_err(|err| {
+                EvolutionError::StorageError(format!(
+                    "corrupt candidate pool line {}: {}",
+                    index + 1,
+                    err
+                ))
+            })?;
             entries.push(entry);
         }
         Ok(entries)
@@ -482,8 +464,10 @@ mod tests {
 
     #[test]
     fn no_baseline_policy_allows_only_first_registration() {
-        assert!(NoBaselinePolicy::RejectOptimization.allows_first_registration(RuleChangeKind::CreateRule));
-        assert!(!NoBaselinePolicy::RejectOptimization.allows_first_registration(RuleChangeKind::UpdateRule));
+        assert!(NoBaselinePolicy::RejectOptimization
+            .allows_first_registration(RuleChangeKind::CreateRule));
+        assert!(!NoBaselinePolicy::RejectOptimization
+            .allows_first_registration(RuleChangeKind::UpdateRule));
     }
 
     #[test]
@@ -503,7 +487,9 @@ mod tests {
             requires_governance: true,
             provenance: Vec::new(),
         };
-        let score = scorer.score(&proposal).expect("fixed scorer should not fail");
+        let score = scorer
+            .score(&proposal)
+            .expect("fixed scorer should not fail");
         assert_eq!(score.total_score, 7);
         assert_eq!(score.max_score, 10);
         assert_eq!(score.benchmark_id, "memory-recall");
@@ -511,10 +497,8 @@ mod tests {
 
     #[test]
     fn candidate_pool_roundtrip_and_jsonl() {
-        let root = std::env::temp_dir().join(format!(
-            "chuang-candidate-pool-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("chuang-candidate-pool-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let path = root.join(".evolver").join("candidates.jsonl");
         let pool = SkillCandidatePool::new(&path);

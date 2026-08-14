@@ -777,7 +777,10 @@ fn parse_skill_candidates(args: &[String]) -> Result<SkillCandidatesRequest, Str
         }
     }
 
-    Ok(SkillCandidatesRequest { output, skills_root })
+    Ok(SkillCandidatesRequest {
+        output,
+        skills_root,
+    })
 }
 
 fn build_skill_review(request: &SkillProposeRequest) -> Result<SkillReviewBuild, String> {

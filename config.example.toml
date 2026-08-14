@@ -14,18 +14,14 @@ first_wake_path = "./identity/FIRST_WAKE.md"
 agents_registry_path = "./identity/agents.toml"
 rules_root = "./rules"
 rules_core_path = "./rules/core.md"
-# 自进化外环（verifier-first 验收 + evolver 重复失败自动改规则）：
+# 安全示例默认只生成 dry-run 提案，不自动修改规则。
 # - evolution = "canonical"：启用 canonical evolver（skill_root 与 governance 规则根同源 ./rules）
 # - auto_outer_loop = true：每个 agent turn 结束后自动驱动 detect → propose → governance → apply
 # - min_repeats = 2：同一失败签名跨 turn 重复达到 2 次才提议改规则（防误触发）
 # - approval_threshold = 75：自批准分数线，低于阈值不写盘
 # - governance 默认 policy：确定性证据门禁（无模型自评，缺失证据即拒绝）
 # 注意：config.toml 不入库（.gitignore），本段同时维护在 config.example.toml 供迁移恢复。
-evolution = "canonical"
-evolution.skill_root = "./rules"
-evolution.approval_threshold = 75
-evolution.detector.min_repeats = 2
-evolution.auto_outer_loop = true
+evolution = "dry_run"
 permission_profile = "full_local_workspace"
 approval_policy = "auto_for_workspace"
 # 权限工作区根：缺省走 CHUANG_AGENT_WORKSPACE_ROOT 环境变量，未设置则取当前目录。
@@ -40,13 +36,21 @@ approval_policy = "auto_for_workspace"
 # network_change = " nmcli , ip route , iptables "
 # secret_access = " .env, auth.json, credentials.json"
 
-provider = "openai_compatible"
-provider_id = "local-openai-compatible"
-base_url = "http://127.0.0.1:8317/v1"
-model = "gpt-5.5"
-api_key_env = "CHUANG_AGENT_API_KEY"
-transport = "native"
-provider_timeout_ms = 120000
+# 新安装默认使用离线 fake provider，复制配置后即可运行 doctor/stub。
+# 启用真实模型时，显式改为 openai_compatible 或 anthropic_compatible，
+# 并只通过 api_key_env 引用环境变量。
+provider = "fake"
+provider_id = "local-stub"
+model = "stub"
+
+# OpenAI-compatible provider 示例：
+# provider = "openai_compatible"
+# provider_id = "local-openai-compatible"
+# base_url = "http://127.0.0.1:8317/v1"
+# model = "your-model"
+# api_key_env = "CHUANG_AGENT_API_KEY"
+# transport = "native"
+# provider_timeout_ms = 120000
 
 # Anthropic Messages API provider（可直接配 Claude / Opus 系列模型）：
 # provider = "anthropic_compatible"
@@ -76,21 +80,14 @@ provider_timeout_ms = 120000
 # fallback_status_codes = "401,402"
 # fallback_error_classes = ""
 
-subagent = "queued_external"
+subagent = "fake"
 subagent_queue_root = "./data/subagent-queue"
 
-actuator = "command"
-actuator_program = "sh"
-actuator_args = "./scripts/chuang-actuator-adapter-example.sh --json"
-actuator_timeout_ms = 30000
+actuator = "fake"
 
 # Protocol-safe example control (smoke). Operator machines should switch to the
 # real allowlisted adapter below (no Feishu units in default allowlist).
-control = "command"
-program = "sh"
-list_args = "./scripts/chuang-control-adapter-example.sh list --json"
-apply_args = "./scripts/chuang-control-adapter-example.sh apply --json"
-control_timeout_ms = 30000
+control = "fake_local"
 
 # Real allowlisted control (recommended local operator config):
 # control = "command"
@@ -114,10 +111,10 @@ context_max_memory_segments = 5
 # 真值源：RuntimeConfig.metadata；[metadata] 段任意键透传。
 [metadata]
 # GBrain 外脑增强：情感快照 prompt 追加主人相关记忆摘要；外脑不可用静默降级。
-emotion_brain = "1"
+emotion_brain = "0"
 # GBrain 直连 API 通道（knowledge_context）：1=启用。预检/查询失败返回结构化
 # 状态并标记 knowledge 段 unavailable，不阻断主对话；真实 token 只走 env。
-knowledge_context = "1"
+knowledge_context = "0"
 # 心跳主动联系：仅本地时间 start_hour..=end_hour 窗口内触发（夜间安静），
 # 连接需求≥门槛 且 距上次主动≥最小间隔 才触发，每日最多 max_per_day 次；
 # 投递走 Chuang Feishu 桥轮询发件箱；消息文本由模型自由生成（失败回退模板）。
@@ -126,7 +123,7 @@ knowledge_context = "1"
 # 引擎侧默认与之一致（SummaryCompressionContextEngine::with_circuit_breaker）。
 # context_compaction_breaker_threshold = "3"      # 连续失败 N 次熔断（默认 3）
 # context_compaction_breaker_cooldown_secs = "60" # 熔断冷却秒数，冷却后自动复位（默认 60）
-heartbeat_enabled = "1"
+heartbeat_enabled = "0"
 heartbeat_threshold = "0.6"
 heartbeat_min_interval_minutes = "120"
 heartbeat_max_per_day = "7"

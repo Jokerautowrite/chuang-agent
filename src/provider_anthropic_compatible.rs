@@ -20,10 +20,9 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use crate::provider_openai_compatible::{
-    execute_curl_transport, execute_http_transport, execute_native_transport,
-    run_provider_respond, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS, HttpCallResult, HttpRequestPreview,
-    ProviderConfigError, ProviderRespondContext, ProviderTransport, ReasoningEffort,
-    StubHttpCallResult,
+    execute_curl_transport, execute_http_transport, execute_native_transport, run_provider_respond,
+    HttpCallResult, HttpRequestPreview, ProviderConfigError, ProviderRespondContext,
+    ProviderTransport, ReasoningEffort, StubHttpCallResult, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
 };
 use crate::responder::{ProviderAdapterResponder, ProviderIdentity, ResponderRequest};
 use crate::runtime_config::AnthropicApiEndpoint;
@@ -211,7 +210,11 @@ impl AnthropicCompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        execute_native_transport(&preview, self.request_timeout_ms, self.tls_ca_cert_path.as_ref())
+        execute_native_transport(
+            &preview,
+            self.request_timeout_ms,
+            self.tls_ca_cert_path.as_ref(),
+        )
     }
 
     pub fn execute_curl_post_call(
@@ -331,9 +334,7 @@ mod tests {
             "application/json"
         );
         assert!(
-            !preview
-                .headers
-                .contains_key("authorization"),
+            !preview.headers.contains_key("authorization"),
             "anthropic must not use Bearer authorization"
         );
     }
@@ -409,10 +410,7 @@ mod tests {
             output.meta.extra.get("transport").unwrap(),
             "anthropic-compatible"
         );
-        assert_eq!(
-            output.meta.extra.get("response_kind").unwrap(),
-            "message"
-        );
+        assert_eq!(output.meta.extra.get("response_kind").unwrap(), "message");
         assert_eq!(
             output.meta.extra.get("response_finish_reason").unwrap(),
             "end_turn"

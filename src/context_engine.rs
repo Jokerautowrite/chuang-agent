@@ -145,7 +145,10 @@ impl PackedContext {
                 ContextCompactionEventKind::CompressionSkipped => {
                     compression_skipped_count += 1;
                     if let Some(reason) = &event.reason {
-                        if !compression_skipped_reasons.iter().any(|existing| existing == reason) {
+                        if !compression_skipped_reasons
+                            .iter()
+                            .any(|existing| existing == reason)
+                        {
                             compression_skipped_reasons.push(reason.clone());
                         }
                     }

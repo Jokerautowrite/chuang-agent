@@ -2019,11 +2019,8 @@ fn execute_shell_exec(
         }
     };
 
-    let wait_outcome = wait_with_timeout_with_watchdog(
-        child,
-        timeout_ms,
-        Some(TOOL_IDLE_WATCHDOG_WARN_MS),
-    );
+    let wait_outcome =
+        wait_with_timeout_with_watchdog(child, timeout_ms, Some(TOOL_IDLE_WATCHDOG_WARN_MS));
     let watchdog_note = idle_watchdog_note(wait_outcome.warn_elapsed_ms);
     let output = match wait_outcome.output {
         Ok(output) => output,
@@ -2775,11 +2772,8 @@ fn run_subagent_cli_json(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("subagent_cli_spawn_failed: {error}"))?;
-    let wait_outcome = wait_with_timeout_with_watchdog(
-        child,
-        timeout_ms,
-        Some(TOOL_IDLE_WATCHDOG_WARN_MS),
-    );
+    let wait_outcome =
+        wait_with_timeout_with_watchdog(child, timeout_ms, Some(TOOL_IDLE_WATCHDOG_WARN_MS));
     let watchdog_note = idle_watchdog_note(wait_outcome.warn_elapsed_ms);
     let output = wait_outcome
         .output
@@ -4387,7 +4381,10 @@ mod idle_watchdog_tests {
     fn idle_watchdog_note_renders_only_when_warned() {
         assert!(idle_watchdog_note(None).is_empty());
         let note = idle_watchdog_note(Some(45_123));
-        assert!(note.contains("idle_watchdog_warned_after_ms=45123"), "note={note}");
+        assert!(
+            note.contains("idle_watchdog_warned_after_ms=45123"),
+            "note={note}"
+        );
     }
 
     #[test]

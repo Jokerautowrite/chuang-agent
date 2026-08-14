@@ -370,7 +370,10 @@ mod tests {
         )));
         let evaluator = BenchmarkEvaluator::from_runtime_config(store, &runtime).expect("build");
         assert_eq!(evaluator.provider_slot.model_name(), "main-model");
-        assert_eq!(evaluator.provider_slot.provider_name(), "provider-main-model");
+        assert_eq!(
+            evaluator.provider_slot.provider_name(),
+            "provider-main-model"
+        );
     }
 
     #[test]
@@ -387,7 +390,10 @@ mod tests {
         });
         let evaluator = BenchmarkEvaluator::from_runtime_config(store, &runtime).expect("build");
         assert_eq!(evaluator.provider_slot.model_name(), "main-model");
-        assert_eq!(evaluator.provider_slot.provider_name(), "provider-main-model");
+        assert_eq!(
+            evaluator.provider_slot.provider_name(),
+            "provider-main-model"
+        );
     }
 
     #[test]

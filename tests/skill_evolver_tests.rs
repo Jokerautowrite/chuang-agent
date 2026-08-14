@@ -1517,7 +1517,9 @@ fn write_gate_benchmark(root: &std::path::Path, id: &str) -> BenchmarkStore {
             rubric: "满分10分：触发条件明确3分；新流程可执行4分；理由充分3分。".to_string(),
         }],
     };
-    store.write_def(&def).expect("benchmark def should be writable");
+    store
+        .write_def(&def)
+        .expect("benchmark def should be writable");
     store
 }
 
@@ -1715,11 +1717,7 @@ fn scoring_gate_snapshot_before_change_captures_existing_content() {
     // 先正常落一条规则。
     let proposal = base_rule_change_proposal();
     evolver
-        .apply_rule_change(
-            proposal,
-            &ApproveAllGovernance,
-            &governance_context(vec![]),
-        )
+        .apply_rule_change(proposal, &ApproveAllGovernance, &governance_context(vec![]))
         .expect("create rule should persist");
 
     let snapshot = evolver

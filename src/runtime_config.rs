@@ -708,16 +708,8 @@ impl RuntimeConfig {
                     .to_string(),
             );
         }
-        push_external_knowledge_warning(
-            &mut warnings,
-            "wiki",
-            &self.external_knowledge.wiki,
-        );
-        push_external_knowledge_warning(
-            &mut warnings,
-            "gbrain",
-            &self.external_knowledge.gbrain,
-        );
+        push_external_knowledge_warning(&mut warnings, "wiki", &self.external_knowledge.wiki);
+        push_external_knowledge_warning(&mut warnings, "gbrain", &self.external_knowledge.gbrain);
 
         warnings
     }
@@ -1431,8 +1423,9 @@ fn missing_provider_api_key_env(provider: &ProviderConfig) -> Option<String> {
         ProviderConfig::AnthropicCompatible(config) => missing_env_name(&config.api_key),
         ProviderConfig::Fallback {
             primary, fallback, ..
-        } => missing_provider_api_key_env(primary)
-            .or_else(|| missing_provider_api_key_env(fallback)),
+        } => {
+            missing_provider_api_key_env(primary).or_else(|| missing_provider_api_key_env(fallback))
+        }
     }
 }
 

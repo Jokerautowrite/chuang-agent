@@ -21,7 +21,7 @@ use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rustls::{ClientConfig, RootCertStore};
-use rustls_pemfile::certs;
+use rustls_pki_types::{pem::PemObject, CertificateDer};
 use serde_json::json;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::time::timeout;
@@ -388,7 +388,11 @@ impl OpenAICompatibleProviderAdapter {
         request: &ResponderRequest,
     ) -> Result<HttpCallResult, ProviderConfigError> {
         let preview = self.build_http_request_preview(request)?;
-        execute_native_transport(&preview, self.request_timeout_ms, self.tls_ca_cert_path.as_ref())
+        execute_native_transport(
+            &preview,
+            self.request_timeout_ms,
+            self.tls_ca_cert_path.as_ref(),
+        )
     }
 
     pub fn execute_curl_post_call(
@@ -401,7 +405,10 @@ impl OpenAICompatibleProviderAdapter {
 }
 
 /// OpenAI Responses 风格的 stub 响应体（保持既有测试断言不变）。
-fn build_openai_stub_response_body(identity: &ProviderIdentity, request: &ResponderRequest) -> String {
+fn build_openai_stub_response_body(
+    identity: &ProviderIdentity,
+    request: &ResponderRequest,
+) -> String {
     json!({
         "id": "resp-stub-001",
         "object": "response",
@@ -465,12 +472,13 @@ pub(crate) fn execute_http_transport(
             field: "http_connect".to_string(),
             message: format!("target={} error=no_resolved_address", preview.url),
         })?;
-    let mut stream = TcpStream::connect_timeout(&target_addr, timeout_duration).map_err(|error| {
-        ProviderConfigError {
-            field: "http_connect".to_string(),
-            message: format!("target={} error={error}", preview.url),
-        }
-    })?;
+    let mut stream =
+        TcpStream::connect_timeout(&target_addr, timeout_duration).map_err(|error| {
+            ProviderConfigError {
+                field: "http_connect".to_string(),
+                message: format!("target={} error={error}", preview.url),
+            }
+        })?;
     stream
         .set_read_timeout(Some(timeout_duration))
         .map_err(|error| ProviderConfigError {
@@ -562,8 +570,7 @@ pub(crate) fn execute_native_transport(
 
     runtime.block_on(async move {
         let connector = build_native_https_connector(tls_ca_cert_path)?;
-        let client: Client<_, Full<Bytes>> =
-            Client::builder(TokioExecutor::new()).build(connector);
+        let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build(connector);
         let authorization = preview
             .headers
             .get("authorization")
@@ -595,17 +602,20 @@ pub(crate) fn execute_native_transport(
                 message: error.to_string(),
             })?;
         let status_code = response.status().as_u16();
-        let response_body_json = timeout(Duration::from_millis(timeout_ms), response.into_body().collect())
-            .await
-            .map_err(|_| ProviderConfigError {
-                field: "native_http_timeout".to_string(),
-                message: format!("response body timed out after {}ms", timeout_ms),
-            })?
-            .map_err(|error| ProviderConfigError {
-                field: "native_http_response_body".to_string(),
-                message: error.to_string(),
-            })?
-            .to_bytes();
+        let response_body_json = timeout(
+            Duration::from_millis(timeout_ms),
+            response.into_body().collect(),
+        )
+        .await
+        .map_err(|_| ProviderConfigError {
+            field: "native_http_timeout".to_string(),
+            message: format!("response body timed out after {}ms", timeout_ms),
+        })?
+        .map_err(|error| ProviderConfigError {
+            field: "native_http_response_body".to_string(),
+            message: error.to_string(),
+        })?
+        .to_bytes();
 
         Ok(HttpCallResult {
             status_code,
@@ -784,11 +794,7 @@ pub(crate) fn run_provider_respond(
     ctx: &ProviderRespondContext,
     request: &ResponderRequest,
     build_preview: impl Fn(&ResponderRequest) -> Result<HttpRequestPreview, ProviderConfigError>,
-    stub_response_body: impl Fn(
-        &ProviderIdentity,
-        &ResponderRequest,
-        &HttpRequestPreview,
-    ) -> String,
+    stub_response_body: impl Fn(&ProviderIdentity, &ResponderRequest, &HttpRequestPreview) -> String,
 ) -> ProviderAdapterResponse {
     let masked_key = if ctx.api_key.is_empty() {
         "missing".to_string()
@@ -837,8 +843,7 @@ pub(crate) fn run_provider_respond(
                 let error_class = provider_error_class(&error);
                 // ECONNRESET / ETIMEDOUT 类传输错误与 429/529 一样先扣留重试，
                 // 重试耗尽才释放；配置/协议等硬错误不重试直接释放。
-                if attempt + 1 < MAX_PROVIDER_ATTEMPTS && transport_retryable(&error, error_class)
-                {
+                if attempt + 1 < MAX_PROVIDER_ATTEMPTS && transport_retryable(&error, error_class) {
                     retry_attempts += 1;
                     std::thread::sleep(Duration::from_millis(backoff_ms(attempt)));
                     continue;
@@ -877,11 +882,7 @@ fn execute_transport_for(
     ctx: &ProviderRespondContext,
     request: &ResponderRequest,
     build_preview: &impl Fn(&ResponderRequest) -> Result<HttpRequestPreview, ProviderConfigError>,
-    stub_response_body: &impl Fn(
-        &ProviderIdentity,
-        &ResponderRequest,
-        &HttpRequestPreview,
-    ) -> String,
+    stub_response_body: &impl Fn(&ProviderIdentity, &ResponderRequest, &HttpRequestPreview) -> String,
 ) -> Result<TransportCallResult, ProviderConfigError> {
     let preview = build_preview(request)?;
     match ctx.transport {
@@ -891,16 +892,16 @@ fn execute_transport_for(
             request_body_json: preview.body_json.clone(),
             response_body_json: stub_response_body(ctx.identity, request, &preview),
         })),
-        ProviderTransport::Http => execute_http_transport(&preview, ctx.request_timeout_ms)
-            .map(TransportCallResult::Http),
-        ProviderTransport::Native => execute_native_transport(
-            &preview,
-            ctx.request_timeout_ms,
-            ctx.tls_ca_cert_path,
-        )
-        .map(TransportCallResult::Native),
-        ProviderTransport::Curl => execute_curl_transport(&preview, ctx.request_timeout_ms)
-            .map(TransportCallResult::Curl),
+        ProviderTransport::Http => {
+            execute_http_transport(&preview, ctx.request_timeout_ms).map(TransportCallResult::Http)
+        }
+        ProviderTransport::Native => {
+            execute_native_transport(&preview, ctx.request_timeout_ms, ctx.tls_ca_cert_path)
+                .map(TransportCallResult::Native)
+        }
+        ProviderTransport::Curl => {
+            execute_curl_transport(&preview, ctx.request_timeout_ms).map(TransportCallResult::Curl)
+        }
     }
 }
 
@@ -911,9 +912,10 @@ fn annotate_retry_and_watchdog(
     retry_outcome: &str,
 ) {
     if retry_attempts > 0 {
-        response
-            .extra_meta
-            .insert("provider_retry_attempts".to_string(), retry_attempts.to_string());
+        response.extra_meta.insert(
+            "provider_retry_attempts".to_string(),
+            retry_attempts.to_string(),
+        );
         response.extra_meta.insert(
             "provider_retry_outcome".to_string(),
             retry_outcome.to_string(),
@@ -1001,9 +1003,8 @@ fn build_success_response(
         extra_meta.insert("provider_response_ok".to_string(), "true".to_string());
         (
             content,
-            extract_finish_reason(response_body).or_else(|| {
-                Some((ctx.default_finish_reason)(call.transport()).to_string())
-            }),
+            extract_finish_reason(response_body)
+                .or_else(|| Some((ctx.default_finish_reason)(call.transport()).to_string())),
         )
     } else {
         extra_meta.insert("provider_response_ok".to_string(), "false".to_string());
@@ -1504,8 +1505,7 @@ fn load_root_store_from_pem(path: &PathBuf) -> Result<RootCertStore, ProviderCon
             path.display()
         ),
     })?;
-    let mut cursor = std::io::Cursor::new(pem);
-    let cert_chain = certs(&mut cursor)
+    let cert_chain = CertificateDer::pem_slice_iter(&pem)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ProviderConfigError {
             field: "native_http_tls".to_string(),
@@ -1827,11 +1827,10 @@ mod tests {
     use super::extract_assistant_content_from_value;
     use super::extract_finish_reason;
     use super::{
-        backoff_ms, jittered_backoff, provider_error_class, provider_error_retryable,
-        transport_retryable, MAX_PROVIDER_ATTEMPTS, PROVIDER_IDLE_WATCHDOG_KILL_MS,
-        PROVIDER_IDLE_WATCHDOG_WARN_MS, RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_JITTER_RATIO,
-        RETRY_BACKOFF_MAX_MS, RETRYABLE_STATUS_CODES, http_status_retryable,
-        ProviderConfigError,
+        backoff_ms, http_status_retryable, jittered_backoff, provider_error_class,
+        provider_error_retryable, transport_retryable, ProviderConfigError, MAX_PROVIDER_ATTEMPTS,
+        PROVIDER_IDLE_WATCHDOG_KILL_MS, PROVIDER_IDLE_WATCHDOG_WARN_MS, RETRYABLE_STATUS_CODES,
+        RETRY_BACKOFF_BASE_MS, RETRY_BACKOFF_JITTER_RATIO, RETRY_BACKOFF_MAX_MS,
     };
     use serde_json::json;
 

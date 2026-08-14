@@ -3209,7 +3209,9 @@ mod tests {
             governance_kind: "rules".to_string(),
             permission_profile: "full_local_workspace".to_string(),
             approval_policy: "auto_for_workspace".to_string(),
-            permission_workspace_root: chuang_agent::runtime_config::default_workspace_root().display().to_string(),
+            permission_workspace_root: chuang_agent::runtime_config::default_workspace_root()
+                .display()
+                .to_string(),
             actuator_kind: "none".to_string(),
             subagent_kind: "none".to_string(),
             subagent_live_worker: chuang_agent::runtime_config::SubagentLiveWorkerSummary {

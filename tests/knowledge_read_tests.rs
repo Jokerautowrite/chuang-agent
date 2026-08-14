@@ -497,8 +497,8 @@ fn readonly_http_gbrain_from_config_resolves_token_from_env_and_reads() {
         timeout_ms: Some(5_000),
     };
 
-    let adapter =
-        ReadonlyHttpKnowledgeReadAdapter::new_gbrain_from_config(&config).expect("build from config");
+    let adapter = ReadonlyHttpKnowledgeReadAdapter::new_gbrain_from_config(&config)
+        .expect("build from config");
     let result = adapter
         .query(KnowledgeReadQuery {
             source: "gbrain".to_string(),

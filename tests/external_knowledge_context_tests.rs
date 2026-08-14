@@ -47,7 +47,11 @@ impl Drop for EnvGuard {
     }
 }
 
-fn runtime_with_gbrain(endpoint: Option<&str>, token_env: Option<&str>, enabled: bool) -> RuntimeConfig {
+fn runtime_with_gbrain(
+    endpoint: Option<&str>,
+    token_env: Option<&str>,
+    enabled: bool,
+) -> RuntimeConfig {
     let mut runtime = RuntimeConfig::new(PathBuf::from("./tmp/chuang-kc-test.db"));
     if enabled {
         runtime
@@ -158,7 +162,9 @@ fn knowledge_context_disabled_preflight_returns_structured_disabled() {
     assert!(!preflight.available);
     assert!(!preflight.live_adapter_configured);
     assert_eq!(preflight.reason_code, "disabled");
-    assert!(preflight.reason.contains("knowledge_context channel is disabled"));
+    assert!(preflight
+        .reason
+        .contains("knowledge_context channel is disabled"));
     assert!(preflight
         .next_action
         .contains("metadata knowledge_context=1"));
@@ -184,11 +190,7 @@ fn knowledge_context_enabled_without_token_preflight_returns_structured_unavaila
 #[test]
 fn knowledge_context_enabled_without_endpoint_preflight_returns_structured_unavailable() {
     let _guard = EnvGuard::clear("CHUANG_TEST_KC_NO_ENDPOINT_TOKEN");
-    let runtime = runtime_with_gbrain(
-        None,
-        Some("CHUANG_TEST_KC_NO_ENDPOINT_TOKEN"),
-        true,
-    );
+    let runtime = runtime_with_gbrain(None, Some("CHUANG_TEST_KC_NO_ENDPOINT_TOKEN"), true);
 
     let reader = LiveExternalKnowledgeReader::from_runtime(&runtime);
     let preflight = reader.preflight();
@@ -238,10 +240,8 @@ fn knowledge_context_live_read_returns_hits_without_leaking_token() {
 #[test]
 fn knowledge_context_live_read_degrades_structured_on_http_error_without_panic() {
     let _guard = EnvGuard::set("CHUANG_TEST_KC_DEGRADE_TOKEN", "kc-degrade-secret");
-    let (endpoint, _request_rx) = spawn_knowledge_read_server(
-        500,
-        r#"{"error":"upstream failed kc-degrade-secret"}"#,
-    );
+    let (endpoint, _request_rx) =
+        spawn_knowledge_read_server(500, r#"{"error":"upstream failed kc-degrade-secret"}"#);
     let runtime = runtime_with_gbrain(
         Some(endpoint.as_str()),
         Some("CHUANG_TEST_KC_DEGRADE_TOKEN"),

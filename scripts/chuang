@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # 创 · 本机首选终端入口（仓库内源；可安装到 ~/.local/bin/chuang）
 set -euo pipefail
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 CALLER_CWD="$(pwd)"
 APP_SERVER_SOCKET="${CHUANG_APP_SERVER_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/chuang-agent/app-server.sock}"
 export CHUANG_REPL_WORKSPACE_ROOT="${CHUANG_REPL_WORKSPACE_ROOT:-$CALLER_CWD}"
 cd "$ROOT"
 
-export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-1}"
-export CHUANG_REAL_CONTROL_ENABLE="${CHUANG_REAL_CONTROL_ENABLE:-1}"
-export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-1}"
+# Real control and external workers are opt-in. Keep a fresh installation
+# fail-closed until the operator explicitly enables and allowlists them.
+export CHUANG_REAL_ACTUATOR_ENABLE="${CHUANG_REAL_ACTUATOR_ENABLE:-0}"
+export CHUANG_REAL_CONTROL_ENABLE="${CHUANG_REAL_CONTROL_ENABLE:-0}"
+export CHUANG_CODEX_RUNNER_ENABLE="${CHUANG_CODEX_RUNNER_ENABLE:-0}"
 
 load_provider_env() {
   set -a
@@ -70,7 +74,7 @@ show_usage() {
   chuang <任意自然语言任务>       作为一次本地任务执行
 
 说明:
-  默认项目: /home/user/projects/chuang-agent
+  默认项目: 脚本所在 Git 仓库（可用 CHUANG_AGENT_ROOT 覆盖）
   配置真相: 常驻 app-server 加载项目 config.toml；local 模式会 materialize 绝对路径
   provider env: ~/.config/chuang-agent/provider.env
   真实 provider 变量: CHUANG_PROXY_API_KEY=<set>

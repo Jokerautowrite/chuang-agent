@@ -94,26 +94,29 @@ provider、memory store、context engine、subagent spawner、actuator、governa
 
 ## 与 DeepSeek Harness 的呼应
 
-2026-08-13，DeepSeek 发布了 Harness——一个同样强调模块化、插件化、Agent 运行时框架的项目。看到它的时候，我们很开心：**这说明"记忆本体 + 可插拔调度"的方向，得到了更多人的认可，比什么都重要。**
+2026-08-13，DeepSeek 公开了 Harness——一个同样强调模块化、插件化的 Agent 运行时框架。它的公开让更多人开始关注 agent harness，也让我们觉得这是发布 chuang-agent、参与公开讨论的好时机。
+
+两边独立走到了若干相似的工程方向，但产品重心不同。DeepSeek Harness 已公开支持多 provider、持久会话、子代理和可逆插件生命周期；chuang-agent 的核心主张则是把**跨运行时长期记忆与身份连续性**放在系统中心。
 
 | | chuang-agent | DeepSeek Harness |
 |---|---|---|
 | 定位 | 本地智能体操作系统 / 调度台 | Agent 运行时框架 |
-| 模型绑定 | **模型无关**，可调最强工人（Codex / Claude Code / 任意 OpenAI 兼容 provider） | 绑定自家模型生态 |
-| 记忆 | 记忆为本体，跨壳迁移 | 常规会话上下文管理 |
-| 起点 | 2026-04-30 | 2026-08-13 |
+| 模型支持 | **模型无关**，可调 Codex / Claude Code / OpenAI 兼容 provider | 支持 DeepSeek、OpenAI、Anthropic 与 OpenAI-compatible provider |
+| 状态重点 | 长期记忆为本体，强调跨壳迁移与身份连续性 | append-only 会话、持久化、重放与上下文压缩 |
+| 可核验公开时间 | 首个源码提交：2026-04-30 | 公开仓库创建：2026-08-13 |
 | 语言 | Rust | TypeScript |
 
-> 殊途同归。chuang-agent 从 2026-04-30 开始建设，DeepSeek Harness 从 2026-08-13 开始——我们并不想跟谁对比，只是看到越来越多的人走上同一条路，觉得这条路值得走下去。
+> 殊途同归。这里记录的是公开可核验的时间点和设计差异，不推断任何项目的内部研发起点，也不主张谁复制了谁。
 
 ## 快速开始
 
-依赖：Rust 工具链（`cargo` 1.7x+）。首次使用先复制配置模板并按需填入你的 provider：
+正式支持环境：**Linux**。需要当前稳定版 Rust 工具链、Git、Bash 与 Python 3。Windows 原生环境尚未纳入发布门禁，建议使用 WSL2。
+
+首次使用先复制安全配置模板；它默认使用离线 fake provider，不会调用模型、外部 worker 或真实控制器：
 
 ```bash
 cp config.example.toml config.toml
-# 编辑 config.toml：provider 支持 openai_compatible / anthropic_compatible，
-# 填入 base_url + model + api_key_env 即可（示例见 config.example.toml）
+# 需要真实模型时，再按 config.example.toml 注释显式启用 provider。
 
 # 初始化人格模板（可选，不复制则使用内置默认人格）
 cp identity/SOUL.example.md identity/SOUL.md
@@ -125,7 +128,15 @@ cp identity/FIRST_WAKE.example.md identity/FIRST_WAKE.md
 # 构建
 cargo build --release
 
-# 进入交互式 REPL（雷蛇绿主题）
+# 直接运行二进制并做安全健康检查
+./target/release/chuang-agent doctor --config config.toml
+
+# 安装仓库内 Linux 入口（使用符号链接，便于脚本定位仓库）
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$(pwd)/scripts/chuang" "$HOME/.local/bin/chuang"
+export PATH="$HOME/.local/bin:$PATH"
+
+# 进入交互式 REPL
 chuang
 
 # 跑一次真实本地 runtime
@@ -134,14 +145,13 @@ chuang ask "你好"
 # 查看终端主线状态
 chuang status --config config.toml --json
 
-# 安全健康检查
-cargo run -- doctor
-
 # 全量回归
-cargo test
+cargo test --locked --all-targets
 ```
 
 更完整的命令清单见 `docs/`。
+
+设计总览见 [`docs/architecture.md`](docs/architecture.md)，独立研发的可核验时间点见 [`docs/provenance.md`](docs/provenance.md)。
 
 ## 终端界面
 
@@ -162,6 +172,8 @@ input → identity/memory → context → runtime → governance → report → 
 - `plugins/`：插件 / adapter 注册表
 - `docs/`：规格草案、架构说明、评审结论
 - `tests/`：合同测试与回归测试
+
+当前插件边界是稳定 trait、内置实现和显式 command adapter；通用动态装卸与可逆插件生命周期仍属于后续路线图，不作为当前能力宣传。
 
 ## 当前状态
 
@@ -215,4 +227,4 @@ chuang-agent 的终端编排（REPL / 命令行）仍在持续优化中，当前
 
 ## License
 
-自定义开源协议（个人免费 / 商业授权）→ 详见 [LICENSE](LICENSE)，© 2026 猫哥
+源代码公开，采用[自定义非商业许可证](LICENSE)：个人学习、研究和非商业使用免费，商业使用必须事先取得书面授权并付费。该许可证不是 OSI 批准的开源许可证。© 2026 猫哥
