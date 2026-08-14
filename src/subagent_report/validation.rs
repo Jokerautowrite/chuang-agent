@@ -365,7 +365,7 @@ impl ReportValidator for SubagentReportValidator {
         Self::extract_non_empty_string(&value, "task_id")?;
         Self::extract_non_empty_string(&value, "agent_id")?;
         let status = Self::extract_string(&value, "status")?;
-        if ExecutionStatus::from_str(&status).is_none() {
+        if ExecutionStatus::parse(&status).is_none() {
             return Err(ReportRejectReason::InvalidEnumFormat {
                 field: "status",
                 found: status,

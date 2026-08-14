@@ -36,6 +36,13 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Anchor source-tree existence checks to the crate root so status output is
+/// independent of the process CWD (a health subprocess may run from a
+/// temporary workspace, a service unit, or a clean checkout).
+fn repo_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChuangMvpStatus {
     pub config: ConfigSummary,
@@ -566,7 +573,7 @@ pub fn build_chuang_mvp_status(
     let governance = governance_readiness_status(config)?;
     let goal_mode = goal_mode_status();
     let goal_run = summarize_goal_run_readiness(Path::new("./context/goal-runs"), "mainline-mvp");
-    let plugin_registry = summarize_plugin_registry(Path::new("plugins/registry.example.json"));
+    let plugin_registry = summarize_plugin_registry(&repo_path("plugins/registry.example.json"));
     let local_contract_readiness = build_local_contract_readiness();
     let slots = summarize_runtime_slots(config);
     let config_summary = config.summary();
@@ -1853,10 +1860,10 @@ fn build_third_test_candidate_readiness(
 }
 
 fn build_external_ai_readiness() -> ExternalAiReadinessStatus {
-    let genesis_path = Path::new("src/genesis_actuator.rs");
-    let browser_worker_path = Path::new("src/browser_worker/mod.rs");
-    let dispatcher_doc_path = Path::new("data/skills/external_agent_dispatch_sop.md");
-    let dispatch_adapter_path = Path::new("src/external_ai_dispatch.rs");
+    let genesis_path = repo_path("src/genesis_actuator.rs");
+    let browser_worker_path = repo_path("src/browser_worker/mod.rs");
+    let dispatcher_doc_path = repo_path("data/skills/external_agent_dispatch_sop.md");
+    let dispatch_adapter_path = repo_path("src/external_ai_dispatch.rs");
     let layers = vec![
         external_ai_layer(
             "genesis_actuator",
@@ -1896,7 +1903,7 @@ fn build_external_ai_readiness() -> ExternalAiReadinessStatus {
         ),
         external_ai_layer(
             "unified_identity_engine",
-            if Path::new("data/skills/unified_identity_engine_adapter.md").exists()
+            if repo_path("data/skills/unified_identity_engine_adapter.md").exists()
                 && dispatch_adapter_path.exists()
             {
                 "ready"
@@ -2406,8 +2413,8 @@ fn build_subagent_readiness(
     } else {
         "spawn_subagent runner is present, but codex is unavailable on PATH".to_string()
     };
-    let live_runner_rehearsal_ready = Path::new("docs/subagent-runner-protocol.md").exists()
-        && Path::new("src/live_subagent_rehearsal.rs").exists();
+    let live_runner_rehearsal_ready = repo_path("docs/subagent-runner-protocol.md").exists()
+        && repo_path("src/live_subagent_rehearsal.rs").exists();
     let layers =
         vec![
         subagent_layer(
@@ -2462,12 +2469,12 @@ fn build_subagent_readiness(
         ),
         subagent_layer(
             "external_ai_downstream",
-            if Path::new("src/external_ai_dispatch.rs").exists() {
+            if repo_path("src/external_ai_dispatch.rs").exists() {
                 "ready"
             } else {
                 "partial"
             },
-            Path::new("src/external_ai_dispatch.rs").exists(),
+            repo_path("src/external_ai_dispatch.rs").exists(),
             false,
             "external AI dispatch remains below subagents, with a dry-run unified-identity adapter contract available for review",
             "connect live agent-browser or HTTP sessions only through audited adapters",
@@ -2532,9 +2539,7 @@ fn build_subagent_readiness(
             .to_string()
     } else if queued && model_tool_worker_available {
         // Do not say "cannot start workers" — models misread that as spawn broken.
-        format!(
-            "queued_external dispatch is ready: model tool spawn_subagent can start local Codex workers; live_worker_available=false only excludes external live adapter pools (not local spawn)"
-        )
+        "queued_external dispatch is ready: model tool spawn_subagent can start local Codex workers; live_worker_available=false only excludes external live adapter pools (not local spawn)".to_string()
     } else if queued {
         "queued_external provides durable dispatch/report contracts; local spawn_subagent needs runner+codex; no external live worker adapter yet"
             .to_string()
@@ -2712,12 +2717,12 @@ fn subagent_layer(
 }
 
 fn build_channel_readiness() -> ChannelReadinessStatus {
-    let bridge_script = Path::new("scripts/chuang-feishu-bridge.sh");
-    let bridge_js = Path::new("scripts/chuang-feishu-bridge.js");
-    let client_adapter = Path::new("scripts/chuang-feishu-client-adapter.js");
-    let env_example = Path::new("ops/systemd/chuang-feishu-bridge.env.example");
-    let service_example = Path::new("ops/systemd/chuang-feishu-bridge.service.example");
-    let checklist = Path::new("docs/feishu-dedicated-channel-checklist.md");
+    let bridge_script = repo_path("scripts/chuang-feishu-bridge.sh");
+    let bridge_js = repo_path("scripts/chuang-feishu-bridge.js");
+    let client_adapter = repo_path("scripts/chuang-feishu-client-adapter.js");
+    let env_example = repo_path("ops/systemd/chuang-feishu-bridge.env.example");
+    let service_example = repo_path("ops/systemd/chuang-feishu-bridge.service.example");
+    let checklist = repo_path("docs/feishu-dedicated-channel-checklist.md");
     let layers = vec![
         channel_layer(
             "app_server",
@@ -2763,7 +2768,7 @@ fn build_channel_readiness() -> ChannelReadinessStatus {
         ),
         channel_layer(
             "rich_messages",
-            if Path::new("scripts/chuang-feishu-rich-message-smoke.js").exists() {
+            if repo_path("scripts/chuang-feishu-rich-message-smoke.js").exists() {
                 "ready"
             } else {
                 "deferred"
@@ -3191,7 +3196,7 @@ fn build_project_readiness(
         ),
         project_module(
             "external_ai",
-            if Path::new("src/external_ai_dispatch.rs").exists() {
+            if repo_path("src/external_ai_dispatch.rs").exists() {
                 "ready"
             } else {
                 "partial"

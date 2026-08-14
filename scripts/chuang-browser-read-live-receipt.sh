@@ -50,7 +50,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 REQUEST_ID="${CHUANG_BROWSER_READ_RECEIPT_REQUEST_ID:-browser-read-live-receipt-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 SKIP_STATUS="${CHUANG_BROWSER_READ_RECEIPT_SKIP_STATUS:-0}"
 CDP_PORT="${CHUANG_CDP_PORT:-}"

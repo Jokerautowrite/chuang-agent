@@ -961,7 +961,7 @@ pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
 /// 解析 XML 风格工具调用，返回正式 ToolCall。支持两类常见输出：
 /// 1. antml:invoke / invoke（参数用 parameter 标签）
 /// 2. <ACTION><tool_call><name>..</name><args>{json}</args>..（参数用 name+args）
-/// 参数名做小范围映射（cmd -> command），数字/布尔参数自动转换，tasks 支持多行数组。
+///    参数名做小范围映射（cmd -> command），数字/布尔参数自动转换，tasks 支持多行数组。
 fn parse_xml_tool_call(body: &str) -> Option<ToolCall> {
     if let Some(call) = parse_xml_invoke_tool_call(body) {
         return Some(call);
@@ -4063,19 +4063,13 @@ fn build_write_diff_preview(path: &str, previous: Option<&str>, next: &str) -> O
         if before == after {
             continue;
         }
-        match before {
-            Some(line) => {
-                push_diff_line(&mut preview, '-', line);
-                emitted += 1;
-            }
-            None => {}
+        if let Some(line) = before {
+            push_diff_line(&mut preview, '-', line);
+            emitted += 1;
         }
-        match after {
-            Some(line) => {
-                push_diff_line(&mut preview, '+', line);
-                emitted += 1;
-            }
-            None => {}
+        if let Some(line) = after {
+            push_diff_line(&mut preview, '+', line);
+            emitted += 1;
         }
         if emitted >= 80 || preview.len() >= 4_000 {
             truncated = index + 1 < max_len;

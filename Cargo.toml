@@ -32,3 +32,9 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 toml = "0.8"
+
+[lints.clippy]
+# 内部调度函数参数多（>7）是领域特性，重构为参数结构体会大改调用面；
+# 大型状态枚举字段差异大属正常，均显式 allow，其余 lint 保持默认严格。
+too_many_arguments = "allow"
+large_enum_variant = "allow"

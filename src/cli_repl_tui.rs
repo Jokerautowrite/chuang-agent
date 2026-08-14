@@ -1032,11 +1032,7 @@ fn draw_slash_menu(
     let max_rows = area.height.saturating_sub(1) as usize;
     let sel = app.slash_sel.min(items.len().saturating_sub(1));
     // 保证选中项在可见窗口内
-    let start = if sel + 1 > max_rows {
-        sel + 1 - max_rows
-    } else {
-        0
-    };
+    let start = (sel + 1).saturating_sub(max_rows);
     for (i, (cmd, desc)) in items.iter().enumerate().skip(start).take(max_rows) {
         let marker = if i == sel { "› " } else { "  " };
         let raw = format!("{marker}{cmd:<10} {desc}");

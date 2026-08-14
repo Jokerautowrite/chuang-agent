@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 
 const CAPABILITY_PRIMER_PATH = path.join(__dirname, "..", "assets", "capability_primer.txt");
+const WORKSPACE_ROOT =
+  process.env.CHUANG_AGENT_WORKSPACE_ROOT || path.resolve(__dirname, "..");
 
 function parseBridgeCommand(text) {
   const normalized = normalizeText(text).toLowerCase();
@@ -48,7 +50,7 @@ function buildNewSessionCommandReply(threadId = "") {
         ? "后续同一聊天里的普通文本会路由到这个新会话。"
         : "请在飞书里新开一个聊天、话题或消息线程，然后直接发任务；如果新窗口提示未绑定，就发送：",
       "",
-      hasThreadId ? "" : "`/codex bind /home/user/projects/chuang-agent`",
+      hasThreadId ? "" : `\`/codex bind ${WORKSPACE_ROOT}\``,
       "",
       hasThreadId
         ? "如果你还想再起一个全新的会话，继续发 /new 即可。"
@@ -56,7 +58,7 @@ function buildNewSessionCommandReply(threadId = "") {
       "",
       hasThreadId
         ? ""
-        : "从现在开始按新任务处理，忽略前面上下文，工作目录仍是 /home/user/projects/chuang-agent",
+        : `从现在开始按新任务处理，忽略前面上下文，工作目录仍是 ${WORKSPACE_ROOT}`,
     ].join("\n"),
   };
 }
@@ -196,7 +198,7 @@ function buildLiveCheckCommandReply() {
       "先在本机终端跑：",
       "",
       "`scripts/chuang-live-operator-checklist.sh --json`",
-      "`node scripts/chuang-feishu-live-preflight.js --env-file /home/user/.codex-im/chuang-feishu-bridge.env --workspace-root /home/user/projects/chuang-agent --json`",
+      `\`node scripts/chuang-feishu-live-preflight.js --env-file ${process.env.CHUANG_FEISHU_ENV_FILE || `${process.env.HOME || "~"}/.codex-im/chuang-feishu-bridge.env`} --workspace-root ${WORKSPACE_ROOT} --json\``,
       "`sh scripts/chuang-live-readonly-preflight.sh`",
       "`scripts/chuang-goal-run-status.sh --json`",
       "",

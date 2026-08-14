@@ -265,7 +265,7 @@ pub(crate) fn run_with_options(
             memory: Some(MemoryToolContext {
                 db_path: runtime.db_path.clone(),
                 session_id: request.session_id.clone(),
-                default_limit: runtime.recall_limit.max(1).min(5),
+                default_limit: runtime.recall_limit.clamp(1, 5),
                 max_limit: runtime.recall_limit.max(1).max(10),
             }),
             actuator: Some(runtime.actuator.clone()),
@@ -463,17 +463,18 @@ fn persist_emotion_state(emotion: &EmotionSlotRuntime, path: &std::path::Path) {
         return;
     };
     // 合并式读写：保留心跳记账（last_proactive_at / 当日计数），只更新五轴与心跳时间。
-    let previous = EmotionStateFile::new(path)
-        .load()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| PersistedEmotionState {
-            axes: snapshot.axes,
-            saved_at: None,
-            last_proactive_at: None,
-            proactive_count_date: None,
-            proactive_count_day: 0,
-        });
+    let previous =
+        EmotionStateFile::new(path)
+            .load()
+            .ok()
+            .flatten()
+            .unwrap_or(PersistedEmotionState {
+                axes: snapshot.axes,
+                saved_at: None,
+                last_proactive_at: None,
+                proactive_count_date: None,
+                proactive_count_day: 0,
+            });
     let state = PersistedEmotionState {
         axes: snapshot.axes,
         saved_at: Some(chuang_agent::emotion_slot::now_rfc3339()),
@@ -487,7 +488,7 @@ fn persist_emotion_state(emotion: &EmotionSlotRuntime, path: &std::path::Path) {
 /// 从本轮对话提取五轴 delta 并喂给 EmotionSlot；随后重置连接需求
 /// （主人主动来找 → 连接需求满足）。情感失败不阻断主流程。
 fn observe_turn_emotion(emotion: &mut EmotionSlotRuntime, user_input: &str, assistant_reply: &str) {
-    let delta = RuleEmotionDeltaExtractor::default().extract(user_input, assistant_reply);
+    let delta = RuleEmotionDeltaExtractor.extract(user_input, assistant_reply);
     let _ = emotion.observe_delta(&delta);
     let _ = emotion.reset_connection();
 }
@@ -1292,11 +1293,14 @@ where
                 let requires_local_action = !requires_spawn
                     && (should_require_action_for_local_task(&original_input) || tool_intent)
                     && tool_calls.is_empty();
-                if tool_calls.is_empty() && protocol_errors.is_empty() && round_index == 0 {
-                    if !requires_local_action && !requires_spawn {
-                        insert_tool_surface_metadata(&mut turn, workspace_root)?;
-                        return Ok(turn);
-                    }
+                if tool_calls.is_empty()
+                    && protocol_errors.is_empty()
+                    && round_index == 0
+                    && !requires_local_action
+                    && !requires_spawn
+                {
+                    insert_tool_surface_metadata(&mut turn, workspace_root)?;
+                    return Ok(turn);
                 }
                 if !requires_local_action && !requires_spawn {
                     last_plain_text_answer = Some(body.clone());
@@ -3261,9 +3265,7 @@ fn insert_tool_surface_metadata(
     extra
         .entry("tool_protocol_error_count".to_string())
         .or_insert_with(|| "0".to_string());
-    extra
-        .entry("tool_trace".to_string())
-        .or_insert_with(String::new);
+    extra.entry("tool_trace".to_string()).or_default();
     Ok(())
 }
 
@@ -6399,20 +6401,17 @@ allowed_channels = ["app-server"]
             .response
             .meta
             .extra
-            .get("session_memory_record_id")
-            .is_some());
+            .contains_key("session_memory_record_id"));
         assert!(result
             .response
             .meta
             .extra
-            .get("session_memory_compacted_from_chars")
-            .is_some());
+            .contains_key("session_memory_compacted_from_chars"));
         assert!(result
             .response
             .meta
             .extra
-            .get("session_memory_compacted_to_chars")
-            .is_some());
+            .contains_key("session_memory_compacted_to_chars"));
         assert!(!result
             .response
             .meta
@@ -9410,12 +9409,12 @@ allowed_channels = ["app-server"]
             "auth error should remain visible"
         );
         assert!(
-            turn.result
+            !turn
+                .result
                 .response
                 .meta
                 .extra
-                .get("model_auto_retry_count")
-                .is_none(),
+                .contains_key("model_auto_retry_count"),
             "auth errors must not be auto-retried"
         );
         assert_eq!(
@@ -9461,12 +9460,12 @@ allowed_channels = ["app-server"]
 
         assert_eq!(turn.result.response.body, "工具已执行后正常完成");
         assert!(
-            turn.result
+            !turn
+                .result
                 .response
                 .meta
                 .extra
-                .get("model_auto_retry_count")
-                .is_none(),
+                .contains_key("model_auto_retry_count"),
             "no auto-retry once a tool has run"
         );
         assert_eq!(

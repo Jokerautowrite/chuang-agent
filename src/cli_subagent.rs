@@ -1533,12 +1533,9 @@ fn join_pipe_reader(
         });
     };
 
-    reader.join().map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "command runner pipe reader panicked",
-        )
-    })?
+    reader
+        .join()
+        .map_err(|_| std::io::Error::other("command runner pipe reader panicked"))?
 }
 
 fn non_empty_preview(value: &str) -> Option<String> {
@@ -1564,6 +1561,65 @@ fn format_unix_rfc3339(seconds: u64) -> String {
                 .expect("unix epoch timestamp should be valid")
         });
     datetime.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+fn resolve_subagent_evolution_runtime(
+    request: &SubagentRunOnceCliRequest,
+) -> (
+    chuang_agent::runtime_config::RuntimeConfig,
+    &'static str,
+    &'static str,
+) {
+    let mut runtime = request.options.runtime.clone();
+    let source = if matches!(runtime.evolution, EvolutionConfig::Noop) {
+        runtime.evolution = EvolutionConfig::DryRun;
+        SubagentEvolutionSource::DefaultDryRunPromotion
+    } else {
+        SubagentEvolutionSource::RuntimeConfig
+    };
+    let evolution_kind = runtime.evolution.kind();
+    (runtime, evolution_kind, source.as_str())
+}
+
+fn build_subagent_evolution_slot(
+    request: &SubagentRunOnceCliRequest,
+) -> Result<(impl SkillEvolver, &'static str, &'static str), String> {
+    let (runtime, evolution_kind, evolution_source) = resolve_subagent_evolution_runtime(request);
+    let slots = build_runtime_slots(&runtime).map_err(|e| {
+        format!(
+            "subagent_evolution_slot_invalid: {}: {}",
+            e.field, e.message
+        )
+    })?;
+    Ok((slots.evolution, evolution_kind, evolution_source))
+}
+
+/// Observe a `TurnCompleted` event through the configured evolution slot and
+/// return at most one dry-run skill candidate. The slot remains readonly here;
+/// no skill is written or solidified by `subagent run-once`.
+fn collect_dry_run_proposals(
+    evolution: &mut impl SkillEvolver,
+    agent_id: &str,
+    task_id: &str,
+    event_id: &str,
+    summary: &str,
+) -> Vec<chuang_agent::skill_evolver::SkillProposal> {
+    let event = RuntimeEvent {
+        event_id: event_id.to_string(),
+        task_id: task_id.to_string(),
+        kind: RuntimeEventKind::TurnCompleted,
+        summary: summary.to_string(),
+        metadata: std::collections::BTreeMap::new(),
+    };
+    if evolution.observe(event).is_err() {
+        return vec![];
+    }
+    let scope = EvolutionScope {
+        agent_id: agent_id.to_string(),
+        task_kind: None,
+        max_proposals: 1,
+    };
+    evolution.propose(scope).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1646,63 +1702,4 @@ mod tests {
             metadata: BTreeMap::new(),
         }
     }
-}
-
-fn resolve_subagent_evolution_runtime(
-    request: &SubagentRunOnceCliRequest,
-) -> (
-    chuang_agent::runtime_config::RuntimeConfig,
-    &'static str,
-    &'static str,
-) {
-    let mut runtime = request.options.runtime.clone();
-    let source = if matches!(runtime.evolution, EvolutionConfig::Noop) {
-        runtime.evolution = EvolutionConfig::DryRun;
-        SubagentEvolutionSource::DefaultDryRunPromotion
-    } else {
-        SubagentEvolutionSource::RuntimeConfig
-    };
-    let evolution_kind = runtime.evolution.kind();
-    (runtime, evolution_kind, source.as_str())
-}
-
-fn build_subagent_evolution_slot(
-    request: &SubagentRunOnceCliRequest,
-) -> Result<(impl SkillEvolver, &'static str, &'static str), String> {
-    let (runtime, evolution_kind, evolution_source) = resolve_subagent_evolution_runtime(request);
-    let slots = build_runtime_slots(&runtime).map_err(|e| {
-        format!(
-            "subagent_evolution_slot_invalid: {}: {}",
-            e.field, e.message
-        )
-    })?;
-    Ok((slots.evolution, evolution_kind, evolution_source))
-}
-
-/// Observe a `TurnCompleted` event through the configured evolution slot and
-/// return at most one dry-run skill candidate. The slot remains readonly here;
-/// no skill is written or solidified by `subagent run-once`.
-fn collect_dry_run_proposals(
-    evolution: &mut impl SkillEvolver,
-    agent_id: &str,
-    task_id: &str,
-    event_id: &str,
-    summary: &str,
-) -> Vec<chuang_agent::skill_evolver::SkillProposal> {
-    let event = RuntimeEvent {
-        event_id: event_id.to_string(),
-        task_id: task_id.to_string(),
-        kind: RuntimeEventKind::TurnCompleted,
-        summary: summary.to_string(),
-        metadata: std::collections::BTreeMap::new(),
-    };
-    if evolution.observe(event).is_err() {
-        return vec![];
-    }
-    let scope = EvolutionScope {
-        agent_id: agent_id.to_string(),
-        task_kind: None,
-        max_proposals: 1,
-    };
-    evolution.propose(scope).unwrap_or_default()
 }

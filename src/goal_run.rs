@@ -1234,7 +1234,7 @@ pub fn evaluate_acceptance_plan(root: &Path, plan: &GoalAcceptancePlan) -> Vec<A
 /// - `Evidence` 检查仍按文件系统只读判定；
 /// - `Command` 检查**不执行**（避免只读路径产生 `sh -c` 副作用），
 ///   统一判定为未评估（passed=false，reason 指明需走可执行 collect）。
-/// 权威判定入口是 `evaluate_acceptance_plan`（mutable collect / `goal verify`）。
+///   权威判定入口是 `evaluate_acceptance_plan`（mutable collect / `goal verify`）。
 pub fn evaluate_acceptance_plan_read_only(
     root: &Path,
     plan: &GoalAcceptancePlan,

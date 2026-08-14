@@ -4,7 +4,7 @@ use chuang_agent::lifecycle::{
 
 #[test]
 fn start_on_uninitialized_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Uninitialized, &LifecycleCommand::Start);
 
@@ -18,7 +18,7 @@ fn start_on_uninitialized_is_accepted() {
 
 #[test]
 fn start_on_running_is_noop() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Running, &LifecycleCommand::Start);
 
@@ -27,7 +27,7 @@ fn start_on_running_is_noop() {
 
 #[test]
 fn start_on_failed_is_deferred() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Failed, &LifecycleCommand::Start);
 
@@ -44,7 +44,7 @@ fn start_on_failed_is_deferred() {
 
 #[test]
 fn pause_on_running_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Running, &LifecycleCommand::Pause);
 
@@ -58,7 +58,7 @@ fn pause_on_running_is_accepted() {
 
 #[test]
 fn pause_on_paused_is_noop() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Paused, &LifecycleCommand::Pause);
 
@@ -67,7 +67,7 @@ fn pause_on_paused_is_noop() {
 
 #[test]
 fn resume_on_starting_is_deferred() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Starting, &LifecycleCommand::Resume);
 
@@ -84,7 +84,7 @@ fn resume_on_starting_is_deferred() {
 
 #[test]
 fn resume_on_paused_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Paused, &LifecycleCommand::Resume);
 
@@ -98,7 +98,7 @@ fn resume_on_paused_is_accepted() {
 
 #[test]
 fn checkpoint_on_running_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Running, &LifecycleCommand::Checkpoint);
 
@@ -112,7 +112,7 @@ fn checkpoint_on_running_is_accepted() {
 
 #[test]
 fn checkpoint_on_paused_is_rejected() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Paused, &LifecycleCommand::Checkpoint);
 
@@ -126,7 +126,7 @@ fn checkpoint_on_paused_is_rejected() {
 
 #[test]
 fn drain_on_running_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Running, &LifecycleCommand::Drain);
 
@@ -140,7 +140,7 @@ fn drain_on_running_is_accepted() {
 
 #[test]
 fn stop_on_running_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Running, &LifecycleCommand::Stop);
 
@@ -154,7 +154,7 @@ fn stop_on_running_is_accepted() {
 
 #[test]
 fn stop_on_stopped_is_noop() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Stopped, &LifecycleCommand::Stop);
 
@@ -163,7 +163,7 @@ fn stop_on_stopped_is_noop() {
 
 #[test]
 fn restart_on_failed_is_accepted() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Failed, &LifecycleCommand::Restart);
 
@@ -177,7 +177,7 @@ fn restart_on_failed_is_accepted() {
 
 #[test]
 fn restart_on_uninitialized_is_deferred() {
-    let table = LifecycleTransitionTable::default();
+    let table = LifecycleTransitionTable;
 
     let effect = table.evaluate(&LifecycleState::Uninitialized, &LifecycleCommand::Restart);
 

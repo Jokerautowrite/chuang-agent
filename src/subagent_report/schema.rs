@@ -1,4 +1,4 @@
-//! `subagent_report::schema` 模块。公开接口：struct ArtifactRef, ContextDropReasonSummary, ContextDebugSummary, WorkingReservationDebug, GovernanceDecisionSummary, ResourceUsage, SubagentReport, ReportAdmission；enum ExecutionStatus, ArtifactKind, ReportAdmissionStatus；fn from_str。
+//! `subagent_report::schema` 模块。公开接口：struct ArtifactRef, ContextDropReasonSummary, ContextDebugSummary, WorkingReservationDebug, GovernanceDecisionSummary, ResourceUsage, SubagentReport, ReportAdmission；enum ExecutionStatus, ArtifactKind, ReportAdmissionStatus；fn parse。
 
 use crate::common::{AgentId, ReportId, TaskId, Timestamp};
 use crate::skill_evolver::SkillProposal;
@@ -13,7 +13,7 @@ pub enum ExecutionStatus {
 }
 
 impl ExecutionStatus {
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "Success" => Some(Self::Success),
             "Failed" => Some(Self::Failed),

@@ -98,10 +98,10 @@ V2 里已经补出了可用的迁移表，这意味着：
 ---
 
 ## 当前文件
-- DeepSeek 原始草案：`/home/user/projects/chuang-agent/docs/deepseek-spec-draft.md`
-- 小创审稿版 V1：`/home/user/projects/chuang-agent/docs/spec-review-v1.md`
-- DeepSeek V2 草案：`/home/user/projects/chuang-agent/docs/deepseek-spec-v2-draft.md`
-- 小创收口版 V2：`/home/user/projects/chuang-agent/docs/spec-v2.md`
+- DeepSeek 原始草案：`$CHUANG_AGENT_ROOT/docs/deepseek-spec-draft.md`
+- 小创审稿版 V1：`$CHUANG_AGENT_ROOT/docs/spec-review-v1.md`
+- DeepSeek V2 草案：`$CHUANG_AGENT_ROOT/docs/deepseek-spec-v2-draft.md`
+- 小创收口版 V2：`$CHUANG_AGENT_ROOT/docs/spec-v2.md`
 
 ---
 

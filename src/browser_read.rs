@@ -419,8 +419,8 @@ impl CdpBrowserReadAdapter {
         }
 
         let body = response
-            .splitn(2, "\r\n\r\n")
-            .nth(1)
+            .split_once("\r\n\r\n")
+            .map(|x| x.1)
             .ok_or_else(|| {
                 Self::cdp_error("cdp_no_body", "no HTTP body in CDP response".to_string())
             })?

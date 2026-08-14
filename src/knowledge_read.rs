@@ -692,7 +692,7 @@ fn parse_knowledge_read_hits(
         let provenance = hit
             .get("provenance")
             .and_then(|value| value.as_str())
-            .unwrap_or_else(|| match adapter_source {
+            .unwrap_or(match adapter_source {
                 "gbrain" => "gbrain_readonly_http",
                 _ => "wiki_readonly_http",
             })

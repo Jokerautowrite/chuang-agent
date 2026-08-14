@@ -220,7 +220,9 @@ fn cli_config_init_writes_default_config_without_overwriting() {
 
     let content = fs::read_to_string(&config_path).expect("config should exist");
     assert!(content.contains("provider = \"openai_compatible\""));
-    assert!(content.contains("subagent = \"queued_external\""));
+    // Public default is fail-closed: the subagent slot starts fake and only
+    // enables queued_external dispatch after an operator explicitly opts in.
+    assert!(content.contains("subagent = \"fake\""));
     assert!(content.contains("api_key_env = \"CHUANG_AGENT_API_KEY\""));
 
     let second = Command::new("cargo")

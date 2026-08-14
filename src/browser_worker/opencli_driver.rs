@@ -54,6 +54,12 @@ pub struct OpenCliRealBrowserDriver<R = SystemOpenCliRunner> {
     runner: R,
 }
 
+impl Default for OpenCliRealBrowserDriver<SystemOpenCliRunner> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpenCliRealBrowserDriver<SystemOpenCliRunner> {
     pub fn new() -> Self {
         Self::with_runner(SystemOpenCliRunner)

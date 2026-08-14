@@ -248,8 +248,10 @@ impl OuterLoopDriver {
         evolver: &mut impl SkillEvolver,
         input: OuterLoopDriveInput<'_>,
     ) -> OuterLoopReport {
-        let mut report = OuterLoopReport::default();
-        report.journal_path = evolver.rule_change_journal_path();
+        let mut report = OuterLoopReport {
+            journal_path: evolver.rule_change_journal_path(),
+            ..Default::default()
+        };
 
         let patterns = match evolver.detect_repeated_failures(input.detector_config) {
             Ok(patterns) => patterns,

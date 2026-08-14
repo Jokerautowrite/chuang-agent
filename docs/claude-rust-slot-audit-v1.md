@@ -1,7 +1,7 @@
 # claude-rust Slot Audit V1
 
 日期：2026-05-11
-对象：`/home/user/projects/claude-rust`
+对象：`$HOME/projects/claude-rust`
 定位：评估 `claude-rust` 对 Chuang 九大 Slot 的可移植价值。
 
 补充：本文是 Claude 单源审计；Codex 代码级审计与双参考后的执行优先级见 `docs/codex-architecture-audit-v1.md` 和 `docs/codex-claude-optimization-plan-v1.md`。

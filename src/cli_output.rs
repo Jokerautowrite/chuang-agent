@@ -1292,6 +1292,75 @@ fn compact_spawn_token(input: &str, max_chars: usize) -> String {
         .collect()
 }
 
+fn compact_cli_preview(input: &str, max_chars: usize) -> String {
+    let trimmed = input.trim().replace('\n', " ");
+    if trimmed.chars().count() <= max_chars {
+        return trimmed;
+    }
+    let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+pub fn usage() -> String {
+    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|goal|memory|plugin|skill|browser|field-accept|experiment|benchmark|external-ai|app-server|approval> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--verbose] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--enable-knowledge-context-preview --knowledge-context-root PATH --knowledge-context-query TEXT [--knowledge-context-limit N]] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | approval resume --workspace-root PATH --pending-file PATH --approval-ticket PATH --approve [--config PATH] [--json] | repl [--verbose] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..32] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent live-preflight --runner-command PATH --allow-runner-command PATH [--requires-capability NAME] [--capability NAME] [--json] | goal plan --objective TEXT [--root PATH] [--goal-id ID] [--max-subtasks N] [--json] | goal show [--root PATH] [--goal-id ID] [--json] | goal checkpoint [--from-collect --subagent-queue-root PATH] --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID] [--json] | goal dispatch [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--parent-agent-id ID] [--json] | goal collect [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--json] | goal step [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--max-runs N] [--max-concurrency 1..32] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | goal evolve [--root PATH] [--goal-id ID] [--approve] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--json] | goal verify [--root PATH] [--goal-id ID] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform opencodex[:MODEL]|openai-compatible[:MODEL] --task TEXT --context TEXT [--dry-run] [--config PATH] [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | memory knowledge preview-context --root PATH --query TEXT [--limit N] [--json] | memory knowledge source-contract --source wiki|gbrain [--json] | memory diary show [--date YYYY-MM-DD] [--json] | memory diary distill [--date YYYY-MM-DD] [--dry-run] [--json] | memory diary append --completed TEXT --in-progress TEXT [--pending TEXT] [--constraints TEXT] [--date YYYY-MM-DD] [--seq N] [--session-id ID] [--trigger TEXT] [--json] | plugin list|check [--registry PATH] [--json] | skill propose --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--json] | skill approve --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--json] | skill judge --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--json] | skill solidify --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--json] | skill retire|deprecate --skill-id ID --reason TEXT [--status deprecated|retired] [--retired-at TEXT] [--skills-root PATH] [--json] | skill monitor|curator [--skills-root PATH] [--json] | skill rollback --skill-id ID --reason TEXT [--rollback-at TEXT] [--skills-root PATH] [--json] | browser start|stop|restart|status|env | field-accept | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--skills-root PATH] [--agent-id ID] [--approval-threshold N] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json] | benchmark list [--root PATH] [--json] | benchmark init --def PATH [--root PATH] [--json] | benchmark verify --id ID [--root PATH] [--json] | benchmark run --id ID --scores PATH [--root PATH] [--json] | benchmark show --id ID [--root PATH] [--json] | benchmark evaluate --id ID --answers PATH [--root PATH] [--config PATH] [--dry-run] [--record] [--json]".to_string()
+}
+
+fn format_drop_reasons(reasons: &[DropReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(|reason| format!("{}:{}", reason.segment_id, reason.reason.as_str()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
+    if reasons.is_empty() {
+        return "none".to_string();
+    }
+
+    reasons
+        .iter()
+        .map(BudgetExceededReason::as_str)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_working_reservation(debug: &ContextDebugInfo) -> String {
+    debug
+        .working_reservation
+        .as_ref()
+        .map(|reservation| {
+            format!(
+                "reserved={}@{} reason={} dropped={}",
+                reservation.reserved_segment_id,
+                reservation.reserved_tokens,
+                reservation.reason.as_str(),
+                if reservation.dropped_segment_ids.is_empty() {
+                    "none".to_string()
+                } else {
+                    reservation.dropped_segment_ids.join(",")
+                }
+            )
+        })
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn print_placeholder_warnings(warnings: &[String]) {
+    if warnings.is_empty() {
+        println!("placeholder_warnings: none");
+        return;
+    }
+
+    for warning in warnings {
+        println!("placeholder_warning: {warning}");
+    }
+}
+
 #[cfg(test)]
 mod spawn_hint_tests {
     use super::spawn_dispatch_hint_from_meta;
@@ -1370,74 +1439,5 @@ mod spawn_hint_tests {
             r#"[{"tool_name":"file_read","ok":true}]"#.to_string(),
         );
         assert!(spawn_dispatch_hint_from_meta(&extra).is_none());
-    }
-}
-
-fn compact_cli_preview(input: &str, max_chars: usize) -> String {
-    let trimmed = input.trim().replace('\n', " ");
-    if trimmed.chars().count() <= max_chars {
-        return trimmed;
-    }
-    let mut out: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
-pub fn usage() -> String {
-    "usage: cargo run -- <run|repl|status|doctor|config|channel|console|control|subagent|genesis|goal|memory|plugin|skill|browser|field-accept|experiment|benchmark|external-ai|app-server|approval> [--config PATH] [--db PATH] [--identity-memory-root PATH] [--subagent fake|queued_external] [--subagent-queue-root PATH] [--context-engine deterministic_budget|summary_compression] [--context-max-tokens N] [--context-reserve-system-tokens N] [--context-min-working-tokens N] [--context-max-tool-results N] [--context-max-memory-segments N] [--input TEXT] [--verbose] [--remember] [--session-id ID] [--remember-session] [--remember-identity] [--remember-experience] [--dispatch-subagent] [--goal TEXT] [--enable-knowledge-context-preview --knowledge-context-root PATH --knowledge-context-query TEXT [--knowledge-context-limit N]] [--provider-base-url URL --provider-api-key KEY --provider-model MODEL [--provider-id ID] [--provider-transport stub|http|native|curl] [--provider-request-timeout-ms MS]] | approval resume --workspace-root PATH --pending-file PATH --approval-ticket PATH --approve [--config PATH] [--json] | repl [--verbose] | status|doctor [--json] | config init [--path PATH] [--json] | config check|show [--json] | channel simulate --workspace-root PATH --message-id ID --sender-id ID --text TEXT [--thread-id ID] [--goal TEXT] [--channel NAME] [--json] | channel feishu-check --env-file PATH [--json] | console snapshot [--json] | control list [--json] | control apply --unit ID --action start|stop|restart|change-model [--model MODEL] --reason TEXT [--approve] [--json] | subagent dispatch --task TEXT [--task-id ID] [--agent-name NAME] [--policy analyze|execute|orchestrate] [--token-budget N] [--idle-timeout-ms MS] [--fork-parent-tokens N] [--requires-capability NAME] [--json] | subagent report --run-id ID [--json] | subagent collect --run-id ID [--json] | subagent release-claim --run-id ID --reason TEXT [--json] | subagent list [--json] | subagent run-once [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent run-loop [--max-runs N] [--max-concurrency 1..32] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | subagent live-preflight --runner-command PATH --allow-runner-command PATH [--requires-capability NAME] [--capability NAME] [--json] | goal plan --objective TEXT [--root PATH] [--goal-id ID] [--max-subtasks N] [--json] | goal show [--root PATH] [--goal-id ID] [--json] | goal checkpoint [--from-collect --subagent-queue-root PATH] --summary TEXT --completed-worker-id ID --validation-note TEXT [--completed-worker-id ID ...] [--validation-note TEXT ...] [--root PATH] [--goal-id ID] [--json] | goal dispatch [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--parent-agent-id ID] [--json] | goal collect [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--json] | goal step [--root PATH] [--goal-id ID] [--subagent-queue-root PATH] [--max-runs N] [--max-concurrency 1..32] [--runner fake|command] [--capability NAME] [--runner-command PATH] [--runner-arg ARG] [--approve-exec] [--json] | goal evolve [--root PATH] [--goal-id ID] [--approve] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--json] | goal verify [--root PATH] [--goal-id ID] [--json] | genesis ask --prompt TEXT (--approve-exec|--dry-run) [--program autocli] [--profile-dir PATH] [--cdp-port N] [--timeout-ms N] [--json] | external-ai dispatch --platform opencodex[:MODEL]|openai-compatible[:MODEL] --task TEXT --context TEXT [--dry-run] [--config PATH] [--session-hint ID] [--timeout-ms N] [--json] | memory identity show [--json] | memory identity append --id ID --content TEXT [--json] | memory identity append-experience --id ID --content TEXT [--json] | memory identity write-user --content TEXT --approve-overwrite [--json] | memory identity write-memory --content TEXT --approve-overwrite [--json] | memory session search --query TEXT [--session-id ID] [--limit N] [--json] | memory lim extract --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance report --query TEXT [--session-id ID] [--limit N] [--json] | memory maintenance apply --query TEXT [--session-id ID] [--limit N] [--candidate-id ID] [--approve-writeback] [--json] | memory knowledge status [--json] | memory knowledge search --root PATH --query TEXT [--limit N] [--json] | memory knowledge preview-context --root PATH --query TEXT [--limit N] [--json] | memory knowledge source-contract --source wiki|gbrain [--json] | memory diary show [--date YYYY-MM-DD] [--json] | memory diary distill [--date YYYY-MM-DD] [--dry-run] [--json] | memory diary append --completed TEXT --in-progress TEXT [--pending TEXT] [--constraints TEXT] [--date YYYY-MM-DD] [--seq N] [--session-id ID] [--trigger TEXT] [--json] | plugin list|check [--registry PATH] [--json] | skill propose --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--json] | skill approve --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--json] | skill judge --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--json] | skill solidify --event-id ID --task-id ID --summary TEXT [--kind KIND] [--metadata key=value] [--agent-id ID] [--task-kind KIND] [--max-proposals N] [--approval-source TEXT] [--approved-at TEXT] [--approval-note TEXT] [--approval-threshold N] [--skills-root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--json] | skill retire|deprecate --skill-id ID --reason TEXT [--status deprecated|retired] [--retired-at TEXT] [--skills-root PATH] [--json] | skill monitor|curator [--skills-root PATH] [--json] | skill rollback --skill-id ID --reason TEXT [--rollback-at TEXT] [--skills-root PATH] [--json] | browser start|stop|restart|status|env | field-accept | app-server health [--workspace-root PATH] [--diagnostic] [--json] | experiment plan --goal TEXT --success TEXT [--time-budget-minutes N] [--root PATH] [--json] | experiment complete --experiment-id ID --outcome success|failure|inconclusive --summary TEXT --next TEXT [--root PATH] [--benchmark-gate ID] [--benchmark-after-score N] [--benchmark-root PATH] [--skills-root PATH] [--agent-id ID] [--approval-threshold N] [--json] | experiment list [--root PATH] [--json] | experiment show --experiment-id ID [--root PATH] [--json] | benchmark list [--root PATH] [--json] | benchmark init --def PATH [--root PATH] [--json] | benchmark verify --id ID [--root PATH] [--json] | benchmark run --id ID --scores PATH [--root PATH] [--json] | benchmark show --id ID [--root PATH] [--json] | benchmark evaluate --id ID --answers PATH [--root PATH] [--config PATH] [--dry-run] [--record] [--json]".to_string()
-}
-
-fn format_drop_reasons(reasons: &[DropReason]) -> String {
-    if reasons.is_empty() {
-        return "none".to_string();
-    }
-
-    reasons
-        .iter()
-        .map(|reason| format!("{}:{}", reason.segment_id, reason.reason.as_str()))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn format_budget_exceeded_reasons(reasons: &[BudgetExceededReason]) -> String {
-    if reasons.is_empty() {
-        return "none".to_string();
-    }
-
-    reasons
-        .iter()
-        .map(BudgetExceededReason::as_str)
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn format_working_reservation(debug: &ContextDebugInfo) -> String {
-    debug
-        .working_reservation
-        .as_ref()
-        .map(|reservation| {
-            format!(
-                "reserved={}@{} reason={} dropped={}",
-                reservation.reserved_segment_id,
-                reservation.reserved_tokens,
-                reservation.reason.as_str(),
-                if reservation.dropped_segment_ids.is_empty() {
-                    "none".to_string()
-                } else {
-                    reservation.dropped_segment_ids.join(",")
-                }
-            )
-        })
-        .unwrap_or_else(|| "none".to_string())
-}
-
-fn print_placeholder_warnings(warnings: &[String]) {
-    if warnings.is_empty() {
-        println!("placeholder_warnings: none");
-        return;
-    }
-
-    for warning in warnings {
-        println!("placeholder_warning: {warning}");
     }
 }

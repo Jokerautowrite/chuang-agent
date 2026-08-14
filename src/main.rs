@@ -183,7 +183,7 @@ impl ReplChrome {
         let bot_border = format!("{ANSI_DIM}╰{}╯{ANSI_RESET}", "─".repeat(inner));
 
         // Right chip (model · state), truncated.
-        let chip_plain = fit_display(&ansi_plain(status_line), (inner / 3).max(12).min(36));
+        let chip_plain = fit_display(&ansi_plain(status_line), (inner / 3).clamp(12, 36));
         let chip_w = display_width(&chip_plain);
 
         // Left: `> draft` or placeholder.
@@ -1405,10 +1405,8 @@ fn note_raw_terminal_event(cursor: &mut ProgressCursor, event: &TerminalEvent) {
             };
             cursor.set_phase(LivePhase::Acting, activity);
         }
-        TerminalEvent::ToolFinished { ok, .. } => {
-            if *ok {
-                cursor.set_phase(LivePhase::Thinking, "思考中…");
-            }
+        TerminalEvent::ToolFinished { ok, .. } if *ok => {
+            cursor.set_phase(LivePhase::Thinking, "思考中…");
         }
         TerminalEvent::AnswerReady { .. } => {
             cursor.set_phase(LivePhase::Finalizing, "整理答复");
@@ -1553,9 +1551,10 @@ fn render_repl_status_line(
     }
     // Quiet footer hints (like OpenCode ctrl+p line, but local slash commands).
     parts.push("/help".to_string());
-    format!("{}", parts.join(" · "))
+    parts.join(" · ").to_string()
 }
 
+#[allow(clippy::ptr_arg)] // 内部需继续以 &mut Vec 传递给下游
 fn poll_running_turn(
     stdout: &mut io::Stdout,
     chrome: &mut ReplChrome,

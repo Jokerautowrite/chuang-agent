@@ -19,7 +19,7 @@ import sys
 import time
 
 
-ROOT = "/home/user/projects/chuang-agent"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE = ROOT
 SENDER = "u-benchmark-baseline"
 

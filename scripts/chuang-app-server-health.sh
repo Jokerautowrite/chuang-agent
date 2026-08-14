@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKSPACE_ROOT="${CHUANG_AGENT_WORKSPACE_ROOT:-$ROOT}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 

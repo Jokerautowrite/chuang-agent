@@ -280,6 +280,51 @@ fn feishu_bridge_script_discovers_desktop_env_without_host_specific_display() {
 #[test]
 fn feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Core guarantee first: the pure, dependency-free config module must
+    // reject Feishu credential names in a provider env. This always runs.
+    let config_module = manifest_dir.join("scripts/chuang-feishu-bridge-config.js");
+    let probe = Command::new("node")
+        .arg("-e")
+        .arg(
+            "const { listDisallowedProviderEnvNames } = require(process.argv[1]); \
+             const names = listDisallowedProviderEnvNames({ OPENAI_API_KEY: 'k', CHUANG_FEISHU_APP_ID: 'x', HERMES_FEISHU_BOT_ID: 'y', CODEX_FEISHU_APP_SECRET: 'z' }); \
+             if (!names.includes('CHUANG_FEISHU_APP_ID') || !names.includes('HERMES_FEISHU_BOT_ID') || !names.includes('CODEX_FEISHU_APP_SECRET')) { process.exit(2); } \
+             process.exit(0);",
+        )
+        .arg(config_module.display().to_string())
+        .output()
+        .expect("config module probe should execute");
+    assert!(
+        probe.status.success(),
+        "listDisallowedProviderEnvNames probe failed: {}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
+
+    // The full bridge startup path needs dotenv + @larksuiteoapi/node-sdk,
+    // which are not bundled in this repo. Discover an SDK root from the
+    // operator's checkout; skip the startup assertion when unavailable.
+    let sdk_root = std::env::var_os("CHUANG_FEISHU_SDK_NODE_MODULES")
+        .map(PathBuf::from)
+        .or_else(|| {
+            ["agent-hub/plugins/agent-bridge/node_modules"]
+                .iter()
+                .find_map(|suffix| {
+                    std::env::var_os("HOME").map(|home| {
+                        let mut home = PathBuf::from(home);
+                        home.push(suffix);
+                        home
+                    })
+                })
+                .filter(|candidate| candidate.join("dotenv").is_dir())
+        });
+    let Some(sdk_root) = sdk_root else {
+        eprintln!(
+            "skip feishu bridge SDK startup assertion: no dotenv/@larksuiteoapi SDK root found"
+        );
+        return;
+    };
+
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
@@ -312,10 +357,7 @@ fn feishu_bridge_script_rejects_forbidden_provider_env_on_direct_startup() {
         .arg(
             "try { require('./scripts/chuang-feishu-bridge.js'); console.log('unexpected_bridge_startup_success'); } catch (error) { console.error(error.message); process.exit(1); }",
         )
-        .env(
-            "NODE_PATH",
-            "/home/user/agent-hub/plugins/agent-bridge/node_modules",
-        )
+        .env("NODE_PATH", &sdk_root)
         .env("CHUANG_FEISHU_ENV_FILE", &bridge_env)
         .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
         .current_dir(&manifest_dir)

@@ -460,8 +460,6 @@ pub fn decide_descriptor_risk(
     best.unwrap_or_else(|| {
         let decision = if descriptor.read_only && !descriptor.mutating {
             PermissionDecision::Allow
-        } else if descriptor.mutating {
-            profile.default_decision
         } else {
             profile.default_decision
         };

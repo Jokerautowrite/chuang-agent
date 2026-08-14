@@ -7,6 +7,7 @@ const path = require("path");
 const { buildNewSessionCommandReply } = require("./chuang-feishu-bridge-commands");
 const { FeishuSessionStore } = require("./chuang-feishu-session-store");
 
+const workspaceRoot = process.env.CHUANG_AGENT_WORKSPACE_ROOT || path.resolve(__dirname, "..");
 const stateFile = path.join(
   os.tmpdir(),
   `chuang-feishu-session-smoke-${process.pid}-${Date.now()}.json`
@@ -15,7 +16,7 @@ const stateFile = path.join(
 try {
   const store = new FeishuSessionStore(stateFile);
   assert.strictEqual(store.getThreadId("chat-a"), "");
-  assert.strictEqual(store.bind("chat-a", "chuang-thread-7", "/home/user/projects/chuang-agent").threadId, "chuang-thread-7");
+  assert.strictEqual(store.bind("chat-a", "chuang-thread-7", workspaceRoot).threadId, "chuang-thread-7");
   assert.strictEqual(store.getThreadId("chat-a"), "chuang-thread-7");
 
   const reloaded = new FeishuSessionStore(stateFile);

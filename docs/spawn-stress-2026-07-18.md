@@ -5,7 +5,7 @@
 ```bash
 set -a; . ~/.config/chuang-agent/provider.env; set +a
 export CHUANG_CODEX_RUNNER_ENABLE=1
-export CHUANG_BIN=/home/user/projects/chuang-agent/target/debug/chuang-agent
+export CHUANG_BIN=$CHUANG_AGENT_ROOT/target/debug/chuang-agent
 # 或先 cargo build
 bash scripts/chuang-spawn-stress.sh
 ```

@@ -444,13 +444,10 @@ fn live_operator_receipt_collect_script_refuses_overlay_live_ready_boundary_esca
     for service in services {
         assert_eq!(service["manual_live_required"], true);
         assert_eq!(service["must_not_count_as_complete"], true);
-        assert!(
-            service["required"]
-                .as_array()
-                .expect("service required list should be an array")
-                .len()
-                > 0
-        );
+        assert!(!service["required"]
+            .as_array()
+            .expect("service required list should be an array")
+            .is_empty());
     }
 }
 
@@ -460,7 +457,7 @@ fn live_operator_receipt_collect_script_marks_ready_only_with_complete_canonical
     let temp_dir = make_temp_dir("chuang-live-operator-receipt-collect-complete");
     let base_output = run_json_script(operator_receipt_script_path().as_path(), &[]);
     let base_path = write_temp_json(&temp_dir, "base.json", &base_output);
-    let service_ids = vec![
+    let service_ids = [
         "feishu",
         "provider",
         "subagent_live_rehearsal",
@@ -575,7 +572,7 @@ fn live_operator_receipt_collect_script_blocks_non_canonical_verified_evidence()
     let temp_dir = make_temp_dir("chuang-live-operator-receipt-collect-non-canonical");
     let base_output = run_json_script(operator_receipt_script_path().as_path(), &[]);
     let base_path = write_temp_json(&temp_dir, "base.json", &base_output);
-    let service_ids = vec![
+    let service_ids = [
         "feishu",
         "provider",
         "subagent_live_rehearsal",

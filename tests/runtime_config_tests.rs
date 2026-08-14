@@ -19,11 +19,11 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.governance_kind, "static_rule");
     assert_eq!(summary.actuator_kind, "fake");
     assert_eq!(summary.subagent_kind, "fake");
-    assert_eq!(summary.subagent_live_worker.enabled, false);
+    assert!(!summary.subagent_live_worker.enabled);
     assert_eq!(summary.subagent_live_worker.adapter_kind, "none");
     assert_eq!(summary.subagent_live_worker.status, "disabled");
-    assert_eq!(summary.subagent_live_worker.starts_worker, false);
-    assert_eq!(summary.subagent_live_worker.available, false);
+    assert!(!summary.subagent_live_worker.starts_worker);
+    assert!(!summary.subagent_live_worker.available);
     assert_eq!(summary.subagent_queue_root, "./data/subagent-queue");
     assert_eq!(summary.evolution_kind, "noop");
     assert_eq!(summary.control_plane_kind, "fake_local");
@@ -97,14 +97,14 @@ fn subagent_live_worker_config_is_status_only_and_never_available_by_default() {
         .expect("status-only live worker config should validate");
     let summary = config.summary();
 
-    assert_eq!(summary.subagent_live_worker.enabled, true);
+    assert!(summary.subagent_live_worker.enabled);
     assert_eq!(summary.subagent_live_worker.adapter_kind, "command");
     assert_eq!(
         summary.subagent_live_worker.status,
         "configured_status_only"
     );
-    assert_eq!(summary.subagent_live_worker.starts_worker, false);
-    assert_eq!(summary.subagent_live_worker.available, false);
+    assert!(!summary.subagent_live_worker.starts_worker);
+    assert!(!summary.subagent_live_worker.available);
     assert!(summary.subagent_live_worker.reason.contains("status only"));
     assert!(summary
         .placeholder_warnings
@@ -500,8 +500,10 @@ fn canonical_evolution_config_defaults_are_backward_compatible_and_valid() {
 #[test]
 fn canonical_evolution_config_auto_outer_loop_can_be_enabled() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
-    canonical.auto_outer_loop = true;
+    let canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig {
+        auto_outer_loop: true,
+        ..Default::default()
+    };
     config.evolution = EvolutionConfig::Canonical(canonical);
 
     config
@@ -516,8 +518,10 @@ fn canonical_evolution_config_auto_outer_loop_can_be_enabled() {
 #[test]
 fn canonical_evolution_config_rejects_zero_approval_threshold() {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
-    canonical.approval_threshold = 0;
+    let canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig {
+        approval_threshold: 0,
+        ..Default::default()
+    };
     config.evolution = EvolutionConfig::Canonical(canonical);
 
     let err = config

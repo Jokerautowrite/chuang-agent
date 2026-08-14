@@ -2,7 +2,7 @@
 set -euo pipefail
 
 FORMAT="text"
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BASE_FILE=""
 INCLUDE_PROVIDER_LIVE="${CHUANG_GLOBAL_RECEIPT_INCLUDE_PROVIDER_LIVE:-0}"
 INCLUDE_DESKTOP_LIVE="${CHUANG_GLOBAL_RECEIPT_INCLUDE_DESKTOP_LIVE:-0}"
@@ -225,7 +225,7 @@ if [ -z "$GBRAIN_FILE" ]; then
 fi
 
 OVERLAY_FILE="$WORK_DIR/global-overlay.json"
-export FEISHU_FILE PROVIDER_FILE SUBAGENT_FILE DESKTOP_FILE BROWSER_FILE WIKI_FILE GBRAIN_FILE
+export FEISHU_FILE PROVIDER_FILE SUBAGENT_FILE DESKTOP_FILE BROWSER_FILE WIKI_FILE GBRAIN_FILE ROOT
 export OVERLAY_FILE WORK_DIR
 
 python3 - <<'PY'
@@ -448,7 +448,7 @@ overlay = {
     "schema_version": 1,
     "receipt_kind": "global_real_live_receipt_overlay",
     "tested_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
-    "workspace_root": os.environ.get("CHUANG_AGENT_ROOT", "/home/user/projects/chuang-agent"),
+    "workspace_root": os.environ.get("CHUANG_AGENT_ROOT", os.environ.get("ROOT", "<repo-root>")),
     "collect_mode": "global_receipt_aggregation",
     "source_receipt_files": {
         "feishu": os.environ["FEISHU_FILE"],

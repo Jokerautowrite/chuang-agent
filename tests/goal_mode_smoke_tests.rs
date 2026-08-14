@@ -84,8 +84,7 @@ fn goal_mode_smoke_script_runs_full_goal_closed_loop() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let final_line = stdout
         .lines()
-        .filter(|line| line.starts_with("goal_mode_smoke_ok "))
-        .last()
+        .rfind(|line| line.starts_with("goal_mode_smoke_ok "))
         .expect("script should print final marker");
     let fields = parse_key_value_line(final_line);
 

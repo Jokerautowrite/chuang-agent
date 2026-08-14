@@ -1462,7 +1462,7 @@ fn build_goal_operability_status(
                     goal_step_command_line(goal_root, queue_root, goal_id)
                 };
 
-            return GoalOperabilityStatus {
+            GoalOperabilityStatus {
                 goal_id: goal_id.to_string(),
                 goal_root: goal_root.display().to_string(),
                 queue_root: queue_root.display().to_string(),
@@ -1481,7 +1481,7 @@ fn build_goal_operability_status(
                 goal_collect,
                 goal_collect_error_field,
                 goal_collect_error_message,
-            };
+            }
         }
         Err(error) => {
             let goal_dispatch_ready = diagnostics.worker_scope_complete
@@ -1511,7 +1511,7 @@ fn build_goal_operability_status(
                 "invalid".to_string()
             };
 
-            return GoalOperabilityStatus {
+            GoalOperabilityStatus {
                 goal_id: goal_id.to_string(),
                 goal_root: goal_root.display().to_string(),
                 queue_root: queue_root.display().to_string(),
@@ -1530,7 +1530,7 @@ fn build_goal_operability_status(
                 goal_collect: None,
                 goal_collect_error_field: None,
                 goal_collect_error_message: None,
-            };
+            }
         }
     }
 }
@@ -1851,10 +1851,8 @@ fn parse_goal_plan(args: &[String]) -> Result<GoalPlanCliRequest, String> {
         }
     }
 
-    if write_paths.is_empty() {
-        if write_scopes.is_empty() {
-            write_paths.push(".".to_string());
-        }
+    if write_paths.is_empty() && write_scopes.is_empty() {
+        write_paths.push(".".to_string());
     }
     if !write_paths.is_empty() {
         write_scopes.push(GoalWriteScope::new("mainline", write_paths));
@@ -2459,11 +2457,11 @@ fn dispatch_error_from_queue(
 }
 
 fn load_goal_checkpoint_suggestion(
-    root: &PathBuf,
-    queue_root: &PathBuf,
+    root: &Path,
+    queue_root: &Path,
     goal_id: &str,
 ) -> Result<GoalCheckpointSuggestion, String> {
-    let receipt = collect_goal_dispatch_reports(root.as_path(), queue_root.as_path(), goal_id)
+    let receipt = collect_goal_dispatch_reports(root, queue_root, goal_id)
         .map_err(format_goal_dispatch_error)?;
 
     if !receipt.ready_to_checkpoint {

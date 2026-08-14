@@ -1843,7 +1843,7 @@ mod tests {
         assert!(RETRYABLE_STATUS_CODES.contains(&529));
         assert!(http_status_retryable(429));
         assert!(http_status_retryable(529));
-        assert!(MAX_PROVIDER_ATTEMPTS >= 2);
+        const _: () = assert!(MAX_PROVIDER_ATTEMPTS >= 2);
         assert!(backoff_ms(0) < backoff_ms(1));
     }
 

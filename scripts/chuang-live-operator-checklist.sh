@@ -49,8 +49,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
-HOME_DIR="${HOME:-/home/user}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+HOME_DIR="${HOME:-$HOME}"
 ENV_FILE="${CHUANG_LIVE_OPERATOR_ENV_FILE:-${CHUANG_FEISHU_ENV_FILE:-$HOME_DIR/.codex-im/chuang-feishu-bridge.env}}"
 
 export FORMAT ROOT ENV_FILE

@@ -30,15 +30,15 @@
 
 默认行为：
 
-- 项目根：`/home/user/projects/chuang-agent`
+- 项目根：`$CHUANG_AGENT_ROOT`
 - tmux session：`chuang-goal`
-- 日志目录：`/home/user/.codex/chuang-goal-interactive`
-- 目标文件：`/home/user/.codex/chuang-goal-interactive/goal.txt`
+- 日志目录：`$HOME/.codex/chuang-goal-interactive`
+- 目标文件：`$HOME/.codex/chuang-goal-interactive/goal.txt`
 
 脚本会：
 
 1. 创建或复用 `chuang-goal` tmux session。
-2. 在项目根启动 `/home/user/.local/bin/codex --no-alt-screen`。
+2. 在项目根启动 `$HOME/.local/bin/codex --no-alt-screen`。
 3. 把预设 goal 发进终端。
 4. attach 到该 session，方便操作者直接观察和接管。
 
@@ -52,9 +52,9 @@
 
 默认行为：
 
-- 项目根：`/home/user/projects/chuang-agent`
-- Codex bin：`/home/user/.local/bin/codex`
-- 运行根目录：`/home/user/.codex/chuang-goal-runs`
+- 项目根：`$CHUANG_AGENT_ROOT`
+- Codex bin：`$HOME/.local/bin/codex`
+- 运行根目录：`$HOME/.codex/chuang-goal-runs`
 - 默认总时长：`21600` 秒
 - 单轮 timeout：`2100` 秒
 
@@ -89,10 +89,10 @@ dry-run 只用于测试外层状态写入路径，不会调用真实 Codex；默
 
 - 观察 tmux session：`chuang-goal`
 - 间隔：`1800` 秒
-- 日志目录：`/home/user/.codex/chuang-goal-interactive`
-- watchdog 日志：`/home/user/.codex/chuang-goal-interactive/watchdog.log`
-- 最近 pane 截图：`/home/user/.codex/chuang-goal-interactive/last-pane.txt`
-- 最新结构化状态：`/home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json`
+- 日志目录：`$HOME/.codex/chuang-goal-interactive`
+- watchdog 日志：`$HOME/.codex/chuang-goal-interactive/watchdog.log`
+- 最近 pane 截图：`$HOME/.codex/chuang-goal-interactive/last-pane.txt`
+- 最新结构化状态：`$HOME/.codex/chuang-goal-interactive/latest-watchdog-report.json`
 - 最新 pane/process/git 只读快照：`latest-panes.txt`、`latest-codex-processes.txt`、`latest-git-status.txt`
 
 每轮记录：
@@ -125,19 +125,19 @@ WATCHDOG_ONCE=1 ./scripts/chuang-goal-watchdog.sh
 
 ```bash
 tmux attach -t chuang-goal
-tail -n 120 /home/user/.codex/chuang-goal-interactive/watchdog.log
-tail -n 120 /home/user/.codex/chuang-goal-interactive/last-pane.txt
-jq . /home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json
+tail -n 120 $HOME/.codex/chuang-goal-interactive/watchdog.log
+tail -n 120 $HOME/.codex/chuang-goal-interactive/last-pane.txt
+jq . $HOME/.codex/chuang-goal-interactive/latest-watchdog-report.json
 git status --short
 ```
 
 批处理 worker：
 
 ```bash
-ls -1 /home/user/.codex/chuang-goal-runs
-jq . /home/user/.codex/chuang-goal-runs/<run-id>/status.json
-tail -n 160 /home/user/.codex/chuang-goal-runs/<run-id>/run.log
-tail -n 160 /home/user/.codex/chuang-goal-runs/<run-id>/last-message.md
+ls -1 $HOME/.codex/chuang-goal-runs
+jq . $HOME/.codex/chuang-goal-runs/<run-id>/status.json
+tail -n 160 $HOME/.codex/chuang-goal-runs/<run-id>/run.log
+tail -n 160 $HOME/.codex/chuang-goal-runs/<run-id>/last-message.md
 ```
 
 先看 `status.json`：`status=running` 表示外层循环仍在跑或最后一次心跳停在运行态，`status=finished` 表示外层脚本已经到达截止时间或达到显式最大轮次；`next_action` 给出主控下一步应查看日志、等待下一轮、还是人工复核。`last_iteration_exit_status` 是上一轮 Codex exec 的退出码，`null` 表示尚未完成任何一轮。

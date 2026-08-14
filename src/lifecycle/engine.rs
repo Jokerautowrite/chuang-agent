@@ -43,7 +43,7 @@ impl LifecycleEngine {
         Self {
             state,
             deferred: vec![],
-            transition_table: LifecycleTransitionTable::default(),
+            transition_table: LifecycleTransitionTable,
             agent_id: None,
             thread_id: None,
             turn_id: None,
@@ -95,7 +95,7 @@ impl LifecycleEngine {
                 .iter()
                 .map(|item| item.inserted_at.clone())
                 .collect(),
-            transition_table: LifecycleTransitionTable::default(),
+            transition_table: LifecycleTransitionTable,
             agent_id: checkpoint.agent_id,
             thread_id: checkpoint.thread_id,
             turn_id: checkpoint.turn_id,

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chuang_agent::channel_adapter::{
     app_server_turn_start_request, ChannelInboundMessage, ChannelOutboundMessage,
@@ -559,7 +559,7 @@ struct FeishuEnvFileScope {
     warnings: Vec<String>,
 }
 
-fn classify_feishu_env_file_scope(path: &PathBuf) -> FeishuEnvFileScope {
+fn classify_feishu_env_file_scope(path: &Path) -> FeishuEnvFileScope {
     let normalized = path.display().to_string().replace('\\', "/");
     let lower = normalized.to_ascii_lowercase();
     let file_name = path

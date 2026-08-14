@@ -39,7 +39,7 @@ impl BenchmarkCapability {
         }
     }
 
-    pub fn from_str(value: &str) -> Self {
+    pub fn parse(value: &str) -> Self {
         match value.trim() {
             "memory_recall" => Self::MemoryRecall,
             "governance_intercept" => Self::GovernanceIntercept,
@@ -312,8 +312,7 @@ impl BenchmarkStore {
         let mut issues = Vec::new();
         let mut seen_ids = BTreeMap::new();
         for case in &def.cases {
-            if let Some(prev) = seen_ids.insert(case.id.as_str(), ()) {
-                let _ = prev;
+            if seen_ids.insert(case.id.as_str(), ()).is_some() {
                 issues.push(format!("duplicate case id: {}", case.id));
             }
             let lower = case.statement.to_lowercase();

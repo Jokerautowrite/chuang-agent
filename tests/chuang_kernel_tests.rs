@@ -417,7 +417,7 @@ fn chuang_kernel_compaction_strips_image_payloads_before_truncation() {
     let mut kernel = kernel(config, InMemoryMemoryStore::new());
 
     let image = format!("data:image/png;base64,{}", "E".repeat(400));
-    let turn = run_turn(&mut kernel, &format!("看图 {image} 继续说"));
+    let turn = run_turn(&mut kernel, format!("看图 {image} 继续说"));
     let prepared = kernel
         .prepare_session_turn_memory(&turn, "img")
         .expect("session memory should compact and prepare");
@@ -432,7 +432,7 @@ fn chuang_kernel_compaction_strips_image_payloads_before_truncation() {
         "compacted turn summary must not contain base64 image payload"
     );
     assert!(
-        stored.content.contains("data:image/png;base64") == false,
+        !stored.content.contains("data:image/png;base64"),
         "image data URL should be stripped in compacted summary"
     );
     assert_eq!(

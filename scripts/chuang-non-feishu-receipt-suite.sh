@@ -34,7 +34,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 INCLUDE_PROVIDER_LIVE="${CHUANG_NON_FEISHU_SUITE_INCLUDE_PROVIDER_LIVE:-0}"
 export ROOT FORMAT INCLUDE_PROVIDER_LIVE
 

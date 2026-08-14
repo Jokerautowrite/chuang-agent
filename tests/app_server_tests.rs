@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -71,7 +72,7 @@ fn app_server_command() -> Command {
     cmd
 }
 
-fn write_identity_registry(workspace: &PathBuf) {
+fn write_identity_registry(workspace: &Path) {
     fs::write(
         workspace.join("identity/agents.toml"),
         r#"memory_body_id = "chuang-local-body"
@@ -89,7 +90,7 @@ allowed_channels = ["chuang-feishu", "cli", "app-server"]
     .expect("agents registry should write");
 }
 
-fn write_basic_stub_workspace(workspace: &PathBuf) {
+fn write_basic_stub_workspace(workspace: &Path) {
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
     fs::write(workspace.join("identity/SOUL.md"), "Chuang test soul\n").expect("soul should write");
@@ -254,8 +255,7 @@ fn app_server_turn_interrupt_reports_unsupported_instead_of_fake_success() {
     let mut stdin = child.stdin.take().expect("stdio stdin should exist");
     writeln!(
         stdin,
-        "{}",
-        r#"{"id":1,"method":"turn/interrupt","params":{"threadId":"chuang-thread-1"}}"#
+        "{{\"id\":1,\"method\":\"turn/interrupt\",\"params\":{{\"threadId\":\"chuang-thread-1\"}}}}"
     )
     .expect("interrupt should write");
     drop(stdin);
@@ -935,13 +935,10 @@ transport = "http"
         .expect("turn should stream a progress event while runtime is active");
     assert!(progress["params"]["event"].get("schema_version").is_some());
     assert!(progress["params"]["event"].get("event").is_some());
-    assert_eq!(
-        messages[response_at]["error"]["message"]
-            .as_str()
-            .expect("cancelled turn should return an RPC error")
-            .contains("turn_cancelled_at_safe_point"),
-        true
-    );
+    assert!(messages[response_at]["error"]["message"]
+        .as_str()
+        .expect("cancelled turn should return an RPC error")
+        .contains("turn_cancelled_at_safe_point"));
     assert_eq!(
         messages[completed_at]["params"]["turn"]["status"],
         "cancelled"
@@ -1034,13 +1031,11 @@ fn app_server_socket_scripts_use_daemon_without_fifo_or_rm() {
     assert!(terminal_script.contains("app-server ask"));
     assert!(terminal_script.contains("CHUANG_APP_SERVER_SOCKET"));
 
-    for unit in [
-        "ops/systemd/chuang-agent-app-server.service",
-        "ops/systemd/chuang-agent-app-server.service.example",
-    ] {
-        let contents = std::fs::read_to_string(root.join(unit)).expect("unit should read");
-        assert!(contents.contains("chuang-app-server-service.sh"));
-    }
+    // 公开仓库只承诺 example 单元文件；本地部署用的 .service 是
+    // gitignored 运行时文件，干净 clone 不存在，不能作为断言目标。
+    let unit = root.join("ops/systemd/chuang-agent-app-server.service.example");
+    let contents = std::fs::read_to_string(&unit).expect("unit should read");
+    assert!(contents.contains("chuang-app-server-service.sh"));
 }
 
 #[test]
@@ -3817,6 +3812,38 @@ fn app_server_health_text_reports_diagnostic_summary_and_next_actions() {
     let workspace = temp_workspace("health-text");
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
+    // health 的 goal_run 就绪度按进程 CWD 的 ./context/goal-runs 读取；
+    // 干净 clone 没有运行期 goal-run 数据，因此测试自建最小合法 fixture，
+    // 并把子进程 CWD 指到 workspace，保证断言不依赖仓库内未提交文件。
+    let goal_run = chuang_agent::goal_run::GoalRun::new(
+        chuang_agent::goal_mode::GoalSpec::mainline_mvp("health-text fixture"),
+        vec![chuang_agent::goal_run::GoalWorkerPlan {
+            worker_id: "w1".to_string(),
+            objective: "fixture worker".to_string(),
+            write_scope_ids: vec!["scope1".to_string()],
+            validation_checks: vec!["true".to_string()],
+        }],
+        vec![chuang_agent::goal_run::GoalWriteScope {
+            scope_id: "scope1".to_string(),
+            paths: vec!["evidence.txt".to_string()],
+        }],
+        chuang_agent::goal_run::GoalValidationPlan {
+            commands: vec!["true".to_string()],
+        },
+        chuang_agent::goal_run::GoalIntegrationPolicy {
+            main_process_owns_integration: true,
+            workers_may_commit: false,
+            workers_may_touch_secrets: false,
+            require_worker_reports: false,
+        },
+    )
+    .expect("goal run fixture should build");
+    fs::create_dir_all(workspace.join("context/goal-runs")).expect("goal-runs dir should create");
+    fs::write(
+        workspace.join("context/goal-runs/mainline-mvp.json"),
+        serde_json::to_string_pretty(&goal_run).expect("goal run fixture should serialize"),
+    )
+    .expect("goal run fixture should write");
     fs::write(workspace.join("identity/SOUL.md"), "Chuang health soul\n")
         .expect("soul should write");
     fs::write(workspace.join("identity/STORY.md"), "Chuang health story\n")
@@ -3856,6 +3883,7 @@ transport = "stub"
     .expect("config should write");
 
     let output = app_server_command()
+        .current_dir(&workspace)
         .args([
             "app-server",
             "health",
@@ -3961,6 +3989,11 @@ transport = "stub"
     assert!(stdout.contains(
         "local_contract_readiness: ok=true state=ready contracts=6 connects_real_external_services=false writes_core_memory=false executes_plugins=false"
     ));
+    if !stdout.contains(
+        "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
+    ) {
+        eprintln!("STDOUT_DUMP\n{stdout}");
+    }
     assert!(stdout.contains(
         "subagent_readiness: ok=true state=queued_protocol_partial mode=fake local_contract_ready=true local_contract_state=ready live_adapter_ready=false live_adapter_state=partial"
     ));

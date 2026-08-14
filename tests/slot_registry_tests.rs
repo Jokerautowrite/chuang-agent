@@ -1122,8 +1122,10 @@ fn slot_failure_event(id: &str, task: &str, tool: &str) -> RuntimeEvent {
 
 fn canonical_slot_config(root: PathBuf) -> RuntimeConfig {
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig::default();
-    canonical.skill_root = root;
+    let mut canonical = chuang_agent::runtime_config::CanonicalEvolutionConfig {
+        skill_root: root,
+        ..Default::default()
+    };
     canonical.detector.min_repeats = 2;
     config.evolution = EvolutionConfig::Canonical(canonical);
     config

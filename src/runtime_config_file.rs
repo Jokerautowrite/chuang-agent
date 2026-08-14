@@ -1374,6 +1374,6 @@ mod tests {
             config.metadata.get("channel").map(String::as_str),
             Some("cli")
         );
-        assert!(config.metadata.get("config_path").is_none());
+        assert!(!config.metadata.contains_key("config_path"));
     }
 }

@@ -39,7 +39,7 @@ The current pure protocol helpers live in `src/channel_adapter.rs`.
   "channel": "feishu-dedicated-chuang",
   "message_id": "msg-1",
   "sender_id": "user-1",
-  "workspace_root": "/home/user/projects/chuang-agent",
+  "workspace_root": "$CHUANG_AGENT_ROOT",
   "text": "还在吗？",
   "thread_id": "chuang-thread-1"
 }
@@ -55,7 +55,7 @@ The current pure protocol helpers live in `src/channel_adapter.rs`.
   "method": "turn/start",
   "params": {
     "threadId": "chuang-thread-1",
-    "workspaceRoot": "/home/user/projects/chuang-agent",
+    "workspaceRoot": "$CHUANG_AGENT_ROOT",
     "text": "还在吗？",
     "channel": "feishu-dedicated-chuang",
     "channelMessageId": "msg-1",
@@ -104,11 +104,11 @@ Before wiring a real channel, run:
 
 ```bash
 cargo run -- channel feishu-check \
-  --env-file /home/user/projects/chuang-agent/ops/systemd/chuang-feishu-bridge.env \
+  --env-file $CHUANG_AGENT_ROOT/ops/systemd/chuang-feishu-bridge.env \
   --json
 
 cargo run -- channel simulate \
-  --workspace-root /home/user/projects/chuang-agent \
+  --workspace-root $CHUANG_AGENT_ROOT \
   --message-id test-msg-1 \
   --sender-id test-user \
   --thread-id test-thread \

@@ -29,8 +29,7 @@ impl SqliteMemoryStore {
         // busy_timeout：并发写撞锁时等待而非立即报 database is locked。
         conn.busy_timeout(std::time::Duration::from_millis(5000))
             .map_err(|_| MemoryStoreError::StorageUnavailable)?;
-        let _ = conn
-            .execute_batch("PRAGMA journal_mode=WAL;")
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|_| MemoryStoreError::StorageUnavailable)?;
 
         let store = Self {

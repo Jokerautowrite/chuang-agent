@@ -73,8 +73,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
-ENV_FILE="${CHUANG_LIVE_ENV_FILE:-${CHUANG_LIVE_OPERATOR_ENV_FILE:-${CHUANG_FEISHU_ENV_FILE:-/home/user/.codex-im/chuang-feishu-bridge.env}}}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ENV_FILE="${CHUANG_LIVE_ENV_FILE:-${CHUANG_LIVE_OPERATOR_ENV_FILE:-${CHUANG_FEISHU_ENV_FILE:-$HOME/.codex-im/chuang-feishu-bridge.env}}}"
 OPERATOR="${CHUANG_LIVE_OPERATOR:-${USER:-<operator>}}"
 REQUEST_ID="${CHUANG_LIVE_REQUEST_ID:-<fill_request_id>}"
 

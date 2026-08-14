@@ -1448,12 +1448,7 @@ fn runtime_report_promotes_context_compaction_summary_without_segment_payloads()
     };
 
     let observability = runtime_observability_meta(&result);
-    assert_eq!(
-        observability
-            .get("context_compaction_summary_json")
-            .is_some(),
-        true
-    );
+    assert!(observability.contains_key("context_compaction_summary_json"));
 
     let report = build_runtime_report(
         &result,

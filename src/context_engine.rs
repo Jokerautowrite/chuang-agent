@@ -260,16 +260,11 @@ pub trait ContextEngine {
     fn pack(&self, segments: Vec<ContextSegment>) -> Result<PackedContext, ContextPackError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ContextEngineKind {
+    #[default]
     DeterministicBudget,
     SummaryCompression,
-}
-
-impl Default for ContextEngineKind {
-    fn default() -> Self {
-        Self::DeterministicBudget
-    }
 }
 
 impl ContextEngineKind {
@@ -667,9 +662,7 @@ impl ContextPacker {
             .filter(|segment| segment.tokens.unwrap_or(0) >= self.budget.min_working_tokens)
             .max_by_key(|segment| (segment.priority, segment.last_accessed, segment.created_at));
 
-        let Some(candidate) = candidate else {
-            return None;
-        };
+        let candidate = candidate?;
 
         let candidate_tokens = candidate.tokens.unwrap_or(0);
         if base_tokens.saturating_add(candidate_tokens) > self.budget.max_tokens {

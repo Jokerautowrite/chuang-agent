@@ -603,7 +603,7 @@ where
     };
     let checkpoint_suggestion = if ready_to_checkpoint {
         Some(build_checkpoint_suggestion(
-            &manifest,
+            manifest,
             &completed_worker_ids,
             &report_summaries,
             &acceptance_evidence,

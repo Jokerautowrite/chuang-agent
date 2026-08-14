@@ -2,7 +2,7 @@
 set -euo pipefail
 
 FORMAT="text"
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CONFIG_PATH=""
 WORKSPACE_ROOT="${CHUANG_LIVE_RUNNER_WORKSPACE_ROOT:-$ROOT}"
 BINARY_PATH="${CHUANG_AGENT_BIN:-}"

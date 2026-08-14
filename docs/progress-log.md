@@ -750,7 +750,7 @@
 - 第三次真实体检中模型首轮直接给出“约 70%”且幻觉工具只有 `zz`，暴露“体检/自检/健康检查”未被本地任务识别器覆盖。现将这些意图显式列为必须真实工具取证：无工具的 FINAL 会按 `missing_required_action` 打回，新增回归锁定健康结论必须至少有一次 `code_execute` 等真实证据。
 - 第四次真实体检已真实执行 `cargo test` 且状态码 0，但模型仍被首轮被否决的“工具不可用”原文锚定，并把安全脱敏误读为执行失败。现在未验证 FINAL 的正文只保留在 `tool_protocol_errors_json` 审计中，不再回灌模型；工具回执改为结构化 `execution_succeeded/exit_code/duration/output statistics/content_redacted`，并明确脱敏仅保护内容、不代表工具不可用或失败。
 - 最终真实体检通过：`chuang ask "给自己做个体检"` 走 `gpt-5.6-sol/xhigh`，实际执行 Bash `pipefail`、`cargo check --workspace` 和 `cargo test --workspace`，工具退出码 0；最终回答承认检查成功，原始两个问题均未复现。
-- 同步修正本机真实命令 `/home/user/.local/bin/chuang` 的一次性任务临时配置：shell 超时从 30 秒对齐到 120 秒，模型从旧 `gpt-5.5` 对齐到 `gpt-5.6-sol/xhigh`。未改 provider URL、密钥、登录态或服务。
+- 同步修正本机真实命令 `$HOME/.local/bin/chuang` 的一次性任务临时配置：shell 超时从 30 秒对齐到 120 秒，模型从旧 `gpt-5.5` 对齐到 `gpt-5.6-sol/xhigh`。未改 provider URL、密钥、登录态或服务。
 - 最终验证通过：`cargo test -q`、`cargo check --all-targets`、`cargo fmt --all -- --check`、`git diff --check`、启动脚本语法检查，以及 stub 伪 TTY 终端样式目检。
 
 # 2026-07-10 Chuang 本地完成度收口
@@ -839,7 +839,7 @@
 
 # 2026-06-20 真实标准主链验收入口
 - 本轮按老爸“全部按照真实标准验收，调用模型”的要求收紧验收口径：`scripts/chuang-mainchain-acceptance.sh` 不再只是 deterministic 矩阵入口，而是先跑 20 项主链矩阵、tool runtime 合同和 CLI smoke，再调用 `scripts/chuang-terminal-acceptance.sh` 做真实 provider 终端端到端验收。
-- `/home/user/.local/bin/chuang` 的 `chuang mainchain-accept` / `chuang mainchain` / `chuang accept-mainchain` 现在是主链总验收入口，成功标志为 `chuang_mainchain_acceptance_ok`；其中真实 provider 子验收成功标志仍是 `chuang_terminal_acceptance_ok`。
+- `$HOME/.local/bin/chuang` 的 `chuang mainchain-accept` / `chuang mainchain` / `chuang accept-mainchain` 现在是主链总验收入口，成功标志为 `chuang_mainchain_acceptance_ok`；其中真实 provider 子验收成功标志仍是 `chuang_terminal_acceptance_ok`。
 - 本轮已先复跑现有真实验收 `chuang accept`，确认通过并输出 `chuang_terminal_acceptance_ok`，work_dir `/tmp/chuang-terminal-acceptance-181622`。
 - 收紧后已复跑主链总验收 `chuang mainchain-accept`，确认真实 provider 子验收通过并输出 `chuang_terminal_acceptance_ok`，最终输出 `chuang_mainchain_acceptance_ok`，work_dir `/tmp/chuang-terminal-acceptance-199411`。
 
@@ -860,7 +860,7 @@
 # 2026-06-20 终端 REPL 可读性增强
 - 追加可见执行 trace：老爸反馈 opencode 能看到过程，Chuang 现在默认显示 `trace` 区，包含 context engine、token 数、recall hit、drop count、model finish、耗时、工具调用数、协议错误数和工具事件摘要。这里显示的是可审计执行过程，不打印模型隐藏思维原文。
 - REPL 命令新增 `/trace` 和 `/notrace`，可在交互中开关 trace 显示；启动横幅命令列表同步展示这两个命令。PTY 实测 `/notrace` 后下一轮只显示运行摘要和最终答复，不显示 trace 区。
-- 本轮按老爸反馈“喜欢 opencode 终端风格，Chuang 终端太简陋”先做轻量终端外壳增强，没有替换 runtime、没有引入复杂 TUI 依赖。确认本机 opencode 实际路径为 `/home/user/.opencode/bin/opencode`，版本 `1.17.4`，参考其命令/终端体验但不复制源码。
+- 本轮按老爸反馈“喜欢 opencode 终端风格，Chuang 终端太简陋”先做轻量终端外壳增强，没有替换 runtime、没有引入复杂 TUI 依赖。确认本机 opencode 实际路径为 `$HOME/.opencode/bin/opencode`，版本 `1.17.4`，参考其命令/终端体验但不复制源码。
 - `cargo run -- repl` / `chuang` 在真实 TTY 下现在会显示 `Chuang Terminal` 启动横幅、`chuang>` 输入提示、运行中 provider/model/workspace 状态、每轮耗时、工具调用数、协议错误数、tool loop status、工具事件摘要和 runtime report id。
 - 新增 REPL 内置命令：`/help`、`/status`、`/verbose`、`/quiet`、`/clear`、`/exit`/`/quit`。非 TTY 管道模式仍保持旧的简洁输出，避免破坏 smoke/acceptance 脚本。
 - 现场验证：PTY 下 `CHUANG_REPL_STUB=1 ./scripts/launch-chuang-agent-repl.sh` 可显示横幅、`/help`、运行中状态、结果摘要和 `report: report-turn-1`；退出后脚本正常结束。
@@ -875,10 +875,10 @@
 
 # 2026-06-20 终端入口自用体验补齐
 - 本轮继续按“我们自己本机终端使用，不考虑发布/安装”的口径推进 Chuang 终端版。发现并修复两个真实入口问题：`chuang --help` 之前会被当成普通任务发给模型，现在改为本地静态帮助；`chuang ask` 从任意目录调用时之前会误把工具工作区切到项目根，现在会保留用户发起命令时的当前目录。
-- `/home/user/.local/bin/chuang` 现在提供 `help/-h/--help`、`accept`、`stub`、`ask` 和自然语言任务入口；`ask`/自然语言任务会生成临时绝对路径 runtime config，保证身份、规则、provider、队列等仍指向 Chuang 项目，而工具工作区保持为用户当前目录。
+- `$HOME/.local/bin/chuang` 现在提供 `help/-h/--help`、`accept`、`stub`、`ask` 和自然语言任务入口；`ask`/自然语言任务会生成临时绝对路径 runtime config，保证身份、规则、provider、队列等仍指向 Chuang 项目，而工具工作区保持为用户当前目录。
 - 运行时继续收紧“假完成”：本地动作任务如果轮次耗尽仍没有任何工具调用，不再把模型普通文本兜底成成功，而是返回 `tool_loop_status=missing_required_action` 和“没有完成真实本地动作”的明确失败。新增回归 `run_with_options_reports_failure_when_local_action_never_calls_tool`。
 - 终端验收脚本新增覆盖：`chuang --help` 必须显示 `chuang accept`；跨目录 `chuang ask` 必须在 caller workspace 里写入 `notes/caller.txt`，且 `tool_surface_json.workspace_root` 必须等于 caller workspace。
-- 验证已通过：`bash -n /home/user/.local/bin/chuang`、`bash -n scripts/chuang-terminal-acceptance.sh`、`git diff --check -- src/cli_runtime.rs README.md scripts/chuang-terminal-acceptance.sh`、定向 cargo 回归三项，以及完整 `chuang accept`。最新完整验收输出 `chuang_terminal_acceptance_ok`，工作目录 `/tmp/chuang-terminal-acceptance-610892`。
+- 验证已通过：`bash -n $HOME/.local/bin/chuang`、`bash -n scripts/chuang-terminal-acceptance.sh`、`git diff --check -- src/cli_runtime.rs README.md scripts/chuang-terminal-acceptance.sh`、定向 cargo 回归三项，以及完整 `chuang accept`。最新完整验收输出 `chuang_terminal_acceptance_ok`，工作目录 `/tmp/chuang-terminal-acceptance-610892`。
 - 当前完成度口径：如果不考虑发布、安装器、对外阉割版和 Feishu 插件入口，终端自用主链已经非常接近完成；剩余主要是继续积累更多真实桌面动作 allowlist 场景和少量使用体验打磨。
 
 # 2026-06-20 终端版主线验收闭环
@@ -890,7 +890,7 @@
 - 当前完成度口径：终端主链已经可以视为可用闭环，用户在本地输入 `chuang` 后应能使用模型、文件/命令工具、记忆、子任务和 goal 流。尚未宣称全局 100% 的部分是外部入口插件化、真实桌面动作的更多 allowlist 场景、Wiki/GBrain/浏览器等外部 receipt 的生产级配置，以及最终发布打包。
 
 # 2026-06-20 本地 chuang 能力默认可用修复
-- 本轮修复终端 `chuang` 入口反复自称“没有桌面写入/键鼠/文件创建能力”的问题。`/home/user/.local/bin/chuang` 与 `scripts/launch-chuang-agent-repl.sh` 现在默认设置 `CHUANG_REAL_ACTUATOR_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_CODEX_RUNNER_ENABLE=1`，本地 CLI/REPL 启动时三项 live gate 默认全开。
+- 本轮修复终端 `chuang` 入口反复自称“没有桌面写入/键鼠/文件创建能力”的问题。`$HOME/.local/bin/chuang` 与 `scripts/launch-chuang-agent-repl.sh` 现在默认设置 `CHUANG_REAL_ACTUATOR_ENABLE=1`、`CHUANG_REAL_CONTROL_ENABLE=1`、`CHUANG_CODEX_RUNNER_ENABLE=1`，本地 CLI/REPL 启动时三项 live gate 默认全开。
 - `assets/capability_primer.txt` 已明确本地 CLI/REPL 不是只读壳，具备 `file_read/file_write/code_execute/list_dir`、`locate/screenshot`、`open_app/mouse/keyboard`、`wait/human_suspend` 等受治理工具面；普通本地动作应优先输出 ACTION 工具调用，不再回答“没有能力”。删除/清理/重置/卸载/支付/验证码/服务或网络变更/密钥访问仍必须询问或拒绝。
 - `src/cli_runtime.rs` 新增普通本地动作的首轮纯文本拦截：如果模型第一轮嘴硬说不能创建/写文件/执行命令/打开点击输入，会被作为 `plain_text_response` 协议错误喂回模型，要求改用 ACTION 工具闭环。新增回归测试锁住该行为。
 - 启动脚本的真实 provider 检查从旧 `CODEX_PPTOKEN_API_KEY` 对齐到当前 `config.toml` 使用的 `CHUANG_PROXY_API_KEY`；`scripts/chuang-mvp-smoke.sh` 的临时 provider env 也同步更新。已通过 `bash -n`、stub REPL、定向 cargo 测试，并用真实 `chuang ask` 验证创建了 `~/Desktop/chuangtest` 与 `~/桌面/chuangtest`。
@@ -993,14 +993,14 @@
 
 # 2026-05-28 Sub2 更新前备份
 - 按老爸要求，在准备更新 Sub2 前只做备份和只读确认，未改服务器配置、未重启容器、未写数据库、未做删除清理。
-- 本地最小用户余额账本已导出并校验：`/home/user/backups/sub2api/chuang-google-cloud/daily/2026-05-28-004621-pre-sub2-update-minimal`，记录数 223，`SHA256SUMS` 校验通过。该备份只含用户/余额最小字段，不含 API key、密码、token、请求日志或完整数据库。
+- 本地最小用户余额账本已导出并校验：`$HOME/backups/sub2api/chuang-google-cloud/daily/2026-05-28-004621-pre-sub2-update-minimal`，记录数 223，`SHA256SUMS` 校验通过。该备份只含用户/余额最小字段，不含 API key、密码、token、请求日志或完整数据库。
 - 服务器本机回滚资料已生成并校验：`/opt/sub2api/backups/pre-sub2-update-2026-05-27-164656`，包含 `docker-compose.yml`、`config.yaml`、容器状态、镜像列表、`sub2api` inspect、当前镜像、健康检查、磁盘与内存快照，`SHA256SUMS` 校验通过。敏感 `config.yaml` 仅保存在服务器备份目录，未输出到聊天或本地仓库。
 - 当前线上主容器镜像为 `sub2api-local:github-main-2f70d965-20260525-181210`，内网 `/health` 返回 `{"status":"ok"}`。本轮没有做全量数据库 dump；如升级风险扩大，需要老爸明确要求后再在低峰期补做。
 
 # 2026-05-24 Sub2 v0.1.130 升级执行前准备
 - 本轮按 `docs/sub2-upgrade-handoff-2026-05-24.md` 直接续接 Sub2API 从 `v0.1.125` 升级到 `v0.1.130` 的执行前准备，没有重写方案。已读取既有执行单与 Sub2 运维手册，按红线只做只读检查和备份准备，不做升级、不改用户数据。
 - 已确认当前线上运行体不是官方 tag，而是自定义镜像 `sub2api-local:native-display-20260523-193053`；服务器使用 `docker-compose 1.29.2`，所以实际命令必须用 `docker-compose` 而不是 `docker compose`。当前服务健康，`sub2api` 仍是 `0.1.125`，后台更新检查最新为 `0.1.130`。
-- 已生成本地异地最终快照：`/home/user/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-050922-pre-version-upgrade-final`。快照包含 compose、脱敏配置、配置 SHA、容器状态、镜像 inspect、groups、payment plans、active subscriptions、用户最小账本和 API key 绑定抽样脱敏文件，`SHA256SUMS` 校验通过。关键计数：groups 19、plans 5、active subscriptions 13、users minimal 216、API key binding sample 24。
+- 已生成本地异地最终快照：`$HOME/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-050922-pre-version-upgrade-final`。快照包含 compose、脱敏配置、配置 SHA、容器状态、镜像 inspect、groups、payment plans、active subscriptions、用户最小账本和 API key 绑定抽样脱敏文件，`SHA256SUMS` 校验通过。关键计数：groups 19、plans 5、active subscriptions 13、users minimal 216、API key binding sample 24。
 - 已生成服务器本机明文回滚备份：`/opt/sub2api/backups/pre-version-upgrade-2026-05-23-211203`，包含 `docker-compose.yml`、`config.yaml`、`docker-compose-ps.txt`、`docker-images.txt`、`sub2api-current-image-inspect.json` 和 `SHA256SUMS`，远端 SHA 校验通过。明文配置只保存在服务器本机备份目录，未输出到聊天。
 - 上游 `v0.1.130` tag 已 fetch 到本地 Sub2 副本，Docker Hub / GHCR 的 `0.1.130` manifest 均可用且支持 `linux/amd64` / `linux/arm64`。本地 Sub2 副本仍是 `v0.1.126-1-g62ccd0ff-dirty`，并有两个无关前端脏改动，不能作为直接上线构建源。
 - 下一步可进入真正升级动作：在服务器 `/opt/sub2api/docker-compose.yml` 只替换 `sub2api` 的 image 行为官方 `weishaw/sub2api:0.1.130`（或等价 GHCR 镜像），保留 `./data`、`./pgdata`、`./redisdata` 卷，然后执行 `docker-compose -f /opt/sub2api/docker-compose.yml pull sub2api && docker-compose -f /opt/sub2api/docker-compose.yml up -d sub2api`。这一步是状态变更，应在明确执行窗口再做；升级后立即验 `/health`、后台 version/check-updates、订阅页和老用户抽样。
@@ -1010,12 +1010,12 @@
 - 服务器使用 `docker-compose 1.29.2`，实际执行为 `docker-compose -f /opt/sub2api/docker-compose.yml pull sub2api` 与 `docker-compose -f /opt/sub2api/docker-compose.yml up -d sub2api`。升级后容器状态为 `sub2api Up (healthy)`、`sub2api-db Up (healthy)`、`sub2api-redis Up`，`/health` 返回 ok。
 - 后台版本接口已确认 `version=0.1.130`；更新检查返回 `current_version=0.1.130`、`latest_version=0.1.130`、`has_update=false`。当前运行容器镜像为 `weishaw/sub2api:0.1.130`。
 - 订阅数据复查通过：groups 19、payment plans 5、active subscriptions 13，和升级前最终快照一致。五个 1x 档位仍存在：group 30/31/32/33/34，plan 1/2/3/4/5 分别对应 2/5/35/99/149 元，价格、有效期、限额、for_sale 与迁移后预期一致。活跃订阅分布为 `{30:1, 31:5, 32:7, 33:0, 34:0}`。
-- 升级后只读快照已生成并校验：`/home/user/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-052202-post-version-upgrade-v0.1.130`。
+- 升级后只读快照已生成并校验：`$HOME/backups/sub2api/chuang-google-cloud/pre-upgrade/2026-05-24-052202-post-version-upgrade-v0.1.130`。
 - 购买流程未做真实下单验证：后台设置当前显示 `payment_enabled=false`、`purchase_subscription_enabled=false`、payment providers count 为 0。当前只能确认订阅 plan/group 数据保留，不能声称购买链路已通过。
 - 新版启动日志出现配置风险：`TOTP_ENCRYPTION_KEY` 未显式配置，支付 resume token 和 channel monitor 加密能力不可用；同时 channel monitor 1/4 报 `CHANNEL_MONITOR_KEY_DECRYPT_FAILED`，提示需重新编辑监控 fresh key。该问题不影响当前版本、健康、订阅数据与正在发生的 API 代理请求，但会影响渠道监控任务；本轮未擅自生成/写入新加密密钥，因为这会改变安全配置且不能自动恢复旧监控密文。
 
 # 2026-05-24 Sub2 v0.1.130 native-display 订阅显示修复
-- 老爸反馈升级到官方 `weishaw/sub2api:0.1.130` 后订阅仍显示旧 `M` 配额样式；根因是升级时从先前自定义 `native-display` 镜像切回官方镜像，丢掉了本地显示修复。为避免污染已有脏改动源码，本轮在干净 worktree `/home/user/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 上基于 tag `v0.1.130` 修复并构建。
+- 老爸反馈升级到官方 `weishaw/sub2api:0.1.130` 后订阅仍显示旧 `M` 配额样式；根因是升级时从先前自定义 `native-display` 镜像切回官方镜像，丢掉了本地显示修复。为避免污染已有脏改动源码，本轮在干净 worktree `$HOME/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 上基于 tag `v0.1.130` 修复并构建。
 - 后端补丁：`/api/v1/payment/plans` 不再只补 `group_platform`，而是和 `checkout-info` 一样返回 `group_name`、`rate_multiplier`、`daily_limit_usd`、`weekly_limit_usd`、`monthly_limit_usd`、`supported_model_scopes`，避免旧路径/兼容路径拿不到组限额后回退到旧配额展示。前端补丁：购买套餐卡片和选中套餐确认卡的限额统一用美元格式显示，如 `$33`，不再走旧 `M` 配额标签。
 - 验证通过：`go test ./internal/handler/... ./internal/service/...`；`pnpm exec vitest run src/components/payment/__tests__/SubscriptionPlanCard.spec.ts`。一次误跑的前端全量 Vitest 暴露 13 个既有失败，但目标文件 `SubscriptionPlanCard.spec.ts` 的 3 个用例通过，本轮未扩大范围修复无关失败。
 - 已构建并部署镜像 `sub2api-local:v0.1.130-native-display-20260524-054147`，镜像内版本为 `Sub2API 0.1.130 (commit: 0cfabaa8-native-display)`。服务器 compose 已备份到 `/opt/sub2api/backups/docker-compose.pre-native-display-20260524-054619.yml`，随后只替换 `sub2api` image 行并重建 `sub2api` 容器；`sub2api-db` 和 `sub2api-redis` 均保持 up-to-date，未重建。
@@ -1024,7 +1024,7 @@
 
 # 2026-05-24 Sub2 KeyUsageView 与倒计时 m/M 二次修复
 - 老爸复看后仍看到 `m/M`，继续排查发现上一轮只覆盖购买套餐卡片和 `/payment/plans` 元数据，API Key 用量查询页 `KeyUsageView` 仍把订阅月窗口英文标签写成 `Used Quota (M)`。同时订阅/Key 相关页面的重置倒计时还会显示裸 `20m` 这类分钟缩写，容易和旧月度 `M` 配额混淆。
-- 本轮在干净 worktree `/home/user/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 追加修复：`KeyUsageView` 的订阅窗口标签改为中文 `日/周/月`、英文 `Day/Week/Month`；`KeyUsageView`、用户 `SubscriptionsView`、用户 `KeysView` 的倒计时单位改为中文 `天/小时/分钟`，英文 `d/hr/min`，避免用户可见订阅入口再出现裸 `M/m`。
+- 本轮在干净 worktree `$HOME/projects/sub2api-ui-work/sub2api-v0.1.130-native-display` 追加修复：`KeyUsageView` 的订阅窗口标签改为中文 `日/周/月`、英文 `Day/Week/Month`；`KeyUsageView`、用户 `SubscriptionsView`、用户 `KeysView` 的倒计时单位改为中文 `天/小时/分钟`，英文 `d/hr/min`，避免用户可见订阅入口再出现裸 `M/m`。
 - 新增回归覆盖 API Key 查询页：订阅月度用量出现 `Used Quota (Month)` 且不出现 `Used Quota (M)`；限额重置倒计时出现 `20min` 且不出现独立 `20m`。验证通过：`pnpm exec vitest run src/views/__tests__/KeyUsageView.spec.ts src/components/payment/__tests__/SubscriptionPlanCard.spec.ts`，共 2 个文件 6 个用例通过。
 - 已重新构建并部署镜像 `sub2api-local:v0.1.130-native-display-20260524-061400`，镜像 ID `sha256:8fdd49baf2d8ec5c3a6926e852f731e484a2b904eaddc90d0a3a73af40efeb9f`，镜像内版本为 `Sub2API 0.1.130 (commit: 0cfabaa8-native-display-duration)`。服务器 compose 已备份到 `/opt/sub2api/backups/docker-compose.pre-native-display-duration-20260524-061720.yml`，只替换 `sub2api` image 并重建 `sub2api` 容器；DB/Redis 未重建。
 - 部署后验证：`sub2api` healthy，`/health` ok，线上入口 JS 为 `assets/index-CjTY_To_.js`；线上 `KeyUsageView-DNEUSOUc.js`、`KeysView-DopaAcT3.js`、`SubscriptionsView-BPz7CpB1.js` 已更新，检查结果 `contains_used_quota_m=false`、`contains_20m_literal=false`、`contains_hr_min=true`、KeyUsage 中 `contains_month=true`。
@@ -1733,12 +1733,12 @@
 - 并行第一批实现已落最小合同：新增 `runtime_event_ledger`、`tool_registry_slot`、`permission_profile_slot`、`subagent_tree_ledger` 四个独立模块及定向测试，并新增 `docs/codex-claude-implementation-slices-v1.md` 拆解 M1-M7 工单、写入范围、验收命令和风险边界。当前仍是 fake/纯结构层，尚未接入真实 runtime/tool dispatch/governance 主链。
 
 ## 2026-05-11 claude-rust Slot 审计
-- 已对 `/home/user/projects/claude-rust` 做代码级 Slot 审计，并新增 `docs/claude-rust-slot-audit-v1.md` 与 `docs/claude-rust-integration-plan-v1.md`：结论是 `claude-rust` 值得吸收，但不能整体替换 Chuang 主链；优先吸收 `Tool` trait / `ToolRegistry` / MCP fake adapter、`QueryEngine` 的流式 tool-use loop 与 overload retry、`permission` 的模式和 allow/deny pattern。
+- 已对 `$HOME/projects/claude-rust` 做代码级 Slot 审计，并新增 `docs/claude-rust-slot-audit-v1.md` 与 `docs/claude-rust-integration-plan-v1.md`：结论是 `claude-rust` 值得吸收，但不能整体替换 Chuang 主链；优先吸收 `Tool` trait / `ToolRegistry` / MCP fake adapter、`QueryEngine` 的流式 tool-use loop 与 overload retry、`permission` 的模式和 allow/deny pattern。
 - 对老爸给出的映射做了校准：`AgentLoop`、`Execution`、`Governance`、`Provider`、`Context` 映射成立；`GroupCoordinator` 需要降级为“有 nested sub-agent / explore adapter 原型”，`claude-rust-coordinator` 当前偏 scaffold，不是完整群体协同系统；`claude-rust-memory` 只是 JSON session repository，不适合作为 Chuang 核心记忆层。
 - 第一阶段集成计划锁定 M1/M2：先做 `ToolRegistrySlot` 设计与 fake contract，再做 MCP fake stdio adapter；禁止真实 MCP 绕过 Chuang governance/allowlist/audit，禁止 `Bypass` 模式成为开源默认。
 
 ## 2026-05-10 live 现场证据第一轮
-- Feishu 现场证据已推进：老爸在 Chuang 专用 Feishu 通道返回 `/health`、`/session`、`/tools` 结果，确认 bridge=ready、app-server=running、workspace=`/home/user/projects/chuang-agent`、session=`chuang-thread-1`，Feishu env 与 provider env 只显示 `<set>`，且 `/tools` 展示 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本、图片 OCR 和主链工具边界；这证明 Feishu 本地命令面与绑定证据可用。
+- Feishu 现场证据已推进：老爸在 Chuang 专用 Feishu 通道返回 `/health`、`/session`、`/tools` 结果，确认 bridge=ready、app-server=running、workspace=`$CHUANG_AGENT_ROOT`、session=`chuang-thread-1`，Feishu env 与 provider env 只显示 `<set>`，且 `/tools` 展示 `/new`、`/session`、`/health`、`/receipt`、`/live-check`、普通文本、图片 OCR 和主链工具边界；这证明 Feishu 本地命令面与绑定证据可用。
 - provider readiness 本地只读检查通过：`scripts/chuang-provider-readiness-check.sh --json` 输出 `overall_state=ready`、`provider_kind=openai_compatible`、`transport=native`、`api_key_state=<set>`、`connects_real_provider=false`、`request_timeout_ms=120000`。同轮 Feishu 普通文本先遇到一次上游 `502 Bad Gateway`，随后老爸重试 `哈喽` 成功返回“哈喽，老爸，我在。有什么要我处理的？”，模型 `gpt-5.5`、耗时 2.0s、API 1 次、runtime report `report-turn-1`，因此 provider live request 证据从 blocked 修正为 verified。
 - single worker rehearsal 本地边界继续通过：`sh scripts/chuang-live-runner-rehearsal-smoke.sh` 输出 `live_runner_rehearsal_smoke_ok`，保留 queue/run evidence；它证明 gate/allowlist/capability/report admission rehearsal 可复验，但仍不等于 runner 池 ready。
 - desktop/browser/wiki/GBrain 证据第一轮已跑本地只读合同：`scripts/chuang-real-actuator-adapter.py` 的 `observe` / `screenshot` 都返回 `read_only=true`、`live_gate_required=false`，但当前终端环境没有图形 `DISPLAY`，窗口标题与截图 evidence 均为 unavailable；`cargo test -q --test actuator_tests --test browser_read_tests --test knowledge_read_tests` 和 `cargo test -q --test tool_runtime_tests tool_runtime_can_execute_desktop_atomic_tools_with_fake_actuator` 通过。`memory knowledge source-contract --source wiki|gbrain --json` 均确认 read-only/source-contract 可用、`connects_real_service=false`、`live_adapter_configured=false`。
@@ -1834,8 +1834,8 @@
 - `scripts/chuang-live-operator-checklist.sh` 现在会在 `CHUANG_PROVIDER_ENV_FILE` 未显式设置时自动尝试标准默认路径 `~/.config/chuang-agent/provider.env`，并把该路径作为只读证据继续输出到 `paths.provider_env_file`、`suggested_provider_env_file`、`provider_env_next_step` 和 `provider_required CHUANG_PROVIDER_ENV_FILE=<set>/<missing>`，同时仍只做脱敏检查、不连接真实 provider、不打印 secret。默认文件存在时 checklist 不再把 provider env 视为缺失；默认文件不存在时仍保留原 blocker。回归已补：`cargo test -q --test cli_smoke_tests live_operator_checklist -- --nocapture`、`cargo fmt --all --check`、`git diff --check`。
 
 ## 2026-05-09 补充 checkpoint
-- 2026-05-09 单 worker live rehearsal 证据补齐：在 `CHUANG_CODEX_RUNNER_ENABLE=1` 且 `CHUANG_CODEX_RUNNER_WORKSPACE=/home/user/projects/chuang-agent` 的前提下，`cargo run --quiet -- subagent live-preflight --runner-command scripts/chuang-codex-runner.py --allow-runner-command scripts/chuang-codex-runner.py --requires-capability rust --capability rust --json` 返回 `ready_for_live=true`；随后用临时 queue root 执行单次 `subagent dispatch` + `subagent run-once --runner command --runner-command scripts/chuang-codex-runner.py --approve-exec --capability rust`，拿到 `ReportAdmission.status=Accepted/reason_code=report_validated`，并由 `subagent report` / `subagent collect` 复读出同一 report。runner stdout 成功返回简短 `ok`，`report.status=Success`，`runtime_report_id` 仍只在主线 turn 里可见，不把 live rehearsal 解释成真实 worker 池 ready。
-- 2026-05-09 provider live 证据补齐：在 `source /home/user/.config/chuang-agent/provider.env` 之后，`cargo run --quiet -- run --config config.toml --input "只回复一个字：好。"` 成功拿到真实 provider 响应，输出 `provider=local-openai-compatible`、`transport=openai-compatible`、`transport_mode=native`、`status_code=200`、`runtime_report_id=report-turn-1`，且 `api_key` 只以长度信息出现在 trace 中。随后同一环境下 `cargo run --quiet -- status --json` 也显示 `provider_readiness.overall_state=ready`、`api_key_state=<set>`、`transport=native`。这条证据把 provider 从本地只读 readiness 推进到可实际发起 live 请求，但仍不把 Feishu/provider live 与桌面/browser/wiki/GBrain 真实验收混写成同一层。
+- 2026-05-09 单 worker live rehearsal 证据补齐：在 `CHUANG_CODEX_RUNNER_ENABLE=1` 且 `CHUANG_CODEX_RUNNER_WORKSPACE=$CHUANG_AGENT_ROOT` 的前提下，`cargo run --quiet -- subagent live-preflight --runner-command scripts/chuang-codex-runner.py --allow-runner-command scripts/chuang-codex-runner.py --requires-capability rust --capability rust --json` 返回 `ready_for_live=true`；随后用临时 queue root 执行单次 `subagent dispatch` + `subagent run-once --runner command --runner-command scripts/chuang-codex-runner.py --approve-exec --capability rust`，拿到 `ReportAdmission.status=Accepted/reason_code=report_validated`，并由 `subagent report` / `subagent collect` 复读出同一 report。runner stdout 成功返回简短 `ok`，`report.status=Success`，`runtime_report_id` 仍只在主线 turn 里可见，不把 live rehearsal 解释成真实 worker 池 ready。
+- 2026-05-09 provider live 证据补齐：在 `source $HOME/.config/chuang-agent/provider.env` 之后，`cargo run --quiet -- run --config config.toml --input "只回复一个字：好。"` 成功拿到真实 provider 响应，输出 `provider=local-openai-compatible`、`transport=openai-compatible`、`transport_mode=native`、`status_code=200`、`runtime_report_id=report-turn-1`，且 `api_key` 只以长度信息出现在 trace 中。随后同一环境下 `cargo run --quiet -- status --json` 也显示 `provider_readiness.overall_state=ready`、`api_key_state=<set>`、`transport=native`。这条证据把 provider 从本地只读 readiness 推进到可实际发起 live 请求，但仍不把 Feishu/provider live 与桌面/browser/wiki/GBrain 真实验收混写成同一层。
 - 2026-05-09 live operator checklist shell 兼容性修复：`scripts/chuang-live-operator-checklist.sh` 顶部从 `set -euo pipefail` 收敛为 POSIX 可用的 `set -eu`，因此既可直接执行也可由 `sh scripts/chuang-live-operator-checklist.sh --json` 调用，不再在只读人工 live 前置检查阶段卡在 shell 方言差异上；脚本仍只输出脱敏状态，不连接真实 Feishu/provider，也不做写操作。
 - 2026-05-09 Feishu `/tools` 与 runtime/status 能力 primer 单源化：新增 `assets/capability_primer.txt` 作为唯一能力 primer 文本源，Rust `capability_primer` 通过 `include_str!` 使用同一文本，Feishu bridge `/tools` / `/capabilities` 通过 Node 读取同一文件并已补 command smoke 断言，避免普通 turn、status/health 和桥命令能力描述再次漂移。`chuang-feishu-bot.service` 已重启，`ExecStartPre` 通过，node bridge 与 app-server 已常驻运行，本地解析确认 `/tools` 包含共享 primer。
 - 2026-05-09 默认能力 primer 状态面外露：新增共享 `capability_primer` 模块，`AgentRuntime` 默认上下文、`status` / `doctor` / `console snapshot` / `app-server health` 现在使用同一份 `runtime_capability_primer` 文案，飞书侧或调度侧不需要先发 `/tools` 也能从 status/health JSON 读到 `file_read/file_write/code_execute/list_dir`、memory/session、goal/subagent 和 live runner `preflight/rehearsal` 边界。已补 kernel/status/app-server 断言，并通过 runtime、kernel、status、doctor、console、app-server 定向回归。
@@ -1942,7 +1942,7 @@
 - 这个 preflight 仍然只用临时目录和 stub provider，执行前会 unset live adapter gate env；它不连接真实 Feishu、不读取真实 secret、不控制真实服务。
 - 2026-05-07 Worker J 本轮补真实外部 subagent runner 启用前 rehearsal：新增只读 `subagent live-preflight`，检查 `CHUANG_CODEX_RUNNER_ENABLE` live gate、runner command 显式 allowlist、required/worker capability routing、ReportAdmission 证据，以及 unscoped external worker pool、直接写核心记忆、登录态/session mutation 等 forbidden capability 是否仍拒绝。
 - 该 rehearsal 不 claim dispatch、不启动 runner、不写 report、不触碰服务；`ok=true` 表示只读合同检查通过，`ready_for_live=true` 还要求 live gate 已由操作员显式开启。
-- 2026-05-07 Worker F 本轮把 terminal watchdog 只读状态接入 `console snapshot`：console 现在默认读取 `/home/user/.codex/chuang-goal-interactive/latest-watchdog-report.json`，JSON 输出 `terminal_watchdog` 摘要，文本输出显示 available/readonly/session/tmux/codex process/git dirty/next_action。
+- 2026-05-07 Worker F 本轮把 terminal watchdog 只读状态接入 `console snapshot`：console 现在默认读取 `$HOME/.codex/chuang-goal-interactive/latest-watchdog-report.json`，JSON 输出 `terminal_watchdog` 摘要，文本输出显示 available/readonly/session/tmux/codex process/git dirty/next_action。
 - 该接入只读已有 report，不执行 `chuang-goal-watchdog.sh`、不派活、不重启、不修改仓库、不触碰服务；测试通过 `CHUANG_GOAL_WATCHDOG_REPORT_FILE` 指向临时 report 覆盖，真实路径仍按 SOP 默认读取。
 - 2026-05-07 Worker G 本轮新增完整本地可用闭环验收入口 `scripts/chuang-complete-local-smoke.sh`：它串起第二测试 smoke、watchdog `--once` 只读报告、临时 stub config 下的 `status/doctor/app-server health/console snapshot` 诊断读面，以及 Feishu 本地 command/session/rich message smoke，最终输出 `complete_local_smoke_ok`。
 - 该 wrapper 明确保持 local-only：使用临时目录和 stub provider，主动 unset live adapter gate env，不连接真实 Feishu、不读取真实 secret、不控制真实服务；新增 `tests/cli_smoke_tests.rs` 合同测试锁定复用安全 smoke、watchdog 一次性模式和稳定 marker。
@@ -2144,7 +2144,7 @@
 - 当前阶段结论：主进程工具口已进入收尾细化阶段，近期连续完成 action/report schema 契约、工具循环元数据统一视图、治理决策标签收口、治理拒绝路径结构化；下一步开始把注意力从工具细节转向 Memory/Context 会话稳定性、真实 subagent runner、Chuang 自身 goal mode 最小实现。
 - GoalSpec CLI 入口已补最小版：`run --goal TEXT` 会生成 `GoalSpec::mainline_mvp(TEXT)` 并注入 runtime extra context；runtime meta 会输出 `goal_id / goal_objective / goal_context_injected`，方便通道和控制台确认目标上下文已生效，同时不改变原始 `user_input`。
 - GoalSpec -> Runtime extra context 最小接入已完成：`GoalSpec::render_context_segment()` 会把目标 spec 渲染为 `ContextSegment`，CLI runtime 的 `RunCliRequest.goal_spec` 可选注入该 segment，并继续复用 `run_governed_turn_with_extra_context()`；未传 goal 时默认空上下文，用户输入不被污染，不新增 slot、不绕过 governance。
-- Codex 自身升级已完成：本机 Codex CLI 来源确认为全局 npm 包 `@openai/codex`，已从 `0.125.0` 升级到 `0.128.0`；验证命令 `/home/user/.npm-global/bin/codex --version` 返回 `codex-cli 0.128.0`。飞书桥通过该路径启动 Codex app-server，重启 `codex-feishu-bot.service` 后会加载新版；升级过程只处理 Codex，不碰 Hermes，不提交私有 `config.toml`。
+- Codex 自身升级已完成：本机 Codex CLI 来源确认为全局 npm 包 `@openai/codex`，已从 `0.125.0` 升级到 `0.128.0`；验证命令 `$HOME/.npm-global/bin/codex --version` 返回 `codex-cli 0.128.0`。飞书桥通过该路径启动 Codex app-server，重启 `codex-feishu-bot.service` 后会加载新版；升级过程只处理 Codex，不碰 Hermes，不提交私有 `config.toml`。
 - Codex 0.128.0 的 `goals` feature 已低风险验证：`codex --enable goals features list` 会显示 `goals ... true`，但当前没有新增显式 `goal` 子命令；因此暂不默认开启到飞书主通道。
 - Chuang 自身 goal mode 最小骨架已开始落地：新增 `src/goal_mode.rs` 和 `tests/goal_mode_tests.rs`，只定义 `GoalSpec`、校验和 runtime context block 渲染，不执行命令、不绕过治理、不新增 slot。
 - `GoalRun` 规划原语已明确：它把 `goal_spec / worker_plan / validation_plan / checkpoint_log` 组织成可恢复的目标计划，当前 continuation model 是 checkpoint-first，尽量靠恢复 checkpoint 续接，而不是反复让操作员输入 `continue`。
@@ -2334,7 +2334,7 @@
 ## 2026-04-30
 
 ### 已完成
-- 建立 Rust crate：`/home/user/projects/chuang-agent`
+- 建立 Rust crate：`$CHUANG_AGENT_ROOT`
 - 落下基础目录：`common / subagent_report / memory_policy / lifecycle / tests`
 - 写入 V3 对应 types/traits skeleton
 - 生命周期真值表已先实现 6 条最小规则并通过测试：
@@ -3362,14 +3362,14 @@
 # 2026-07-10 小策飞书桥日志写盘加固
 - 飞书桥 `normal` 日志在已有 delta、token usage、rate limit 降噪基础上，进一步屏蔽 `item/started`、`item/completed`、`turn/diff/updated`、`turn/plan/updated` 和 routine thread 状态事件；`verbose` 仍保留完整 RPC 交通用于限时排障，警告、错误、请求摘要和回合完成日志继续保留。
 - `codex-feishu-bot.service` 新增服务级 journal 兜底限流：`LogRateLimitIntervalSec=30s`、`LogRateLimitBurst=200`，防止异常循环重新形成高频写盘。
-- `/home/user/.local/bin/codex-cli-preflight` 改为健康时静默退出，仅在缺失 native package、执行修复或修复失败时写入 `codex-cli-preflight.log`；实测健康运行前后日志大小和 mtime 均不变。
-- 已通过 `npm run test:log-level`、`npm run check`、`bash -n /home/user/.local/bin/codex-cli-preflight`、`systemd-analyze --user verify codex-feishu-bot.service`，并回读 systemd 限流属性为 `30s/200`。
-- 所有改动已备份到 `/home/user/.codex/backups/xiaoce-log-hardening-20260710-100745`。历史 `journald` 约 1.6 GB、`~/.codex/log` 约 367 MB，本轮按删除保护规则未清理。
+- `$HOME/.local/bin/codex-cli-preflight` 改为健康时静默退出，仅在缺失 native package、执行修复或修复失败时写入 `codex-cli-preflight.log`；实测健康运行前后日志大小和 mtime 均不变。
+- 已通过 `npm run test:log-level`、`npm run check`、`bash -n $HOME/.local/bin/codex-cli-preflight`、`systemd-analyze --user verify codex-feishu-bot.service`，并回读 systemd 限流属性为 `30s/200`。
+- 所有改动已备份到 `$HOME/.codex/backups/xiaoce-log-hardening-20260710-100745`。历史 `journald` 约 1.6 GB、`~/.codex/log` 约 367 MB，本轮按删除保护规则未清理。
 - 2026-07-10 10:13:06 CST 已完成唯一一次飞书桥重启：服务 `active/running`、`NRestarts=0`、长连接成功；启动窗口 16 行且 routine RPC/delta/error 均为 0。13:18 后真实回合复查仍为 routine RPC/delta/token usage/rate limit/error 全部 0，默认模型保持 `gpt-5.6-terra/high`。
 
 # 2026-07-11 full_local_workspace 治理与脱敏收口
 
-- 新增显式 `full_local_workspace` permission profile，并通过 `config.toml` 的 `permission_profile`、`approval_policy=auto_for_workspace`、`permission_workspace_root=/home/user/projects/chuang-agent` 固定当前工作区。
+- 新增显式 `full_local_workspace` permission profile，并通过 `config.toml` 的 `permission_profile`、`approval_policy=auto_for_workspace`、`permission_workspace_root=$CHUANG_AGENT_ROOT` 固定当前工作区。
 - `StaticRuleGovernance` 已真正使用 permission profile 做运行时决策，不再只是 status 展示；普通本地读写、patch、构建、测试、扫描、报告和桌面操作自动执行并审计。
 - 高危边界继续保留：删除/清理/重置/卸载、支付/验证码、sudo/root、服务、网络配置、外部发送以及真实秘密材料读取/导出/上传均需明确审批。
 - secret shell 分类从裸关键词改为意图分类；`rg/grep` 扫描 token/key/password/secret 等源码词正常执行，`.env`、auth/credentials、私钥和秘密环境变量的真实读取继续拦截。
@@ -3380,7 +3380,7 @@
 
 # 2026-07-11 Chuang 满血工作区与模型子代理接通
 
-- Chuang 运行配置继续固定为 `full_local_workspace`、`auto_for_workspace` 和 `/home/user/projects/chuang-agent`；普通工作区读写、补丁、构建、测试和扫描自动执行，高危边界继续由 governance 审批。
+- Chuang 运行配置继续固定为 `full_local_workspace`、`auto_for_workspace` 和 `$CHUANG_AGENT_ROOT`；普通工作区读写、补丁、构建、测试和扫描自动执行，高危边界继续由 governance 审批。
 - 新增模型可调用的 `spawn_subagent` 工具，复用 queued dispatch、command runner、ReportAdmission 和 collect 主链；默认 worker 为 `gpt-5.6-luna`，分析任务只读，执行任务限工作区写入。
 - 状态面新增独立 `model_tool_worker_*` 字段，真实表达模型工具 worker 是否可用，同时保留 `live_worker_available` 对完整外部 worker/live-adapter 聚合的严格语义，避免把单 worker 成功误报成全局 live ready。
 - 子代理 runner 明确禁止删除、清理、reset、提权、服务/网络修改、支付/验证码、密钥导出、外部推送、递归派发和核心记忆直写。

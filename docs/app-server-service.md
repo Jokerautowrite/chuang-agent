@@ -113,7 +113,7 @@ The 2026-07-18 persistence and service validation also confirmed:
 ## Health Check
 
 ```bash
-cargo run -- app-server health --workspace-root /home/user/projects/chuang-agent --json
+cargo run -- app-server health --workspace-root $CHUANG_AGENT_ROOT --json
 ```
 
 The health command only loads and validates the workspace runtime config. It does not start a conversation and does not call the provider.

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/home/user/projects/chuang-agent"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION="${SESSION:-chuang-goal}"
-LOG_DIR="${LOG_DIR:-/home/user/.codex/chuang-goal-interactive}"
+LOG_DIR="${LOG_DIR:-$HOME/.codex/chuang-goal-interactive}"
 GOAL_FILE="$LOG_DIR/goal.txt"
 
 mkdir -p "$LOG_DIR"
@@ -19,7 +19,7 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 tmux new-session -d -s "$SESSION" -c "$ROOT" \
-  "bash -lc 'exec /home/user/.local/bin/codex --no-alt-screen'"
+  "bash -lc 'exec ${CODEX_BIN:-$HOME/.local/bin/codex} --no-alt-screen'"
 
 sleep 8
 tmux send-keys -t "$SESSION" "$(cat "$GOAL_FILE")" C-m

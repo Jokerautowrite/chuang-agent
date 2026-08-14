@@ -271,7 +271,7 @@ Provider live receipt, single-worker rehearsal, Feishu readonly collector code, 
 Start here:
 
 ```bash
-cd /home/user/projects/chuang-agent
+cd $CHUANG_AGENT_ROOT
 git status --short --branch
 cargo run -q -- status --json
 sh scripts/chuang-third-test-smoke.sh

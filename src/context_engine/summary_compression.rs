@@ -87,7 +87,7 @@ impl CompactionStrategy {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         Self::CASCADE_ORDER
             .iter()
             .copied()
@@ -107,25 +107,13 @@ pub struct CompactionCircuitBreakerStatus {
     pub skipped_compactions: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct BreakerState {
     consecutive_failures: usize,
     open: bool,
     opened_at: Option<DateTime<Utc>>,
     last_failure_at: Option<DateTime<Utc>>,
     skipped_compactions: u64,
-}
-
-impl Default for BreakerState {
-    fn default() -> Self {
-        Self {
-            consecutive_failures: 0,
-            open: false,
-            opened_at: None,
-            last_failure_at: None,
-            skipped_compactions: 0,
-        }
-    }
 }
 
 #[derive(Debug)]

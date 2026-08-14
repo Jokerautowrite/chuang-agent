@@ -123,7 +123,7 @@ fn app_server_service_runtime_snapshot_from_evidence_and_persistence(
     let caller_environment =
         app_server_gate_environment_from_values("caller_environment", &caller_environment);
     let service_environment = service_is_active(&evidence)
-        .then(|| evidence.process_environment.as_ref())
+        .then_some(evidence.process_environment.as_ref())
         .flatten()
         .map(|values| app_server_gate_environment_from_values("service_environment", values));
     let service_is_active = service_is_active(&evidence);

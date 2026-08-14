@@ -802,7 +802,7 @@ fn goal_evolve_approve_benchmark_rejects_when_no_baseline() {
     let tmp = unique_tmp("evolve-revert-nobaseline");
     let skills_root = tmp.join("skills");
     let benchmark_root = tmp.join("bench");
-    fs::create_dir_all(&benchmark_root.join("memory-recall")).expect("benchmark dir should exist");
+    fs::create_dir_all(benchmark_root.join("memory-recall")).expect("benchmark dir should exist");
     fs::write(
         benchmark_root.join("memory-recall").join("scoreboard.json"),
         serde_json::to_vec_pretty(&serde_json::json!({

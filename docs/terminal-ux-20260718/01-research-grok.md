@@ -196,12 +196,12 @@ chuang 已有：
 
 ## 6. 参考路径（本机）
 
-- `/home/user/.grok/docs/user-guide/01-getting-started.md` — Scrollback 内容清单  
-- `/home/user/.grok/docs/user-guide/03-keyboard-shortcuts.md` — 折叠、取消、队列、hint bar  
-- `/home/user/.grok/docs/user-guide/06-theming.md` — 块样式、截断、accent 槽  
-- `/home/user/.grok/docs/user-guide/15-agent-mode.md` — sessionUpdate 分型  
-- `/home/user/.grok/docs/user-guide/16-subagents.md` — 父时间线 lifecycle  
-- `/home/user/projects/chuang-agent/src/display_projector.rs` — 已有投影与默认安静策略  
+- `$HOME/.grok/docs/user-guide/01-getting-started.md` — Scrollback 内容清单  
+- `$HOME/.grok/docs/user-guide/03-keyboard-shortcuts.md` — 折叠、取消、队列、hint bar  
+- `$HOME/.grok/docs/user-guide/06-theming.md` — 块样式、截断、accent 槽  
+- `$HOME/.grok/docs/user-guide/15-agent-mode.md` — sessionUpdate 分型  
+- `$HOME/.grok/docs/user-guide/16-subagents.md` — 父时间线 lifecycle  
+- `$CHUANG_AGENT_ROOT/src/display_projector.rs` — 已有投影与默认安静策略  
 
 ---
 

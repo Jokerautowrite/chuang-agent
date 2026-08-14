@@ -45,12 +45,12 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-HOME_DIR="${HOME:-/home/user}"
+HOME_DIR="${HOME:-$HOME}"
 WATCHDOG_REPORT_FILE="${CHUANG_GOAL_WATCHDOG_REPORT_FILE:-$HOME_DIR/.codex/chuang-goal-interactive/latest-watchdog-report.json}"
 RUN_ROOT="${CHUANG_GOAL_RUN_ROOT:-$HOME_DIR/.codex/chuang-goal-runs}"
 OVERNIGHT_STATUS_FILE="${CHUANG_GOAL_OVERNIGHT_STATUS_FILE:-}"
 TMUX_SESSION="${CHUANG_GOAL_TMUX_SESSION:-chuang-codex-claude-goal}"
-AGENT_ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+AGENT_ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PROJECT_GOAL_RUN_FILE="${CHUANG_PROJECT_GOAL_RUN_FILE:-$AGENT_ROOT/context/goal-runs/mainline-mvp.json}"
 
 export FORMAT WATCHDOG_REPORT_FILE RUN_ROOT OVERNIGHT_STATUS_FILE TMUX_SESSION AGENT_ROOT PROJECT_GOAL_RUN_FILE

@@ -180,7 +180,7 @@ fn heartbeat_command(args: &[String]) -> Result<(), String> {
             let hits = if emotion_brain_enabled(&runtime.metadata) {
                 brain_query_semantic(
                     &EmotionBrainConfig::default(),
-                    &format!("主人 最近 心情 喜好 关心"),
+                    "主人 最近 心情 喜好 关心",
                     3,
                 )
             } else {

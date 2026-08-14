@@ -151,16 +151,10 @@ pub trait AcceptanceCheckContract {
 }
 
 /// 类型化验收计划：goal 定义时声明的全部验收检查。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct GoalAcceptancePlan {
     #[serde(default)]
     pub checks: Vec<AcceptanceCheck>,
-}
-
-impl Default for GoalAcceptancePlan {
-    fn default() -> Self {
-        Self { checks: Vec::new() }
-    }
 }
 
 impl GoalAcceptancePlan {
@@ -242,19 +236,15 @@ impl Default for GoalConvergencePolicy {
 ///
 /// - `Active`：系统持有（运行中默认），模型不可写。
 /// - `Complete|Blocked`：模型唯一可写的两个值。
-/// 解析失败/非法值一律归一化为 `Blocked`（fail-closed：控制通道坏了就停，不空转）。
+///   解析失败/非法值一律归一化为 `Blocked`（fail-closed：控制通道坏了就停，不空转）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum GoalStatus {
+    #[default]
     Active,
     Complete,
     Blocked,
-}
-
-impl Default for GoalStatus {
-    fn default() -> Self {
-        GoalStatus::Active
-    }
 }
 
 impl GoalStatus {

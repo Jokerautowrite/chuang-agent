@@ -1840,7 +1840,7 @@ fn build_memory_knowledge_context_segments(
 
 fn estimate_tokenish_count(text: &str) -> usize {
     let chars = text.chars().count();
-    ((chars + 3) / 4).max(1)
+    chars.div_ceil(4).max(1)
 }
 
 fn search_local_knowledge_root(

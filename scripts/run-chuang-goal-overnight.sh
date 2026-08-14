@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/home/user/projects/chuang-agent"
-CODEX_BIN="${CODEX_BIN:-/home/user/.local/bin/codex}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CODEX_BIN="${CODEX_BIN:-$HOME/.local/bin/codex}"
 DURATION_SECONDS="${DURATION_SECONDS:-21600}"
 ITERATION_TIMEOUT_SECONDS="${ITERATION_TIMEOUT_SECONDS:-2100}"
-RUN_ROOT="${RUN_ROOT:-/home/user/.codex/chuang-goal-runs}"
+RUN_ROOT="${RUN_ROOT:-$HOME/.codex/chuang-goal-runs}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 LOG_DIR="$RUN_ROOT/$RUN_ID"
 LAST_MESSAGE="$LOG_DIR/last-message.md"

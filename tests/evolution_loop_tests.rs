@@ -710,9 +710,11 @@ impl SkillEvolver for StubOuterLoopEvolver {
 fn slot_wiring_bridges_and_drives_outer_loop_like_cli_runtime() {
     let root = temp_skill_root("slot-wiring");
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    let mut canonical = CanonicalEvolutionConfig::default();
-    canonical.skill_root = root.clone();
-    canonical.auto_outer_loop = true;
+    let canonical = CanonicalEvolutionConfig {
+        skill_root: root.clone(),
+        auto_outer_loop: true,
+        ..Default::default()
+    };
     config.evolution = EvolutionConfig::Canonical(canonical);
     let mut slots = build_runtime_slots(&config).expect("canonical slots should build");
 
@@ -776,10 +778,12 @@ fn slot_wiring_bridges_and_drives_outer_loop_like_cli_runtime() {
 fn slot_noop_governance_wiring_rejects_without_writing() {
     let root = temp_skill_root("slot-noop");
     let mut config = RuntimeConfig::new(PathBuf::from("./data/chuang-agent.db"));
-    let mut canonical = CanonicalEvolutionConfig::default();
-    canonical.skill_root = root.clone();
-    canonical.auto_outer_loop = true;
-    canonical.governance = chuang_agent::runtime_config::CanonicalEvolutionGovernance::Noop;
+    let canonical = CanonicalEvolutionConfig {
+        skill_root: root.clone(),
+        auto_outer_loop: true,
+        governance: chuang_agent::runtime_config::CanonicalEvolutionGovernance::Noop,
+        ..Default::default()
+    };
     config.evolution = EvolutionConfig::Canonical(canonical);
     let mut slots = build_runtime_slots(&config).expect("canonical slots should build");
 

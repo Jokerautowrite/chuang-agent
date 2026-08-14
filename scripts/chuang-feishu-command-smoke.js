@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("assert");
+const path = require("path");
 const {
   buildBridgeErrorReply,
   buildHelpCommandReply,
@@ -15,6 +16,8 @@ const {
   sanitizeErrorMessage,
 } = require("./chuang-feishu-bridge-commands");
 
+const workspaceRoot = process.env.CHUANG_AGENT_WORKSPACE_ROOT || path.resolve(__dirname, "..");
+
 const reply = parseBridgeCommand(" /new ");
 assert(reply, "/new should be handled as a bridge command");
 assert.strictEqual(reply.commandName, "new");
@@ -23,7 +26,7 @@ assert(reply.replyText.includes("开新窗口/新上下文命令"));
 assert(reply.replyText.includes("不会进入 Agent 主链"));
 assert(reply.replyText.includes("不会消耗一轮任务"));
 assert(reply.replyText.includes("飞书机器人不能直接替你创建客户端窗口"));
-assert(reply.replyText.includes("/codex bind /home/user/projects/chuang-agent"));
+assert(reply.replyText.includes(`/codex bind ${workspaceRoot}`));
 assert(buildNewSessionCommandReply("chuang-thread-1").replyText.includes("当前 Feishu 聊天已切到新的 Chuang 会话"));
 
 assert.strictEqual(parseBridgeCommand("继续推进"), null);
@@ -130,28 +133,28 @@ assert(session.replyText.includes("当前会话"));
 const boundSession = buildSessionCommandReply({
   chatId: "chat-1",
   threadId: "chuang-thread-9",
-  workspaceRoot: "/home/user/projects/chuang-agent",
+  workspaceRoot,
   updatedAt: "2026-05-07T00:00:00.000Z",
 });
 assert(boundSession.replyText.includes("已绑定当前飞书聊天"));
 assert(boundSession.replyText.includes("chuang-thread-9"));
-assert(boundSession.replyText.includes("工作区：/home/user/projects/chuang-agent"));
+assert(boundSession.replyText.includes(`工作区：${workspaceRoot}`));
 
 const health = parseBridgeCommand("/health");
 assert(health, "/health should be handled as a bridge command");
 assert.strictEqual(health.commandName, "health");
 const healthReply = buildHealthCommandReply({
   bridgeReady: true,
-  workspaceRoot: "/home/user/projects/chuang-agent",
+  workspaceRoot,
   appServer: {
     running: true,
-    workspaceRoot: "/home/user/projects/chuang-agent",
+    workspaceRoot,
     lastError: "token=secret-value app_secret=hidden",
   },
   workspace: {
-    bridgeRoot: "/home/user/projects/chuang-agent",
-    appServerRoot: "/home/user/projects/chuang-agent",
-    inboundRoot: "/home/user/projects/chuang-agent",
+    bridgeRoot: workspaceRoot,
+    appServerRoot: workspaceRoot,
+    inboundRoot: workspaceRoot,
     rootsMatch: true,
   },
   session: { bound: true, threadId: "chuang-thread-9" },
@@ -163,7 +166,7 @@ const healthReply = buildHealthCommandReply({
 });
 assert(healthReply.replyText.includes("健康诊断"));
 assert(healthReply.replyText.includes("app-server：running"));
-assert(healthReply.replyText.includes("workspace：/home/user/projects/chuang-agent"));
+assert(healthReply.replyText.includes(`workspace：${workspaceRoot}`));
 assert(healthReply.replyText.includes("session：bound chuang-thread-9"));
 assert(healthReply.replyText.includes("CODEX_PPTOKEN_API_KEY=<set>"));
 assert(!healthReply.replyText.includes("secret-value"));

@@ -79,7 +79,7 @@ impl<S: MemoryStore> MemoryRecallPipeline<S> {
 
         let segments = ranked_hits
             .iter()
-            .map(|hit| recall_hit_to_segment(hit))
+            .map(recall_hit_to_segment)
             .collect::<Vec<_>>();
 
         let summary = ranked_hits

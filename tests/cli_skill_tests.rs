@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -22,7 +22,7 @@ fn test_skills_root(name: &str) -> PathBuf {
     root
 }
 
-fn seed_cli_canonical_skill(skills_root: &PathBuf, version: u32) -> PathBuf {
+fn seed_cli_canonical_skill(skills_root: &Path, version: u32) -> PathBuf {
     let path = skills_root.join("dry_run_skill_candidate_for_xiaoce.md");
     fs::write(
         &path,
@@ -938,7 +938,7 @@ fn cli_skill_deprecate_updates_seeded_canonical_file_without_deleting() {
     assert!(content.contains("Existing canonical body kept for lifecycle tests."));
 }
 
-fn seed_benchmark_scoreboard(benchmark_root: &PathBuf, id: &str, best_total: u16) -> PathBuf {
+fn seed_benchmark_scoreboard(benchmark_root: &Path, id: &str, best_total: u16) -> PathBuf {
     let dir = benchmark_root.join(id);
     fs::create_dir_all(&dir).expect("benchmark dir should be creatable");
     let board = serde_json::json!({

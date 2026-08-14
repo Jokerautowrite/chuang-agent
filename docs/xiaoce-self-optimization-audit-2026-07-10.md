@@ -43,7 +43,7 @@
 - 启动验收窗口共 16 行，长连接成功 1 次，routine RPC、delta 和错误均为 0。
 - 2026-07-10 13:18:44 CST 后的真实飞书回合再次统计：11 行，routine RPC、delta、token usage、rate limit 和错误均为 0。
 - 当前默认模型继续为 `gpt-5.6-terra`，reasoning effort 为 `high`，provider 未切换。
-- 自动验收报告：`/home/user/.codex/backups/xiaoce-log-hardening-20260710-100745/post-restart-verification.txt`。
+- 自动验收报告：`$HOME/.codex/backups/xiaoce-log-hardening-20260710-100745/post-restart-verification.txt`。
 
 ## 用户习惯固化
 
@@ -65,10 +65,10 @@
 
 ## 回滚点
 
-- 本轮文件级备份：`/home/user/.codex/backups/xiaoce-self-opt-20260710-093317`
-- 日志加固备份：`/home/user/.codex/backups/xiaoce-log-hardening-20260710-100745`
-- 旧 CLI 归档：`/home/user/.local/share/codex-cli/0.141.0`
-- 新 CLI 隔离副本：`/home/user/.local/share/codex-cli/0.144.1`
+- 本轮文件级备份：`$HOME/.codex/backups/xiaoce-self-opt-20260710-093317`
+- 日志加固备份：`$HOME/.codex/backups/xiaoce-log-hardening-20260710-100745`
+- 旧 CLI 归档：`$HOME/.local/share/codex-cli/0.141.0`
+- 新 CLI 隔离副本：`$HOME/.local/share/codex-cli/0.144.1`
 
 ## 后续验收
 

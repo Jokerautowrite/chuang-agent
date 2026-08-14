@@ -21,7 +21,7 @@ Chuang 的长期记忆方案不能简化成三层。老爸已明确：小创当�
 参考源：
 
 ```text
-/home/user/.hermes/memories/memory-management-guide.md
+$HOME/.hermes/memories/memory-management-guide.md
 ```
 
 ## 五层分工
@@ -127,7 +127,7 @@ memory lim extract --query TEXT [--session-id ID]：只读 dry-run 候选，输�
 Hermes 当前参考：
 
 ```text
-Obsidian wiki: /home/user/.hermes/wiki
+Obsidian wiki: $HOME/.hermes/wiki
 GBrain: 文件索引 + embedding + 语义召回
 ```
 

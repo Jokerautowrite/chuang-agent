@@ -80,8 +80,7 @@ fn goal_mode_negative_smoke_script_runs_not_ready_rejection_flow() {
     assert!(stdout.contains("blocked_report_reasons=none"));
     let final_line = stdout
         .lines()
-        .filter(|line| line.starts_with("goal_mode_negative_smoke_ok "))
-        .last()
+        .rfind(|line| line.starts_with("goal_mode_negative_smoke_ok "))
         .expect("script should print final marker");
     let fields = parse_key_value_line(final_line);
 

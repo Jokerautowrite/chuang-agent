@@ -260,8 +260,10 @@ fn parse_header(
     path: &Path,
     line: usize,
 ) -> Result<EntryBuilder, DiaryError> {
-    let mut builder = EntryBuilder::default();
-    builder.date = Some(date.to_string());
+    let mut builder = EntryBuilder {
+        date: Some(date.to_string()),
+        ..Default::default()
+    };
     if let Some((time, meta)) = rest.split_once('[') {
         builder.created_at = Some(time.trim().to_string());
         let meta = meta.trim_end_matches(']');

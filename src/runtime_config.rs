@@ -113,8 +113,9 @@ pub struct AnthropicCompatibleConfig {
     pub tls_ca_cert_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AnthropicApiEndpoint {
+    #[default]
     Messages,
 }
 
@@ -123,12 +124,6 @@ impl AnthropicApiEndpoint {
         match self {
             Self::Messages => "messages",
         }
-    }
-}
-
-impl Default for AnthropicApiEndpoint {
-    fn default() -> Self {
-        Self::Messages
     }
 }
 
@@ -151,8 +146,9 @@ impl std::fmt::Display for AnthropicApiEndpoint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProviderApiEndpoint {
+    #[default]
     Responses,
     ChatCompletions,
 }
@@ -163,12 +159,6 @@ impl ProviderApiEndpoint {
             Self::Responses => "responses",
             Self::ChatCompletions => "chat_completions",
         }
-    }
-}
-
-impl Default for ProviderApiEndpoint {
-    fn default() -> Self {
-        Self::Responses
     }
 }
 
@@ -233,7 +223,7 @@ pub enum ContextEngineConfig {
 /// 真值源：RuntimeConfig.metadata 透传键（config 的 [metadata] 段）：
 /// - `context_compaction_breaker_threshold`：连续失败 N 次熔断（默认 3）；
 /// - `context_compaction_breaker_cooldown_secs`：熔断冷却秒数，冷却后自动复位（默认 60）。
-/// 未配置时用默认值；引擎侧默认与之一致（summary_compression 模块常量）。
+///   未配置时用默认值；引擎侧默认与之一致（summary_compression 模块常量）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextCompactionConfig {
     pub breaker_threshold: usize,
@@ -310,15 +300,11 @@ pub struct SubagentLiveWorkerConfig {
 /// `noop` = 永不批准（安全默认，绝不写盘）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CanonicalEvolutionGovernance {
+    #[default]
     Policy,
     Noop,
-}
-
-impl Default for CanonicalEvolutionGovernance {
-    fn default() -> Self {
-        Self::Policy
-    }
 }
 
 impl std::str::FromStr for CanonicalEvolutionGovernance {

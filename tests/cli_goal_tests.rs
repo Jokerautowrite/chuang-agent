@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2476,7 +2476,7 @@ fn assert_rfc3339_timestamp(value: &str) {
     chrono::DateTime::parse_from_rfc3339(value).expect("created_at should be RFC3339");
 }
 
-fn plan_dispatch_goal(root: &PathBuf, queue_root: &PathBuf, goal_id: &str) {
+fn plan_dispatch_goal(root: &Path, queue_root: &Path, goal_id: &str) {
     let planned = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "goal",
@@ -2578,7 +2578,7 @@ fn build_cli_goal_report(
 }
 
 fn build_goal_checkpoint_args_from_collect(
-    root: &PathBuf,
+    root: &Path,
     goal_id: &str,
     receipt: &serde_json::Value,
     checkpoint_id: &str,

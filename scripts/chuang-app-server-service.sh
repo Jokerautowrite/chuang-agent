@@ -2,7 +2,7 @@
 # Supervise the canonical Chuang app-server Unix socket for the user service.
 set -euo pipefail
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKSPACE="${CHUANG_AGENT_WORKSPACE_ROOT:-$ROOT}"
 PROVIDER_ENV_FILE="${CHUANG_PROVIDER_ENV_FILE:-$HOME/.config/chuang-agent/provider.env}"
 BIN="${CHUANG_BIN:-$ROOT/target/debug/chuang-agent}"

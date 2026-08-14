@@ -115,9 +115,9 @@ impl EmotionDeltaExtractor for RuleEmotionDeltaExtractor {
         let positive = count_matches(&text, POSITIVE_WORDS);
         let negative = count_matches(&text, NEGATIVE_WORDS);
         let intense = count_matches(&text, INTENSE_WORDS);
-        let praise = count_matches(&user_only, PRAISE_WORDS);
-        let criticism = count_matches(&user_only, CRITICISM_WORDS);
-        let intimacy = count_matches(&user_only, INTIMACY_WORDS);
+        let praise = count_matches(user_only, PRAISE_WORDS);
+        let criticism = count_matches(user_only, CRITICISM_WORDS);
+        let intimacy = count_matches(user_only, INTIMACY_WORDS);
         let exclamations = user_input.matches(['！', '!']).count();
 
         // 愉悦度：正向词 +0.12，负向词 -0.14，封顶 ±0.6。
@@ -230,7 +230,7 @@ mod tests {
     use crate::responder::ScriptedResponder;
 
     fn extract(user: &str, reply: &str) -> EmotionDelta {
-        RuleEmotionDeltaExtractor::default().extract(user, reply)
+        RuleEmotionDeltaExtractor.extract(user, reply)
     }
 
     #[test]

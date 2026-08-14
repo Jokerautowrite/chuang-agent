@@ -59,7 +59,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OPERATOR="${CHUANG_FEISHU_LIVE_RECEIPT_OPERATOR:-<operator>}"
 REQUEST_ID="${CHUANG_FEISHU_LIVE_RECEIPT_REQUEST_ID:-feishu-live-receipt-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 EVENT_LOG_FILE="${CHUANG_FEISHU_EVENT_LOG_FILE:-/tmp/chuang-feishu-bridge-events.log}"

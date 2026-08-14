@@ -833,14 +833,9 @@ impl EmotionSlot for JiwenEmotionSlot {
             arousal_rise_force += r.pride_arousal_conflict_rate * mins;
         }
         let net_arousal = self.axes.arousal + arousal_regress_force + arousal_rise_force;
-        if arousal_regress_force < 0.0
-            && net_arousal < r.arousal_setpoint
-            && arousal_rise_force == 0.0
-        {
-            self.axes.arousal = r.arousal_setpoint;
-        } else if arousal_regress_force > 0.0
-            && net_arousal > r.arousal_setpoint
-            && arousal_rise_force == 0.0
+        if arousal_rise_force == 0.0
+            && ((arousal_regress_force < 0.0 && net_arousal < r.arousal_setpoint)
+                || (arousal_regress_force > 0.0 && net_arousal > r.arousal_setpoint))
         {
             self.axes.arousal = r.arousal_setpoint;
         } else {

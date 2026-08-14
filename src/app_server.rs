@@ -194,8 +194,8 @@ fn serve_json_lines<R: BufRead, W: Write>(
             "initialize" => Ok(handle_initialize()),
             "model/list" => handle_model_list(&params),
             "thread/start" => handle_thread_start(&mut *state, &params),
-            "thread/resume" => handle_thread_resume(&state, &params),
-            "thread/list" => Ok(handle_thread_list(&state)),
+            "thread/resume" => handle_thread_resume(state, &params),
+            "thread/list" => Ok(handle_thread_list(state)),
             "turn/start" => handle_turn_start(state, &params, writer),
             "turn/interrupt" => Err(
                 "turn_interrupt_unsupported: synchronous app-server turns cannot be interrupted"
@@ -584,6 +584,7 @@ impl AppServerDbLock {
         }
         let file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .read(true)
             .write(true)
             .mode(0o600)
@@ -1912,10 +1913,8 @@ fn prepare_live_turn(
         .and_then(|value| value.as_str())
         .map(normalize_workspace_root);
     let (input_text, image_paths) = extract_turn_input(params);
-    if input_text.is_empty() {
-        if image_paths.is_empty() {
-            return Err("turn/start requires non-empty input".to_string());
-        }
+    if input_text.is_empty() && image_paths.is_empty() {
+        return Err("turn/start requires non-empty input".to_string());
     }
     let goal_spec = extract_turn_goal(params)?;
 

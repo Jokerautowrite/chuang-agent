@@ -127,7 +127,7 @@ impl BenchmarkEvaluator {
                 });
                 raw.push(RawCaseEvaluation {
                     case_id: case.id.clone(),
-                    prompt: format!("<skipped: error answer>"),
+                    prompt: "<skipped: error answer>".to_string(),
                     model_output: answer_text.to_string(),
                     parsed: false,
                     parse_error: Some("error_answer_skipped".to_string()),

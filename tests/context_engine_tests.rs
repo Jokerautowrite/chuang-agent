@@ -979,12 +979,12 @@ fn compaction_strategy_cascade_enum_orders_and_degrades() {
 
     for strategy in CompactionStrategy::CASCADE_ORDER {
         assert_eq!(
-            CompactionStrategy::from_str(strategy.as_str()),
+            CompactionStrategy::parse(strategy.as_str()),
             Some(strategy),
             "as_str/from_str should round-trip for {strategy:?}"
         );
     }
-    assert_eq!(CompactionStrategy::from_str("bogus"), None);
+    assert_eq!(CompactionStrategy::parse("bogus"), None);
 }
 
 #[test]
@@ -1081,7 +1081,7 @@ fn summary_compression_breaker_skips_compression_while_open() {
         !memory.content.ends_with("..."),
         "breaker open should skip compression so long memory stays raw"
     );
-    assert!(memory.metadata.get("summary_compressed").is_none(),);
+    assert!(!memory.metadata.contains_key("summary_compressed"),);
     assert!(packed.compaction_events.iter().any(|event| event.kind
         == ContextCompactionEventKind::CompressionSkipped
         && event.reason.as_deref() == Some("circuit_breaker_open")));
@@ -1341,7 +1341,7 @@ fn summary_compression_recursion_guard_skips_already_summarized_segments() {
             "{id} must not be re-compressed"
         );
         assert!(
-            item.metadata.get("summary_compressed").is_none(),
+            !item.metadata.contains_key("summary_compressed"),
             "{id} must not be marked as re-compressed"
         );
     }
@@ -1393,7 +1393,7 @@ fn summary_compression_keeps_toolset_segments_untouched() {
         tool.content, tool_protocol,
         "toolset content must not change"
     );
-    assert!(tool.metadata.get("summary_compressed").is_none());
+    assert!(!tool.metadata.contains_key("summary_compressed"));
     let system = packed
         .segments
         .iter()

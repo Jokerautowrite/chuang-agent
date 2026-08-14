@@ -85,7 +85,7 @@ function loadEnv() {
     process.env.CHUANG_FEISHU_STATE_FILE || path.join(ROOT, "context", "feishu-session-state.json");
   FEISHU_SDK_MODULES =
     process.env.CHUANG_FEISHU_SDK_NODE_MODULES ||
-    "/home/user/agent-hub/plugins/agent-bridge/node_modules";
+    path.join(os.homedir(), "agent-hub", "plugins", "agent-bridge", "node_modules");
   EVENT_LOG_FILE =
     process.env.CHUANG_FEISHU_EVENT_LOG_FILE || "/tmp/chuang-feishu-bridge-events.log";
   process.env.NODE_PATH = `${FEISHU_SDK_MODULES}${process.env.NODE_PATH ? `:${process.env.NODE_PATH}` : ""}`;

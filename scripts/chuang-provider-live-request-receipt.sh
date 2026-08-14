@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 FORMAT="text"
 CONFIG_PATH=""
 REQUEST_INPUT="${CHUANG_PROVIDER_LIVE_INPUT:-provider live receipt probe: reply with ok only}"

@@ -1771,7 +1771,7 @@ fn build_skill_monitor_entry(path: &Path, content: &str) -> SkillMonitorEntry {
         .or_else(|| extract_lifecycle_value(content, "retirement_score"))
         .and_then(|raw| raw.parse::<u16>().ok());
     let has_previous_version_snapshot = extract_previous_version_snapshot(content).is_some();
-    let decay_candidate = status != "active" || score.map_or(false, |score| score < 75);
+    let decay_candidate = status != "active" || score.is_some_and(|score| score < 75);
     let rollback_available = has_previous_version_snapshot;
 
     SkillMonitorEntry {
@@ -1956,7 +1956,7 @@ pub(crate) fn default_skills_root() -> PathBuf {
 }
 
 fn sanitize_yaml_scalar(raw: &str) -> String {
-    raw.replace('\n', " ").replace('\r', " ")
+    raw.replace(['\n', '\r'], " ")
 }
 
 pub(crate) struct SkillProposeRequest {

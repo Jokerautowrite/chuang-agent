@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SESSION="${SESSION:-chuang-goal}"
 INTERVAL_SECONDS="${INTERVAL_SECONDS:-1800}"
-LOG_DIR="${LOG_DIR:-/home/user/.codex/chuang-goal-interactive}"
+LOG_DIR="${LOG_DIR:-$HOME/.codex/chuang-goal-interactive}"
 LOG_FILE="$LOG_DIR/watchdog.log"
 PANE_FILE="$LOG_DIR/last-pane.txt"
 PANE_LIST_FILE="$LOG_DIR/latest-panes.txt"
@@ -124,7 +124,7 @@ record_once() {
       echo "ALERT: goal tmux session is not running"
     fi
     echo "codex_processes:"
-    ps -eo pid,ppid,etime,cmd | rg 'codex --no-alt-screen|codex/codex|/home/user/.local/bin/codex' | rg -v 'rg ' >"$PROCESS_FILE" || true
+    ps -eo pid,ppid,etime,cmd | rg 'codex --no-alt-screen|codex/codex|/.local/bin/codex' | rg -v 'rg ' >"$PROCESS_FILE" || true
     cat "$PROCESS_FILE"
     echo "git_status:"
     git -C "$ROOT" status --short | sed -n '1,120p' >"$GIT_STATUS_FILE"

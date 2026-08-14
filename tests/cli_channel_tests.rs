@@ -3,7 +3,10 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde_json::Value;
 
@@ -53,7 +56,7 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
     request
 }
 
-fn write_workspace_config(workspace: &PathBuf) {
+fn write_workspace_config(workspace: &Path) {
     fs::create_dir_all(workspace.join("identity")).expect("identity dir should create");
     fs::create_dir_all(workspace.join("rules")).expect("rules dir should create");
     fs::write(workspace.join("identity/SOUL.md"), "Channel test soul\n")
@@ -95,7 +98,7 @@ transport = "stub"
     .expect("config should write");
 }
 
-fn write_identity_registry(workspace: &PathBuf) {
+fn write_identity_registry(workspace: &Path) {
     fs::write(
         workspace.join("identity/agents.toml"),
         r#"memory_body_id = "chuang-local-body"

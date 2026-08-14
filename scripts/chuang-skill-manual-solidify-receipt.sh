@@ -48,7 +48,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 REQUEST_ID="${CHUANG_SKILL_MANUAL_SOLIDIFY_REQUEST_ID:-skill-manual-solidify-receipt-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 PROPOSAL_ID="${CHUANG_SKILL_PROPOSAL_ID:-<fill_proposal_id>}"
 PROPOSAL_REF="${CHUANG_SKILL_PROPOSAL_REF:-<fill_proposal_ref>}"

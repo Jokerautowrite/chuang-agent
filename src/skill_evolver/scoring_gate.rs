@@ -48,16 +48,12 @@ impl SkillScoringGateConfig {
 /// 无基线时的门禁策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum NoBaselinePolicy {
     /// 无基线不优化：只允许首次登记（CreateRule）；UpdateRule（优化）拒绝，
     /// 不盲目改技能。
+    #[default]
     RejectOptimization,
-}
-
-impl Default for NoBaselinePolicy {
-    fn default() -> Self {
-        Self::RejectOptimization
-    }
 }
 
 impl NoBaselinePolicy {

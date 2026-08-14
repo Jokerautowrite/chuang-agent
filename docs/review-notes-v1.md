@@ -68,5 +68,5 @@ DeepSeek 给出的三份草案**有可用骨架，但还不够工程化，不能
 ---
 
 ## 当前文件
-- DeepSeek 原始草案：`/home/user/projects/chuang-agent/docs/deepseek-spec-draft.md`
-- 小创审稿版 V1：`/home/user/projects/chuang-agent/docs/spec-review-v1.md`
+- DeepSeek 原始草案：`$CHUANG_AGENT_ROOT/docs/deepseek-spec-draft.md`
+- 小创审稿版 V1：`$CHUANG_AGENT_ROOT/docs/spec-review-v1.md`

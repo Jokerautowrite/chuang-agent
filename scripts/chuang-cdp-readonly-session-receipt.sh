@@ -36,7 +36,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-ROOT="${CHUANG_AGENT_ROOT:-/home/user/projects/chuang-agent}"
+ROOT="${CHUANG_AGENT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 REQUEST_ID="${CHUANG_CDP_READONLY_RECEIPT_REQUEST_ID:-cdp-readonly-session-receipt-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 CDP_PORT="${CHUANG_CDP_PORT:-}"
 

@@ -10,7 +10,7 @@ This checklist is for the future Chuang Feishu bot. It must stay separate from C
 - Do not write Feishu secrets into repo files.
 - Store secrets in an external env file or service manager secret store.
 - Keep provider credentials separate from Feishu credentials. The current bridge reads `CHUANG_PROVIDER_ENV_FILE` and expects that external file to define `CODEX_PPTOKEN_API_KEY=<set>`.
-- Bind the channel to `/home/user/projects/chuang-agent` explicitly.
+- Bind the channel to `$CHUANG_AGENT_ROOT` explicitly.
 - For the current long-connection adapter, only `CHUANG_FEISHU_APP_ID` and `CHUANG_FEISHU_APP_SECRET` are mandatory; `CHUANG_FEISHU_BOT_ID` and `CHUANG_FEISHU_VERIFICATION_TOKEN` stay optional unless you later switch to a webhook-style adapter.
 - The Chuang bot env file must use Chuang-scoped Feishu names only: `CHUANG_FEISHU_*` plus `CHUANG_AGENT_WORKSPACE_ROOT` and provider-env pointers. Do not put generic `FEISHU_*`, `HERMES_FEISHU_*`, or `CODEX_FEISHU_*` credential names in this file; `channel feishu-check` treats app id, app secret, bot id, verification token, and encrypt key variants from those namespaces as isolation blockers.
 - `CHUANG_FEISHU_SDK_NODE_MODULES` may point to a shared local SDK installation path for dependency loading only; this does not mean credential/session/channel reuse. Runtime credentials, session state, and bridge service ownership must still stay Chuang-dedicated.
@@ -35,16 +35,16 @@ Before enabling the bot:
 
 ```bash
 node scripts/chuang-feishu-live-preflight.js \
-  --env-file /home/user/.codex-im/chuang-feishu-bridge.env \
+  --env-file $HOME/.codex-im/chuang-feishu-bridge.env \
   --json
 cargo run --quiet -- doctor --config config.toml
-CHUANG_PROVIDER_ENV_FILE=/home/user/.config/chuang-agent/provider.env \
+CHUANG_PROVIDER_ENV_FILE=$HOME/.config/chuang-agent/provider.env \
   scripts/chuang-app-server-health.sh
 cargo run --quiet -- channel feishu-check \
-  --env-file /home/user/.codex-im/chuang-feishu-bridge.env \
+  --env-file $HOME/.codex-im/chuang-feishu-bridge.env \
   --json
 cargo run --quiet -- channel simulate \
-  --workspace-root /home/user/projects/chuang-agent \
+  --workspace-root $CHUANG_AGENT_ROOT \
   --message-id preflight-msg \
   --sender-id preflight-user \
   --thread-id preflight-thread \

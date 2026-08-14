@@ -64,10 +64,10 @@ max_memory_segments = 3
         PathBuf::from("/home/user/projects/chuang-agent")
     );
     assert_eq!(config.subagent, SubagentConfig::QueuedExternal);
-    assert_eq!(config.subagent_live_worker.enabled, true);
+    assert!(config.subagent_live_worker.enabled);
     assert_eq!(config.subagent_live_worker.adapter_kind, "command");
     assert_eq!(config.subagent_live_worker.status, "configured_status_only");
-    assert_eq!(config.subagent_live_worker.starts_worker, false);
+    assert!(!config.subagent_live_worker.starts_worker);
     assert_eq!(
         config.context_engine,
         ContextEngineConfig::SummaryCompression
@@ -294,15 +294,15 @@ starts_worker = "false"
     .expect("section live worker config should parse");
 
     let summary = config.summary().subagent_live_worker;
-    assert_eq!(config.subagent_live_worker.enabled, true);
+    assert!(config.subagent_live_worker.enabled);
     assert_eq!(config.subagent_live_worker.adapter_kind, "command");
     assert_eq!(config.subagent_live_worker.status, "configured_status_only");
-    assert_eq!(config.subagent_live_worker.starts_worker, false);
-    assert_eq!(summary.enabled, true);
+    assert!(!config.subagent_live_worker.starts_worker);
+    assert!(summary.enabled);
     assert_eq!(summary.adapter_kind, "command");
     assert_eq!(summary.status, "configured_status_only");
-    assert_eq!(summary.starts_worker, false);
-    assert_eq!(summary.available, false);
+    assert!(!summary.starts_worker);
+    assert!(!summary.available);
     assert!(summary.reason.contains("status only"));
 }
 
@@ -701,7 +701,7 @@ evolution = "canonical"
     assert!(matches!(
         &config.evolution,
         EvolutionConfig::Canonical(canonical)
-            if canonical.skill_root == PathBuf::from("./rules")
+            if canonical.skill_root.as_path() == std::path::Path::new("./rules")
                 && canonical.approval_threshold == 75
                 && canonical.detector.min_repeats == 2
                 && canonical.detector.window.is_none()

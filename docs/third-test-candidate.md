@@ -31,7 +31,7 @@
 - `sh scripts/chuang-third-test-smoke.sh` -> `third_test_candidate_smoke_ok`
 - `cargo test -q`
 - `scripts/chuang-provider-readiness-check.sh`
-- `cargo run --quiet -- channel feishu-check --env-file /home/user/.codex-im/chuang-feishu-bridge.env --json`
+- `cargo run --quiet -- channel feishu-check --env-file $HOME/.codex-im/chuang-feishu-bridge.env --json`
 - `node scripts/chuang-feishu-command-smoke.js`
 
 这些都属于本地可复验门禁，不要求真实 Feishu、不读 secret、不控制服务。`chuang-live-gaps-check.sh` 会输出三段矩阵：`local_contract=ready`、`preflight=ready_but_no_start`、`real_live=pending`，用于防止把本地合同或 ready-but-no-start 预检误写成真实 live。`chuang-candidate-verify.sh` 会把 live-gaps、operator checklist 只读摘要、operator receipt 模板结构断言、goal run status 只读摘要和 provider readiness check 纳入候选门禁；provider readiness check 只读取 `status --json` 的 `provider_readiness`，输出 `<set>/<missing>`，不连接真实 provider。runtime/report 状态面当前固定 `runtime_report_surface=11/26`，runtime event ledger、context compaction、goal/subagent admission refs、tool protocol errors 和 unified execution 摘要都已进入 readiness/status/channel/app-server/health/wrapper 复验面。
