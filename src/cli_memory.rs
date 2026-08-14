@@ -1938,7 +1938,11 @@ fn collect_knowledge_files(
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('.') || is_sensitive_knowledge_path(&path) {
+        // 敏感判断基于相对 root 的路径：macOS 的 /private/... 系统前缀不属于
+        // 知识库内容，不应触发跳过；只有知识根内部 secret/token/private 等
+        // 命名组件才被视为敏感。
+        let relative = path.strip_prefix(root).unwrap_or(path.as_path());
+        if name.starts_with('.') || is_sensitive_knowledge_path(relative) {
             continue;
         }
         let file_type = entry.file_type().map_err(|e| {
@@ -1972,17 +1976,20 @@ fn is_supported_knowledge_file(path: &std::path::Path) -> bool {
 }
 
 fn is_sensitive_knowledge_path(path: &std::path::Path) -> bool {
-    let path_text = path.display().to_string().to_ascii_lowercase();
-    [
+    // 只按路径组件判断，避免 macOS 的 /private/... 前缀被误判为敏感目录。
+    // 组件级匹配依然覆盖 .env、secrets/、tokens/ 等常见敏感位置。
+    let markers = [
         "secret",
         "token",
         "password",
         "private",
         ".env",
         "credential",
-    ]
-    .iter()
-    .any(|marker| path_text.contains(marker))
+    ];
+    path.components().any(|component| {
+        let text = component.as_os_str().to_string_lossy().to_ascii_lowercase();
+        markers.iter().any(|marker| text.contains(marker))
+    })
 }
 
 fn score_knowledge_line(line_lower: &str, needle: &str) -> u32 {

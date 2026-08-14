@@ -48,6 +48,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Provide mock codex binary (subagent status asserts it on PATH)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\mockbin" | Out-Null
+          Set-Content -Path "$env:RUNNER_TEMP\mockbin\codex" -Value "exit 0"
+          echo "$env:RUNNER_TEMP\mockbin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
       - run: cargo fmt --all -- --check
       - run: cargo check --locked --all-targets
       - run: cargo test --locked --all-targets
@@ -79,6 +85,14 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install ripgrep (used by mainchain terminal task matrix fixture)
+        run: brew install ripgrep
+      - name: Provide mock codex binary (subagent status asserts it on PATH)
+        run: |
+          mkdir -p /tmp/mockbin
+          printf '#!/bin/sh\nexit 0\n' > /tmp/mockbin/codex
+          chmod +x /tmp/mockbin/codex
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
       - run: cargo fmt --all -- --check
       - run: cargo check --locked --all-targets
       - run: cargo test --locked --all-targets
@@ -90,4 +104,3 @@ jobs:
 
           python3 -m py_compile scripts/chuang-configure-platform-actuator.py
           osacompile -l JavaScript -o /tmp/chuang-actuator.scpt scripts/chuang-real-actuator-adapter-macos.js
-

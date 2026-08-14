@@ -5302,7 +5302,11 @@ allowed_channels = ["app-server"]
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            max_tokens: if cfg!(windows) { 2650 } else { 2600 },
+            max_tokens: if cfg!(any(windows, target_os = "macos")) {
+                2700
+            } else {
+                2600
+            },
             reserve_system_tokens: 1200,
             min_working_tokens: 1,
             max_tool_results: 5,
