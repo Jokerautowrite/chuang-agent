@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,32 +13,82 @@ fn temp_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("chuang-agent-doctor-test-{name}-{nanos}"))
 }
 
+/// doctor 的 goal_run 就绪度按进程 CWD 的 ./context/goal-runs 读取；
+/// 干净 clone 没有运行期 goal-run 数据，因此测试自建最小合法 fixture，
+/// 并把子进程 CWD 指到临时 root，保证断言不依赖仓库内未提交文件。
+fn write_goal_run_fixture(root: &Path) {
+    let mut goal_run = chuang_agent::goal_run::GoalRun::new(
+        chuang_agent::goal_mode::GoalSpec::mainline_mvp("doctor fixture"),
+        vec![chuang_agent::goal_run::GoalWorkerPlan {
+            worker_id: "w1".to_string(),
+            objective: "fixture worker".to_string(),
+            write_scope_ids: vec!["scope1".to_string()],
+            validation_checks: vec!["true".to_string()],
+        }],
+        vec![chuang_agent::goal_run::GoalWriteScope {
+            scope_id: "scope1".to_string(),
+            paths: vec!["evidence.txt".to_string()],
+        }],
+        chuang_agent::goal_run::GoalValidationPlan {
+            commands: vec!["true".to_string()],
+        },
+        chuang_agent::goal_run::GoalIntegrationPolicy {
+            main_process_owns_integration: true,
+            workers_may_commit: false,
+            workers_may_touch_secrets: false,
+            require_worker_reports: false,
+        },
+    )
+    .expect("goal run fixture should build");
+    goal_run
+        .record_checkpoint(chuang_agent::goal_run::GoalCheckpoint::new(
+            "ck-1",
+            "fixture checkpoint summary",
+            vec!["w1".to_string()],
+            vec!["fixture validation note".to_string()],
+        ))
+        .expect("goal run checkpoint should record");
+    fs::create_dir_all(root.join("context/goal-runs")).expect("goal-runs dir should create");
+    fs::write(
+        root.join("context/goal-runs/mainline-mvp.json"),
+        serde_json::to_string_pretty(&goal_run).expect("goal run fixture should serialize"),
+    )
+    .expect("goal run fixture should write");
+}
+
 #[test]
 fn cli_doctor_reports_mvp_health_in_text() {
     let root = temp_root("text");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    fs::create_dir_all(root.join("rules")).expect("rules root should be created");
+    fs::write(
+        root.join("rules/core.md"),
+        "- Keep responses minimal and testable.\n",
+    )
+    .expect("core rule should write");
+    write_goal_run_fixture(&root);
     let config_path = root.join("config.toml");
     fs::write(
         &config_path,
         format!(
-            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\n",
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nrules_root = \"{}\"\nrules_core_path = \"{}\"\n",
             root.join("memory.db").display(),
-            root.join("identity").display()
+            root.join("identity").display(),
+            root.join("rules").display(),
+            root.join("rules/core.md").display()
         ),
     )
     .expect("config should be written");
 
-    let output = Command::new("cargo")
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .current_dir(&root)
         .args([
-            "run",
-            "--quiet",
-            "--",
             "doctor",
             "--config",
             config_path.to_str().expect("config path should be utf8"),
         ])
         .output()
-        .expect("cargo run should execute");
+        .expect("doctor should execute");
 
     assert!(
         output.status.success(),
@@ -214,22 +264,29 @@ fn cli_doctor_reports_mvp_health_in_text() {
 fn cli_doctor_can_render_json_without_secret_leak() {
     let root = temp_root("json");
     fs::create_dir_all(root.join("identity")).expect("identity root should be created");
+    fs::create_dir_all(root.join("rules")).expect("rules root should be created");
+    fs::write(
+        root.join("rules/core.md"),
+        "- Keep responses minimal and testable.\n",
+    )
+    .expect("core rule should write");
+    write_goal_run_fixture(&root);
     let config_path = root.join("config.toml");
     fs::write(
         &config_path,
         format!(
-            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\n",
+            "db_path = \"{}\"\nidentity_memory_root = \"{}\"\nrules_root = \"{}\"\nrules_core_path = \"{}\"\n",
             root.join("memory.db").display(),
-            root.join("identity").display()
+            root.join("identity").display(),
+            root.join("rules").display(),
+            root.join("rules/core.md").display()
         ),
     )
     .expect("config should be written");
 
-    let output = Command::new("cargo")
+    let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
+        .current_dir(&root)
         .args([
-            "run",
-            "--quiet",
-            "--",
             "doctor",
             "--json",
             "--config",
@@ -242,7 +299,7 @@ fn cli_doctor_can_render_json_without_secret_leak() {
             "gpt-5.5",
         ])
         .output()
-        .expect("cargo run should execute");
+        .expect("doctor should execute");
 
     assert!(
         output.status.success(),
