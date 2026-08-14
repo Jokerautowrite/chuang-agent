@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::path_utils::resolve_candidate_preserving_existing_symlinks;
+use crate::path_utils::{path_to_display_string, resolve_candidate_preserving_existing_symlinks};
 use crate::secret_redaction::redact_sensitive_text;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -72,6 +72,7 @@ pub struct WorkspaceFileAdapter {
 impl WorkspaceFileAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
+        let workspace_root = fs::canonicalize(&workspace_root).unwrap_or(workspace_root);
         let audit_root = workspace_root.join(".chuang-file-audit");
         Self {
             workspace_root,
@@ -103,7 +104,7 @@ impl WorkspaceFileAdapter {
 
         Ok(WorkspaceListResult {
             path: path.trim().to_string(),
-            resolved_path: dir.display().to_string(),
+            resolved_path: path_to_display_string(&dir),
             entries,
         })
     }
@@ -117,7 +118,7 @@ impl WorkspaceFileAdapter {
 
         Ok(WorkspaceReadResult {
             path: path.trim().to_string(),
-            resolved_path: file.display().to_string(),
+            resolved_path: path_to_display_string(&file),
             content: truncated.text,
             bytes: content.len(),
             lines: count_lines(&content),
@@ -153,7 +154,7 @@ impl WorkspaceFileAdapter {
         let diff_preview = build_write_diff_preview(path, previous_content.as_deref(), content);
         Ok(WorkspaceWriteResult {
             path: path.trim().to_string(),
-            resolved_path: file.display().to_string(),
+            resolved_path: path_to_display_string(&file),
             before_bytes: previous_content.as_ref().map(|value| value.len()),
             after_bytes: content.len(),
             changed: previous_content.as_deref() != Some(content),
@@ -200,7 +201,7 @@ impl WorkspaceFileAdapter {
                     write.file.display()
                 )
             })?;
-            changed_files.push(write.file.display().to_string());
+            changed_files.push(path_to_display_string(&write.file));
             let preview =
                 build_write_diff_preview(&write.path, write.previous.as_deref(), &write.next);
             diff_parts.push(format_patch_preview(write.kind, &write.path, &preview.text));
@@ -308,7 +309,7 @@ impl WorkspaceFileAdapter {
                 backup_path.display()
             )
         })?;
-        Ok(vec![backup_path.display().to_string()])
+        Ok(vec![path_to_display_string(&backup_path)])
     }
 
     fn resolve_workspace_path(&self, raw_path: &str) -> Result<PathBuf, String> {

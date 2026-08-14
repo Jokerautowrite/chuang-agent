@@ -737,15 +737,11 @@ fn build_native_https_connector(
             .enable_http1()
             .build())
     } else {
-        Ok(HttpsConnectorBuilder::new()
-            .with_native_roots()
-            .map_err(|error| ProviderConfigError {
-                field: "native_http_tls".to_string(),
-                message: error.to_string(),
-            })?
-            .https_or_http()
-            .enable_http1()
-            .build())
+        let tls_builder = match HttpsConnectorBuilder::new().with_native_roots() {
+            Ok(builder) => builder,
+            Err(_) => HttpsConnectorBuilder::new().with_webpki_roots(),
+        };
+        Ok(tls_builder.https_or_http().enable_http1().build())
     }
 }
 

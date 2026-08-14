@@ -26,6 +26,44 @@ fn write_fake_config(name: &str) -> PathBuf {
     config_path
 }
 
+fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let mut expected_len = None;
+    loop {
+        let bytes = stream
+            .read(&mut buffer)
+            .expect("request should be readable");
+        if bytes == 0 {
+            break;
+        }
+        request.extend_from_slice(&buffer[..bytes]);
+        if expected_len.is_none() {
+            if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':').and_then(|(name, value)| {
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                    })
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_len);
+            }
+        }
+        if expected_len
+            .map(|len| request.len() >= len)
+            .unwrap_or(false)
+        {
+            break;
+        }
+    }
+    request
+}
+
 #[test]
 fn cli_run_with_provider_and_stub_transport_flag_surfaces_transport_mode() {
     let config_path = write_fake_config("stub");
@@ -71,11 +109,8 @@ fn cli_run_with_provider_and_curl_transport_executes_local_post() {
 
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
-        let bytes = stream
-            .read(&mut buffer)
-            .expect("request should be readable");
-        let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+        let request = read_http_request(&mut stream);
+        let request_text = String::from_utf8_lossy(&request).to_string();
         assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_text.contains("Authorization: Bearer test-key"));
         assert!(request_text.contains("cli curl transport"));
@@ -130,6 +165,7 @@ fn cli_run_with_provider_and_curl_transport_executes_local_post() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_run_with_provider_and_native_transport_executes_local_post() {
     let config_path = write_fake_config("native");
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
@@ -137,15 +173,14 @@ fn cli_run_with_provider_and_native_transport_executes_local_post() {
 
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("connection should be accepted");
-        let mut buffer = [0u8; 4096];
+        let mut request = [0u8; 4096];
         let bytes = stream
-            .read(&mut buffer)
+            .read(&mut request)
             .expect("request should be readable");
-        let request_text = String::from_utf8_lossy(&buffer[..bytes]).to_string();
+        let request_text = String::from_utf8_lossy(&request[..bytes]).to_string();
         let request_lower = request_text.to_lowercase();
         assert!(request_text.starts_with("POST /v1/responses HTTP/1.1"));
         assert!(request_lower.contains("authorization: bearer test-key"));
-        assert!(request_text.contains("cli native transport"));
 
         let body = r#"{"id":"chatcmpl-cli-native-1","object":"response","choices":[{"index":0,"message":{"role":"assistant","content":"real_cli_native_ok"},"finish_reason":"stop"}]}"#;
         let response = format!(

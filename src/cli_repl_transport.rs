@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -17,6 +16,29 @@ use serde_json::{json, Value};
 
 use crate::cli_types::{CliOptions, ConversationHistoryItem};
 use crate::{spawn_repl_turn, spawn_repl_turn_task, LiveControlGate, RunningTurn};
+
+#[cfg(unix)]
+type AppServerStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type AppServerStream = std::net::TcpStream;
+
+#[cfg(unix)]
+fn connect_app_server(socket: &Path) -> Result<AppServerStream, String> {
+    AppServerStream::connect(socket).map_err(|error| {
+        format!(
+            "app_server_unavailable: socket={} error={error}",
+            socket.display()
+        )
+    })
+}
+
+#[cfg(windows)]
+fn connect_app_server(_socket: &Path) -> Result<AppServerStream, String> {
+    Err(
+        "app_server_socket_transport_unsupported_on_windows: set CHUANG_APP_SERVER_MODE=local"
+            .to_string(),
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReplTransportKind {
@@ -143,7 +165,7 @@ impl ReplTurnTransport {
         &self.workspace_root
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn thread_id(&self) -> Option<&str> {
         self.thread_id.as_deref()
     }
@@ -154,7 +176,17 @@ fn select_repl_transport(mode: Option<&str>, stub: bool) -> Result<ReplTransport
         return Ok(ReplTransportKind::Local);
     }
     match mode.map(str::trim).filter(|value| !value.is_empty()) {
-        None | Some("socket") => Ok(ReplTransportKind::AppServerSocket),
+        None => {
+            #[cfg(unix)]
+            {
+                Ok(ReplTransportKind::AppServerSocket)
+            }
+            #[cfg(windows)]
+            {
+                Ok(ReplTransportKind::Local)
+            }
+        }
+        Some("socket") => Ok(ReplTransportKind::AppServerSocket),
         Some("local") => Ok(ReplTransportKind::Local),
         Some(value) => Err(format!(
             "invalid_chuang_app_server_mode: {value}; expected socket or local"
@@ -274,12 +306,7 @@ fn app_server_stream_turn(
         Arc::clone(&progress_writer),
     );
     let result = (|| -> Result<Value, String> {
-        let mut stream = UnixStream::connect(socket).map_err(|error| {
-            format!(
-                "app_server_unavailable: socket={} error={error}",
-                socket.display()
-            )
-        })?;
+        let mut stream = connect_app_server(socket)?;
         let encoded = serde_json::to_string(&request)
             .map_err(|error| format!("app_server_client_json_encode_failed: {error}"))?;
         writeln!(stream, "{encoded}").map_err(|error| {
@@ -562,12 +589,7 @@ fn append_control_warning(path: &Path, message: &str, progress_writer: &Arc<Mute
 }
 
 fn app_server_rpc_request(socket: &Path, request: Value) -> Result<Value, String> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        format!(
-            "app_server_unavailable: socket={} error={error}",
-            socket.display()
-        )
-    })?;
+    let mut stream = connect_app_server(socket)?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .map_err(|error| format!("app_server_client_timeout_config_failed: {error}"))?;
@@ -750,7 +772,7 @@ fn copy_turn_value(extra: &mut BTreeMap<String, String>, turn: &Value, source: &
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Write};

@@ -1,13 +1,16 @@
 [Unit]
-Description=Chuang dedicated Feishu bridge
-# Keep this unit isolated from Codex/Hermes bridge units and credentials.
+
+Description=Chuang Agent dedicated Feishu bridge
 After=network-online.target chuang-agent-app-server.service
-Wants=network-online.target chuang-agent-app-server.service
+Wants=network-online.target
+
 
 [Service]
 Type=simple
 WorkingDirectory=/absolute/path/to/chuang-agent
-EnvironmentFile=/absolute/path/to/chuang-feishu-bridge.env
+
+EnvironmentFile=/absolute/path/to/chuang-agent/ops/systemd/chuang-feishu-bridge.env
+
 ExecStart=/absolute/path/to/chuang-agent/scripts/chuang-feishu-bridge.sh
 Restart=on-failure
 RestartSec=5

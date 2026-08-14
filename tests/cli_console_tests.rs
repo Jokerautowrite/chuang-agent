@@ -355,14 +355,19 @@ fn cli_console_snapshot_outputs_dashboard_json_without_actions() {
         .as_str()
         .expect("app server diagnostic summary")
         .contains("local warning"));
-    assert!(parsed["app_server_health"]["next_actions"]
+    let app_server_next_actions = parsed["app_server_health"]["next_actions"]
         .as_array()
-        .expect("app server next actions")
-        .iter()
-        .any(|action| action
-            .as_str()
-            .expect("next action")
-            .contains("configure an openai_compatible provider")));
+        .expect("app server next actions");
+    #[cfg(unix)]
+    assert!(app_server_next_actions.iter().any(|action| action
+        .as_str()
+        .expect("next action")
+        .contains("configure an openai_compatible provider")));
+    #[cfg(windows)]
+    assert!(app_server_next_actions.iter().any(|action| action
+        .as_str()
+        .expect("next action")
+        .contains("configure a real provider")));
     assert_eq!(parsed["terminal_watchdog"]["dispatches_tasks"], false);
     assert_eq!(parsed["terminal_watchdog"]["modifies_repo"], false);
     assert_eq!(parsed["terminal_watchdog"]["restarts_worker"], false);
@@ -427,7 +432,10 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains(
         "subagent_capability_mismatch_reason: live subagent preflight must reject missing or mismatched dispatch required_capabilities"
     ));
+    #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
+    #[cfg(windows)]
+    assert!(stdout.contains("external_ai_readiness: ok=true state=external_ai_adapter_partial"));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
     ));
@@ -459,7 +467,10 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     assert!(stdout.contains("plugins: 5"));
     assert!(stdout.contains("terminal_watchdog: available=false readable=false fresh=false diagnostic_status=missing readonly=true session=unknown tmux_session_present=unknown codex_process_count=unknown git_dirty=unknown next_action=run_watchdog_once_before_console_review"));
     assert!(stdout.contains("app_server_health: status=warning"));
+    #[cfg(unix)]
     assert!(stdout.contains("configure an openai_compatible provider"));
+    #[cfg(windows)]
+    assert!(stdout.contains("configure a real provider"));
     assert!(stdout.contains("plugin_registry: available=true ok=true plugin_count=5"));
 }
 

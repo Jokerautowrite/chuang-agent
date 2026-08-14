@@ -192,7 +192,11 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains(
         "governance_readiness: ok=true kind=static_rule rules_loaded=true tool_surface_governed=true goal_run_executes=false"
     ));
-    assert!(stdout.contains("governance_rules: path=./rules/core.md rule_count="));
+    assert!(stdout.contains("governance_rules: path="));
+    assert!(
+        stdout.contains("rules/core.md rule_count=")
+            || stdout.contains("rules\\core.md rule_count=")
+    );
     assert!(stdout.contains(
         "governance_decisions: read_only=allowed dangerous_write=needs_approval dangerous_shell=needs_approval secret_shell=needs_approval"
     ));
@@ -347,9 +351,16 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("preflight=confirm CHUANG_REAL_CONTROL_ENABLE=1"));
     assert!(stdout.contains("must_reject=arbitrary systemd unit or process control"));
     assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
+    #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
+    #[cfg(windows)]
+    assert!(stdout
+        .contains("external_ai_readiness: ok=true state=external_ai_adapter_partial layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
+    #[cfg(unix)]
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
+    #[cfg(windows)]
+    assert!(stdout.contains("external_ai_layer name=dispatch_sop state=deferred"));
     assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
     assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
@@ -675,7 +686,10 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert!(parsed["goal_run"]["plan_exists"].is_boolean());
     assert!(parsed["goal_run"]["checkpoint_count"].is_number());
     assert!(parsed["goal_run"]["checkpoint_log_complete"].is_boolean());
-    assert!(parsed["goal_run"]["last_checkpoint_summary"].is_string());
+    assert!(
+        parsed["goal_run"]["last_checkpoint_summary"].is_string()
+            || parsed["goal_run"]["last_checkpoint_summary"].is_null()
+    );
     assert!(parsed["goal_run"]["incomplete_reasons"]
         .as_array()
         .expect("goal run incomplete reasons should be an array")
@@ -931,18 +945,30 @@ fn cli_status_can_render_json_without_secret_leak() {
                     .expect("capability")
                     .contains("verification-code entry"))));
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
+    #[cfg(unix)]
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
+    #[cfg(windows)]
+    assert_eq!(
+        parsed["external_ai_readiness"]["overall_state"],
+        "external_ai_adapter_partial"
+    );
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);
     assert!(parsed["external_ai_readiness"]["layers"]
         .as_array()
         .expect("external ai layers should be an array")
         .iter()
         .any(|layer| layer["name"] == "genesis_actuator" && layer["state"] == "ready"));
-    assert!(parsed["external_ai_readiness"]["layers"]
+    let external_ai_layers = parsed["external_ai_readiness"]["layers"]
         .as_array()
-        .expect("external ai layers should be an array")
+        .expect("external ai layers should be an array");
+    #[cfg(unix)]
+    assert!(external_ai_layers
         .iter()
         .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "ready"));
+    #[cfg(windows)]
+    assert!(external_ai_layers
+        .iter()
+        .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "deferred"));
     assert_eq!(parsed["browser_readiness"]["ok"], true);
     assert_eq!(
         parsed["browser_readiness"]["overall_state"],

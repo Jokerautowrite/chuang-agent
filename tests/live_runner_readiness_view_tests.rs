@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
+#[cfg(unix)]
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -319,6 +320,7 @@ fn live_runner_readiness_view_status_json_exposes_blocked_reason_and_next_action
 }
 
 #[test]
+#[cfg(unix)]
 fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
     let empty_headless = std::env::temp_dir().join(format!(
         "chuang-live-runner-no-headless-{}",
@@ -620,6 +622,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
 }
 
 #[test]
+#[cfg(unix)]
 fn live_runner_readiness_view_script_text_output_lists_runtime_surface_fields() {
     let output = Command::new("bash")
         .arg("scripts/chuang-live-runner-readiness-view.sh")

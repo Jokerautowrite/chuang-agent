@@ -878,6 +878,7 @@ fn cli_goal_checkpoint_surfaces_last_checkpoint_diagnostics() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cli_goal_checkpoint_from_collect_persists_acceptance_verdicts() {
     let root = temp_goal_root("from-collect-acceptance");
     let queue_root = temp_goal_root("from-collect-acceptance-queue");

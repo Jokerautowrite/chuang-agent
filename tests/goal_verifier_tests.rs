@@ -14,6 +14,26 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+fn passing_command() -> &'static str {
+    "true"
+}
+
+#[cfg(windows)]
+fn passing_command() -> &'static str {
+    "exit 0"
+}
+
+#[cfg(unix)]
+fn failing_command() -> &'static str {
+    "false"
+}
+
+#[cfg(windows)]
+fn failing_command() -> &'static str {
+    "exit 1"
+}
+
 fn temp_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -396,7 +416,7 @@ fn evaluate_acceptance_check_evidence_fails_when_file_missing() {
 #[test]
 fn evaluate_acceptance_check_command_passes_on_zero_exit() {
     let root = temp_root("accept-command-pass");
-    let check = AcceptanceCheck::Command("true".to_string());
+    let check = AcceptanceCheck::Command(passing_command().to_string());
     let verdict = evaluate_acceptance_check(&root, &check, 1);
     assert!(verdict.passed, "true must pass: {}", verdict.reason);
     assert_eq!(verdict.check_index, 1);
@@ -407,7 +427,7 @@ fn evaluate_acceptance_check_command_passes_on_zero_exit() {
 #[test]
 fn evaluate_acceptance_check_command_fails_on_nonzero_exit() {
     let root = temp_root("accept-command-fail");
-    let check = AcceptanceCheck::Command("false".to_string());
+    let check = AcceptanceCheck::Command(failing_command().to_string());
     let verdict = evaluate_acceptance_check(&root, &check, 2);
     assert!(!verdict.passed);
     assert_eq!(verdict.check_index, 2);
@@ -421,8 +441,8 @@ fn evaluate_acceptance_plan_reports_each_check_by_index() {
     fs::write(root.join("report.md"), "RESULT=PASS\n").expect("write report");
     let plan = GoalAcceptancePlan::new(vec![
         AcceptanceCheck::Evidence(GoalEvidence::new("report.md")),
-        AcceptanceCheck::Command("true".to_string()),
-        AcceptanceCheck::Command("false".to_string()),
+        AcceptanceCheck::Command(passing_command().to_string()),
+        AcceptanceCheck::Command(failing_command().to_string()),
     ]);
     let verdicts = evaluate_acceptance_plan(&root, &plan);
     assert_eq!(verdicts.len(), 3);
@@ -562,6 +582,7 @@ fn goal_spec_legacy_json_without_acceptance_plan_deserializes() {
 fn cli_goal_verify_judges_acceptance_plan_by_evidence_and_command() {
     let root = temp_root("verify-cli");
     let bin = env!("CARGO_BIN_EXE_chuang-agent");
+    let command_acceptance = format!("command:{}", passing_command());
     let run = |args: &[&str]| {
         std::process::Command::new(bin)
             .args(args)
@@ -586,7 +607,7 @@ fn cli_goal_verify_judges_acceptance_plan_by_evidence_and_command() {
         "--acceptance",
         "evidence:done.md|3|RESULT=PASS",
         "--acceptance",
-        "command:true",
+        command_acceptance.as_str(),
     ]);
     assert!(plan.status.success(), "goal plan should succeed");
 

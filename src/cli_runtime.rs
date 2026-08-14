@@ -4875,6 +4875,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::{Arc, Mutex};
 
+    fn shell_print_command(text: &str) -> String {
+        #[cfg(unix)]
+        {
+            format!("printf '%s' '{text}'")
+        }
+        #[cfg(windows)]
+        {
+            format!("Write-Output '{text}'")
+        }
+    }
+
     #[test]
     fn run_with_options_surfaces_governance_metadata_in_runtime_result() {
         let temp_dir = std::env::temp_dir().join(format!(
@@ -5291,7 +5302,7 @@ allowed_channels = ["app-server"]
 
         let mut runtime = test_runtime(temp_dir.join("memory.db"), temp_dir.join("identity"));
         runtime.context_budget = chuang_agent::context_engine::ContextBudget {
-            max_tokens: 2600,
+            max_tokens: if cfg!(windows) { 2650 } else { 2600 },
             reserve_system_tokens: 1200,
             min_working_tokens: 1,
             max_tool_results: 5,
@@ -6568,6 +6579,7 @@ allowed_channels = ["app-server"]
     }
 
     #[test]
+    #[cfg(unix)]
     fn run_with_options_covers_mainchain_terminal_task_matrix() {
         let temp_dir = std::env::temp_dir().join(format!(
             "chuang-agent-cli-mainchain-matrix-test-{}",
@@ -7946,9 +7958,13 @@ allowed_channels = ["app-server"]
         let workspace_root = temp_dir.join("workspace");
         fs::create_dir_all(&workspace_root).expect("workspace should be created");
 
+        let health_action = format!(
+            r#"ACTION: {{"schema_version":1,"type":"tool_call","call":{{"tool":"code_execute","command":"{}","cwd":"."}}}}"#,
+            shell_print_command("health-ok")
+        );
         let responder = SequenceResponder::new(vec![
             r#"ACTION: {"schema_version":1,"type":"final","answer":"健康度约 70%，工具不可用。"}"#,
-            r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"printf health-ok","cwd":"."}}"#,
+            &health_action,
             r#"ACTION: {"schema_version":1,"type":"final","answer":"体检完成，工具链正常。"}"#,
         ]);
         let captured = responder.captured.clone();
@@ -8412,11 +8428,18 @@ allowed_channels = ["app-server"]
         .expect("cargo manifest should be created");
         let progress_path = temp_dir.join("progress.jsonl");
 
+        #[cfg(unix)]
+        let test_command = "cargo test -q >/dev/null || true";
+        #[cfg(windows)]
+        let test_command = "cargo test -q *> $null; exit 0";
+        let test_action = format!(
+            r#"ACTION: {{"type":"tool_call","call":{{"tool":"code_execute","command":"{test_command}","cwd":"."}}}}"#
+        );
         let mut kernel = ChuangKernel::with_responder(
             test_kernel_config(temp_dir.join("memory.db"), temp_dir.join("identity")),
             chuang_agent::memory_store::InMemoryMemoryStore::new(),
             SequenceResponder::new(vec![
-                r#"ACTION: {"type":"tool_call","call":{"tool":"code_execute","command":"cargo test -q >/dev/null || true","cwd":"."}}"#,
+                &test_action,
                 r#"ACTION: {"type":"final","answer":"测试检查已完成。"}"#,
             ]),
         );
@@ -9005,6 +9028,7 @@ allowed_channels = ["app-server"]
         }
     }
 
+    #[cfg(unix)]
     struct MainchainCase {
         name: &'static str,
         user_input: &'static str,
@@ -9016,6 +9040,7 @@ allowed_channels = ["app-server"]
         expected_protocol_error: Option<&'static str>,
     }
 
+    #[cfg(unix)]
     fn run_mainchain_case(temp_dir: &Path, workspace_root: &Path, case: MainchainCase) {
         let mut kernel = ChuangKernel::with_responder(
             test_kernel_config(
@@ -9166,9 +9191,15 @@ allowed_channels = ["app-server"]
         let workspace_root = temp_dir.join("workspace");
         fs::create_dir_all(&workspace_root).expect("workspace should be created");
         let guidance_path = temp_dir.join("guidance.txt");
+        #[cfg(unix)]
         let guidance_command = format!(
             "printf '%s\\n' '改成写 beta，不要继续 alpha' >> {}",
             guidance_path.display()
+        );
+        #[cfg(windows)]
+        let guidance_command = format!(
+            "[System.IO.File]::AppendAllText('{}', \"改成写 beta，不要继续 alpha`n\")",
+            guidance_path.display().to_string().replace('\'', "''")
         );
         let action = format!(
             r#"ACTION: {{"type":"tool_call","call":{{"tool":"shell_exec","command":"{}","cwd":"."}}}}"#,

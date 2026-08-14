@@ -1,4 +1,4 @@
-//! `path_utils` 模块。公开接口：fn normalize_path_lexically, resolve_candidate_preserving_existing_symlinks。
+//! `path_utils` 模块。公开接口：fn normalize_path_lexically, path_to_display_string, resolve_candidate_preserving_existing_symlinks。
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -17,6 +17,20 @@ pub fn normalize_path_lexically(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+pub fn path_to_display_string(path: &Path) -> String {
+    let text = path.display().to_string();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    text
 }
 
 pub fn resolve_candidate_preserving_existing_symlinks(path: &Path) -> Result<PathBuf, String> {

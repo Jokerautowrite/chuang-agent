@@ -32,7 +32,7 @@ fn runtime_config_defaults_to_fake_provider_without_silent_network_use() {
     assert_eq!(summary.provider_request_timeout_ms, None);
     assert_eq!(summary.identity_memory_kind, "hermes_dual_file");
     assert_eq!(
-        summary.identity_experiences_path,
+        summary.identity_experiences_path.replace('\\', "/"),
         "./identity/experiences.md"
     );
     assert_eq!(summary.identity_user_max_chars, 1375);
