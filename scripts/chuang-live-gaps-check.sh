@@ -3,6 +3,7 @@ set -euo pipefail
 
 root_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mode="text"
+config_args=()
 work_dir="${TMPDIR:-/tmp}/chuang-agent-live-gaps-check-$$"
 status_json="$work_dir/status.json"
 preflight_json="$work_dir/live-preflight.json"
@@ -17,10 +18,26 @@ run_chuang() {
     fi
 }
 
-if [ "${1:-}" = "--json" ]; then
-    mode="json"
-elif [ "${1:-}" = "--help" ]; then
-    cat <<'EOF'
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json)
+      mode="json"
+      shift
+      ;;
+    --config)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' "error: missing value for --config" >&2
+        exit 2
+      fi
+      config_args+=("--config" "$2")
+      shift 2
+      ;;
+    --config=*)
+      config_args+=("--config" "${1#--config=}")
+      shift
+      ;;
+    --help)
+      cat <<'EOF'
 Usage: scripts/chuang-live-gaps-check.sh [--json]
 
 Read-only live readiness gap matrix.
@@ -33,11 +50,14 @@ It distinguishes:
 This script does not connect real Feishu/provider services, does not start workers,
 does not enable live gates, and does not print secret values.
 EOF
-    exit 0
-elif [ "${1:-}" != "" ]; then
-    printf '%s\n' "error: unsupported argument: $1" >&2
-    exit 2
-fi
+      exit 0
+      ;;
+    *)
+      printf '%s\n' "error: unsupported argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
 
 mkdir -p "$work_dir"
 
@@ -55,7 +75,7 @@ fi
 
 cd "$root_dir"
 
-run_chuang status --json > "$status_json"
+run_chuang status --json "${config_args[@]}" > "$status_json"
 run_chuang subagent live-preflight \
   --runner-command scripts/chuang-codex-runner.py \
   --allow-runner-command scripts/chuang-codex-runner.py \

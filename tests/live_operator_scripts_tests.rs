@@ -4,6 +4,15 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    write_live_readiness_config_with_transport(manifest_dir, "stub")
+}
+
+// 生成带指定 transport 的临时 config：stub 用于 placeholder 语义测试，
+// native 用于「非 placeholder、就绪语义」测试（status --json 只读，不发起真实请求）。
+fn write_live_readiness_config_with_transport(
+    manifest_dir: &std::path::Path,
+    transport: &str,
+) -> (PathBuf, PathBuf) {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock should be valid")
@@ -20,10 +29,11 @@ fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, Path
     fs::write(
         &config_path,
         format!(
-            "db_path = \"{}\"\nrecall_limit = 5\nidentity_memory_root = \"{}\"\nidentity_root = \"{root_dir}/identity\"\nsoul_path = \"{root_dir}/identity/SOUL.md\"\nstory_path = \"{root_dir}/identity/STORY.md\"\nfirst_wake_path = \"{root_dir}/identity/FIRST_WAKE.md\"\nagents_registry_path = \"{root_dir}/identity/agents.toml\"\nrules_root = \"{root_dir}/rules\"\nrules_core_path = \"{root_dir}/rules/core.md\"\nprovider = \"openai_compatible\"\nprovider_id = \"live-readiness-preflight-openai\"\nbase_url = \"https://api.example.com/v1\"\nmodel = \"gpt-live-readiness-preflight\"\napi_key_env = \"CHUANG_AGENT_LIVE_READINESS_PREFLIGHT_API_KEY\"\ntransport = \"stub\"\nsubagent = \"queued_external\"\nsubagent_queue_root = \"{}\"\nactuator = \"command\"\nactuator_program = \"sh\"\nactuator_args = \"{root_dir}/scripts/chuang-actuator-adapter-example.sh --json\"\nactuator_timeout_ms = 30000\ncontrol = \"command\"\nprogram = \"sh\"\nlist_args = \"{root_dir}/scripts/chuang-control-adapter-example.sh list --json\"\napply_args = \"{root_dir}/scripts/chuang-control-adapter-example.sh apply --json\"\ncontrol_timeout_ms = 30000\n",
+            "db_path = \"{}\"\nrecall_limit = 5\nidentity_memory_root = \"{}\"\nidentity_root = \"{root_dir}/identity\"\nsoul_path = \"{root_dir}/identity/SOUL.md\"\nstory_path = \"{root_dir}/identity/STORY.md\"\nfirst_wake_path = \"{root_dir}/identity/FIRST_WAKE.md\"\nagents_registry_path = \"{root_dir}/identity/agents.toml\"\nrules_root = \"{root_dir}/rules\"\nrules_core_path = \"{root_dir}/rules/core.md\"\nprovider = \"openai_compatible\"\nprovider_id = \"live-readiness-preflight-openai\"\nbase_url = \"https://api.example.com/v1\"\nmodel = \"gpt-live-readiness-preflight\"\napi_key_env = \"CHUANG_AGENT_LIVE_READINESS_PREFLIGHT_API_KEY\"\ntransport = \"{transport}\"\nsubagent = \"queued_external\"\nsubagent_queue_root = \"{}\"\nactuator = \"command\"\nactuator_program = \"sh\"\nactuator_args = \"{root_dir}/scripts/chuang-actuator-adapter-example.sh --json\"\nactuator_timeout_ms = 30000\ncontrol = \"command\"\nprogram = \"sh\"\nlist_args = \"{root_dir}/scripts/chuang-control-adapter-example.sh list --json\"\napply_args = \"{root_dir}/scripts/chuang-control-adapter-example.sh apply --json\"\ncontrol_timeout_ms = 30000\n",
             root.join("chuang-agent.db").display(),
             identity_memory_root.display(),
             subagent_queue_root.display(),
+            transport = transport,
             root_dir = manifest_dir.display(),
         ),
     )
@@ -32,15 +42,14 @@ fn write_live_readiness_config(manifest_dir: &std::path::Path) -> (PathBuf, Path
     (root, config_path)
 }
 
-// 从本地 config.toml 提取所有 *_api_key_env 引用的变量名，写入临时 provider.env。
-// 这样测试跟随当前配置（例如 CHUANG_PROXY_API_KEY / CHUANG_PROXY_STATIC_KEY），
-// 而不是硬编码某个旧变量名。
+// 从给定 config 提取所有 *_api_key_env 引用的变量名，写入临时 provider.env。
+// 这样测试跟随传入的 config（例如 CHUANG_AGENT_LIVE_READINESS_PREFLIGHT_API_KEY），
+// 而不是依赖仓库根 untracked config.toml（干净 clone 不存在）。
 fn write_provider_env_for_config(
-    manifest_dir: &std::path::Path,
+    config_path: &std::path::Path,
     temp_dir: &std::path::Path,
 ) -> PathBuf {
-    let config_path = manifest_dir.join("config.toml");
-    let config_text = fs::read_to_string(&config_path).expect("config.toml should be readable");
+    let config_text = fs::read_to_string(config_path).expect("config.toml should be readable");
     let mut vars: Vec<String> = Vec::new();
     for line in config_text.lines() {
         let line = line.trim();
@@ -463,13 +472,14 @@ fn provider_readiness_check_uses_provider_env_file_when_available() {
     ));
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
-    let provider_env = write_provider_env_for_config(&manifest_dir, &temp_dir);
+    let (_root, config_path) = write_live_readiness_config_with_transport(&manifest_dir, "native");
+    let provider_env = write_provider_env_for_config(&config_path, &temp_dir);
 
     let output = Command::new("bash")
         .arg(&script_path)
         .arg("--json")
         .arg("--config")
-        .arg(manifest_dir.join("config.toml"))
+        .arg(&config_path)
         .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
         .current_dir(&manifest_dir)
         .output()
@@ -507,11 +517,14 @@ fn live_gaps_check_uses_provider_env_file_when_available() {
     ));
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");
 
-    let provider_env = write_provider_env_for_config(&manifest_dir, &temp_dir);
+    let (_root, config_path) = write_live_readiness_config_with_transport(&manifest_dir, "native");
+    let provider_env = write_provider_env_for_config(&config_path, &temp_dir);
 
     let output = Command::new("bash")
         .arg(&script_path)
         .arg("--json")
+        .arg("--config")
+        .arg(&config_path)
         .env("CHUANG_PROVIDER_ENV_FILE", &provider_env)
         .env("CHUANG_AGENT_BIN", env!("CARGO_BIN_EXE_chuang-agent"))
         .current_dir(&manifest_dir)
@@ -626,9 +639,13 @@ fn live_gaps_check_reports_ready_with_verified_global_receipt_file() {
     )
     .expect("receipt should write");
 
+    let (_root, config_path) = write_live_readiness_config_with_transport(&manifest_dir, "native");
+
     let output = Command::new("bash")
         .arg(&script_path)
         .arg("--json")
+        .arg("--config")
+        .arg(&config_path)
         .env("CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE", &receipt_path)
         .env("CHUANG_AGENT_BIN", env!("CARGO_BIN_EXE_chuang-agent"))
         .current_dir(&manifest_dir)
