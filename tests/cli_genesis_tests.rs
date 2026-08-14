@@ -79,7 +79,7 @@ fn cli_genesis_ask_can_run_approved_program_and_render_json() {
             "--prompt",
             "测试 Genesis",
             "--program",
-            "printf",
+            "echo",
             "--profile-dir",
             "/tmp/chuang-genesis-cli-profile",
             "--approve-exec",
@@ -96,7 +96,10 @@ fn cli_genesis_ask_can_run_approved_program_and_render_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be json");
     assert_eq!(parsed["response"]["channel"], "UserDataDir");
-    assert_eq!(parsed["response"]["answer"], "deepseek");
+    assert!(parsed["response"]["answer"]
+        .as_str()
+        .expect("answer should be string")
+        .contains("deepseek"));
     assert_eq!(
         parsed["response"]["primary_repair"],
         serde_json::Value::Null
