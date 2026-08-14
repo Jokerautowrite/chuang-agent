@@ -30,7 +30,7 @@ impl FakeControlPlane {
     pub fn default_local_agents() -> Self {
         Self::new(vec![
             ManagedUnit {
-                unit_id: "hermes-xiaochuang".to_string(),
+                unit_id: "hermes-example".to_string(),
                 display_name: "小创".to_string(),
                 kind: ManagedUnitKind::Agent,
                 status: ManagedUnitStatus::Unknown,

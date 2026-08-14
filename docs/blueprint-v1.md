@@ -195,9 +195,9 @@ Interface Layer
 agent_id = "xiaoce"
 display_name = "小策"
 shell_kind = "codex-rust"
-memory_body_id = "xiaochuang-family"
+memory_body_id = "example-family"
 role = "engineering-executor"
-lineage = ["xiaochuang"]
+lineage = ["example-agent"]
 allowed_channels = ["codex-feishu"]
 ```
 

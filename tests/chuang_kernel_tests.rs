@@ -288,7 +288,7 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
             first_wake: "第一次醒来先确认身份、边界和老爸的禁令。".to_string(),
             first_wake_exists: true,
             agents_registry:
-                "agent_id = \"chuang\"\nagent_id = \"xiaochuang\"\nsecret = \"must-not-leak\""
+                "agent_id = \"chuang\"\nagent_id = \"example-agent\"\nsecret = \"must-not-leak\""
                     .to_string(),
             agents_registry_exists: true,
             active_identity: Some(AgentIdentity {
@@ -297,7 +297,7 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
                 shell_kind: "codex-rust".to_string(),
                 role: "local-agent-os-kernel".to_string(),
                 memory_body_id: "chuang-local-body".to_string(),
-                lineage: vec!["xiaochuang".to_string()],
+                lineage: vec!["example-agent".to_string()],
                 allowed_channels: vec!["cli".to_string()],
                 active: true,
             }),
@@ -314,7 +314,7 @@ fn chuang_kernel_injects_identity_bootstrap_snapshot_into_runtime_context() {
     assert!(turn.result.prompt.contains("identity-soul"));
     assert!(turn.result.prompt.contains("identity-active-agent"));
     assert!(turn.result.prompt.contains("\"agent_id\":\"chuang\""));
-    assert!(!turn.result.prompt.contains("\"agent_id\":\"xiaochuang\""));
+    assert!(!turn.result.prompt.contains("\"agent_id\":\"example-agent\""));
     assert!(!turn.result.prompt.contains("must-not-leak"));
     assert_eq!(
         snapshot.identity_first_wake_chars,

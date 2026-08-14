@@ -12,7 +12,7 @@ fi
 if [ "$command" = "list" ]; then
   printf '%s\n' '[
     {
-      "unit_id": "hermes-xiaochuang",
+      "unit_id": "hermes-example",
       "display_name": "小创",
       "kind": "agent",
       "status": "Running",
@@ -108,7 +108,7 @@ action = request.get("action", "")
 model_name = request.get("model_name")
 
 known_units = {
-    "hermes-xiaochuang",
+    "hermes-example",
     "hermes-xiaocheng",
     "openclaw-xiaoyun",
     "codex-xiaoce",

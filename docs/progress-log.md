@@ -617,7 +617,7 @@
 - wiki/gbrain receipt 支持真实本地数据源：wiki 读 `/opt/agent-hub/data/brain/wiki/index.md`（local_filesystem）；
   gbrain 走 `agent-hub-brain-query semantic` Unix socket（local_unix_socket，hybrid 检索 top score 0.89）。
   均显式标注 source_mode，HTTP 配置优先、本地为显式回退，不静默降级。
-- 收口产物：`data/receipts/global-real-live-verified-2026-08-06.json`（operator=xiaochuang，
+- 收口产物：`data/receipts/global-real-live-verified-2026-08-06.json`（operator=user，
   全部 7 项 service verified）；经 `CHUANG_GLOBAL_REAL_LIVE_RECEIPT_FILE` 注入状态面生效。
 - 提交：`e2d3b3c`（feishu 桥修复）、`82aaa4a`（chrome setsid+disable-gpu）、`c07fbf4`（browser state-file 回退）、
   `907e3ae`（desktop live）、`eb53ceb`（wiki/gbrain 本地源）。
