@@ -102,7 +102,7 @@ write_json_report() {
 
 record_once() {
   local now
-  now="$(date -Is)"
+  now="$(date +"%Y-%m-%dT%H:%M:%S%z")"
   {
     echo "===== watchdog $now ====="
     : >"$PANE_LIST_FILE"
