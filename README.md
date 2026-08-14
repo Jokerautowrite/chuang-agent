@@ -1,5 +1,11 @@
 # chuang-agent（创）
 
+[![CI](https://github.com/Jokerautowrite/chuang-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Jokerautowrite/chuang-agent/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Jokerautowrite/chuang-agent?color=44d62c&label=release)](https://github.com/Jokerautowrite/chuang-agent/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-44d62c)](https://github.com/Jokerautowrite/chuang-agent/actions)
+[![License](https://img.shields.io/badge/License-Source--Available--Non--Commercial-44d62c)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?color=44d62c)](CONTRIBUTING.md)
+
 **本地智能体操作系统 · 模型无关的 Agent 调度台**
 
 > 记忆是本体，Agent 只是壳。
