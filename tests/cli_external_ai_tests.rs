@@ -1,6 +1,30 @@
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+fn temp_config() -> (std::path::PathBuf, std::path::PathBuf) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be valid")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("chuang-agent-external-ai-{nanos}"));
+    std::fs::create_dir_all(&root).expect("temp root should create");
+    let config_path = root.join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+provider = "openai_compatible"
+provider_id = "external-ai-test-openai"
+base_url = "https://api.example.com/v1"
+model = "gpt-external-ai-test"
+api_key_env = "CHUANG_AGENT_EXTERNAL_AI_TEST_API_KEY"
+transport = "stub"
+"#,
+    )
+    .expect("config should write");
+    (root, config_path)
+}
 
 #[test]
 fn cli_external_ai_dispatch_outputs_dry_run_contract() {
@@ -43,6 +67,7 @@ fn cli_external_ai_dispatch_outputs_dry_run_contract() {
 
 #[test]
 fn cli_external_ai_dispatch_rejects_unsupported_live_platform() {
+    let (_root, config_path) = temp_config();
     let output = Command::new(env!("CARGO_BIN_EXE_chuang-agent"))
         .args([
             "external-ai",
@@ -53,7 +78,10 @@ fn cli_external_ai_dispatch_rejects_unsupported_live_platform() {
             "collect architecture concerns",
             "--context",
             "bounded context only",
+            "--config",
+            config_path.to_str().expect("config path should be utf8"),
         ])
+        .env("CHUANG_AGENT_EXTERNAL_AI_TEST_API_KEY", "test-key")
         .output()
         .expect("external-ai dispatch should execute");
 
