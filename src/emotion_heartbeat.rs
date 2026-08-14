@@ -317,6 +317,24 @@ pub fn build_proactive_prompt(
 mod tests {
     use super::*;
     use crate::emotion_slot::EmotionAxes;
+    use chrono::TimeZone;
+
+    // 构造「宿主本地时区的指定时刻」。时间窗口用 chrono::Local 判断，
+    // 固定 +08:00 偏移在 UTC runner 上会落在窗口外导致 flaky。
+    fn local_ymd_hms(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> DateTime<Utc> {
+        chrono::Local
+            .with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .expect("valid local time")
+            .with_timezone(&Utc)
+    }
 
     fn metadata_pairs(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -403,10 +421,8 @@ mod tests {
 
     #[test]
     fn evaluate_heartbeat_respects_policy_and_threshold() {
-        // 固定为本地 15:00（在默认 9..=22 窗口内），避免测试运行时段影响结果。
-        let now = chrono::DateTime::parse_from_rfc3339("2026-08-07T15:00:00+08:00")
-            .expect("fixed time should parse")
-            .with_timezone(&Utc);
+        // 宿主本地 15:00（在默认 9..=22 窗口内），避免测试运行时段与时区影响结果。
+        let now = local_ymd_hms(2026, 8, 7, 15, 0, 0);
         let snapshot = EmotionStateSnapshot {
             axes: EmotionAxes {
                 connection: 0.8,
@@ -514,22 +530,16 @@ mod tests {
         };
         let ws = Path::new("/tmp/ws");
 
-        // 白天 10:00 → 允许。
-        let day = chrono::DateTime::parse_from_rfc3339("2026-08-07T10:00:00+08:00")
-            .expect("day time")
-            .with_timezone(&Utc);
+        // 本地白天 10:00 → 允许。
+        let day = local_ymd_hms(2026, 8, 7, 10, 0, 0);
         assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, day).is_some());
 
-        // 夜间 23:00 → 不触发（即使连接达标）。
-        let night = chrono::DateTime::parse_from_rfc3339("2026-08-07T23:00:00+08:00")
-            .expect("night time")
-            .with_timezone(&Utc);
+        // 本地夜间 23:00 → 不触发（即使连接达标）。
+        let night = local_ymd_hms(2026, 8, 7, 23, 0, 0);
         assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, night).is_none());
 
-        // 早上 8:00 → 不触发。
-        let early = chrono::DateTime::parse_from_rfc3339("2026-08-07T08:00:00+08:00")
-            .expect("early time")
-            .with_timezone(&Utc);
+        // 本地早上 8:00 → 不触发。
+        let early = local_ymd_hms(2026, 8, 7, 8, 0, 0);
         assert!(evaluate_heartbeat(&snapshot, &triggers, &state, &enabled, ws, early).is_none());
     }
 
