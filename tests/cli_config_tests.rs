@@ -224,7 +224,6 @@ fn cli_config_init_writes_default_config_without_overwriting() {
     assert!(content.contains("subagent = \"fake\""));
     assert!(content.contains("# api_key_env = \"CHUANG_AGENT_API_KEY\""));
 
-
     let second = Command::new("cargo")
         .args([
             "run",
