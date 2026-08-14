@@ -3576,3 +3576,22 @@
 - Kept Unix-domain app-server transport on Unix and made Windows local terminal mode explicit; unsupported Windows socket operations return structured errors.
 - Changed CLI dispatch ids to `queued-cli-<nanos>-<pid>` so lexical queue ordering remains FIFO across separate processes on Windows.
 - Verified the installed Windows terminal with offline `doctor`, `status --json`, and `ask`; external channels and real providers remain out of scope pending credentials.
+
+# 2026-08-14 开源 CI 平台兼容修复：linux/windows/macos 三平台全绿
+
+- **背景**：仓库公开后公司电脑负责 Windows/macOS 兼容，本机负责 CI 等部分；
+  目标是在 GitHub Actions 上 linux/windows/macos 三平台 `cargo test --locked --all-targets` 全绿。
+- **已合并的平台修复**（本机 + 公司侧）：
+  - 敏感路径组件级匹配（修 macOS `/private` 误判）、tight budget 测试余量、CI 各平台装
+    ripgrep / mock codex。
+  - app-server socket 路径缩短（macOS SUN_LEN 104 上限）、windows choco 装 ripgrep。
+  - `normalized_path_text` 统一 canonicalize（Windows `\\?\`/8.3 短路径、macOS
+    `/var`→`/private/var`）；socket 目录加短唯一后缀防 AddrInUse。
+- **本次修的两个 BSD/GNU 差异**：
+  - `tests/cli_genesis_tests.rs`：占位程序 `printf` → `echo`，断言 `== "deepseek"` →
+    `contains("deepseek")`。macOS BSD printf 多参数时按格式串重扫报
+    `missing format character`，GNU printf 则静默忽略多余参数。
+  - `scripts/chuang-goal-watchdog.sh`：`date -Is` → `date +"%Y-%m-%dT%H:%M:%S%z"`。
+    `-I` 是 GNU 扩展，BSD date 报 `invalid argument 's' for -I`。
+- **结果**：CI run 31804655330 linux ✅ windows ✅ macos ✅；本地
+  `cargo test --locked --all-targets` 126 组全绿。
