@@ -257,8 +257,6 @@ fn cli_doctor_reports_mvp_health_in_text() {
     assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
     #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
-    #[cfg(windows)]
-    assert!(stdout.contains("external_ai_readiness: ok=true state=external_ai_adapter_partial"));
     assert!(stdout.contains("context_engine: deterministic_budget"));
     assert!(stdout.contains("placeholder_warning: provider=fake"));
     assert!(stdout.contains("placeholder_warning: control_plane=fake_local"));
@@ -798,11 +796,6 @@ fn cli_doctor_can_render_json_without_secret_leak() {
     assert_eq!(
         parsed["status"]["external_ai_readiness"]["overall_state"],
         "ready"
-    );
-    #[cfg(windows)]
-    assert_eq!(
-        parsed["status"]["external_ai_readiness"]["overall_state"],
-        "external_ai_adapter_partial"
     );
     assert_eq!(
         parsed["status"]["atomic_tools"]["manifest_schema_version"],

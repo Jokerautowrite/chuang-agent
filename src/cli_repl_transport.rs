@@ -784,13 +784,18 @@ mod tests {
     use super::*;
 
     fn temp_socket(name: &str) -> PathBuf {
+        // Keep the socket path short: macOS caps sockaddr_un at SUN_LEN (104
+        // bytes) and its $TMPDIR is far longer than /tmp on Linux. A truncated
+        // name plus a short nonce keeps every platform well under the limit.
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be valid")
-            .as_nanos();
-        let root = env::temp_dir().join(format!("chuang-repl-transport-{name}-{nonce}"));
+            .as_nanos()
+            % 1_000_000_000;
+        let short_name: String = name.chars().take(10).collect();
+        let root = env::temp_dir().join(format!("crt-{short_name}-{nonce}"));
         fs::create_dir_all(&root).expect("socket parent should create");
-        root.join("app-server.sock")
+        root.join("s.sock")
     }
 
     fn test_options() -> CliOptions {

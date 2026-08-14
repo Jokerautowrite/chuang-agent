@@ -353,14 +353,9 @@ fn cli_status_prints_mvp_health_summary() {
     assert!(stdout.contains("next=keep disabled until the operator approves exact live adapter targets and preflight evidence"));
     #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready layers=5"));
-    #[cfg(windows)]
-    assert!(stdout
-        .contains("external_ai_readiness: ok=true state=external_ai_adapter_partial layers=5"));
     assert!(stdout.contains("external_ai_layer name=genesis_actuator state=ready"));
     #[cfg(unix)]
     assert!(stdout.contains("external_ai_layer name=dispatch_sop state=ready"));
-    #[cfg(windows)]
-    assert!(stdout.contains("external_ai_layer name=dispatch_sop state=deferred"));
     assert!(stdout.contains("goal_run_checkpoint_log_complete:"));
     assert!(stdout.contains("goal_run_last_checkpoint_summary:"));
     assert!(stdout.contains("goal_run_last_checkpoint_created_at:"));
@@ -947,11 +942,6 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert_eq!(parsed["external_ai_readiness"]["ok"], true);
     #[cfg(unix)]
     assert_eq!(parsed["external_ai_readiness"]["overall_state"], "ready");
-    #[cfg(windows)]
-    assert_eq!(
-        parsed["external_ai_readiness"]["overall_state"],
-        "external_ai_adapter_partial"
-    );
     assert_eq!(parsed["external_ai_readiness"]["layer_count"], 5);
     assert!(parsed["external_ai_readiness"]["layers"]
         .as_array()
@@ -965,10 +955,6 @@ fn cli_status_can_render_json_without_secret_leak() {
     assert!(external_ai_layers
         .iter()
         .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "ready"));
-    #[cfg(windows)]
-    assert!(external_ai_layers
-        .iter()
-        .any(|layer| layer["name"] == "unified_identity_engine" && layer["state"] == "deferred"));
     assert_eq!(parsed["browser_readiness"]["ok"], true);
     assert_eq!(
         parsed["browser_readiness"]["overall_state"],

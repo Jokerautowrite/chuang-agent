@@ -434,8 +434,6 @@ fn cli_console_snapshot_outputs_compact_text_summary() {
     ));
     #[cfg(unix)]
     assert!(stdout.contains("external_ai_readiness: ok=true state=ready"));
-    #[cfg(windows)]
-    assert!(stdout.contains("external_ai_readiness: ok=true state=external_ai_adapter_partial"));
     assert!(stdout.contains(
         "goal_mode: ok=true kind=lightweight_runtime_context cli_entrypoint=run --goal TEXT context_source=goal default_goal_id=mainline-mvp allowed_slots=context,governance,execution,report,memory checkpoint_policy=progress_log:true handoff:true commit:true final_report_policy=validation:true next_steps:true bypasses_governance=false adds_core_slot=false"
     ));

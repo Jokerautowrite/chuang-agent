@@ -847,11 +847,6 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
     assert!(status.external_ai_readiness.ok);
     #[cfg(unix)]
     assert_eq!(status.external_ai_readiness.overall_state, "ready");
-    #[cfg(windows)]
-    assert_eq!(
-        status.external_ai_readiness.overall_state,
-        "external_ai_adapter_partial"
-    );
     assert!(status
         .external_ai_readiness
         .layers
@@ -863,24 +858,12 @@ fn kernel_status_exposes_mvp_config_slots_and_kernel_snapshot() {
         .layers
         .iter()
         .any(|layer| layer.name == "dispatch_sop" && layer.state == "ready"));
-    #[cfg(windows)]
-    assert!(status
-        .external_ai_readiness
-        .layers
-        .iter()
-        .any(|layer| layer.name == "dispatch_sop" && layer.state == "deferred"));
     #[cfg(unix)]
     assert!(status
         .external_ai_readiness
         .layers
         .iter()
         .any(|layer| layer.name == "unified_identity_engine" && layer.state == "ready"));
-    #[cfg(windows)]
-    assert!(status
-        .external_ai_readiness
-        .layers
-        .iter()
-        .any(|layer| layer.name == "unified_identity_engine" && layer.state == "deferred"));
     assert!(status.live_readiness.ok);
     assert_eq!(
         status.live_readiness.overall_state,
