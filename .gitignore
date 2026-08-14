@@ -77,13 +77,9 @@ __pycache__/
 /config.toml
 # evolver 外环运行时状态（观察流 + 规则变更 journal）不入库
 /rules/.evolver/
-/identity/MEMORY.md
-/identity/USER.md
-/identity/experiences.md
-/identity/SOUL.md
-/identity/STORY.md
-/identity/FIRST_WAKE.md
-/identity/backup-*/
+# identity/ is 100% local-private runtime state (real SOUL/STORY/USER/MEMORY/agents.toml/diary)
+# Never publish. Public identity templates live in config.example.toml / docs.
+/identity/
 /__IDENTITY__/
 
 # OS / editor noise
@@ -99,3 +95,10 @@ ops/systemd/*.env
 
 # Local env files (real secrets stay untracked; keep *.env.example)
 /ops/systemd/*.env
+# Real systemd units contain local paths; only *.example are tracked
+/ops/systemd/*.service
+/ops/systemd/*.timer
+
+
+# Internal MIMO vision-model logo description draft (not for publish)
+/assets/mimo_desc.txt
