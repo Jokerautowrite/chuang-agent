@@ -39,6 +39,20 @@ fn write_fake_status_config(root: &Path) -> PathBuf {
     config_path
 }
 
+// 与 write_fake_status_config 相同，但 subagent 使用 queued_external，
+// 使 subagent_readiness 的 dispatch/report 层达到 ready（聚合视图断言 overall_state=ready）。
+fn write_queued_status_config(root: &Path) -> PathBuf {
+    let config_path = write_fake_status_config(root);
+    let mut text = fs::read_to_string(&config_path).expect("config should be readable");
+    text.push_str("subagent = \"queued_external\"\n");
+    text.push_str(&format!(
+        "subagent_queue_root = \"{}\"\n",
+        root.join("subagent-queue").display()
+    ));
+    fs::write(&config_path, text).expect("config should be updated");
+    config_path
+}
+
 #[test]
 fn live_runner_readiness_view_rejects_missing_allow_runner_command() {
     let output = cargo_command()
@@ -305,9 +319,13 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&empty_headless);
+    let config_root = temp_root("live-runner-readiness-view-config");
+    let config_path = write_queued_status_config(&config_root);
     let output = Command::new("bash")
         .arg("scripts/chuang-live-runner-readiness-view.sh")
         .arg("--json")
+        .arg("--config")
+        .arg(&config_path)
         .env("CHUANG_AGENT_ROOT", manifest_dir())
         .env_remove("CHUANG_CDP_PORT")
         .env("CHUANG_HEADLESS_STATE_DIR", &empty_headless)
@@ -379,10 +397,7 @@ fn live_runner_readiness_view_script_outputs_aggregated_json_view() {
         parsed["workspace_root"],
         manifest_dir().display().to_string()
     );
-    assert_eq!(
-        parsed["config_path"],
-        manifest_dir().join("config.toml").display().to_string()
-    );
+    assert_eq!(parsed["config_path"], config_path.display().to_string());
 
     let policy_tool_status = &parsed["policy_tool_status"];
     // 本机 config.toml 为免审批不受限测试模式时显示 unrestricted（kernel_status 有意区分）
