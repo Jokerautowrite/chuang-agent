@@ -148,8 +148,14 @@ fn parse_structured_action_result_reports_errors() {
         .expect_err("missing ACTION prefix should be structured error");
     assert_eq!(missing_prefix.code, "missing_action_prefix");
 
-    let invalid_json = parse_tool_action_envelope_result(r#"ACTION: {"type":"final""#)
-        .expect_err("bad ACTION json should be structured error");
+    let truncated_json = parse_tool_action_envelope_result(r#"ACTION: {"type":"final""#)
+        .expect_err("truncated ACTION json should be structured error");
+    assert_eq!(truncated_json.code, "truncated_action_json");
+    assert!(truncated_json.message.contains("truncated"));
+
+    let invalid_json =
+        parse_tool_action_envelope_result(r#"ACTION: {"type": "final"}"#)
+            .expect_err("bad ACTION json should be structured error");
     assert_eq!(invalid_json.code, "invalid_action_json");
     assert!(invalid_json.message.contains("ACTION payload is invalid"));
 

@@ -850,11 +850,12 @@ fn parse_action_json_prefix(
         .next()
         .transpose()
         .map_err(|error| {
-            protocol_error(
-                "invalid_action_json",
-                &format!("ACTION payload is invalid or unsupported: {error}"),
-                raw,
-            )
+            let (code, message) = if error.is_eof() {
+                ("truncated_action_json", format!("ACTION payload truncated mid-JSON ({error}); retry with a shorter command on the next attempt"))
+            } else {
+                ("invalid_action_json", format!("ACTION payload is invalid or unsupported: {error}"))
+            };
+            protocol_error(code, &message, raw)
         })?
         .ok_or_else(|| protocol_error("invalid_action_json", "ACTION payload is empty", raw))?;
     let trailing = json_text[stream.byte_offset()..].trim();
@@ -893,7 +894,7 @@ pub fn parse_final_answer(body: &str) -> Option<String> {
 
 pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
     let trimmed = body.trim();
-    if trimmed.starts_with("ACTION:") {
+    if trimmed.starts_with("ACTION:") || (!trimmed.starts_with("FINAL:") && trimmed.contains("ACTION: {")) {
         return match parse_tool_action_envelope_result(trimmed) {
             Ok(ToolActionEnvelope::ToolCall {
                 schema_version,
