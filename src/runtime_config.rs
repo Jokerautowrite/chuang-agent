@@ -561,7 +561,7 @@ impl RuntimeConfig {
     }
 
     /// knowledge_context（GBrain 直连 API 通道）显式开关：metadata
-    /// `knowledge_context=1` 时启用（与 emotion_brain 同款约定）。
+    /// `knowledge_context=1` 时启用。外脑=知识库，仅按需主动检索。
     pub fn knowledge_context_enabled(&self) -> bool {
         self.metadata
             .get("knowledge_context")

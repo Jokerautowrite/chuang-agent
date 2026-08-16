@@ -61,7 +61,7 @@ pub fn parse_runtime_config_file_with_options(
             .unwrap_or_else(|| "./data/chuang-agent.db".to_string()),
     ));
 
-    // [metadata] 段 → RuntimeConfig.metadata（任意键透传，如 emotion_brain=1）。
+    // [metadata] 段 → RuntimeConfig.metadata（任意键透传，如 knowledge_context=1）。
     for (key, value) in values.iter() {
         if let Some(metadata_key) = key.strip_prefix("metadata.") {
             config
@@ -1368,12 +1368,12 @@ mod tests {
             model_name = "stub"
 
             [metadata]
-            emotion_brain = "1"
+            mood = "1"
             channel = "cli"
         "#;
         let config = parse_runtime_config_file_with_options(content, options()).expect("parse");
         assert_eq!(
-            config.metadata.get("emotion_brain").map(String::as_str),
+            config.metadata.get("mood").map(String::as_str),
             Some("1")
         );
         assert_eq!(

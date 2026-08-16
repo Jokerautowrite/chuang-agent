@@ -1,3 +1,26 @@
+# 2026-08-17 删除 emotion_brain 外脑通道：主人记忆本地查，外脑=知识库按需检索
+
+- **背景**：田楠质疑：五轴状态机每轮跑对不对（答：对话提取是纯本地词表匹配、微秒级，
+  时间衰减走 tick 分钟级，保留）；外脑增强每轮查 gbrain 对不对（答：错——查的是
+  `user/preferences`/`user/mood-history`，本地身份记忆已有同样内容，纯冗余 + 每次
+  spawn 子进程 `agent-hub-brain-query semantic`，慢）。用户裁定：**删掉**。
+- **架构原则（田楠定）**：
+  - 主人偏好/情绪/记忆 → 本地身份记忆注入，不去外脑找；
+  - 外脑（GBrain）= 知识库，**仅按需主动检索**（`knowledge_context` 通道，默认 0）。
+- **删除**（commit 范围）：
+  - `src/emotion_brain.rs` 整个模块 + `lib.rs` 的 `pub mod emotion_brain`；
+  - `cli_runtime.rs`：`emotion_brain_enabled()`、`emotion_context_segment` 里的
+    `brain_query_semantic` 调用与 `brain_hit_count` metadata（函数签名去掉
+    `runtime`/`user_input` 参数），相关测试同步；
+  - `cli_emotion.rs`：heartbeat 里 `brain_query_semantic` 调用、
+    `generate_proactive_text` 的 `hits` 参数；
+  - `emotion_heartbeat.rs`：`build_proactive_prompt` 去掉 `hits` 参数与记忆行；
+  - config/example 删除 `emotion_brain` 键；注释同步（external_knowledge 标注
+    "外脑=知识库，仅按需主动检索"）。
+- **保留**：五轴状态机（对话提取 + 分钟级 tick）、心跳主动联系（timer 每 2h）、
+  `knowledge_context` 按需通道。
+- **验证**：全量 `cargo test` 0 失败；编译 0 warning。
+
 # 2026-08-17 按需化修复：gbrain/evolve 不再每轮空转 + transport 回 native
 
 - **背景**：田楠三连问（为什么每 turn 拉 gbrain？为什么每次 spawn curl？evolve 循环

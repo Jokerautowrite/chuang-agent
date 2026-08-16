@@ -247,8 +247,6 @@ pub(crate) fn run_with_options(
     // 情感状态注入：快照作为高优先级 context segment（可拔插；失败静默跳过）。
     if let Some(segment) = emotion_context_segment(
         &emotion_slot,
-        &runtime,
-        &request.user_input,
         &emotion_triggers,
     ) {
         runtime_context.push(segment);
@@ -296,35 +294,15 @@ pub(crate) fn run_with_options(
     remember_turn_if_requested(&request.options, &mut kernel, turn, request)
 }
 
-/// 是否启用 GBrain 外脑增强（默认关；metadata.emotion_brain=1 打开）。
-fn emotion_brain_enabled(runtime: &RuntimeConfig) -> bool {
-    runtime
-        .metadata
-        .get("emotion_brain")
-        .map(|value| value == "1")
-        .unwrap_or(false)
-}
-
 /// 情感快照 → 高优先级 context segment（priority 246：治理之后、身份用户之前）。
-/// 外脑可用时把主人相关记忆摘要追加进 prompt；不可用静默退化为纯本地快照。
+/// 纯本地快照：主人偏好/情绪记忆由本地身份记忆注入，不再查询外脑
+/// （外脑 = 知识库，仅按需主动检索，见 external_knowledge）。
 fn emotion_context_segment(
     emotion: &EmotionSlotRuntime,
-    runtime: &RuntimeConfig,
-    user_input: &str,
     triggers: &[EmotionTrigger],
 ) -> Option<ContextSegment> {
     let snapshot = emotion.snapshot().ok()?;
     let mut content = snapshot.prompt_context.clone();
-    let mut brain_hit_count = 0usize;
-    if emotion_brain_enabled(runtime) {
-        let hits = chuang_agent::emotion_brain::brain_query_semantic(
-            &chuang_agent::emotion_brain::EmotionBrainConfig::default(),
-            &format!("主人 当前心情 偏好 {user_input}"),
-            3,
-        );
-        brain_hit_count = hits.len();
-        content = chuang_agent::emotion_brain::augment_prompt_context(&snapshot, &hits);
-    }
     if !triggers.is_empty() {
         content.push_str("\n\n[情感提示] 主人离开了一阵子：");
         content.push_str(&render_emotion_triggers(triggers));
@@ -341,7 +319,6 @@ fn emotion_context_segment(
         metadata: std::collections::HashMap::from([
             ("kind".to_string(), "emotion_state".to_string()),
             ("emotion_slot".to_string(), emotion.kind().to_string()),
-            ("brain_hit_count".to_string(), brain_hit_count.to_string()),
             ("trigger_count".to_string(), triggers.len().to_string()),
         ]),
     })
@@ -9780,8 +9757,7 @@ allowed_channels = ["cli", "app-server"]
         );
         let emotion =
             EmotionSlotRuntime::Jiwen(chuang_agent::emotion_slot::JiwenEmotionSlot::default());
-        let segment = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样", &[])
-            .expect("emotion segment should build");
+        let segment = emotion_context_segment(&emotion, &[]).expect("emotion segment should build");
         assert_eq!(segment.id, "emotion-state");
         assert_eq!(segment.priority, 246);
         assert!(segment.content.contains("当前情绪状态"));
@@ -9793,26 +9769,10 @@ allowed_channels = ["cli", "app-server"]
             segment.metadata.get("emotion_slot").map(String::as_str),
             Some("jiwen")
         );
-        assert_eq!(
-            segment.metadata.get("brain_hit_count").map(String::as_str),
-            Some("0"),
-            "外脑默认关闭时不应发起查询"
-        );
-
-        // 外脑开启时：本机 GBrain 不可用必须静默降级（不阻断 segment 生成）。
-        runtime
-            .metadata
-            .insert("emotion_brain".to_string(), "1".to_string());
-        let augmented = emotion_context_segment(&emotion, &runtime, "主人今天状态怎么样", &[])
-            .expect("segment");
-        assert_eq!(augmented.priority, 246);
-        assert!(augmented.content.contains("当前情绪状态"));
 
         // 触发提示会追加进 segment 内容。
         let triggered = emotion_context_segment(
             &emotion,
-            &runtime,
-            "主人今天状态怎么样",
             &[chuang_agent::emotion_slot::EmotionTrigger::Contact {
                 urgency: 0.4,
                 forced: false,

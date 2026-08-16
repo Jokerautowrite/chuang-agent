@@ -1,7 +1,7 @@
 //! `external_knowledge` 模块。公开接口：trait ExternalKnowledgeRead；struct ExternalKnowledgeSourceConfig, ExternalKnowledgeConfig, ExternalKnowledgeReadRequest, ExternalKnowledgeReadHit, ExternalKnowledgePreflightStatus, ExternalKnowledgeReadStatus, FakeExternalKnowledgeReader, LiveExternalKnowledgeReader；enum ExternalKnowledgeSource；fn as_str, disabled, source_config, new, from_runtime, preflight_for_source, unavailable_preflight, unavailable_read_status。
 //!
 //! knowledge_context（GBrain 直连 API 通道）在这里启用：开关走
-//! `RuntimeConfig.metadata.knowledge_context=1`（与 emotion_brain 同款显式开关），
+//! `RuntimeConfig.metadata.knowledge_context=1`（显式开关，默认 0），
 //! endpoint/token_env/timeout 走 `runtime.external_knowledge.gbrain`；
 //! 真实 token 由 `token_env` 命名的环境变量在读取时解析，绝不写入结构体/日志/回执。
 //! 预检失败返回结构化状态（reason_code/reason），live 查询失败同样返回结构化

@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-use chuang_agent::emotion_brain::{brain_query_semantic, BrainHit, EmotionBrainConfig};
 use chuang_agent::emotion_heartbeat::{
     build_proactive_prompt, evaluate_heartbeat, restore_jiwen_from_state, HeartbeatPolicy,
     ProactiveOutbox,
@@ -85,22 +84,14 @@ fn load_runtime_strict(args: &[String]) -> Result<Option<RuntimeConfig>, String>
     }
 }
 
-fn emotion_brain_enabled(metadata: &std::collections::BTreeMap<String, String>) -> bool {
-    metadata
-        .get("emotion_brain")
-        .map(|value| value == "1")
-        .unwrap_or(false)
-}
-
 /// 用模型自由发挥生成主动消息；失败返回 None（调用方回退模板）。
 fn generate_proactive_text(
     runtime: &RuntimeConfig,
     snapshot: &EmotionStateSnapshot,
-    hits: &[BrainHit],
     now: chrono::DateTime<chrono::Utc>,
 ) -> Option<String> {
     let provider = build_provider_responder(&runtime.provider).ok()?;
-    let prompt = build_proactive_prompt(snapshot, hits, now);
+    let prompt = build_proactive_prompt(snapshot, now);
     let output = provider.generate(&ResponderRequest {
         prompt,
         user_input: String::new(),
@@ -177,16 +168,7 @@ fn heartbeat_command(args: &[String]) -> Result<(), String> {
     if let Some((mut message, today)) = decision {
         // 主动消息用模型自由发挥（不固定话术）；provider 缺失/失败回退模板。
         if let Some(runtime) = &strict_runtime {
-            let hits = if emotion_brain_enabled(&runtime.metadata) {
-                brain_query_semantic(
-                    &EmotionBrainConfig::default(),
-                    "主人 最近 心情 喜好 关心",
-                    3,
-                )
-            } else {
-                Vec::new()
-            };
-            if let Some(text) = generate_proactive_text(runtime, &snapshot, &hits, now) {
+            if let Some(text) = generate_proactive_text(runtime, &snapshot, now) {
                 message.text = text;
             }
         }

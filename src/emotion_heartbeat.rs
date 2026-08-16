@@ -288,28 +288,20 @@ pub fn evaluate_heartbeat(
 /// 构建「主动找主人说话」的模型 prompt（自由发挥，不固定话术）。
 pub fn build_proactive_prompt(
     snapshot: &EmotionStateSnapshot,
-    hits: &[crate::emotion_brain::BrainHit],
     now: chrono::DateTime<Utc>,
 ) -> String {
     let local = now.with_timezone(&chrono::Local);
     let weekday = local.format("%A").to_string();
     let time = local.format("%H:%M").to_string();
-    let mut memory_lines = String::new();
-    if !hits.is_empty() {
-        memory_lines.push_str("\n主人相关记忆（可能有用）：\n");
-        for hit in hits.iter().take(3) {
-            memory_lines.push_str(&format!("- {}: {}\n", hit.title, hit.snippet));
-        }
-    }
     format!(
         "你是创，一个陪伴型助手，正在主动找主人说句话。\n\
          现在：{weekday} {time}（本地时间）。\n\
          你此刻的感受：{}\n\
-         {}[要求] 像真人一样自然地说一句话，想说什么说什么；\
+         [要求] 像真人一样自然地说一句话，想说什么说什么；\
          没有特别想说的就随口关心/聊点日常也行。\
          不要固定模板、不要解释这是系统触发的、不要堆套话；\
          不超过 50 字；直接输出要发给主人的那句话。",
-        snapshot.prompt_context, memory_lines
+        snapshot.prompt_context
     )
 }
 

@@ -113,10 +113,9 @@ context_max_memory_segments = 5
 # 情感模块（EmotionSlot / 对话 delta / 心跳主动联系）参数。
 # 真值源：RuntimeConfig.metadata；[metadata] 段任意键透传。
 [metadata]
-# GBrain 外脑增强：情感快照 prompt 追加主人相关记忆摘要；外脑不可用静默降级。
-emotion_brain = "0"
 # GBrain 直连 API 通道（knowledge_context）：1=启用。预检/查询失败返回结构化
 # 状态并标记 knowledge 段 unavailable，不阻断主对话；真实 token 只走 env。
+# 外脑=知识库，仅按需主动检索；主人偏好/情绪等记忆由本地身份记忆注入，不查外脑。
 knowledge_context = "0"
 # 心跳主动联系：仅本地时间 start_hour..=end_hour 窗口内触发（夜间安静），
 # 连接需求≥门槛 且 距上次主动≥最小间隔 才触发，每日最多 max_per_day 次；

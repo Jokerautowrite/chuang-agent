@@ -23,7 +23,6 @@ pub mod control_surface;
 pub mod control_workflow;
 pub mod diary;
 pub mod display_projector;
-pub mod emotion_brain;
 pub mod emotion_delta;
 pub mod emotion_heartbeat;
 pub mod emotion_slot;
