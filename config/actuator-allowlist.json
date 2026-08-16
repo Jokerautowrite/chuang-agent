@@ -15,6 +15,14 @@
         "owner": "chuang",
         "risk": "browser"
       }
+    },
+    {
+      "app_name": "KCalc",
+      "open_command": ["kcalc"],
+      "metadata": {
+        "owner": "chuang",
+        "risk": "calculator"
+      }
     }
   ],
   "input_allowed": true,
