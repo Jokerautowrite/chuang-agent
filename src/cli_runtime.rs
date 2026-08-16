@@ -7,6 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chuang_agent::chuang_kernel::{
@@ -3116,8 +3117,6 @@ fn drive_evolution_outer_loop_after_turn(
         return;
     }
 
-    let bridge = EvolutionEventBridge::new();
-
     // 1) 从 turn 元数据读本 turn 的 ledger 事件（无工具事件的 turn 无该键 → 空流）。
     let ledger_events = turn
         .result
@@ -3127,6 +3126,36 @@ fn drive_evolution_outer_loop_after_turn(
         .get("runtime_event_ledger_json")
         .and_then(|raw| serde_json::from_str::<Vec<RuntimeEvent>>(raw).ok())
         .unwrap_or_default();
+
+    // 按需门禁（一）：只有本 turn 含可学习事件（工具执行/失败/审批）才驱动外环。
+    // bridge 的 map_event 也只消费 ToolFinished/TurnFailed/ApprovalRequested 三类，
+    // 其余 ledger 事件（TurnStarted/ProviderRequested 等）喂进去也是空转。
+    let has_learnable_event = ledger_events.iter().any(|event| {
+        matches!(
+            event.event_type,
+            chuang_agent::runtime_event_ledger::RuntimeEventKind::ToolFinished
+                | chuang_agent::runtime_event_ledger::RuntimeEventKind::TurnFailed
+                | chuang_agent::runtime_event_ledger::RuntimeEventKind::ApprovalRequested
+        )
+    });
+    if !has_learnable_event {
+        return;
+    }
+
+    // 按需门禁（二）：进程内频率节流。密集 turn（如 app-server 轮询）不会每轮
+    // 触发 detect → propose → governance → apply；距上次驱动不足配置间隔就跳过。
+    static LAST_DRIVE_UNIX_SECS: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let last = LAST_DRIVE_UNIX_SECS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < canonical.outer_loop_min_interval_secs {
+        return;
+    }
+    LAST_DRIVE_UNIX_SECS.store(now, Ordering::Relaxed);
+
+    let bridge = EvolutionEventBridge::new();
 
     // 2) 桥接喂入工具事件（ToolFinished → ToolSucceeded/ToolFailed 等）。
     if let Err(error) = bridge.observe_turn_events(evolution, &ledger_events) {

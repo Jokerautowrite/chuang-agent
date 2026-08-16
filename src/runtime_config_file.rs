@@ -1109,6 +1109,11 @@ fn parse_canonical_evolution(
         .map(|value| parse_bool("evolution.auto_outer_loop", value))
         .transpose()?
         .unwrap_or(false);
+    let outer_loop_min_interval_secs =
+        get_any(values, &["evolution.outer_loop_min_interval_secs"])
+            .map(|value| parse_u64("evolution.outer_loop_min_interval_secs", value))
+            .transpose()?
+            .unwrap_or(CanonicalEvolutionConfig::default().outer_loop_min_interval_secs);
 
     Ok(EvolutionConfig::Canonical(CanonicalEvolutionConfig {
         skill_root,
@@ -1120,6 +1125,7 @@ fn parse_canonical_evolution(
         },
         governance,
         auto_outer_loop,
+        outer_loop_min_interval_secs,
     }))
 }
 

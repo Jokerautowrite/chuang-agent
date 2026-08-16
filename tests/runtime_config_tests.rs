@@ -492,6 +492,10 @@ fn canonical_evolution_config_defaults_are_backward_compatible_and_valid() {
             !canonical.auto_outer_loop,
             "auto_outer_loop must default to off for backward compatibility"
         );
+        assert_eq!(
+            canonical.outer_loop_min_interval_secs, 300,
+            "outer_loop_min_interval_secs must default to 300s (5 min throttle)"
+        );
     } else {
         panic!("expected canonical evolution config");
     }

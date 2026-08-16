@@ -17,6 +17,9 @@ rules_core_path = "./rules/core.md"
 # 安全示例默认只生成 dry-run 提案，不自动修改规则。
 # - evolution = "canonical"：启用 canonical evolver（skill_root 与 governance 规则根同源 ./rules）
 # - auto_outer_loop = true：每个 agent turn 结束后自动驱动 detect → propose → governance → apply
+# - outer_loop_min_interval_secs = 300：外环最小驱动间隔（秒），即使 auto_outer_loop=true，
+#   距上次驱动不足该间隔也跳过。evolve 是按需/低频学习（有工具事件或失败才驱动 + 节流），
+#   不是每轮空转；纯文本闲聊 turn 无 ledger 事件时同样跳过。
 # - min_repeats = 2：同一失败签名跨 turn 重复达到 2 次才提议改规则（防误触发）
 # - approval_threshold = 75：自批准分数线，低于阈值不写盘
 # - governance 默认 policy：确定性证据门禁（无模型自评，缺失证据即拒绝）

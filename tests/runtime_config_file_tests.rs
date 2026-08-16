@@ -710,6 +710,7 @@ evolution = "canonical"
                 && canonical.detector.window.is_none()
                 && canonical.detector.failure_kinds.len() == 1
                 && !canonical.auto_outer_loop
+                && canonical.outer_loop_min_interval_secs == 300
     ));
     assert_eq!(config.summary().evolution_kind, "canonical");
 }
@@ -729,6 +730,25 @@ auto_outer_loop = true
         panic!("expected canonical evolution config");
     };
     assert!(canonical.auto_outer_loop);
+}
+
+#[test]
+fn config_file_parses_outer_loop_min_interval_secs() {
+    let config = parse_runtime_config_file(
+        r#"
+[evolution]
+kind = "canonical"
+auto_outer_loop = true
+outer_loop_min_interval_secs = 60
+"#,
+    )
+    .expect("canonical evolution with outer_loop_min_interval_secs should parse");
+
+    let EvolutionConfig::Canonical(canonical) = &config.evolution else {
+        panic!("expected canonical evolution config");
+    };
+    assert!(canonical.auto_outer_loop);
+    assert_eq!(canonical.outer_loop_min_interval_secs, 60);
 }
 
 #[test]

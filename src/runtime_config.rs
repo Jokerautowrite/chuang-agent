@@ -338,6 +338,10 @@ pub struct CanonicalEvolutionConfig {
     /// （detect → propose → governance → apply）。默认关闭，向后兼容：
     /// 配置只写 `evolution = "canonical"` 时不会突然开始自动写规则。
     pub auto_outer_loop: bool,
+    /// 外环驱动的最小间隔秒数（进程内节流）。即使 auto_outer_loop=true，
+    /// 距上次驱动不足该间隔也会跳过——evolve 是按需/低频学习，不是每轮空转。
+    /// 0 = 不节流（仅在显式按需场景使用）。
+    pub outer_loop_min_interval_secs: u64,
 }
 
 impl Default for CanonicalEvolutionConfig {
@@ -348,6 +352,8 @@ impl Default for CanonicalEvolutionConfig {
             detector: FailureDetectorConfig::default(),
             governance: CanonicalEvolutionGovernance::default(),
             auto_outer_loop: false,
+            // 默认 5 分钟：密集 turn（如 app-server 轮询）不会每轮触发外环。
+            outer_loop_min_interval_secs: 300,
         }
     }
 }

@@ -1,3 +1,30 @@
+# 2026-08-17 按需化修复：gbrain/evolve 不再每轮空转 + transport 回 native
+
+- **背景**：田楠三连问（为什么每 turn 拉 gbrain？为什么每次 spawn curl？evolve 循环
+  在干什么）后确认：这些不是设计，是三次「应急/实验」本地配置漂移。design 基线
+  （`config.example.toml`）默认全关/全保守，本地 config 被人为开成相反值一直没还债。
+  - `transport=curl`：08-06 应急切 curl 绕 5yuantoken 网关 502（`e198f65`），主通道
+    早已不是 5yuantoken，curl 理由已不存在。
+  - `emotion_brain=1` / `knowledge_context=1`：08-07/08-12 实验性本地开启
+    （`090323d` / `c550e9c`+`e253ded`），example 默认 0。
+  - evolve 外环每 turn 驱动（`3e3dbe7`，08-10），无事件门禁无节流，app-server
+    每 ~3.5 分钟空转一次 `patterns=0 proposals=0`。
+- **代码改动**：
+  - `src/runtime_config.rs`：`CanonicalEvolutionConfig` 新增
+    `outer_loop_min_interval_secs`（默认 300s，进程内节流）。
+  - `src/runtime_config_file.rs`：解析 `evolution.outer_loop_min_interval_secs`。
+  - `src/cli_runtime.rs` `drive_evolution_outer_loop_after_turn` 两层按需门禁：
+    (1) 事件门禁——仅当本 turn 含 ToolFinished/TurnFailed/ApprovalRequested 才驱动，
+    纯文本闲聊零开销；(2) 频率门禁——距上次驱动 < 300s 跳过（app-server 密集轮询不风暴）。
+- **配置改动**（`config.toml`）：
+  - `emotion_brain = "0"`、`knowledge_context = "0"`（按需，需要时 CLI 显式开）
+  - `transport = "native"`（主 8317 与 fallback2 10100 均实测 200；fallback1 5yuantoken
+    历史 native 502 保留 curl）
+  - 新增 `evolution.outer_loop_min_interval_secs = 300`
+- **验证**：全量 `cargo test` 0 失败（含新增默认值/解析断言）；`doctor` exit=0；
+  纯文本 turn 不再触发外环、工具 turn 正常触发；app-server 重启后 journal
+  无 `evolution_outer_loop_done` 空转（此前每 3.5 分钟一次）；内存从 5.9G 峰值回落。
+
 # 2026-08-16 ACTION 解析器容错加固：取最后一个完整 JSON + 截断补闭合 + 重试指令
 
 - **背景**：田楠排查 chuang 飞书「长时间不回应」时发现根因是模型在高上下文下用
