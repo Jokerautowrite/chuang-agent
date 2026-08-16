@@ -149,9 +149,10 @@ fn parse_structured_action_result_reports_errors() {
     assert_eq!(missing_prefix.code, "missing_action_prefix");
 
     let truncated_json = parse_tool_action_envelope_result(r#"ACTION: {"type":"final""#)
-        .expect_err("truncated ACTION json should be structured error");
+        .expect_err("unrepairable truncated ACTION json should be structured error");
     assert_eq!(truncated_json.code, "truncated_action_json");
     assert!(truncated_json.message.contains("truncated"));
+    assert!(truncated_json.message.contains("only one complete ACTION JSON"));
 
     let invalid_json =
         parse_tool_action_envelope_result(r#"ACTION: {"type": "final"}"#)
@@ -164,6 +165,82 @@ fn parse_structured_action_result_reports_errors() {
             .expect_err("arbitrary trailing text should stay invalid");
     assert_eq!(trailing_text.code, "invalid_action_json");
     assert!(trailing_text.message.contains("trailing text"));
+}
+
+#[test]
+fn parse_structured_action_takes_last_complete_json() {
+    // 模型中途改主意输出多个 ACTION：取最后一个完整 JSON。
+    let envelope = parse_tool_action_envelope_result(
+        r#"ACTION: {"type":"tool_call","call":{"tool":"read_file","path":"a.txt"}} 不对，换一个 ACTION: {"type":"tool_call","call":{"tool":"read_file","path":"b.txt"}}"#,
+    )
+    .expect("last complete ACTION JSON should win");
+    assert!(matches!(
+        envelope,
+        ToolActionEnvelope::ToolCall {
+            call: ToolCall::ReadFile { path, .. },
+            ..
+        } if path == "b.txt"
+    ));
+
+    // 解释文本夹在中间、后面还有 ACTION：仍取最后一个。
+    let parsed = parse_tool_model_output(
+        "我先看下文件。\nACTION: {\"type\":\"tool_call\",\"call\":{\"tool\":\"read_file\",\"path\":\"a.txt\"}}\n不对，重来：\nACTION: {\"type\":\"tool_call\",\"call\":{\"tool\":\"list_dir\",\"path\":\".\"}}",
+    );
+    assert!(matches!(
+        parsed,
+        ToolModelOutput::ToolCall(ToolCall::ListDir { .. })
+    ));
+
+    // 解释文本里的 "ACTION:" 字样（后接非 JSON）不应截胡真正的 ACTION。
+    let envelope = parse_tool_action_envelope_result(
+        r#"我先说下 ACTION: 格式，然后执行 ACTION: {"type":"tool_call","call":{"tool":"list_dir","path":"."}}"#,
+    )
+    .expect("real ACTION after prose should parse");
+    assert!(matches!(
+        envelope,
+        ToolActionEnvelope::ToolCall {
+            call: ToolCall::ListDir { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parse_structured_action_repairs_truncated_json() {
+    // 对象未闭合：补 } 后自动修复。
+    let envelope = parse_tool_action_envelope_result(
+        r#"ACTION: {"type":"tool_call","call":{"tool":"read_file","path":"src/main.rs"}"#,
+    )
+    .expect("truncated object should be repaired");
+    assert!(matches!(
+        envelope,
+        ToolActionEnvelope::ToolCall {
+            call: ToolCall::ReadFile { path, .. },
+            ..
+        } if path == "src/main.rs"
+    ));
+
+    // 字符串值内截断：补 "} 后自动修复。
+    let envelope =
+        parse_tool_action_envelope_result(r#"ACTION: {"type":"final","answer":"完成"#)
+            .expect("truncated string should be repaired");
+    assert!(matches!(
+        envelope,
+        ToolActionEnvelope::Final { answer, .. } if answer == "完成"
+    ));
+
+    // 嵌套对象未闭合：补 }} 后自动修复。
+    let envelope = parse_tool_action_envelope_result(
+        r#"ACTION: {"schema_version":1,"type":"tool_call","call":{"tool":"code_execute","command":"ls","cwd":"."}"#,
+    )
+    .expect("truncated nested object should be repaired");
+    assert!(matches!(
+        envelope,
+        ToolActionEnvelope::ToolCall {
+            call: ToolCall::ShellExec { command, .. },
+            ..
+        } if command == "ls"
+    ));
 }
 
 #[test]

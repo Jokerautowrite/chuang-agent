@@ -1,3 +1,24 @@
+# 2026-08-16 ACTION 解析器容错加固：取最后一个完整 JSON + 截断补闭合 + 重试指令
+
+- **背景**：田楠排查 chuang 飞书「长时间不回应」时发现根因是模型在高上下文下用
+  flash 输出超长 sqlite3 命令，被传输/解析层截断导致 protocol_error（chuang 自述
+  「这个 bug 现在还在我身上发作」）。本次按「治标：解析器加容错」方向加固。
+- **改动**（`src/tool_runtime.rs`，2 处函数 + 1 处入口判定）：
+  - `parse_tool_action_envelope_result` 重写：全文扫描所有 `ACTION:` 标记，从最后
+    一个 marker 往前尝试解析——剥掉 ACTION 前的解释文本，多 ACTION 时取最后一个
+    完整 JSON；解释文本里的「ACTION: 字样」（后接非 JSON）不截胡真正 ACTION。
+  - 新增 `try_repair_truncated_json`：serde 报 EOF 截断时尝试追加常见闭合序列
+    （对象/数组/字符串引号）补全 JSON；补全成功即接受，补不了才报错。
+  - `truncated_action_json` 报错 message 强化重试指令：「output only one complete
+    ACTION JSON with no explanation text, and split long commands into shorter
+    pieces」——兜底才报错，不许静默丢。
+  - `parse_tool_model_output` 入口判定放宽：`ACTION: {` 与 `ACTION:{`（无空格）都
+    走协议解析，避免「开始语 + ACTION:{...}」被当 PlainText 静默断流。
+- **测试**（`tests/tool_runtime_tests.rs`，新增 2 个测试函数 7 个断言）：
+  取最后一个完整 JSON、解释文本夹心、多 ACTION 选最后、对象/字符串/嵌套截断
+  补闭合修复、不可修复截断报错带重试提示；全量 `cargo test` 约 550 例 0 失败。
+- **验证**：`cargo build` 通过；`cargo run -- doctor` exit=0。
+
 # 2026-08-11 memory-recall v4 运行时落地：会话滚动总结 + 最近 10 轮压缩保真
 
 - **目标**：把 v4 基准验证过的断线恢复与压缩保真能力接入真实运行时；不改变

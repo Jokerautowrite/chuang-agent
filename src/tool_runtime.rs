@@ -819,22 +819,85 @@ pub fn parse_tool_action_envelope_result(
     body: &str,
 ) -> Result<ToolActionEnvelope, ToolProtocolError> {
     let trimmed = body.trim();
-    let Some(json_text) = trimmed.strip_prefix("ACTION:").map(str::trim) else {
-        // 容错：模型可能在说明文字后输出 "ACTION: {...}" 混合体，
-        // 找不到前缀时先在全文中搜索 ACTION: 标记，提取其后 JSON 再解析。
-        if let Some(pos) = trimmed.find("ACTION:") {
-            let action_part = trimmed[pos + "ACTION:".len()..].trim_start();
-            if action_part.starts_with('{') {
-                return parse_action_json_prefix(action_part, trimmed);
-            }
-        }
+
+    // 收集全文所有 ACTION: 标记位置。
+    // 容错：模型常在解释文本后输出 ACTION，甚至中途改主意输出多个 ACTION；
+    // 协议约定「每响应一个 ACTION/FINAL」，但解析器按最后出现的完整 JSON 兜底，
+    // 避免把「开始语 + ACTION」误当最终答案，也避免多 ACTION 时取错旧意图。
+    let mut markers: Vec<usize> = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(rel) = trimmed[search_from..].find("ACTION:") {
+        let pos = search_from + rel;
+        markers.push(pos);
+        search_from = pos + "ACTION:".len();
+    }
+
+    if markers.is_empty() {
         return Err(protocol_error(
             "missing_action_prefix",
             "ACTION payload must start with ACTION:",
             trimmed,
         ));
-    };
-    parse_action_json_prefix(json_text, trimmed)
+    }
+
+    // 从最后一个 marker 往前尝试：取最后一个完整可解析的 ACTION JSON。
+    // 截断（EOF）时先尝试补闭合；补闭合失败才记错并回退到更早的 marker。
+    let mut last_error: Option<ToolProtocolError> = None;
+    for &marker in markers.iter().rev() {
+        let json_part = trimmed[marker + "ACTION:".len()..].trim_start();
+        if !json_part.starts_with('{') {
+            // 解释文本里的 "ACTION:" 字样（后接非 JSON），跳过但保留可观测错误。
+            last_error = Some(protocol_error(
+                "invalid_action_json",
+                "ACTION: not followed by a JSON object; output only one complete ACTION JSON",
+                trimmed,
+            ));
+            continue;
+        }
+        match parse_action_json_prefix(json_part, trimmed) {
+            Ok(envelope) => return Ok(envelope),
+            Err(error) => {
+                if error.code == "truncated_action_json" {
+                    if let Some(repaired) = try_repair_truncated_json(json_part) {
+                        return Ok(repaired);
+                    }
+                }
+                last_error = Some(error);
+                // 继续回退到更早的完整 ACTION（取最后一个完整 JSON）。
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        protocol_error(
+            "missing_action_prefix",
+            "no parseable ACTION payload found",
+            trimmed,
+        )
+    }))
+}
+
+/// 截断补闭合：serde 报 EOF 说明 JSON 被模型/传输截断，尝试追加常见闭合
+/// 序列（对象/数组/字符串引号），补全后能解析成合法 ACTION 信封即接受。
+/// 这是「最后兜底才报错」的中间层——能补则补，补不了才让上层报
+/// `truncated_action_json` 并附「仅输出完整 ACTION」的重试指令。
+fn try_repair_truncated_json(json_text: &str) -> Option<ToolActionEnvelope> {
+    const REPAIR_SUFFIXES: &[&str] = &[
+        "\"}",  // 字符串值内截断：补引号 + 闭对象
+        "}",    // 对象未闭合
+        "\"}]", // 字符串内截断 + 数组闭 + 对象闭
+        "]}",   // 数组未闭合 + 对象闭
+        "\"",   // 仅字符串引号（极少数）
+        "\"}}", // 嵌套对象字符串截断
+        "}}",   // 嵌套对象未闭合
+        "\"]}", // 数组内字符串截断
+    ];
+    for suffix in REPAIR_SUFFIXES {
+        let candidate = format!("{json_text}{suffix}");
+        if let Ok(envelope) = serde_json::from_str::<ToolActionEnvelope>(&candidate) {
+            return Some(envelope);
+        }
+    }
+    None
 }
 
 fn parse_action_json_prefix(
@@ -851,7 +914,7 @@ fn parse_action_json_prefix(
         .transpose()
         .map_err(|error| {
             let (code, message) = if error.is_eof() {
-                ("truncated_action_json", format!("ACTION payload truncated mid-JSON ({error}); retry with a shorter command on the next attempt"))
+                ("truncated_action_json", format!("ACTION payload truncated mid-JSON ({error}); automatic repair failed — output only one complete ACTION JSON with no explanation text, and split long commands into shorter pieces on the next attempt"))
             } else {
                 ("invalid_action_json", format!("ACTION payload is invalid or unsupported: {error}"))
             };
@@ -894,7 +957,10 @@ pub fn parse_final_answer(body: &str) -> Option<String> {
 
 pub fn parse_tool_model_output(body: &str) -> ToolModelOutput {
     let trimmed = body.trim();
-    if trimmed.starts_with("ACTION:") || (!trimmed.starts_with("FINAL:") && trimmed.contains("ACTION: {")) {
+    if trimmed.starts_with("ACTION:")
+        || (!trimmed.starts_with("FINAL:")
+            && (trimmed.contains("ACTION: {") || trimmed.contains("ACTION:{")))
+    {
         return match parse_tool_action_envelope_result(trimmed) {
             Ok(ToolActionEnvelope::ToolCall {
                 schema_version,
