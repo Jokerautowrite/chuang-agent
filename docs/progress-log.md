@@ -1,3 +1,22 @@
+# 2026-08-17 修复 chuang「又卡住」：code_execute 递归搜索扫 34G target 超时
+
+- **现象**：田楠报告 chuang 又卡住（飞书发消息半天不回应）。
+- **定位**：live-turns/progress.jsonl 显示模型 round 1 执行 code_execute（"搜索代码"）
+  120s 超时（`shell_exec timed out after 120000ms`），超时后 round 2 兜底回答。
+  全库 21 次同类超时（08-16 白天 + 当前），都集中在「搜索代码/查看文件/执行终端命令」。
+- **根因（实测验证）**：工作区 `target/` 34G（63019 个文件）+ `benchmarks/` 5.7G。
+  模型对工作区根执行 `grep -rn`（不尊重 .gitignore）→ 扫进 34G target →
+  10 秒实测扫不完（timeout 124），120s 超时是必然。而 `rg`（尊重 .gitignore，
+  target 第一行被忽略）**瞬间返回**。
+- **修复（治本，模型行为约束）**：`src/atomic_tool.rs` tool_detail_block 的
+  code_execute 描述新增「搜索/递归命令规范」：严禁对根直接 grep -r/find/ls -R；
+  搜索优先 `rg <pattern> src tests docs`（尊重 .gitignore）或显式
+  `--exclude-dir=target --exclude-dir=benchmarks --exclude-dir=.git`；
+  查看文件用 file_read/list_dir。
+- **保留**：shell 120s 超时作为兜底（不放开，防失控命令）。
+- **建议**：`target/` 34G 是编译缓存，`cargo clean` 可释放（需田楠确认后执行）。
+- **验证**：cargo test 0 失败；服务重启；冒烟 turn 200 无超时。
+
 # 2026-08-17 删除 emotion_brain 外脑通道：主人记忆本地查，外脑=知识库按需检索
 
 - **背景**：田楠质疑：五轴状态机每轮跑对不对（答：对话提取是纯本地词表匹配、微秒级，
